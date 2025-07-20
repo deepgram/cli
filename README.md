@@ -112,9 +112,24 @@ All dependencies are managed in `pyproject.toml`. Install them with:
 
 ```bash
 uv pip install -e .              # Runtime dependencies
-uv pip install -e ".[dev]"       # Development dependencies  
+uv pip install -e ".[dev]"       # Development dependencies
 uv pip install -e ".[test]"      # Test dependencies
 ```
+
+### Workspace Structure
+
+This repository is organized as a uv workspace (monorepo) to support multiple related packages:
+
+```
+cli/                    # Workspace root
+├── src/               # Main CLI package (deepctl)
+│   └── deepgram_cli/
+├── packages/          # Additional workspace packages
+│   └── (future packages)
+└── docs/              # Shared documentation
+```
+
+See [Workspace and Monorepo Architecture](docs/Workspace%20and%20Monorepo%20Architecture.md) for detailed information about the workspace structure and how to add new packages.
 
 ### Running Tests
 
@@ -132,7 +147,7 @@ from deepgram_cli.commands.base import BaseCommand
 class MyCommand(BaseCommand):
     name = "my-command"
     help = "My custom command"
-    
+
     def handle(self, args):
         # Your command implementation
         pass
@@ -146,4 +161,4 @@ class MyCommand(BaseCommand):
 
 ## License
 
-MIT License - see LICENSE file for details. 
+MIT License - see LICENSE file for details.
