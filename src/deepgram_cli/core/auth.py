@@ -4,7 +4,7 @@ import json
 import os
 import time
 import webbrowser
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urljoin
 
 import httpx
@@ -71,6 +71,11 @@ class AuthManager:
 
         return False
 
+    def is_ci_mode(self) -> bool:
+        """Check if running in CI mode (credentials from environment)."""
+        # If both API key and project ID are provided via environment, we're in CI mode
+        return bool(os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID"))
+
     def get_api_key(self) -> Optional[str]:
         """Get API key from config or environment."""
         # Environment variable takes precedence (CI-friendly)
@@ -99,6 +104,61 @@ class AuthManager:
 
         return None
 
+    def verify_credentials(self, api_key: Optional[str] = None, project_id: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
+        """Verify API key and project ID by making a request to the Deepgram API.
+
+        Args:
+            api_key: API key to verify (uses stored key if not provided)
+            project_id: Project ID to verify (uses stored ID if not provided)
+
+        Returns:
+            Tuple of (success, message, error_type)
+            - success: True if credentials are valid
+            - message: Human-readable message about the result
+            - error_type: 'auth' for API key issues, 'project' for project ID issues, None if successful
+        """
+        # Use provided credentials or get from storage
+        if not api_key:
+            api_key = self.get_api_key()
+        if not project_id:
+            project_id = self.get_project_id()
+
+        # Check if we have required credentials
+        if not api_key:
+            return False, "No API key provided or stored", "auth"
+
+        if not project_id:
+            return False, "No project ID provided or stored", "project"
+
+        # Make API request to verify credentials
+        try:
+            headers = {
+                "Authorization": f"Token {api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # Make request to get project details
+            response = self.client.get(
+                f"https://api.deepgram.com/v1/projects/{project_id}",
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                return True, "Credentials verified successfully", None
+            elif response.status_code == 401:
+                return False, "Invalid API key - authentication failed", "auth"
+            elif response.status_code == 403:
+                return False, "API key is valid but lacks permission for this project", "auth"
+            elif response.status_code == 404:
+                return False, f"Project ID '{project_id}' not found", "project"
+            else:
+                return False, f"Unexpected error: HTTP {response.status_code}", "unknown"
+
+        except httpx.RequestError as e:
+            return False, f"Network error during verification: {e}", "network"
+        except Exception as e:
+            return False, f"Unexpected error during verification: {e}", "unknown"
+
     def guard(self) -> None:
         """Guard function to ensure authentication (replicated from Go implementation)."""
         api_key = self.get_api_key()
@@ -113,6 +173,26 @@ class AuthManager:
             )
             raise AuthenticationError("DEEPGRAM_API_KEY is not set")
 
+        # Verify credentials before proceeding
+        success, message, error_type = self.verify_credentials()
+        if not success:
+            console.print(f"[red]Error:[/red] {message}")
+
+            if error_type == "auth":
+                console.print(
+                    "[yellow]Your API key may have expired or been revoked.[/yellow]\n"
+                    "[yellow]Run[/yellow] [bold]deepctl login[/bold] [yellow]to re-authenticate.[/yellow]"
+                )
+                raise AuthenticationError(message)
+            elif error_type == "project":
+                console.print(
+                    "[yellow]The project may have been deleted or you may need to specify a different project.[/yellow]\n"
+                    "[yellow]Run[/yellow] [bold]deepctl login --project-id <project_id>[/bold] [yellow]to set a valid project ID.[/yellow]"
+                )
+                raise AuthenticationError(message)
+            else:
+                raise AuthenticationError(message)
+
     def login_with_api_key(self, api_key: str, project_id: str, force_write: bool = False) -> None:
         """Login with API key directly (CI-friendly method).
 
@@ -125,6 +205,25 @@ class AuthManager:
         if not api_key.startswith(("sk-", "pk-")):
             console.print(
                 "[red]Warning:[/red] API key format doesn't match expected pattern")
+
+        # Verify credentials before storing
+        console.print("[dim]Verifying credentials...[/dim]")
+        success, message, error_type = self.verify_credentials(
+            api_key, project_id)
+
+        if not success:
+            console.print(f"[red]Error:[/red] {message}")
+            if error_type == "auth":
+                raise AuthenticationError(
+                    f"API key verification failed: {message}")
+            elif error_type == "project":
+                raise AuthenticationError(
+                    f"Project ID verification failed: {message}")
+            else:
+                raise AuthenticationError(
+                    f"Credential verification failed: {message}")
+
+        console.print(f"[green]✓[/green] {message}")
 
         # Store in keyring for security (with fallback)
         try:

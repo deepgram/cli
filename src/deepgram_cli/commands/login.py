@@ -129,30 +129,7 @@ class LoginCommand(BaseCommand):
                     return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
 
         try:
-            # Test API key validity
-            console.print("[dim]Testing API key...[/dim]")
-
-            # Create temporary client to test
-            temp_client = DeepgramClient(config, auth_manager)
-            temp_client._client = None  # Reset client to force recreation
-
-            # Temporarily set API key for testing
-            old_api_key = config.get_profile().api_key
-            config.get_profile().api_key = api_key
-
-            # Test the key
-            if not temp_client.validate_api_key(api_key):
-                # Restore old key
-                config.get_profile().api_key = old_api_key
-                console.print("[red]✗[/red] API key validation failed")
-                return LoginResult(status="error", message="Invalid API key", profile=config.profile or "default")
-
-            # Restore old key (will be set properly below)
-            config.get_profile().api_key = old_api_key
-
-            console.print("[green]✓[/green] API key validated successfully")
-
-            # Store credentials
+            # Store credentials (verification happens inside login_with_api_key)
             auth_manager.login_with_api_key(api_key, project_id, force_write)
 
             profile_name = config.profile or "default"
