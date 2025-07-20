@@ -36,6 +36,12 @@ requires-python = ">=3.8.1"
 dependencies = [
     "click>=8.0.0",
     "deepgram-sdk>=3.0.0",
+    "deepctl-core",           # Core components moved to separate package
+    "deepctl-cmd-login",      # Login command package
+    "deepctl-cmd-projects",   # Projects command package
+    "deepctl-cmd-transcribe", # Transcribe command package
+    "deepctl-cmd-usage",      # Usage command package
+    "deepctl-shared-utils",   # Shared utilities
     "pydantic>=2.0.0",
     "rich>=13.0.0",
     "httpx>=0.24.0",
@@ -57,6 +63,7 @@ dev = [
     "pre-commit>=3.0.0",
     "twine>=4.0.0",
     "build>=0.10.0",
+
 ]
 test = [
     "pytest>=7.0.0",
@@ -74,22 +81,23 @@ Repository = "https://github.com/deepgram/cli"
 "Community" = "https://discord.gg/deepgram"
 
 [project.scripts]
-deepctl = "deepgram_cli.main:main"
-deepgram = "deepgram_cli.main:main"
-dg = "deepgram_cli.main:main"
+deepctl = "deepctl.main:main"
+deepgram = "deepctl.main:main"
+dg = "deepctl.main:main"
 
-[project.entry-points."deepgram_cli.commands"]
-transcribe = "deepgram_cli.commands.transcribe:TranscribeCommand"
-projects = "deepgram_cli.commands.projects:ProjectsCommand"
-usage = "deepgram_cli.commands.usage:UsageCommand"
-login = "deepgram_cli.commands.login:LoginCommand"
+# Entry points are now provided by individual command packages
+# [project.entry-points."deepctl.commands"]
+# transcribe = "deepctl.commands.transcribe:TranscribeCommand"
+# projects = "deepctl.commands.projects:ProjectsCommand"
+# usage = "deepctl.commands.usage:UsageCommand"
+# login = "deepctl.commands.login:LoginCommand"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepgram_cli*"]
+include = ["deepctl*"]
 
 [tool.black]
 line-length = 88
@@ -116,11 +124,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=deepgram_cli --cov-report=term-missing --cov-report=html"
+addopts = "--cov=deepctl --cov-report=term-missing --cov-report=html"
 asyncio_mode = "auto"
 
 [tool.coverage.run]
-source = ["src/deepgram_cli"]
+source = ["src/deepctl"]
 omit = ["*/tests/*", "*/test_*"]
 
 [tool.coverage.report]
@@ -153,6 +161,15 @@ exclude_lines = [
 #     "black>=23.0.0",
 #     "mypy>=1.0.0",
 # ]
+
+[tool.uv.sources]
+# Workspace dependencies
+deepctl-core = { workspace = true }
+deepctl-cmd-login = { workspace = true }
+deepctl-cmd-projects = { workspace = true }
+deepctl-cmd-transcribe = { workspace = true }
+deepctl-cmd-usage = { workspace = true }
+deepctl-shared-utils = { workspace = true }
 
 [tool.uv.workspace]
 # Workspace configuration

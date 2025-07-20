@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepctl-cmd-login"
+version = "0.1.0"
+description = "Login command for deepctl"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Deepgram", email = "support@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "support@deepgram.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["deepgram", "cli", "login", "authentication"]
+requires-python = ">=3.8.1"
+dependencies = [
+    "deepctl-core",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "deepgram-sdk>=3.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+# Internal commands not meant to be called directly
+
+[project.entry-points."deepctl.commands"]
+login = "deepctl_cmd_login.command:LoginCommand"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepctl_cmd_login*"]
