@@ -1,6 +1,6 @@
 # deepctl
 
-The official Deepgram CLI for speech recognition and audio intelligence.
+The official Deepgram CLI.
 
 ## Quick Start
 
@@ -142,14 +142,14 @@ uv run pytest
 The CLI supports custom plugins. Create a new command by extending the `BaseCommand` class:
 
 ```python
-from deepgram_cli.commands.base import BaseCommand
+from deepctl_core.base_command import BaseCommand
 
 class MyCommand(BaseCommand):
-    name = "my-command"
-    help = "My custom command"
+    name = "mycommand"
+    help = "Description of my command"
 
-    def handle(self, args):
-        # Your command implementation
+    def handle(self, config, auth_manager, client, **kwargs):
+        # Command implementation
         pass
 ```
 

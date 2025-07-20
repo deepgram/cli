@@ -2,8 +2,7 @@
 """Simple script to demonstrate credential verification functionality."""
 
 from rich.console import Console
-from deepgram_cli.core.auth import AuthManager
-from deepgram_cli.core.config import Config
+from deepctl_core import AuthManager, Config
 import sys
 import os
 from pathlib import Path
@@ -18,7 +17,9 @@ console = Console()
 def main():
     """Demonstrate credential verification."""
     console.print(
-        "[bold blue]Deepgram CLI Credential Verification Demo[/bold blue]\n")
+        "[bold blue]deepctl Credential Verification Demo[/bold blue]\n")
+    console.print(
+        "This script demonstrates how the CLI validates credentials.")
 
     # Create config and auth manager
     config = Config()

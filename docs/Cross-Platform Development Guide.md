@@ -14,15 +14,15 @@ This guide outlines best practices for maintaining cross-platform compatibility 
 
 ### File System Differences
 
-| Feature | Windows | Linux/macOS | Solution |
-|---------|---------|-------------|----------|
-| Path separator | `\` | `/` | Use `pathlib.Path` |
-| Case sensitivity | No | Yes | Normalize case where needed |
-| Hidden files | Attributes | `.` prefix | Use `platformdirs` |
-| Line endings | `\r\n` | `\n` | Open files in text mode |
-| Max path length | 260 chars* | 4096 chars | Handle long paths gracefully |
+| Feature          | Windows     | Linux/macOS | Solution                     |
+| ---------------- | ----------- | ----------- | ---------------------------- |
+| Path separator   | `\`         | `/`         | Use `pathlib.Path`           |
+| Case sensitivity | No          | Yes         | Normalize case where needed  |
+| Hidden files     | Attributes  | `.` prefix  | Use `platformdirs`           |
+| Line endings     | `\r\n`      | `\n`        | Open files in text mode      |
+| Max path length  | 260 chars\* | 4096 chars  | Handle long paths gracefully |
 
-*Windows 10+ with long path support enabled
+\*Windows 10+ with long path support enabled
 
 ### Environment Variables
 
@@ -103,7 +103,7 @@ def create_client() -> httpx.Client:
     if sys.platform == "win32":
         # Windows might need custom certificate store
         verify = ssl.create_default_context()
-    
+
     return httpx.Client(verify=verify)
 ```
 
@@ -131,11 +131,11 @@ LC_ALL=en_US.UTF-8 python -m pytest
 strategy:
   matrix:
     os: [ubuntu-latest, windows-latest, macos-latest]
-    python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+    python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
     include:
       # Test on Apple Silicon
       - os: macos-latest
-        python-version: '3.11'
+        python-version: "3.11"
         architecture: arm64
 ```
 
@@ -212,15 +212,15 @@ def build_binary():
         '--console',
         '--clean',
         f'--distpath=dist/{sys.platform}',
-        'src/deepgram_cli/main.py'
+        'src/deepctl/main.py'
     ]
-    
+
     # Platform-specific options
     if sys.platform == 'win32':
         args.extend(['--icon=assets/icon.ico'])
     elif sys.platform == 'darwin':
         args.extend(['--icon=assets/icon.icns'])
-    
+
     PyInstaller.__main__.run(args)
 ```
 
@@ -348,4 +348,4 @@ def debug_paths():
 - [Python pathlib documentation](https://docs.python.org/3/library/pathlib.html)
 - [platformdirs documentation](https://platformdirs.readthedocs.io/)
 - [PyInstaller documentation](https://pyinstaller.readthedocs.io/)
-- [GitHub Actions matrix builds](https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs) 
+- [GitHub Actions matrix builds](https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs)

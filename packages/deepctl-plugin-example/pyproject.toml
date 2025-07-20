@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepctl-plugin-example"
+version = "0.1.0"
+description = "Example plugin for deepctl"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Deepgram", email = "support@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "support@deepgram.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["deepgram", "cli", "plugin", "example"]
+requires-python = ">=3.8.1"
+dependencies = ["deepctl-core", "click>=8.0.0", "rich>=13.0.0"]
+
+[project.entry-points."deepctl.commands"]
+example = "deepctl_plugin_example.command:ExampleCommand"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepctl_plugin_example*"]

@@ -2,234 +2,188 @@
 
 ## Overview
 
-The Deepgram CLI repository is structured as a uv workspace (monorepo) to support multiple related packages while maintaining a unified development experience. This architecture allows us to:
+The deepctl repository is structured as a uv workspace (monorepo) to support multiple related packages while maintaining a unified development experience. This architecture allows us to:
 
-1. Share common dependencies and tooling
-2. Coordinate releases across packages
-3. Enable cross-package development and testing
-4. Maintain consistent code standards
+- Share code between packages
+- Ensure consistent versioning
+- Simplify development workflow
+- Enable easy plugin development
 
-## Workspace Layout
-
-We use a **mixed layout** where:
-
-- The root project (`deepctl`) serves as both the workspace root AND a workspace member
-- Additional packages live in the `packages/` directory
+## Structure
 
 ```
-cli/                              # Workspace root
-├── pyproject.toml               # Workspace config + deepctl package
+deepgram-cli/                   # Repository root
+├── pyproject.toml              # Workspace configuration
 ├── src/
-│   └── deepgram_cli/           # Main CLI package source
-├── packages/                    # Additional workspace packages
-│   ├── package-a/
-│   │   ├── pyproject.toml
-│   │   └── src/
-│   └── package-b/
-│       ├── pyproject.toml
-│       └── src/
-└── ... (shared configs, docs, etc.)
+│   └── deepctl/           # Main CLI package source
+├── packages/                   # Workspace packages
+│   ├── deepctl-core/          # Core functionality shared by all commands
+│   ├── deepctl-cmd-login/     # Login command package
+│   ├── deepctl-cmd-projects/  # Projects command package
+│   ├── deepctl-cmd-transcribe/# Transcribe command package
+│   ├── deepctl-cmd-usage/     # Usage command package
+│   ├── deepctl-shared-utils/  # Shared utilities
+│   └── deepctl-plugin-example/# Example plugin
+├── tests/                      # Tests for main CLI
+└── scripts/                    # Development scripts
 ```
+
+## Packages
+
+### Main Package: `deepctl`
+
+Located in `src/deepctl/`, this is the main entry point for the CLI. It:
+
+- Provides the command-line interface
+- Loads commands from installed packages
+- Handles global options and configuration
+
+### Core Package: `deepctl-core`
+
+The foundation package containing:
+
+- Base command class
+- Authentication system
+- Configuration management
+- Client initialization
+- Output formatting
+- Plugin system
+
+### Command Packages
+
+Each command is its own package:
+
+- `deepctl-cmd-login` - Authentication commands
+- `deepctl-cmd-projects` - Project management
+- `deepctl-cmd-transcribe` - Transcription functionality
+- `deepctl-cmd-usage` - Usage statistics
+
+### Shared Utilities: `deepctl-shared-utils`
+
+Common utilities used across packages:
+
+- Input validation
+- File handling
+- Date/time utilities
+
+### Plugin Example: `deepctl-plugin-example`
+
+A reference implementation showing how to create plugins.
 
 ## Workspace Configuration
 
-The workspace is configured in the root `pyproject.toml`:
+The root `pyproject.toml` defines the workspace:
 
 ```toml
 [tool.uv.workspace]
 members = ["packages/*"]
-# Root is implicitly a member due to [project] section
+
+[project]
+name = "deepctl"
+dependencies = [
+    "deepctl-core",
+    "deepctl-cmd-login",
+    "deepctl-cmd-projects",
+    "deepctl-cmd-transcribe",
+    "deepctl-cmd-usage",
+    "deepctl-shared-utils",
+]
 ```
-
-## Package Types
-
-### 1. Root Package (deepctl)
-
-- The main Deepgram CLI application
-- Provides core commands and functionality
-- Serves as the entry point for users
-
-### 2. Plugin Packages
-
-Located in `packages/deepgram-plugin-*`:
-
-- Extend CLI functionality
-- Follow the plugin interface defined in `deepgram_cli.plugins`
-- Can be optionally installed
-
-### 3. Shared Libraries
-
-Located in `packages/deepgram-shared-*`:
-
-- Common utilities used across packages
-- Reduce code duplication
-- Maintain consistency
-
-### 4. Tool Packages
-
-Located in `packages/deepgram-tool-*`:
-
-- Development tools
-- Build utilities
-- Testing helpers
 
 ## Development Workflow
 
-### Installing Dependencies
-
-From the workspace root:
+### Installing for Development
 
 ```bash
-# Install all workspace packages and dependencies
+# Install all packages in editable mode
 uv sync
 
-# Install with specific extras
-uv sync --extra dev --extra test
+# Run the CLI
+uv run deepctl --help
 ```
 
-### Adding a New Package
+### Adding a New Command Package
 
-1. Create the package structure:
+1. Create package directory:
 
-```bash
-mkdir -p packages/my-package/src/my_package
-touch packages/my-package/pyproject.toml
-touch packages/my-package/src/my_package/__init__.py
-```
+   ```bash
+   mkdir -p packages/deepctl-cmd-newcmd/src/deepctl_cmd_newcmd
+   ```
 
-2. Configure the package `pyproject.toml`:
+2. Add `pyproject.toml`:
 
-```toml
-[project]
-name = "deepgram-my-package"
-version = "0.1.0"
-description = "Description of my package"
-dependencies = [
-    # Package-specific dependencies
-]
+   ```toml
+   [project]
+   name = "deepctl-cmd-newcmd"
+   version = "0.1.0"
+   dependencies = ["deepctl-core"]
 
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+   [project.entry-points."deepctl.commands"]
+   newcmd = "deepctl_cmd_newcmd:NewCommand"
+   ```
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+3. Implement the command following the base class interface
 
-[tool.setuptools.packages.find]
-where = ["src"]
-```
-
-3. The package is automatically included in the workspace
-
-### Cross-Package Dependencies
-
-Packages can depend on each other:
-
-```toml
-# In packages/my-package/pyproject.toml
-[project]
-dependencies = [
-    "deepctl",  # Depend on the root CLI package
-    "deepgram-shared-utils",  # Depend on another workspace package
-]
-```
+4. Update root `pyproject.toml` to include the new package
 
 ### Testing
 
-Run tests for all packages:
+Each package has its own test suite:
 
 ```bash
-# From workspace root
+# Run all tests
 uv run pytest
 
-# Test specific package
-uv run pytest packages/my-package/tests/
+# Run tests for specific package
+uv run pytest packages/deepctl-core/tests/
+
+# Run with coverage
+uv run pytest --cov
 ```
 
-### Building and Publishing
-
-Build all packages:
+### Building and Distribution
 
 ```bash
-# Build all workspace members
+# Build all packages
 uv build
 
 # Build specific package
-cd packages/my-package && uv build
+cd packages/deepctl-core && uv build
 ```
+
+## Plugin Development
+
+External plugins can extend the CLI by:
+
+1. Depending on `deepctl-core`
+2. Implementing the `BaseCommand` interface
+3. Registering via entry points:
+   ```toml
+   [project.entry-points."deepctl.commands"]
+   myplugin = "my_plugin:MyCommand"
+   ```
+
+## Benefits of This Architecture
+
+1. **Modularity**: Each command is independent
+2. **Testability**: Packages can be tested in isolation
+3. **Extensibility**: Easy to add new commands or plugins
+4. **Maintainability**: Clear separation of concerns
+5. **Distribution**: Can publish packages independently if needed
 
 ## Best Practices
 
-### 1. Package Independence
+1. Keep packages focused on single responsibilities
+2. Use `deepctl-core` for shared functionality
+3. Follow the established command interface
+4. Include comprehensive tests with each package
+5. Document public APIs
 
-- Each package should be independently useful
-- Minimize circular dependencies
-- Clear interfaces between packages
+## Migration Notes
 
-### 2. Shared Configuration
+When migrating from a traditional structure:
 
-- Use workspace root for shared tool configs (pytest, mypy, etc.)
-- Inherit common settings where possible
-- Override only when necessary
-
-### 3. Version Management
-
-- Coordinate versions for related releases
-- Use consistent versioning scheme
-- Document breaking changes
-
-### 4. Documentation
-
-- Each package has its own README
-- Cross-reference related packages
-- Maintain workspace-level documentation
-
-### 5. Testing Strategy
-
-- Unit tests per package
-- Integration tests at workspace level
-- Cross-package compatibility tests
-
-## Common Patterns
-
-### Plugin Development
-
-```python
-# packages/deepgram-plugin-example/src/deepgram_plugin_example/plugin.py
-from deepgram_cli.plugins import BasePlugin
-
-class ExamplePlugin(BasePlugin):
-    name = "example"
-    description = "An example plugin"
-
-    def register_commands(self, cli):
-        # Add plugin commands
-        pass
-```
-
-### Shared Utilities
-
-```python
-# packages/deepgram-shared-utils/src/deepgram_shared_utils/common.py
-def shared_function():
-    """Function used across multiple packages"""
-    pass
-```
-
-## Migration Guide
-
-When moving existing code to a package:
-
-1. Identify the boundaries of the code to extract
-2. Create the new package structure
-3. Move the code maintaining import paths
-4. Update imports in dependent code
-5. Add appropriate dependencies
-6. Test thoroughly
-
-## Future Considerations
-
-1. **Workspace Dependencies**: Consider using workspace dependencies for development
-2. **Shared Build Tools**: Centralize build configuration
-3. **Monorepo Tools**: Evaluate tools for change detection and selective testing
-4. **Release Automation**: Implement coordinated release workflows
+1. Move command implementations to separate packages
+2. Update imports to use the new package names
+3. Ensure entry points are correctly registered
+4. Test plugin discovery after migration

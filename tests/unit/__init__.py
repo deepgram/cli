@@ -1,1 +1,1 @@
-"""Unit tests for Deepgram CLI."""
+"""Unit tests for deepctl."""

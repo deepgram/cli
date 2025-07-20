@@ -1,1 +1,1 @@
-"""Test suite for Deepgram CLI."""
+"""Test suite for deepctl."""

@@ -2,6 +2,8 @@
 
 # Default target
 help: ## Show this help message
+	@echo "🔧 deepctl"
+	@echo ""
 	@echo "Available commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -65,11 +67,11 @@ clean: ## Clean build artifacts and cache
 install-local: build ## Install package locally from built wheel
 	uv tool install dist/*.whl --force
 
-run-help: ## Run the CLI help command
-	uv run python -m deepgram_cli --help
+run:
+	uv run python -m deepctl --help
 
-run-transcribe-help: ## Show transcribe command help
-	uv run python -m deepgram_cli transcribe --help
+run-help:
+	uv run python -m deepctl transcribe --help
 
 # Development workflow shortcuts
 check: format lint typecheck ## Quick code quality check (no tests)

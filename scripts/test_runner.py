@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Test runner script for Deepgram CLI test suite.
+"""Test runner script for deepctl test suite.
 
-This script provides convenient ways to run tests with various options.
+This script runs all tests across the workspace packages.
 """
 
 import sys
@@ -19,10 +19,10 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None) -> int:
 
 
 def main():
-    """Main test runner function."""
+    """Run tests with selected options."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Deepgram CLI Test Runner")
+    parser = argparse.ArgumentParser(description="deepctl Test Runner")
     parser.add_argument(
         "command",
         choices=["test", "coverage", "watch",
@@ -61,14 +61,14 @@ def main():
     if args.command == "test":
         # Run all tests with standard options
         if not args.no_cov:
-            cmd.extend(["--cov=src/deepgram_cli", "--cov-report=term-missing"])
+            cmd.extend(["--cov=src/deepctl", "--cov-report=term-missing"])
         if args.verbose:
             cmd.append("-vv")
 
     elif args.command == "coverage":
         # Run with full coverage report
         cmd.extend([
-            "--cov=src/deepgram_cli",
+            "--cov=src/deepctl",
             "--cov-report=term-missing:skip-covered",
             "--cov-report=html:htmlcov",
             "--cov-report=xml",
@@ -79,13 +79,13 @@ def main():
         # Run in watch mode (requires pytest-watch)
         cmd = ["uv", "run", "ptw", "--", "tests/"]
         if not args.no_cov:
-            cmd.extend(["--cov=src/deepgram_cli"])
+            cmd.extend(["--cov=src/deepctl"])
 
     elif args.command == "unit":
         # Run only unit tests
         cmd.extend(["-m", "unit"])
         if not args.no_cov:
-            cmd.extend(["--cov=src/deepgram_cli"])
+            cmd.extend(["--cov=src/deepctl"])
 
     elif args.command == "integration":
         # Run only integration tests

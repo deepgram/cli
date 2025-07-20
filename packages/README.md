@@ -1,37 +1,17 @@
-# Workspace Packages
+# deepctl Workspace Packages
 
-This directory contains additional packages that are part of the Deepgram CLI workspace.
+This directory contains additional packages that are part of the deepctl workspace.
 
-## Structure
+## Packages
 
-Each package should follow this structure:
+- `deepctl-core/` - Core functionality shared across commands
+- `deepctl-cmd-login/` - Login command implementation
+- `deepctl-cmd-projects/` - Projects command implementation
+- `deepctl-cmd-transcribe/` - Transcribe command implementation
+- `deepctl-cmd-usage/` - Usage command implementation
+- `deepctl-shared-utils/` - Shared utilities
+- `deepctl-plugin-example/` - Example plugin demonstrating extensibility
 
-```
-packages/
-└── package-name/
-    ├── pyproject.toml      # Package configuration
-    ├── README.md           # Package documentation
-    └── src/
-        └── package_module/ # Python package source
-            └── __init__.py
-```
+## Development
 
-## Creating a New Package
-
-1. Create a new directory under `packages/`
-2. Add a `pyproject.toml` with the package configuration
-3. Create the source structure under `src/`
-4. The package will automatically be included in the workspace
-
-## Example Package Types
-
-- **Plugins**: Extensions for the CLI (e.g., `deepgram-plugin-audio`)
-- **SDK Extras**: Additional utilities for the Deepgram SDK
-- **Shared Libraries**: Common code used across multiple packages
-- **Tools**: Development or auxiliary tools
-
-## Package Naming Convention
-
-- Use lowercase with hyphens for directory names
-- Use underscores for Python module names
-- Prefix with `deepgram-` for clarity
+Each package is independently developed but shares the workspace configuration. See the main README for development instructions.
