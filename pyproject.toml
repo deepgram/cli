@@ -153,3 +153,8 @@ exclude_lines = [
 #     "black>=23.0.0",
 #     "mypy>=1.0.0",
 # ]
+
+[tool.uv.workspace]
+# Workspace configuration
+members = ["packages/*"]
+# The root project (deepctl) is implicitly a member since it contains [project]
