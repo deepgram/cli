@@ -7,13 +7,9 @@ name = "deepctl"
 version = "0.1.0"
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "Deepgram", email = "support@deepgram.com"},
-]
-maintainers = [
-    {name = "Deepgram", email = "support@deepgram.com"},
-]
+license = { text = "MIT" }
+authors = [{ name = "Deepgram", email = "support@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "support@deepgram.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -28,7 +24,14 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Speech",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-keywords = ["deepgram", "speech", "recognition", "transcription", "audio", "cli"]
+keywords = [
+    "deepgram",
+    "speech",
+    "recognition",
+    "transcription",
+    "audio",
+    "cli",
+]
 requires-python = ">=3.8.1"
 dependencies = [
     "click>=8.0.0",
@@ -82,7 +85,7 @@ usage = "deepgram_cli.commands.usage:UsageCommand"
 login = "deepgram_cli.commands.login:LoginCommand"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -106,7 +109,7 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
-strict_equality = true
+strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -149,4 +152,4 @@ exclude_lines = [
 #     "pytest>=7.0.0",
 #     "black>=23.0.0",
 #     "mypy>=1.0.0",
-# ] 
+# ]
