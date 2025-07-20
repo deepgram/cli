@@ -227,8 +227,11 @@ class TestAuthManager:
         # Mock successful verification
         with patch.object(auth_manager, 'verify_credentials', return_value=(True, "Success", None)):
             # Mock keyring
-            with patch('deepgram_core.auth.keyring') as mock_keyring:
-                auth_manager.login_with_api_key("sk-test-key", "test-project")
+            with patch('deepctl_core.auth.keyring') as mock_keyring:
+                mock_keyring.get_password.return_value = None
+
+                # Test login
+                result = auth_manager.login_with_api_key("test_api_key")
 
                 # Verify keyring was called
                 mock_keyring.set_password.assert_any_call(

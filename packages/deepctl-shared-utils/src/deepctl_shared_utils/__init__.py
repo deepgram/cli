@@ -5,7 +5,7 @@ from .validation import (
     validate_url,
     validate_date_format
 )
-from .models import AudioSource, FileInfo
+from .models import FileInfo
 
 __all__ = [
     "validate_audio_file",
@@ -13,3 +13,5 @@ __all__ = [
     "validate_date_format",
     "FileInfo"
 ]
+
+__version__ = "0.1.0"
