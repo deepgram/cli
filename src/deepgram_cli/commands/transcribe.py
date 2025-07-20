@@ -11,22 +11,23 @@ from ..core.config import Config
 from ..core.auth import AuthManager
 from ..core.client import DeepgramClient
 from ..utils.validation import validate_audio_file, validate_url
+from ..models import TranscribeResult, BaseResult
 
 console = Console()
 
 
 class TranscribeCommand(BaseCommand):
     """Command for transcribing audio files and URLs."""
-    
+
     name = "transcribe"
     help = "Transcribe audio files or URLs using Deepgram"
     short_help = "Transcribe audio"
-    
+
     # Transcription requires authentication
     requires_auth = True
     requires_project = False  # Project ID is optional for transcription
     ci_friendly = True
-    
+
     def get_arguments(self) -> List[Dict[str, Any]]:
         """Get command arguments and options."""
         return [
@@ -96,14 +97,14 @@ class TranscribeCommand(BaseCommand):
                 "is_option": True
             }
         ]
-    
+
     def handle(
-        self, 
-        config: Config, 
-        auth_manager: AuthManager, 
-        client: DeepgramClient, 
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
         **kwargs
-    ) -> Any:
+    ) -> BaseResult:
         """Handle transcribe command."""
         source = kwargs.get("source")
         model = kwargs.get("model", "nova-2")
@@ -115,12 +116,12 @@ class TranscribeCommand(BaseCommand):
         detect_topics = kwargs.get("detect_topics", False)
         save_to = kwargs.get("save_to")
         no_validate = kwargs.get("no_validate", False)
-        
+
         # Validate input if not skipped
         if not no_validate:
             if not self._validate_source(source):
-                return {"status": "error", "message": "Invalid audio source"}
-        
+                return BaseResult(status="error", message="Invalid audio source")
+
         # Build transcription options
         options = {
             "model": model,
@@ -128,19 +129,19 @@ class TranscribeCommand(BaseCommand):
             "smart_format": smart_format,
             "punctuate": punctuate
         }
-        
+
         if diarize:
             options["diarize"] = True
         if summarize:
             options["summarize"] = True
         if detect_topics:
             options["detect_topics"] = True
-        
+
         try:
             console.print(f"[blue]Transcribing:[/blue] {source}")
             console.print(f"[dim]Model:[/dim] {model}")
             console.print(f"[dim]Language:[/dim] {language}")
-            
+
             # Determine if source is file or URL
             if self._is_url(source):
                 console.print("[dim]Processing URL...[/dim]")
@@ -148,41 +149,42 @@ class TranscribeCommand(BaseCommand):
             else:
                 console.print("[dim]Processing file...[/dim]")
                 result = client.transcribe_file(source, options)
-            
+
             # Extract transcript text
             transcript = self._extract_transcript(result)
-            
+
             # Save to file if requested
             if save_to:
                 self._save_transcript(transcript, save_to)
-                console.print(f"[green]✓[/green] Transcript saved to: {save_to}")
-            
+                console.print(
+                    f"[green]✓[/green] Transcript saved to: {save_to}")
+
             # Return structured result
-            return {
-                "status": "success",
-                "source": source,
-                "model": model,
-                "language": language,
-                "transcript": transcript,
-                "full_result": result,
-                "saved_to": save_to
-            }
-            
+            return TranscribeResult(
+                status="success",
+                source=source,
+                model=model,
+                language=language,
+                transcript=transcript,
+                full_result=result,
+                saved_to=save_to,
+            )
+
         except Exception as e:
             console.print(f"[red]Transcription failed:[/red] {e}")
-            return {"status": "error", "message": str(e)}
-    
+            return BaseResult(status="error", message=str(e))
+
     def _validate_source(self, source: str) -> bool:
         """Validate audio source (file or URL)."""
         if self._is_url(source):
             return validate_url(source, check_accessibility=True)
         else:
             return validate_audio_file(source)
-    
+
     def _is_url(self, source: str) -> bool:
         """Check if source is a URL."""
         return source.startswith(("http://", "https://"))
-    
+
     def _extract_transcript(self, result: dict) -> str:
         """Extract transcript text from API result."""
         try:
@@ -194,31 +196,32 @@ class TranscribeCommand(BaseCommand):
                     alternatives = channels[0]["alternatives"]
                     if alternatives and "transcript" in alternatives[0]:
                         return alternatives[0]["transcript"]
-            
+
             # Fallback: try to find transcript in any structure
             if isinstance(result, dict):
                 for key, value in result.items():
                     if "transcript" in key.lower():
                         return str(value)
-            
+
             return "No transcript found in response"
-            
+
         except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Could not extract transcript: {e}")
+            console.print(
+                f"[yellow]Warning:[/yellow] Could not extract transcript: {e}")
             return str(result)
-    
+
     def _save_transcript(self, transcript: str, file_path: str) -> None:
         """Save transcript to file."""
         try:
             path = Path(file_path)
-            
+
             # Create directory if it doesn't exist
             path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Write transcript
             with open(path, "w", encoding="utf-8") as f:
                 f.write(transcript)
-                
+
         except Exception as e:
             console.print(f"[red]Error saving transcript:[/red] {e}")
-            raise 
+            raise

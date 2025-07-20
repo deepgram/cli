@@ -9,22 +9,23 @@ from .base import BaseCommand
 from ..core.config import Config
 from ..core.auth import AuthManager
 from ..core.client import DeepgramClient
+from ..models import ProjectsResult, ProjectInfo, BaseResult
 
 console = Console()
 
 
 class ProjectsCommand(BaseCommand):
     """Command for managing Deepgram projects."""
-    
+
     name = "projects"
     help = "Manage Deepgram projects"
     short_help = "Manage projects"
-    
+
     # Projects require authentication
     requires_auth = True
     requires_project = False  # Project ID is optional for listing
     ci_friendly = True
-    
+
     def get_arguments(self) -> List[Dict[str, Any]]:
         """Get command arguments and options."""
         return [
@@ -65,14 +66,14 @@ class ProjectsCommand(BaseCommand):
                 "is_option": True
             }
         ]
-    
+
     def handle(
-        self, 
-        config: Config, 
-        auth_manager: AuthManager, 
-        client: DeepgramClient, 
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
         **kwargs
-    ) -> Any:
+    ) -> BaseResult:
         """Handle projects command."""
         list_projects = kwargs.get("list", False)
         create_project = kwargs.get("create")
@@ -80,7 +81,7 @@ class ProjectsCommand(BaseCommand):
         company = kwargs.get("company")
         show_current = kwargs.get("current", False)
         set_default = kwargs.get("set_default")
-        
+
         try:
             if list_projects:
                 return self._list_projects(client)
@@ -95,144 +96,137 @@ class ProjectsCommand(BaseCommand):
             else:
                 # Default behavior - list projects
                 return self._list_projects(client)
-                
+
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
-            return {"status": "error", "message": str(e)}
-    
-    def _list_projects(self, client: DeepgramClient) -> Dict[str, Any]:
+            return BaseResult(status="error", message=str(e))
+
+    def _list_projects(self, client: DeepgramClient) -> ProjectsResult | BaseResult:
         """List all projects."""
         console.print("[blue]Fetching projects...[/blue]")
-        
+
         try:
             result = client.get_projects()
-            
-            if "projects" in result:
-                projects = result["projects"]
-                
-                if not projects:
-                    console.print("[yellow]No projects found[/yellow]")
-                    return {"status": "info", "message": "No projects found"}
-                
-                console.print(f"[green]Found {len(projects)} project(s):[/green]")
-                
-                for project in projects:
-                    project_id = project.get("project_id", "N/A")
-                    name = project.get("name", "Unnamed")
-                    company = project.get("company", "N/A")
-                    
-                    console.print(f"  • {name}")
-                    console.print(f"    ID: {project_id}")
-                    console.print(f"    Company: {company}")
-                    console.print()
-                
-                return {
-                    "status": "success",
-                    "projects": projects,
-                    "count": len(projects)
-                }
-            else:
-                console.print("[yellow]No projects data in response[/yellow]")
-                return {"status": "info", "message": "No projects data", "raw_result": result}
-                
+
+            projects_raw = result.get("projects", [])
+
+            if not projects_raw:
+                console.print("[yellow]No projects found[/yellow]")
+                return ProjectsResult(status="info", message="No projects found", projects=[], count=0)
+
+            project_models: list[ProjectInfo] = []
+            console.print(
+                f"[green]Found {len(projects_raw)} project(s):[/green]")
+
+            for proj in projects_raw:
+                info = ProjectInfo(
+                    project_id=proj.get("project_id", "N/A"),
+                    name=proj.get("name", "Unnamed"),
+                    company=proj.get("company"),
+                )
+                project_models.append(info)
+
+                console.print(f"  • {info.name}")
+                console.print(f"    ID: {info.project_id}")
+                console.print(f"    Company: {info.company or 'N/A'}")
+                console.print()
+
+            return ProjectsResult(status="success", projects=project_models, count=len(project_models))
+
         except Exception as e:
             console.print(f"[red]Failed to list projects:[/red] {e}")
-            return {"status": "error", "message": str(e)}
-    
-    def _create_project(self, client: DeepgramClient, name: str, company: Optional[str]) -> Dict[str, Any]:
+            return BaseResult(status="error", message=str(e))
+
+    def _create_project(self, client: DeepgramClient, name: str, company: Optional[str]) -> ProjectsResult | BaseResult:
         """Create a new project."""
         console.print(f"[blue]Creating project:[/blue] {name}")
-        
+
         if company:
             console.print(f"[dim]Company:[/dim] {company}")
-        
+
         try:
             result = client.create_project(name, company)
-            
+
             if "project_id" in result:
                 project_id = result["project_id"]
                 console.print(f"[green]✓[/green] Project created successfully")
                 console.print(f"[dim]Project ID:[/dim] {project_id}")
-                
-                return {
-                    "status": "success",
-                    "message": "Project created successfully",
-                    "project_id": project_id,
-                    "name": name,
-                    "company": company,
-                    "full_result": result
-                }
+
+                proj = ProjectInfo(project_id=project_id,
+                                   name=name, company=company)
+                return ProjectsResult(status="success", message="Project created successfully", projects=[proj], count=1)
             else:
-                console.print("[yellow]Project creation response missing project_id[/yellow]")
-                return {"status": "warning", "message": "Created but missing project_id", "result": result}
-                
+                console.print(
+                    "[yellow]Project creation response missing project_id[/yellow]")
+                return ProjectsResult(status="warning", message="Created but missing project_id", projects=[], count=0)
+
         except Exception as e:
             console.print(f"[red]Failed to create project:[/red] {e}")
-            return {"status": "error", "message": str(e)}
-    
-    def _show_project(self, client: DeepgramClient, project_id: str) -> Dict[str, Any]:
+            return BaseResult(status="error", message=str(e))
+
+    def _show_project(self, client: DeepgramClient, project_id: str) -> ProjectsResult | BaseResult:
         """Show details for a specific project."""
         console.print(f"[blue]Fetching project details:[/blue] {project_id}")
-        
+
         try:
             result = client.get_project(project_id)
-            
+
             if "name" in result:
                 name = result.get("name", "N/A")
                 company = result.get("company", "N/A")
-                
+
                 console.print(f"[green]Project Details:[/green]")
                 console.print(f"  Name: {name}")
                 console.print(f"  ID: {project_id}")
                 console.print(f"  Company: {company}")
-                
-                return {
-                    "status": "success",
-                    "project": result,
-                    "project_id": project_id,
-                    "name": name,
-                    "company": company
-                }
+
+                proj = ProjectInfo(project_id=project_id,
+                                   name=name, company=company)
+                return ProjectsResult(status="success", projects=[proj], count=1)
             else:
                 console.print("[yellow]Project details incomplete[/yellow]")
-                return {"status": "warning", "message": "Incomplete project data", "result": result}
-                
+                proj = ProjectInfo(project_id=project_id,
+                                   name=name, company=company)
+                return ProjectsResult(status="warning", message="Incomplete project data", projects=[proj], count=1)
+
         except Exception as e:
             console.print(f"[red]Failed to get project details:[/red] {e}")
-            return {"status": "error", "message": str(e)}
-    
-    def _show_current_project(self, config: Config, auth_manager: AuthManager, client: DeepgramClient) -> Dict[str, Any]:
+            return BaseResult(status="error", message=str(e))
+
+    def _show_current_project(self, config: Config, auth_manager: AuthManager, client: DeepgramClient) -> ProjectsResult | BaseResult:
         """Show current project details."""
         project_id = auth_manager.get_project_id()
-        
+
         if not project_id:
             console.print("[yellow]No current project set[/yellow]")
-            console.print("Set a project ID with: deepctl login --project-id <project_id>")
+            console.print(
+                "Set a project ID with: deepctl login --project-id <project_id>")
             console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
-            return {"status": "info", "message": "No current project set"}
-        
+            return BaseResult(status="info", message="No current project set")
+
         console.print(f"[blue]Current project ID:[/blue] {project_id}")
         return self._show_project(client, project_id)
-    
-    def _set_default_project(self, config: Config, auth_manager: AuthManager, project_id: str) -> Dict[str, Any]:
+
+    def _set_default_project(self, config: Config, auth_manager: AuthManager, project_id: str) -> BaseResult:
         """Set default project ID."""
         console.print(f"[blue]Setting default project:[/blue] {project_id}")
-        
+
         try:
             # Update current profile
             profile_name = config.profile or "default"
             current_profile = config.get_profile(profile_name)
-            
+
             # Test if project exists by trying to get it
             client = DeepgramClient(config, auth_manager)
             try:
                 client.get_project(project_id)
                 console.print("[green]✓[/green] Project ID validated")
             except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Could not validate project: {e}")
+                console.print(
+                    f"[yellow]Warning:[/yellow] Could not validate project: {e}")
                 if not self.confirm("Continue anyway?", default=False):
-                    return {"status": "cancelled", "message": "Cancelled by user"}
-            
+                    return BaseResult(status="cancelled", message="Cancelled by user")
+
             # Update profile
             config.create_profile(
                 profile_name,
@@ -240,16 +234,12 @@ class ProjectsCommand(BaseCommand):
                 project_id=project_id,
                 base_url=current_profile.base_url
             )
-            
-            console.print(f"[green]✓[/green] Default project set to: {project_id}")
-            
-            return {
-                "status": "success",
-                "message": "Default project updated",
-                "project_id": project_id,
-                "profile": profile_name
-            }
-            
+
+            console.print(
+                f"[green]✓[/green] Default project set to: {project_id}")
+
+            return BaseResult(status="success", message="Default project updated",)
+
         except Exception as e:
             console.print(f"[red]Failed to set default project:[/red] {e}")
-            return {"status": "error", "message": str(e)} 
+            return BaseResult(status="error", message=str(e))
