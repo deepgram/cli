@@ -58,35 +58,23 @@ class TestMainCLI:
         assert result.exit_code != 0
         assert "Invalid value" in result.output
 
-    @patch("importlib.metadata.entry_points")
-    def test_load_commands_success(self, mock_entry_points):
+    @patch("deepctl_core.PluginManager")
+    def test_load_commands_success(self, mock_plugin_manager_class):
         """Test successful command loading from entry points."""
-        # Mock entry point
-        mock_entry_point = Mock()
-        mock_entry_point.name = "test-command"
-
-        # Mock command class
-        mock_command_class = Mock()
-        mock_command_instance = Mock()
-        mock_command_instance.name = "test"
-        mock_command_instance.help = "Test command"
-        mock_command_instance.get_arguments.return_value = []
-        mock_command_class.return_value = mock_command_instance
-
-        mock_entry_point.load.return_value = mock_command_class
-
-        # Setup entry points mock
-        mock_entry_points.return_value.select.return_value = [mock_entry_point]
+        # Mock the plugin manager instance
+        mock_plugin_manager = Mock()
+        mock_plugin_manager_class.return_value = mock_plugin_manager
 
         # Load commands should not raise
         load_commands()
 
-        # Verify entry point was loaded
-        mock_entry_point.load.assert_called_once()
+        # Verify plugin manager was created and load_plugins was called
+        mock_plugin_manager_class.assert_called_once()
+        mock_plugin_manager.load_plugins.assert_called_once()
 
-    @patch("importlib.metadata.entry_points")
-    @patch("deepctl.main.console")
-    def test_load_commands_error_handling(self, mock_console, mock_entry_points):
+    @patch("deepctl_core.plugin_manager.console")
+    @patch("deepctl_core.plugin_manager.metadata.entry_points")
+    def test_load_commands_error_handling(self, mock_entry_points, mock_console):
         """Test error handling during command loading."""
         # Mock entry point that raises error
         mock_entry_point = Mock()
@@ -100,9 +88,11 @@ class TestMainCLI:
         load_commands()
 
         # Verify error was printed
-        mock_console.print.assert_called_once()
-        assert "Error loading command broken-command" in str(
-            mock_console.print.call_args)
+        assert mock_console.print.called
+        # Check that error message was printed
+        error_calls = [str(call) for call in mock_console.print.call_args_list]
+        assert any(
+            "Error loading plugin broken-command" in call for call in error_calls)
 
     def test_cli_context_setup(self, runner):
         """Test that CLI context is properly set up."""

@@ -31,7 +31,7 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_debug_audio_command_execution(self, runner):
         """Test executing debug audio subcommand."""
-        with patch('deepctl_cmd_debug_audio.command.AudioDebugCommand.handle') as mock_handle:
+        with patch('deepctl_cmd_debug_audio.command.AudioCommand.handle') as mock_handle:
             mock_handle.return_value = {"status": "audio debug complete"}
 
             result = runner.invoke(deepctl_cli, ["debug", "audio"])
@@ -43,7 +43,7 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_debug_browser_command_execution(self, runner):
         """Test executing debug browser subcommand."""
-        with patch('deepctl_cmd_debug_browser.command.BrowserDebugCommand.handle') as mock_handle:
+        with patch('deepctl_cmd_debug_browser.command.BrowserCommand.handle') as mock_handle:
             mock_handle.return_value = {"status": "browser debug complete"}
 
             result = runner.invoke(deepctl_cli, ["debug", "browser"])
@@ -55,7 +55,7 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_debug_network_command_execution(self, runner):
         """Test executing debug network subcommand."""
-        with patch('deepctl_cmd_debug_network.command.NetworkDebugCommand.handle') as mock_handle:
+        with patch('deepctl_cmd_debug_network.command.NetworkCommand.handle') as mock_handle:
             mock_handle.return_value = {"status": "network debug complete"}
 
             result = runner.invoke(deepctl_cli, ["debug", "network"])
@@ -69,7 +69,8 @@ class TestNestedCommandsIntegration:
         """Test that debug without subcommand shows help."""
         result = runner.invoke(deepctl_cli, ["debug"])
 
-        assert result.exit_code == 0
+        # Click exits with code 2 when a required subcommand is missing
+        assert result.exit_code == 2
         assert "Debug utilities for troubleshooting" in result.output
         assert "Commands:" in result.output
 
@@ -86,7 +87,7 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_nested_command_with_options(self, runner):
         """Test nested command with options passed correctly."""
-        with patch('deepctl_cmd_debug_network.command.NetworkDebugCommand.handle') as mock_handle:
+        with patch('deepctl_cmd_debug_network.command.NetworkCommand.handle') as mock_handle:
             mock_handle.return_value = {"verbose": True}
 
             # Assuming network debug has a --verbose flag
@@ -141,7 +142,7 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_subcommand_inherits_parent_context(self, runner):
         """Test that subcommands inherit context from parent group."""
-        with patch('deepctl_cmd_debug_audio.command.AudioDebugCommand.handle') as mock_handle:
+        with patch('deepctl_cmd_debug_audio.command.AudioCommand.handle') as mock_handle:
             def check_context(config, auth_manager, client, **kwargs):
                 # Verify that config, auth_manager, and client are passed
                 assert config is not None
