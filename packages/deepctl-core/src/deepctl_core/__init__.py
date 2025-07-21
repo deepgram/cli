@@ -6,6 +6,7 @@ from .client import DeepgramClient
 from .plugin_manager import PluginManager
 from .models import ProfileInfo, ProfilesResult, PluginInfo, ErrorResult, BaseResult
 from .base_command import BaseCommand
+from .base_group_command import BaseGroupCommand
 from .output import (
     setup_output,
     OutputFormatter,
@@ -29,6 +30,7 @@ __all__ = [
     "ErrorResult",
     "BaseResult",
     "BaseCommand",
+    "BaseGroupCommand",
     # Output utilities
     "setup_output",
     "OutputFormatter",

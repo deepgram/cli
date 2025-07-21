@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Dict, List, Type, Any
 from importlib import metadata
 from .models import PluginInfo, ErrorResult
+from .base_group_command import BaseGroupCommand
+from .base_command import BaseCommand
 
 import click
 from rich.console import Console
@@ -35,44 +37,9 @@ class PluginManager:
 
     def _load_builtin_commands(self, cli_group: click.Group) -> None:
         """Load built-in commands from the commands package."""
-        from ..commands.base import BaseCommand
-
-        commands_dir = Path(__file__).parent.parent / "commands"
-
-        # Skip __init__.py and base.py
-        command_files = [
-            f for f in commands_dir.glob("*.py")
-            if f.name not in ("__init__.py", "base.py")
-        ]
-
-        for command_file in command_files:
-            try:
-                # Import the module
-                module_name = f"deepctl.commands.{command_file.stem}"
-                module = importlib.import_module(module_name)
-
-                # Find command classes
-                for name, obj in inspect.getmembers(module):
-                    if (inspect.isclass(obj) and
-                        issubclass(obj, BaseCommand) and
-                            obj is not BaseCommand):
-
-                        # Create command instance
-                        command_instance = obj()
-
-                        # Create Click command
-                        click_command = self._create_click_command(
-                            command_instance)
-
-                        # Add to CLI group
-                        cli_group.add_command(click_command)
-
-                        # Store reference
-                        self.command_classes[command_instance.name] = obj
-
-            except Exception as e:
-                console.print(
-                    f"[red]Error loading command from {command_file}:[/red] {e}")
+        # Built-in commands are no longer used - all commands are now
+        # loaded as external plugins via entry points
+        pass
 
     def _load_external_plugins(self, cli_group: click.Group) -> None:
         """Load external plugins from entry points."""
@@ -115,6 +82,11 @@ class PluginManager:
         Returns:
             Click command object
         """
+        # Check if this is a group command
+        if isinstance(command_instance, BaseGroupCommand) or getattr(command_instance, 'is_group', False):
+            # Create a Click Group for group commands
+            return self._create_click_group(command_instance)
+
         # Create the command function
         def command_func(**kwargs):
             # Pass CLI context and arguments to the command
@@ -137,6 +109,87 @@ class PluginManager:
         cmd = self._add_command_arguments(cmd, command_instance)
 
         return cmd
+
+    def _create_click_group(self, group_instance: BaseGroupCommand) -> click.Group:
+        """Create a Click group from a BaseGroupCommand instance.
+
+        Args:
+            group_instance: Instance of BaseGroupCommand
+
+        Returns:
+            Click group object
+        """
+        # Use the group's own method to create the Click group
+        if hasattr(group_instance, 'get_click_group'):
+            group = group_instance.get_click_group()
+        else:
+            # Fallback for basic group creation
+            def group_func(**kwargs):
+                ctx = click.get_current_context()
+                return group_instance.execute(ctx, **kwargs)
+
+            group_func.__name__ = group_instance.name.replace("-", "_")
+            group_func.__doc__ = group_instance.help
+
+            group = click.Group(
+                name=group_instance.name,
+                callback=group_func,
+                help=group_instance.help,
+                short_help=group_instance.short_help or group_instance.help,
+                invoke_without_command=getattr(
+                    group_instance, 'invoke_without_command', False)
+            )
+
+            # Add arguments and options to the group
+            group = self._add_command_arguments(group, group_instance)
+
+        # Load subcommands for this group
+        self._load_subcommands_for_group(group, group_instance)
+
+        return group
+
+    def _load_subcommands_for_group(self, group: click.Group, group_instance: BaseGroupCommand) -> None:
+        """Load subcommands for a group command.
+
+        Args:
+            group: Click Group to add subcommands to
+            group_instance: Instance of BaseGroupCommand
+        """
+        # Load subcommands from entry points using the pattern deepctl.subcommands.{parent}
+        subcommand_group = f"deepctl.subcommands.{group_instance.name}"
+
+        try:
+            entry_points = metadata.entry_points()
+            for entry_point in entry_points.select(group=subcommand_group):
+                try:
+                    # Load the subcommand class
+                    subcommand_class = entry_point.load()
+
+                    # Create instance
+                    subcommand_instance = subcommand_class()
+
+                    # Create Click command for the subcommand
+                    click_subcommand = self._create_click_command(
+                        subcommand_instance)
+
+                    # Add to the group
+                    group.add_command(click_subcommand)
+
+                    # Store reference in the group instance
+                    if hasattr(group_instance, 'add_subcommand'):
+                        group_instance.add_subcommand(
+                            entry_point.name, subcommand_class)
+
+                    console.print(
+                        f"[dim]Loaded subcommand:[/dim] {group_instance.name} {entry_point.name}")
+
+                except Exception as e:
+                    console.print(
+                        f"[red]Error loading subcommand {entry_point.name} for {group_instance.name}:[/red] {e}")
+
+        except Exception as e:
+            console.print(
+                f"[red]Error loading subcommands for {group_instance.name}:[/red] {e}")
 
     def _add_command_arguments(self, cmd: click.Command, command_instance) -> click.Command:
         """Add arguments and options to a Click command.
@@ -242,8 +295,6 @@ class PluginManager:
         Returns:
             True if valid, False otherwise
         """
-        from ..commands.base import BaseCommand
-
         try:
             # Check if it's a subclass of BaseCommand
             if not issubclass(plugin_class, BaseCommand):
