@@ -27,7 +27,7 @@ class TestMainCLI:
         """Test that --help displays help information."""
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
-        assert "deepctl - Official deepctl" in result.output
+        assert "deepctl - Official Deepgram CLI for speech recognition and audio intelligence" in result.output
         assert "--config" in result.output
         assert "--profile" in result.output
         assert "--output" in result.output

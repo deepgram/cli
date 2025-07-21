@@ -48,20 +48,17 @@ class TestFileInfo:
         }
 
     @pytest.mark.unit
-    def test_file_info_creation_with_valid_data(self, valid_file_data: Dict[str, Any],
-                                                assert_pydantic_model):
+    def test_file_info_creation_with_valid_data(self, valid_file_data: Dict[str, Any]):
         """Test FileInfo model creation with all fields."""
-        file_info = assert_pydantic_model(
-            FileInfo,
-            valid_file_data,
-            expected_fields={
-                "path": "/home/user/audio/sample.mp3",
-                "name": "sample.mp3",
-                "extension": ".mp3",
-                "size_mb": 1.0,
-                "is_audio": True
-            }
-        )
+        # Create the model
+        file_info = FileInfo(**valid_file_data)
+
+        # Verify expected fields
+        assert file_info.path == "/home/user/audio/sample.mp3"
+        assert file_info.name == "sample.mp3"
+        assert file_info.extension == ".mp3"
+        assert file_info.size_mb == 1.0
+        assert file_info.is_audio is True
 
         # Additional assertions
         assert file_info.exists is True
@@ -222,18 +219,22 @@ class TestFileInfo:
 
     @pytest.mark.unit
     @pytest.mark.benchmark
-    def test_file_info_creation_performance(self, valid_file_data: Dict[str, Any],
-                                            benchmark_timer):
+    def test_file_info_creation_performance(self, valid_file_data: Dict[str, Any]):
         """Benchmark FileInfo model creation performance."""
+        import time
+
         iterations = 1000
 
-        with benchmark_timer:
-            for _ in range(iterations):
-                FileInfo(**valid_file_data)
+        start_time = time.time()
+        for _ in range(iterations):
+            FileInfo(**valid_file_data)
+        end_time = time.time()
+
+        total_time = end_time - start_time
 
         # Assert reasonable performance (should be < 1ms per creation)
-        assert benchmark_timer.last < 1.0  # Less than 1 second for 1000 iterations
-        avg_time = benchmark_timer.last / iterations
+        assert total_time < 1.0  # Less than 1 second for 1000 iterations
+        avg_time = total_time / iterations
         assert avg_time < 0.001  # Less than 1ms per creation
 
     @pytest.mark.unit
