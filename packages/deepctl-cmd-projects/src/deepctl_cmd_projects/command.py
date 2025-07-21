@@ -104,7 +104,18 @@ class ProjectsCommand(BaseCommand):
         try:
             result = client.get_projects()
 
-            projects_raw = result.get("projects", [])
+            # Handle ProjectsResponse object
+            projects_raw = []
+            if hasattr(result, 'projects'):
+                projects_raw = result.projects
+            elif hasattr(result, 'to_dict'):
+                result_dict = result.to_dict()
+                projects_raw = result_dict.get("projects", [])
+            elif hasattr(result, 'dict'):
+                result_dict = result.dict()
+                projects_raw = result_dict.get("projects", [])
+            elif isinstance(result, dict):
+                projects_raw = result.get("projects", [])
 
             if not projects_raw:
                 console.print("[yellow]No projects found[/yellow]")
@@ -115,10 +126,19 @@ class ProjectsCommand(BaseCommand):
                 f"[green]Found {len(projects_raw)} project(s):[/green]")
 
             for proj in projects_raw:
+                # Handle project objects that might not be dicts
+                project_data = proj
+                if hasattr(proj, '__dict__'):
+                    project_data = proj.__dict__
+                elif hasattr(proj, 'to_dict'):
+                    project_data = proj.to_dict()
+                elif hasattr(proj, 'dict'):
+                    project_data = proj.dict()
+
                 info = ProjectInfo(
-                    project_id=proj.get("project_id", "N/A"),
-                    name=proj.get("name", "Unnamed"),
-                    company=proj.get("company"),
+                    project_id=project_data.get("project_id", "N/A"),
+                    name=project_data.get("name", "Unnamed"),
+                    company=project_data.get("company"),
                 )
                 project_models.append(info)
 
@@ -143,8 +163,17 @@ class ProjectsCommand(BaseCommand):
         try:
             result = client.create_project(name, company)
 
-            if "project_id" in result:
-                project_id = result["project_id"]
+            # Handle response object
+            result_dict = result
+            if hasattr(result, 'to_dict'):
+                result_dict = result.to_dict()
+            elif hasattr(result, 'dict'):
+                result_dict = result.dict()
+            elif hasattr(result, '__dict__'):
+                result_dict = result.__dict__
+
+            if isinstance(result_dict, dict) and "project_id" in result_dict:
+                project_id = result_dict["project_id"]
                 console.print(f"[green]✓[/green] Project created successfully")
                 console.print(f"[dim]Project ID:[/dim] {project_id}")
 
@@ -167,9 +196,18 @@ class ProjectsCommand(BaseCommand):
         try:
             result = client.get_project(project_id)
 
-            if "name" in result:
-                name = result.get("name", "N/A")
-                company = result.get("company", "N/A")
+            # Handle response object
+            result_dict = result
+            if hasattr(result, 'to_dict'):
+                result_dict = result.to_dict()
+            elif hasattr(result, 'dict'):
+                result_dict = result.dict()
+            elif hasattr(result, '__dict__'):
+                result_dict = result.__dict__
+
+            if isinstance(result_dict, dict) and "name" in result_dict:
+                name = result_dict.get("name", "N/A")
+                company = result_dict.get("company", "N/A")
 
                 console.print(f"[green]Project Details:[/green]")
                 console.print(f"  Name: {name}")
@@ -181,6 +219,11 @@ class ProjectsCommand(BaseCommand):
                 return ProjectsResult(status="success", projects=[proj], count=1)
             else:
                 console.print("[yellow]Project details incomplete[/yellow]")
+                # Still try to create a project info with what we have
+                name = result_dict.get("name", "Unknown") if isinstance(
+                    result_dict, dict) else "Unknown"
+                company = result_dict.get("company") if isinstance(
+                    result_dict, dict) else None
                 proj = ProjectInfo(project_id=project_id,
                                    name=name, company=company)
                 return ProjectsResult(status="warning", message="Incomplete project data", projects=[proj], count=1)

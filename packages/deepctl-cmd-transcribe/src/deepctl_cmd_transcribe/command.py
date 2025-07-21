@@ -122,16 +122,17 @@ class TranscribeCommand(BaseCommand):
         options = {
             "model": model,
             "language": language,
-            "smart_format": smart_format,
-            "punctuate": punctuate
+            "smart_format": str(smart_format).lower(),
+            "punctuate": str(punctuate).lower(),
         }
 
+        # Only add optional features if explicitly enabled
         if diarize:
-            options["diarize"] = True
+            options["diarize"] = "true"
         if summarize:
-            options["summarize"] = True
+            options["summarize"] = "true"
         if detect_topics:
-            options["detect_topics"] = True
+            options["detect_topics"] = "true"
 
         try:
             console.print(f"[blue]Transcribing:[/blue] {source}")
@@ -146,8 +147,17 @@ class TranscribeCommand(BaseCommand):
                 console.print("[dim]Processing file...[/dim]")
                 result = client.transcribe_file(source, options)
 
+            # Convert SDK response object to dict
+            result_dict = result
+            if hasattr(result, 'to_dict'):
+                result_dict = result.to_dict()
+            elif hasattr(result, 'dict'):
+                result_dict = result.dict()
+            elif hasattr(result, '__dict__'):
+                result_dict = result.__dict__
+
             # Extract transcript text
-            transcript = self._extract_transcript(result)
+            transcript = self._extract_transcript(result_dict)
 
             # Save to file if requested
             if save_to:
@@ -162,7 +172,7 @@ class TranscribeCommand(BaseCommand):
                 model=model,
                 language=language,
                 transcript=transcript,
-                full_result=result,
+                full_result=result_dict,
                 saved_to=save_to,
             )
 

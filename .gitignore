@@ -154,3 +154,8 @@ Thumbs.db
 .env.development
 .env.test
 .env.production 
+
+# tmps
+tmp_chatface/
+tmp_community-turbo/
+tmp_deepgram-cli/

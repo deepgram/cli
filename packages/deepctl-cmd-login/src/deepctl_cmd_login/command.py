@@ -166,12 +166,22 @@ class LoginCommand(BaseCommand):
             auth_manager.login_with_device_flow()
 
             profile_name = config.profile or "default"
+
+            # Retrieve the stored credentials
+            api_key = auth_manager.get_api_key()
+            project_id = auth_manager.get_project_id()
+
+            # Mask the API key for display
+            api_key_masked = None
+            if api_key:
+                api_key_masked = f"****{api_key[-4:]}"
+
             return LoginResult(
                 status="success",
                 message="Successfully logged in via web authentication",
                 profile=profile_name,
-                api_key_masked=None,
-                project_id=None,
+                api_key_masked=api_key_masked,
+                project_id=project_id,
                 config_path=str(config.config_path),
             )
 

@@ -57,9 +57,32 @@ class Config:
     def _get_default_config_path(self) -> Path:
         """Get the default configuration path for the current platform."""
         # Use platformdirs for cross-platform config directory
-        config_dir = Path(platformdirs.user_config_dir("deepgram", "deepgram"))
+        config_dir = Path(platformdirs.user_config_dir("deepctl", "deepgram"))
         config_dir.mkdir(parents=True, exist_ok=True)
+
+        # Migrate from old location if needed
+        self._migrate_config_if_needed(config_dir)
+
         return config_dir / "config.yaml"
+
+    def _migrate_config_if_needed(self, new_config_dir: Path) -> None:
+        """Migrate config from old deepgram directory to new deepctl directory."""
+        # Check for old config location
+        old_config_dir = Path(
+            platformdirs.user_config_dir("deepgram", "deepgram"))
+        old_config_path = old_config_dir / "config.yaml"
+        new_config_path = new_config_dir / "config.yaml"
+
+        # If old config exists and new doesn't, migrate it
+        if old_config_path.exists() and not new_config_path.exists():
+            try:
+                import shutil
+                print(
+                    f"Migrating config from {old_config_path} to {new_config_path}")
+                shutil.copy2(old_config_path, new_config_path)
+                print("✓ Config migrated successfully")
+            except Exception as e:
+                print(f"Warning: Could not migrate config: {e}")
 
     def _get_project_config_path(self) -> Path:
         """Get the project-specific configuration path."""

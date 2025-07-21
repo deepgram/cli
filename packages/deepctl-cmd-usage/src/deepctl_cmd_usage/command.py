@@ -142,43 +142,106 @@ class UsageCommand(BaseCommand):
         first_day = today.replace(day=1)
         return first_day.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
 
-    def _process_usage_result(self, result: dict, summary_only: bool, start_date: str, end_date: str) -> BaseResult:
+    def _process_usage_result(self, result: Any, summary_only: bool, start_date: str, end_date: str) -> BaseResult:
         """Process usage result and display formatted output."""
         try:
-            # Extract usage data
-            usage_data = self._extract_usage_data(result)
+            # Handle UsageSummaryResponse object - try different conversion methods
+            result_dict = None
 
-            if not usage_data:
+            if hasattr(result, 'to_dict'):
+                result_dict = result.to_dict()
+            elif hasattr(result, 'dict'):
+                result_dict = result.dict()
+            elif hasattr(result, '__dict__'):
+                # For SDK response objects, we need to access attributes directly
+                result_dict = {
+                    "results": result.results if hasattr(result, 'results') else [],
+                    "start": result.start if hasattr(result, 'start') else start_date,
+                    "end": result.end if hasattr(result, 'end') else end_date,
+                    "project_id": result.project_id if hasattr(result, 'project_id') else ""
+                }
+            else:
+                result_dict = result
+
+            # Extract usage data
+            if result_dict and "results" in result_dict and isinstance(result_dict["results"], list):
+                # Calculate totals from results array
+                total_hours = 0
+                total_requests = 0
+                total_tts_characters = 0
+                total_tokens_out = 0
+
+                buckets: list[UsageBucket] = []
+
+                for item in result_dict["results"]:
+                    # Sum up totals
+                    if "total_hours" in item:
+                        total_hours += item["total_hours"]
+                    if "requests" in item:
+                        total_requests += item["requests"]
+                    if "tts" in item and "characters" in item["tts"]:
+                        total_tts_characters += item["tts"]["characters"]
+                    if "tokens" in item and "out" in item["tokens"]:
+                        total_tokens_out += item["tokens"]["out"]
+
+                    # Create bucket for each day
+                    buckets.append(UsageBucket(
+                        start=item.get("start", ""),
+                        end=item.get("end", ""),
+                        hours=float(item.get("total_hours", 0))
+                    ))
+
+                # Display summary
+                console.print(
+                    f"\n[green]Usage Summary ({start_date} to {end_date}):[/green]")
+                console.print(f"  Total Hours: {total_hours:,.1f}")
+                console.print(f"  Total Requests: {total_requests:,}")
+
+                if total_tts_characters > 0:
+                    console.print(
+                        f"  TTS Characters: {total_tts_characters:,}")
+
+                if total_tokens_out > 0:
+                    console.print(f"  Tokens Out: {total_tokens_out:,}")
+
+                # Display detailed breakdown if not summary only
+                if not summary_only and result_dict["results"]:
+                    console.print("\n[blue]Daily Breakdown:[/blue]")
+                    for item in result_dict["results"]:
+                        date = item.get("start", "Unknown")
+                        hours = item.get("total_hours", 0)
+                        requests = item.get("requests", 0)
+
+                        console.print(f"\n  {date}:")
+                        console.print(f"    Hours: {hours}")
+                        console.print(f"    Requests: {requests}")
+
+                        if "tts" in item:
+                            console.print(
+                                f"    TTS Characters: {item['tts'].get('characters', 0):,}")
+                            console.print(
+                                f"    TTS Requests: {item['tts'].get('requests', 0):,}")
+
+                        if "tokens" in item and item["tokens"].get("out", 0) > 0:
+                            console.print(
+                                f"    Tokens Out: {item['tokens'].get('out', 0):,}")
+
+                project_id = result_dict.get("project_id", "")
+                return UsageResult(
+                    status="success",
+                    project_id=project_id,
+                    buckets=buckets,
+                    total_hours=float(total_hours)
+                )
+            else:
                 console.print(
                     "[yellow]No usage data found for the specified period[/yellow]")
                 return BaseResult(status="info", message="No usage data found")
 
-            # Display summary
-            self._display_usage_summary(usage_data, start_date, end_date)
-
-            # Display detailed breakdown if not summary only
-            if not summary_only:
-                self._display_usage_details(usage_data)
-
-            total_seconds = usage_data.get(
-                "duration", 0) if isinstance(usage_data, dict) else 0
-            hours = total_seconds / \
-                3600 if isinstance(total_seconds, (int, float)) else 0
-
-            buckets: list[UsageBucket] = []
-            # simple: if details per day exist in usage_data["details"] with date and seconds
-            details = usage_data.get("details", {}) if isinstance(
-                usage_data, dict) else {}
-            if isinstance(details, dict):
-                for period, val in details.items():
-                    if isinstance(val, dict) and "duration" in val:
-                        dur = val["duration"]
-                        buckets.append(UsageBucket(
-                            start=period, end="", hours=dur/3600 if isinstance(dur, (int, float)) else 0))
-            return UsageResult(status="success", project_id=result.get("project_id", ""), buckets=buckets, total_hours=hours)
-
         except Exception as e:
             console.print(f"[red]Error processing usage data:[/red] {e}")
+            import traceback
+            traceback.print_exc()
             return BaseResult(status="error", message=str(e))
 
     def _extract_usage_data(self, result: dict) -> Dict[str, Any]:

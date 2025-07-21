@@ -4,8 +4,10 @@ import json
 import os
 import time
 import webbrowser
+import random
+import string
 from typing import Optional, Dict, Any, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 
 import httpx
 import keyring
@@ -19,15 +21,19 @@ from .models import ProfileInfo, ProfilesResult
 console = Console()
 
 # Constants from Go implementation
-COMMUNITY_BASE_URL = "https://community-local.deepgram.com:3000"
-DEVICE_FLOW_URL = f"{COMMUNITY_BASE_URL}/api/auth/cli/device"
-LOGIN_URL = f"{COMMUNITY_BASE_URL}/auth/login/cli/"
+COMMUNITY_BASE_URL = os.getenv(
+    "DEEPGRAM_CLI_BASE_URL", "https://community.deepgram.com")
+DEVICE_CODE_URL = f"{COMMUNITY_BASE_URL}/api/auth/device/code"
+TOKEN_POLL_URL = f"{COMMUNITY_BASE_URL}/api/auth/device/token"
+
+# Keyring service identifier using reverse domain notation
+KEYRING_SERVICE = "com.deepgram.dx.deepctl"
 
 
 class DeviceCodeResponse(BaseModel):
     """Response from device code request."""
     device_code: str
-    user_code: str
+    user_code: Optional[str] = None  # Not used in current implementation
     verification_uri: str
     expires_in: int
     interval: int
@@ -36,9 +42,17 @@ class DeviceCodeResponse(BaseModel):
 class TokenResponse(BaseModel):
     """Response from token request."""
     access_token: str
-    token_type: str
-    expires_in: int
-    scope: str
+    project_id: str
+    token_type: Optional[str] = None
+    expires_in: Optional[int] = None
+    scope: Optional[str] = None
+
+    # The access_token returned is the actual Deepgram API key
+    @property
+    def api_key(self) -> str:
+        """Get the API key from the response."""
+        # The community server returns the actual API key in the access_token field
+        return self.access_token
 
 
 class AuthenticationError(Exception):
@@ -56,17 +70,29 @@ class AuthManager:
             config: Configuration manager instance
         """
         self.config = config
-        self.client = httpx.Client(timeout=30.0)
+        # Disable SSL verification for local development
+        verify = not COMMUNITY_BASE_URL.startswith("https://community-local")
+        self.client = httpx.Client(timeout=30.0, verify=verify)
 
     def is_authenticated(self) -> bool:
         """Check if user is authenticated."""
-        # Check for API key in config
-        current_profile = self.config.get_profile()
-        if current_profile.api_key:
-            return True
-
         # Check for API key in environment
         if os.getenv("DEEPGRAM_API_KEY"):
+            return True
+
+        # Check keyring
+        try:
+            profile_name = self.config.profile or "default"
+            api_key = keyring.get_password(
+                KEYRING_SERVICE, f"api-key.{profile_name}")
+            if api_key:
+                return True
+        except Exception:
+            pass
+
+        # Check for API key in config (backward compatibility)
+        current_profile = self.config.get_profile()
+        if current_profile.api_key:
             return True
 
         return False
@@ -77,13 +103,22 @@ class AuthManager:
         return bool(os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID"))
 
     def get_api_key(self) -> Optional[str]:
-        """Get API key from config or environment."""
+        """Get API key from keyring, then environment, then config."""
         # Environment variable takes precedence (CI-friendly)
         api_key = os.getenv("DEEPGRAM_API_KEY")
         if api_key:
             return api_key
 
-        # Check current profile
+        # Check keyring next
+        try:
+            api_key = keyring.get_password(
+                KEYRING_SERVICE, f"api-key.{self.config.profile or 'default'}")
+            if api_key:
+                return api_key
+        except Exception:
+            pass  # Keyring not available or error
+
+        # Fall back to config file (for backward compatibility)
         current_profile = self.config.get_profile()
         if current_profile.api_key:
             return current_profile.api_key
@@ -91,13 +126,22 @@ class AuthManager:
         return None
 
     def get_project_id(self) -> Optional[str]:
-        """Get project ID from config or environment."""
+        """Get project ID from environment or config."""
         # Environment variable takes precedence (CI-friendly)
         project_id = os.getenv("DEEPGRAM_PROJECT_ID")
         if project_id:
             return project_id
 
-        # Check current profile
+        # Check keyring for project ID (if stored there)
+        try:
+            project_id = keyring.get_password(
+                KEYRING_SERVICE, f"project-id.{self.config.profile or 'default'}")
+            if project_id:
+                return project_id
+        except Exception:
+            pass
+
+        # Check current profile config
         current_profile = self.config.get_profile()
         if current_profile.project_id:
             return current_profile.project_id
@@ -225,24 +269,31 @@ class AuthManager:
 
         console.print(f"[green]✓[/green] {message}")
 
-        # Store in keyring for security (with fallback)
+        # Store API key in keyring for security
+        profile_name = self.config.profile or "default"
+        keyring_available = False
+
         try:
-            keyring.set_password("deepgram", "api_key", api_key)
+            keyring.set_password(
+                KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
             if project_id:
-                keyring.set_password("deepgram", "project_id", project_id)
+                keyring.set_password(
+                    KEYRING_SERVICE, f"project-id.{profile_name}", project_id)
             console.print(
                 "[green]✓[/green] Credentials stored securely in system keyring")
+            keyring_available = True
         except Exception as e:
             console.print(
                 f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
-            console.print("Falling back to config file storage")
+            console.print("Credentials will be stored in config file instead")
 
-        # Update config
-        profile_name = self.config.profile or "default"
+        # Update config with non-sensitive data
+        # Only store API key in config if keyring is not available
         self.config.create_profile(
             profile_name,
-            api_key=api_key,
-            project_id=project_id
+            api_key=api_key if not keyring_available else None,
+            project_id=project_id,
+            base_url=self.config.get_profile(profile_name).base_url
         )
 
         console.print(f"[green]✓[/green] Successfully logged in with API key")
@@ -250,6 +301,19 @@ class AuthManager:
 
         if project_id:
             console.print(f"[dim]Project ID:[/dim] {project_id}")
+
+    def _generate_client_id(self, length: int = 40) -> str:
+        """Generate a random client ID for device flow.
+
+        Args:
+            length: Length of the client ID
+
+        Returns:
+            Random URL-safe string
+        """
+        # URL-friendly characters matching Go implementation
+        url_friendly_chars = string.ascii_letters + string.digits + "-._~"
+        return ''.join(random.choice(url_friendly_chars) for _ in range(length))
 
     def login_with_device_flow(self) -> None:
         """Login using device flow (interactive method)."""
@@ -262,62 +326,83 @@ class AuthManager:
                 return
 
         try:
-            # Request device code
-            device_response = self._request_device_code()
+            # Get hostname for device identification
+            hostname = os.uname().nodename if hasattr(os, 'uname') else 'unknown'
 
-            # Display user code and open browser
-            console.print(
-                f"\n[bold]User Code:[/bold] {device_response.user_code}")
-            console.print(
-                f"[dim]Verification URL:[/dim] {device_response.verification_uri}")
-            console.print(
-                f"[dim]Expires in:[/dim] {device_response.expires_in} seconds")
+            # Request device code (returns device code response and client_id)
+            device_response, client_id = self._request_device_code()
 
-            # Open browser automatically
+            # Build verification URI with query parameters like Go implementation
+            query_params = {
+                "device_code": device_response.device_code,
+                "client_id": client_id,
+                "hostname": hostname
+            }
+            verification_uri = f"{device_response.verification_uri}?{urlencode(query_params)}"
+
+            # Display prompt message like Go implementation
+            console.print(
+                "\n[bold]Hello from Deepgram![/bold] Press Enter to open browser and login automatically.")
+            console.print(
+                f"[dim]Here is your login link in case browser did not open:[/dim] [dim]{verification_uri}[/dim]\n")
+
+            # Wait for Enter key
+            console.input()
+
+            # Open browser
             try:
-                webbrowser.open(device_response.verification_uri)
+                webbrowser.open(verification_uri)
                 console.print(
                     "[green]✓[/green] Opened browser for authentication")
             except Exception as e:
                 console.print(
                     f"[yellow]Warning:[/yellow] Could not open browser: {e}")
                 console.print(
-                    "Please manually navigate to the verification URL")
+                    "Please manually navigate to the verification URL above")
 
             # Poll for token
-            token_response = self._poll_for_token(device_response)
+            token_response = self._poll_for_token(
+                device_response, client_id, hostname)
 
             # Store token and get user info
             self._store_token(token_response)
 
             console.print(
-                "[green]✓[/green] Successfully logged in via device flow")
+                "\n[green]Key created and stored successfully.[/green]")
+            console.print("\nYou are now logged in. Happy coding!")
 
         except Exception as e:
             console.print(f"[red]Error during device flow:[/red] {e}")
             raise AuthenticationError(f"Device flow failed: {e}")
 
-    def _request_device_code(self) -> DeviceCodeResponse:
-        """Request device code from community site."""
-        # Get process and hostname info (like Go implementation)
-        ppid = os.getpid()  # Use current process ID
+    def _request_device_code(self) -> Tuple[DeviceCodeResponse, str]:
+        """Request device code from community site.
+
+        Returns:
+            Tuple of (DeviceCodeResponse, client_id)
+        """
+        # Get hostname info (like Go implementation)
         hostname = os.uname().nodename if hasattr(os, 'uname') else 'unknown'
 
+        # Generate random client ID like Go implementation
+        client_id = self._generate_client_id(40)
+
         payload = {
-            "id": ppid,
+            "client_id": client_id,
             "hostname": hostname,
-            "scopes": ["usage:write"]  # Same scopes as Go implementation
+            # Full scopes needed for CLI
+            "scopes": ["admin"]
         }
 
         try:
             response = self.client.post(
-                f"{COMMUNITY_BASE_URL}/api/auth/device/code",
+                DEVICE_CODE_URL,
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )
 
             if response.status_code == 201:
-                return DeviceCodeResponse(**response.json())
+                return DeviceCodeResponse(**response.json()), client_id
             else:
                 raise AuthenticationError(
                     f"Device code request failed: {response.status_code}")
@@ -326,11 +411,20 @@ class AuthManager:
             raise AuthenticationError(
                 f"Network error during device code request: {e}")
 
-    def _poll_for_token(self, device_response: DeviceCodeResponse) -> TokenResponse:
+    def _poll_for_token(self, device_response: DeviceCodeResponse, client_id: str, hostname: str) -> TokenResponse:
         """Poll for token using device code."""
         console.print("\n[blue]Waiting for authentication...[/blue]")
 
         start_time = time.time()
+
+        # Build query parameters like Go implementation
+        query_params = {
+            "device_code": device_response.device_code,
+            "client_id": client_id,
+            "hostname": hostname
+        }
+
+        poll_url = f"{TOKEN_POLL_URL}?{urlencode(query_params)}"
 
         with Progress(
             SpinnerColumn(),
@@ -343,21 +437,20 @@ class AuthManager:
 
             while time.time() - start_time < device_response.expires_in:
                 try:
-                    response = self.client.post(
-                        f"{COMMUNITY_BASE_URL}/api/auth/device/token",
-                        json={"device_code": device_response.device_code},
-                        headers={"Content-Type": "application/json"}
-                    )
+                    # Use GET request like Go implementation
+                    response = self.client.get(poll_url)
 
-                    if response.status_code == 200:
-                        return TokenResponse(**response.json())
-                    elif response.status_code == 202:
-                        # Still pending
+                    if response.status_code == 201:
+                        response_data = response.json()
+                        return TokenResponse(**response_data)
+                    elif response.status_code == 404:
+                        # Still pending - this is the expected status code from Go implementation
                         time.sleep(device_response.interval)
                         continue
                     else:
+                        error_data = response.json()
                         raise AuthenticationError(
-                            f"Token request failed: {response.status_code}")
+                            f"Token request failed: {error_data.get('error', 'Unknown error')}")
 
                 except httpx.RequestError as e:
                     console.print(f"[red]Network error:[/red] {e}")
@@ -368,42 +461,56 @@ class AuthManager:
 
     def _store_token(self, token_response: TokenResponse) -> None:
         """Store authentication token."""
-        # For now, we'll need to extract the API key from the token
-        # This would typically involve making another API call to get user info
-        # For the prototype, we'll use a placeholder
-        api_key = "sk-placeholder-from-device-flow"
+        # The access_token from community site is already a Deepgram API key
+        api_key = token_response.access_token
+        project_id = token_response.project_id
+
+        profile_name = self.config.profile or "default"
+        keyring_available = False
 
         try:
-            keyring.set_password("deepgram", "access_token",
-                                 token_response.access_token)
-            keyring.set_password("deepgram", "api_key", api_key)
+            keyring.set_password(
+                KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
+            if project_id:
+                keyring.set_password(
+                    KEYRING_SERVICE, f"project-id.{profile_name}", project_id)
             console.print(
-                "[green]✓[/green] Token stored securely in system keyring")
+                "[green]✓[/green] Credentials stored securely in system keyring")
+            keyring_available = True
         except Exception as e:
             console.print(
                 f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
+            console.print("Credentials will be stored in config file instead")
 
-        # Update config
-        profile_name = self.config.profile or "default"
+        # Update config - only store API key if keyring is not available
         self.config.create_profile(
             profile_name,
-            api_key=api_key
+            api_key=api_key if not keyring_available else None,
+            project_id=project_id
         )
 
     def logout(self) -> None:
         """Logout user and clear credentials."""
+        profile_name = self.config.profile or "default"
+
         # Clear keyring
         try:
-            keyring.delete_password("deepgram", "api_key")
-            keyring.delete_password("deepgram", "project_id")
-            keyring.delete_password("deepgram", "access_token")
+            keyring.delete_password(KEYRING_SERVICE, f"api-key.{profile_name}")
+            keyring.delete_password(
+                KEYRING_SERVICE, f"project-id.{profile_name}")
+            console.print("[dim]Cleared credentials from system keyring[/dim]")
         except Exception:
             pass  # Ignore errors if not stored
 
-        # Clear config
-        profile_name = self.config.profile or "default"
+        # Clear sensitive data from config but keep profile
         if profile_name in self.config.list_profiles():
-            self.config.delete_profile(profile_name)
+            profile = self.config.get_profile(profile_name)
+            self.config.create_profile(
+                profile_name,
+                api_key=None,  # Clear API key
+                project_id=profile.project_id,  # Keep project ID
+                base_url=profile.base_url  # Keep base URL
+            )
 
         console.print("[green]✓[/green] Successfully logged out")
 
@@ -413,13 +520,30 @@ class AuthManager:
 
         for profile_name in self.config.list_profiles():
             profile = self.config.get_profile(profile_name)
+
+            # Try to get API key from keyring first
+            api_key = None
+            project_id = profile.project_id
+
+            try:
+                api_key = keyring.get_password(
+                    KEYRING_SERVICE, f"api-key.{profile_name}")
+                # Also check if project_id is in keyring
+                keyring_project_id = keyring.get_password(
+                    KEYRING_SERVICE, f"project-id.{profile_name}")
+                if keyring_project_id:
+                    project_id = keyring_project_id
+            except Exception:
+                # Fall back to config
+                api_key = profile.api_key
+
             masked_key = None
-            if profile.api_key:
-                masked_key = "****" + profile.api_key[-4:]
+            if api_key:
+                masked_key = "****" + api_key[-4:]
 
             profiles[profile_name] = ProfileInfo(
                 api_key=masked_key,
-                project_id=profile.project_id,
+                project_id=project_id,
                 base_url=profile.base_url,
             )
 

@@ -4,7 +4,7 @@ import os
 from typing import Optional, Dict, Any, Union
 from pathlib import Path
 
-from deepgram import Deepgram, DeepgramError
+from deepgram import DeepgramClient as DGClient, DeepgramClientOptions, DeepgramError
 from deepgram.clients.prerecorded import PrerecordedOptions
 from deepgram.clients.live import LiveOptions
 from rich.console import Console
@@ -27,16 +27,17 @@ class DeepgramClient:
         """
         self.config = config
         self.auth_manager = auth_manager
-        self._client: Optional[Deepgram] = None
+        self._client: Optional[DGClient] = None
+        self._project_id: Optional[str] = None
 
     @property
-    def client(self) -> Deepgram:
+    def client(self) -> DGClient:
         """Get authenticated Deepgram client."""
         if self._client is None:
             self._client = self._create_client()
         return self._client
 
-    def _create_client(self) -> Deepgram:
+    def _create_client(self) -> DGClient:
         """Create authenticated Deepgram client."""
         # Ensure user is authenticated and credentials are valid
         self.auth_manager.guard()
@@ -52,10 +53,18 @@ class DeepgramClient:
         current_profile = self.config.get_profile()
 
         try:
-            client = Deepgram(
-                api_key=api_key,
-                base_url=current_profile.base_url
-            )
+            # Create options if we have a custom base URL
+            options = None
+            if current_profile.base_url:
+                options = DeepgramClientOptions(
+                    url=current_profile.base_url
+                )
+
+            # Create client with API key and options
+            if options:
+                client = DGClient(api_key, options)
+            else:
+                client = DGClient(api_key)
 
             # Store project ID for later use
             self._project_id = project_id
@@ -103,8 +112,8 @@ class DeepgramClient:
                 # Create options object
                 prerecorded_options = PrerecordedOptions(**default_options)
 
-                # Make request
-                response = self.client.listen.prerecorded.v("1").transcribe_file(
+                # Make request using the new SDK API
+                response = self.client.listen.rest.v("1").transcribe_file(
                     payload,
                     prerecorded_options
                 )
@@ -146,8 +155,8 @@ class DeepgramClient:
             # Create options object
             prerecorded_options = PrerecordedOptions(**default_options)
 
-            # Make request
-            response = self.client.listen.prerecorded.v("1").transcribe_url(
+            # Make request using the new SDK API
+            response = self.client.listen.rest.v("1").transcribe_url(
                 payload,
                 prerecorded_options
             )
@@ -182,6 +191,8 @@ class DeepgramClient:
             Project data
         """
         if not project_id:
+            # Ensure client is initialized which sets _project_id
+            _ = self.client
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         if not project_id:
@@ -234,6 +245,8 @@ class DeepgramClient:
             Usage data
         """
         if not project_id:
+            # Ensure client is initialized which sets _project_id
+            _ = self.client
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         if not project_id:
@@ -247,7 +260,11 @@ class DeepgramClient:
             if end_date:
                 params["end"] = end_date
 
-            response = self.client.manage.v("1").get_usage(project_id, params)
+            response = self.client.manage.v(
+                "1").get_usage_summary(project_id, params)
+            # Add project_id to response for consistency
+            if isinstance(response, dict):
+                response["project_id"] = project_id
             return response
 
         except Exception as e:
@@ -264,10 +281,13 @@ class DeepgramClient:
             Models data
         """
         if not project_id:
+            # Ensure client is initialized which sets _project_id
+            _ = self.client
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         try:
-            response = self.client.manage.v("1").get_models(project_id)
+            # The new SDK doesn't have get_models, this is likely part of get_project
+            response = self.client.manage.v("1").get_project(project_id)
             return response
 
         except Exception as e:
