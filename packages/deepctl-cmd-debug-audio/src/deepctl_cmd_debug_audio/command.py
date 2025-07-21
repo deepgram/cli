@@ -255,27 +255,27 @@ class AudioCommand(BaseCommand):
 
         # Check if ffmpeg is installed
         if not self.check_ffmpeg_installed():
-            console.print(
-                Panel(
-                    "[red]✗ FFmpeg not found![/red]\n\n"
-                    "The audio debug command requires FFmpeg to be installed on your system.\n\n"
-                    "[bold]To install FFmpeg:[/bold]\n"
-                    "• Visit: [link]https://ffmpeg.org/download.html[/link]\n"
-                    "• Or use your package manager:\n"
-                    "  - macOS: [dim]brew install ffmpeg[/dim]\n"
-                    "  - Ubuntu/Debian: [dim]sudo apt install ffmpeg[/dim]\n"
-                    "  - Windows: [dim]Download from ffmpeg.org[/dim]",
-                    title="FFmpeg Required",
-                    border_style="red"
-                )
+        console.print(
+            Panel(
+                "[red]✗ FFmpeg not found![/red]\n\n"
+                "The audio debug command requires FFmpeg to be installed on your system.\n\n"
+                "[bold]To install FFmpeg:[/bold]\n"
+                "• Visit: [link]https://ffmpeg.org/download.html[/link]\n"
+                "• Or use your package manager:\n"
+                "  - macOS: [dim]brew install ffmpeg[/dim]\n"
+                "  - Ubuntu/Debian: [dim]sudo apt install ffmpeg[/dim]\n"
+                "  - Windows: [dim]Download from ffmpeg.org[/dim]",
+                title="FFmpeg Required",
+                border_style="red"
             )
+        )
 
-            return AudioDebugResult(
-                status="error",
-                message="FFmpeg is not installed",
-                audio_file=audio_file,
-                ffmpeg_installed=False
-            )
+        return AudioDebugResult(
+            status="error",
+            message="FFmpeg is not installed",
+            audio_file=audio_file,
+            ffmpeg_installed=False
+        )
 
         # Process the audio file
         try:
@@ -316,9 +316,9 @@ class AudioCommand(BaseCommand):
             if compatibility_issues:
                 for issue in compatibility_issues:
                     console.print(f"  {issue}")
-            else:
-                console.print(
-                    "  [green]✓[/green] Audio appears to be compatible with Deepgram")
+        else:
+            console.print(
+                "  [green]✓[/green] Audio appears to be compatible with Deepgram")
 
             return AudioDebugResult(
                 status="success",
@@ -337,9 +337,9 @@ class AudioCommand(BaseCommand):
                 )
             )
 
-            return AudioDebugResult(
-                status="error",
-                message="Failed to analyze audio file",
-                audio_file=audio_file,
-                error_details=str(e)
-            )
+        return AudioDebugResult(
+            status="error",
+            message="Failed to analyze audio file",
+            audio_file=audio_file,
+            error_details=str(e)
+        )
