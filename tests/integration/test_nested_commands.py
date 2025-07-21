@@ -34,7 +34,8 @@ class TestNestedCommandsIntegration:
         with patch('deepctl_cmd_debug_audio.command.AudioCommand.handle') as mock_handle:
             mock_handle.return_value = {"status": "audio debug complete"}
 
-            result = runner.invoke(deepctl_cli, ["debug", "audio"])
+            result = runner.invoke(
+                deepctl_cli, ["debug", "audio", "--file", "test.mp3"])
 
             # Check command was executed
             assert result.exit_code == 0
@@ -152,7 +153,8 @@ class TestNestedCommandsIntegration:
 
             mock_handle.side_effect = check_context
 
-            result = runner.invoke(deepctl_cli, ["debug", "audio"])
+            result = runner.invoke(
+                deepctl_cli, ["debug", "audio", "--file", "test.mp3"])
             assert result.exit_code == 0
 
     @pytest.mark.integration
