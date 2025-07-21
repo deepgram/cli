@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deepctl Browser Debug</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+
+        .status {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid #333;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #444;
+            transition: all 0.3s ease;
+        }
+
+        .indicator.success {
+            background: #4ade80;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+        }
+
+        .indicator.error {
+            background: #f87171;
+            box-shadow: 0 0 10px rgba(248, 113, 113, 0.5);
+        }
+
+        .indicator.warning {
+            background: #fbbf24;
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+        }
+
+        .checks {
+            display: grid;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .check-item {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .check-item:hover {
+            border-color: #555;
+            background: #222;
+        }
+
+        .check-name {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .check-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .check-status.success {
+            color: #4ade80;
+        }
+
+        .check-status.error {
+            color: #f87171;
+        }
+
+        .check-status.warning {
+            color: #fbbf24;
+        }
+
+        .progress {
+            width: 100%;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 2rem 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .log {
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            margin-bottom: 0.5rem;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #222;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 0.8rem;
+        }
+
+        .complete-message {
+            text-align: center;
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            border-radius: 12px;
+            margin-top: 2rem;
+            display: none;
+        }
+
+        .complete-message.show {
+            display: block;
+        }
+
+        .loader {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #333;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Deepctl Browser Debug</h1>
+        <p class="subtitle">Running browser capability checks for Deepgram services...</p>
+
+        <div class="status">
+            <div class="status-item">
+                <div class="indicator" id="ws-indicator"></div>
+                <span>WebSocket Connection</span>
+            </div>
+        </div>
+
+        <div class="progress">
+            <div class="progress-bar" id="progress-bar"></div>
+        </div>
+
+        <div class="checks" id="checks">
+            <!-- Capability checks will be inserted here -->
+        </div>
+
+        <h3 style="margin-bottom: 1rem;">Debug Log</h3>
+        <div class="log" id="log"></div>
+
+        <div class="complete-message" id="complete-message">
+            <h2>Debug Complete!</h2>
+            <p style="margin-top: 1rem; color: #888;">You can close this window now.</p>
+        </div>
+    </div>
+
+    <script>
+        const WS_PORT = window.location.port;
+        const WS_URL = `ws://localhost:${WS_PORT}/ws`;
+
+        let ws = null;
+        let checkResults = {};
+        let totalChecks = 0;
+        let completedChecks = 0;
+
+        // Log function
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const timestamp = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+
+            // Send to WebSocket
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: type,
+                    message: message,
+                    data: {}
+                }));
+            }
+        }
+
+        // Update progress
+        function updateProgress() {
+            const progress = (completedChecks / totalChecks) * 100;
+            document.getElementById('progress-bar').style.width = `${progress}%`;
+        }
+
+        // Connect to WebSocket
+        function connectWebSocket() {
+            log('Connecting to debug server...');
+
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                log('Connected to debug server', 'info');
+                document.getElementById('ws-indicator').className = 'indicator success';
+                startDebugChecks();
+            };
+
+            ws.onerror = (error) => {
+                log(`WebSocket error: ${error}`, 'error');
+                document.getElementById('ws-indicator').className = 'indicator error';
+            };
+
+            ws.onclose = () => {
+                log('Disconnected from debug server', 'info');
+                document.getElementById('ws-indicator').className = 'indicator error';
+            };
+        }
+
+        // Check browser capabilities
+        function startDebugChecks() {
+            log('Starting browser capability checks...');
+
+            const checks = [
+                {
+                    name: 'Web Audio API',
+                    key: 'web_audio_api',
+                    check: () => {
+                        return typeof window.AudioContext !== 'undefined' ||
+                            typeof window.webkitAudioContext !== 'undefined';
+                    }
+                },
+                {
+                    name: 'AudioContext',
+                    key: 'audio_context',
+                    check: () => {
+                        try {
+                            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                            const ctx = new AudioCtx();
+                            ctx.close();
+                            return true;
+                        } catch (e) {
+                            return false;
+                        }
+                    }
+                },
+                {
+                    name: 'AudioWorklet API',
+                    key: 'audio_worklet',
+                    check: async () => {
+                        try {
+                            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                            const ctx = new AudioCtx();
+                            const result = typeof ctx.audioWorklet !== 'undefined';
+                            ctx.close();
+                            return result;
+                        } catch (e) {
+                            return false;
+                        }
+                    }
+                },
+                {
+                    name: 'WebSocket API',
+                    key: 'websocket_api',
+                    check: () => typeof WebSocket !== 'undefined'
+                },
+                {
+                    name: 'Fetch API',
+                    key: 'fetch_api',
+                    check: () => typeof fetch !== 'undefined'
+                },
+                {
+                    name: 'ES6+ Features',
+                    key: 'es6_features',
+                    check: () => {
+                        try {
+                            // Test various ES6+ features
+                            eval('const a = 1; let b = 2; ');
+                            eval('const fn = async () => {}; ');
+                            eval('const arr = [1,2,3]; const [...rest] = arr; ');
+                            eval('class Test {}');
+                            return true;
+                        } catch (e) {
+                            return false;
+                        }
+                    }
+                },
+                {
+                    name: 'DOM APIs',
+                    key: 'dom_apis',
+                    check: () => {
+                        return typeof document.createElement !== 'undefined' &&
+                            typeof window.location !== 'undefined' &&
+                            typeof document.head !== 'undefined';
+                    }
+                },
+                {
+                    name: 'Console API',
+                    key: 'console_api',
+                    check: () => {
+                        return typeof console !== 'undefined' &&
+                            typeof console.log === 'function' &&
+                            typeof console.error === 'function';
+                    }
+                },
+                {
+                    name: 'Timer APIs',
+                    key: 'timer_apis',
+                    check: () => {
+                        return typeof setTimeout === 'function' &&
+                            typeof clearTimeout === 'function' &&
+                            typeof setInterval === 'function';
+                    }
+                },
+                {
+                    name: 'Secure Context (HTTPS/localhost)',
+                    key: 'secure_context',
+                    check: () => window.isSecureContext === true
+                }
+            ];
+
+            totalChecks = checks.length;
+            const checksContainer = document.getElementById('checks');
+
+            // Create UI for each check
+            checks.forEach(check => {
+                const checkEl = document.createElement('div');
+                checkEl.className = 'check-item';
+                checkEl.id = `check-${check.key}`;
+                checkEl.innerHTML = `
+                    <div class="check-name">
+                        <div class="loader" id="loader-${check.key}"></div>
+                        ${check.name}
+                    </div>
+                    <div class="check-status" id="status-${check.key}">
+                        Checking...
+                    </div>
+                `;
+                checksContainer.appendChild(checkEl);
+            });
+
+            // Run checks
+            checks.forEach(async (check, index) => {
+                setTimeout(async () => {
+                    try {
+                        const result = await check.check();
+                        const loaderEl = document.getElementById(`loader-${check.key}`);
+                        const statusEl = document.getElementById(`status-${check.key}`);
+
+                        checkResults[check.key] = {
+                            name: check.name,
+                            supported: result,
+                            version: null,
+                            details: result ? 'Supported' : 'Not supported',
+                            required: true
+                        };
+
+                        if (result) {
+                            loaderEl.className = 'indicator success';
+                            statusEl.className = 'check-status success';
+                            statusEl.textContent = '✓ Supported';
+                            log(`${check.name}: Supported`, 'info');
+                        } else {
+                            loaderEl.className = 'indicator error';
+                            statusEl.className = 'check-status error';
+                            statusEl.textContent = '✗ Not Supported';
+                            log(`${check.name}: Not supported`, 'error');
+                        }
+
+                        completedChecks++;
+                        updateProgress();
+
+                        // Send result to server
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'capability_check',
+                                data: {
+                                    capability: check.key,
+                                    result: checkResults[check.key]
+                                }
+                            }));
+                        }
+
+                        // Check if all tests are complete
+                        if (completedChecks === totalChecks) {
+                            completeDebug();
+                        }
+                    } catch (error) {
+                        log(`Error checking ${check.name}: ${error.message}`, 'error');
+                        completedChecks++;
+                        updateProgress();
+                    }
+                }, index * 200); // Stagger checks for visual effect
+            });
+        }
+
+        // Complete debug session
+        function completeDebug() {
+            log('All capability checks complete!', 'info');
+
+            const overallCompatible = Object.values(checkResults).every(r => r.supported);
+
+            // Send final results
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'complete',
+                    data: {
+                        capabilities: {
+                            ...checkResults,
+                            user_agent: navigator.userAgent,
+                            overall_compatible: overallCompatible
+                        }
+                    }
+                }));
+
+                // Close WebSocket after a short delay
+                setTimeout(() => {
+                    ws.close();
+                }, 1000);
+            }
+
+            // Show completion message
+            document.getElementById('complete-message').className = 'complete-message show';
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+        });
+    </script>
+</body>
+
+</html>
