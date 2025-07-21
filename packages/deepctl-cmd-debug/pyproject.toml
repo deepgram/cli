@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepctl-cmd-debug"
+version = "0.1.0"
+description = "Debug command group for deepctl"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Deepgram", email = "support@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "support@deepgram.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["deepgram", "cli", "debug", "diagnostics"]
+requires-python = ">=3.8.1"
+dependencies = [
+    "deepctl-core",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+# Internal commands not meant to be called directly
+
+[project.entry-points."deepctl.commands"]
+debug = "deepctl_cmd_debug.command:DebugCommand"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepctl_cmd_debug*"]

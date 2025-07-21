@@ -1,7 +1,7 @@
 """Main entry point for deepctl."""
 
 import sys
-from typing import Optional
+from typing import Optional, List
 
 import click
 from rich.console import Console
@@ -12,6 +12,79 @@ from deepctl_core import Config, setup_output
 # Install rich traceback for better error messages
 install(show_locals=True)
 console = Console()
+
+
+def preprocess_hyphenated_commands(args: List[str]) -> List[str]:
+    """Convert hyphenated commands to nested commands.
+
+    This function looks for commands in the format 'group-subcommand' and converts
+    them to 'group subcommand' to support both syntaxes.
+
+    Args:
+        args: Command line arguments
+
+    Returns:
+        Modified arguments with hyphenated commands converted to nested format
+    """
+    if not args:
+        return args
+
+    # Get all registered commands to know which are groups
+    from importlib import metadata
+
+    group_commands = set()
+
+    # Discover group commands from entry points
+    try:
+        entry_points = metadata.entry_points()
+        for entry_point in entry_points.select(group="deepctl.commands"):
+            # We'll need to check if it's a group, but for now we'll use a heuristic
+            # that if there are subcommands registered for it, it's a group
+            subcommand_group = f"deepctl.subcommands.{entry_point.name}"
+            try:
+                subcommand_eps = list(
+                    entry_points.select(group=subcommand_group))
+                if subcommand_eps:
+                    group_commands.add(entry_point.name)
+            except:
+                pass
+    except:
+        pass
+
+    # Process arguments
+    new_args = []
+    i = 0
+
+    while i < len(args):
+        arg = args[i]
+
+        # Skip if it's an option (starts with -)
+        if arg.startswith('-'):
+            new_args.append(arg)
+            i += 1
+            # If it's an option with a value, include the next arg too
+            if i < len(args) and not args[i].startswith('-'):
+                new_args.append(args[i])
+                i += 1
+            continue
+
+        # Check if this could be a hyphenated command
+        if '-' in arg and not arg.startswith('-'):
+            parts = arg.split('-', 1)
+            if len(parts) == 2:
+                group_name, subcommand = parts
+
+                # If the first part is a known group command, convert it
+                if group_name in group_commands:
+                    new_args.extend([group_name, subcommand])
+                    i += 1
+                    continue
+
+        # Otherwise, keep the argument as-is
+        new_args.append(arg)
+        i += 1
+
+    return new_args
 
 
 # Create CLI group
@@ -72,52 +145,11 @@ def cli(
 # Load commands from entry points
 def load_commands():
     """Load commands from package entry points."""
-    # Discover and register commands dynamically
-    from importlib import metadata
+    # Use the plugin manager to load all commands
+    from deepctl_core import PluginManager
 
-    entry_points = metadata.entry_points()
-    for entry_point in entry_points.select(group="deepctl.commands"):
-        try:
-            command_class = entry_point.load()
-            command_instance = command_class()
-
-            # Create a closure that properly captures the command instance
-            def create_command(cmd_instance):
-                @cli.command(name=cmd_instance.name, help=cmd_instance.help)
-                @click.pass_context
-                def cmd(ctx, **kwargs):
-                    # Use execute() instead of handle() to get proper output formatting
-                    return cmd_instance.execute(ctx, **kwargs)
-
-                # Add arguments to the command
-                if hasattr(cmd_instance, 'get_arguments'):
-                    for arg in reversed(cmd_instance.get_arguments()):
-                        if arg.get('is_option', False):
-                            cmd = click.option(
-                                *arg.get('names', []),
-                                default=arg.get('default'),
-                                help=arg.get('help', ''),
-                                type=arg.get('type', str),
-                                required=arg.get('required', False),
-                                is_flag=arg.get('is_flag', False),
-                                multiple=arg.get('multiple', False)
-                            )(cmd)
-                        else:
-                            cmd = click.argument(
-                                arg.get('name', ''),
-                                type=arg.get('type', str),
-                                required=arg.get('required', True),
-                                nargs=arg.get('nargs', 1)
-                            )(cmd)
-
-                return cmd
-
-            # Create the command with proper closure
-            create_command(command_instance)
-
-        except Exception as e:
-            console.print(
-                f"[red]Error loading command {entry_point.name}:[/red] {e}")
+    plugin_manager = PluginManager()
+    plugin_manager.load_plugins(cli)
 
 
 # Load commands when module is imported
@@ -127,7 +159,12 @@ load_commands()
 def main() -> None:
     """Main entry point for the CLI."""
     try:
-        cli()
+        # Preprocess arguments to handle hyphenated commands
+        args = sys.argv[1:]  # Skip the program name
+        processed_args = preprocess_hyphenated_commands(args)
+
+        # Call CLI with processed arguments
+        cli(args=processed_args, standalone_mode=True)
     except KeyboardInterrupt:
         console.print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(1)
