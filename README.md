@@ -78,7 +78,7 @@ This CLI is built with Python and uses a modular plugin architecture. **Cross-pl
 
 ### Requirements
 
-- Python 3.8.1+
+- Python 3.10+
 - `uv`
 - Works on all major platforms:
   - Linux (x86_64, arm64)

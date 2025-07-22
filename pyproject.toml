@@ -8,15 +8,12 @@ version = "0.1.0"
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Deepgram", email = "support@deepgram.com" }]
-maintainers = [{ name = "Deepgram", email = "support@deepgram.com" }]
+authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,20 +29,21 @@ keywords = [
     "audio",
     "cli",
 ]
-requires-python = ">=3.8.1"
+requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
     "deepgram-sdk>=3.0.0",
-    "deepctl-core",              # Core components moved to separate package
-    "deepctl-cmd-login",         # Login command package
-    "deepctl-cmd-projects",      # Projects command package
-    "deepctl-cmd-transcribe",    # Transcribe command package
-    "deepctl-cmd-usage",         # Usage command package
-    "deepctl-cmd-debug",         # Debug command group package
-    "deepctl-cmd-debug-browser", # Browser debug subcommand
-    "deepctl-cmd-debug-network", # Network debug subcommand
-    "deepctl-cmd-debug-audio",   # Audio debug subcommand
-    "deepctl-shared-utils",      # Shared utilities
+    "deepctl-core>=0.1.0",              # Core components moved to separate package
+    "deepctl-cmd-login>=0.1.0",         # Login command package
+    "deepctl-cmd-projects>=0.1.0",      # Projects command package
+    "deepctl-cmd-transcribe>=0.1.0",    # Transcribe command package
+    "deepctl-cmd-usage>=0.1.0",         # Usage command package
+    "deepctl-cmd-mcp>=0.1.0",           # MCP server command package
+    "deepctl-cmd-debug>=0.1.0",         # Debug command group package
+    "deepctl-cmd-debug-browser>=0.1.0", # Browser debug subcommand
+    "deepctl-cmd-debug-network>=0.1.0", # Network debug subcommand
+    "deepctl-cmd-debug-audio>=0.1.0",   # Audio debug subcommand
+    "deepctl-shared-utils>=0.1.0",      # Shared utilities
     "pydantic>=2.0.0",
     "rich>=13.0.0",
     "httpx>=0.24.0",
@@ -68,7 +66,7 @@ dev = [
     "pre-commit>=3.0.0",
     "twine>=4.0.0",
     "build>=0.10.0",
-
+    "tox>=4.0.0",
 ]
 test = [
     "pytest>=7.0.0",
@@ -105,12 +103,12 @@ where = ["src"]
 include = ["deepctl*"]
 
 [tool.black]
-line-length = 88
-target-version = ['py38']
+line-length = 79
+target-version = ['py310']
 include = '\.pyi?$'
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -125,25 +123,160 @@ warn_unreachable = true
 strict = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "packages/*/tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=deepctl --cov-report=term-missing --cov-report=html"
-asyncio_mode = "auto"
+# pythonpath is the correct option name (not python_path)
+pythonpath = ["."]
+# Add package directories to sys.path
+addopts = "--strict-markers --import-mode=importlib"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+    "requires_auth: Tests that require authentication",
+    "requires_network: Tests that require network access",
+    "benchmark: Benchmark tests",
+]
 
-[tool.coverage.run]
-source = ["src/deepctl"]
-omit = ["*/tests/*", "*/test_*"]
+[tool.tox]
+requires = ["tox>=4.19"]
+env_list = ["py310", "py311", "py312", "lint"]
+skip_missing_interpreters = true
 
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
+[tool.tox.env_run_base]
+package = "skip"
+deps = [
+    "uv",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+]
+set_env = { PYTHONDONTWRITEBYTECODE = "1", PYTHONPATH = "{tox_root}" }
+allowlist_externals = ["uv"]
+commands_pre = [
+    [
+        "uv",
+        "pip",
+        "install",
+        "-e",
+        ".",
+        "-e",
+        "packages/deepctl-core",
+        "-e",
+        "packages/deepctl-shared-utils",
+        "-e",
+        "packages/deepctl-cmd-login",
+        "-e",
+        "packages/deepctl-cmd-projects",
+        "-e",
+        "packages/deepctl-cmd-transcribe",
+        "-e",
+        "packages/deepctl-cmd-usage",
+        "-e",
+        "packages/deepctl-cmd-debug",
+        "-e",
+        "packages/deepctl-cmd-debug-audio",
+        "-e",
+        "packages/deepctl-cmd-debug-browser",
+        "-e",
+        "packages/deepctl-cmd-debug-network",
+        "-e",
+        "packages/deepctl-cmd-mcp",
+    ],
+]
+change_dir = "{tox_root}"
+commands = [
+    [
+        "pytest",
+        "tests",
+        "packages/deepctl-core/tests",
+        "packages/deepctl-shared-utils/tests",
+        "packages/deepctl-cmd-login/tests",
+        "packages/deepctl-cmd-projects/tests",
+        "packages/deepctl-cmd-transcribe/tests",
+        "packages/deepctl-cmd-usage/tests",
+        "packages/deepctl-cmd-debug/tests",
+        "packages/deepctl-cmd-debug-audio/tests",
+        "packages/deepctl-cmd-debug-browser/tests",
+        "packages/deepctl-cmd-debug-network/tests",
+        "packages/deepctl-cmd-mcp/tests",
+        "--cov=deepctl",
+        "--cov=deepctl_core",
+        "--cov=deepctl_cmd_login",
+        "--cov=deepctl_cmd_projects",
+        "--cov=deepctl_cmd_transcribe",
+        "--cov=deepctl_cmd_usage",
+        "--cov=deepctl_shared_utils",
+        "--cov=deepctl_cmd_debug",
+        "--cov=deepctl_cmd_debug_audio",
+        "--cov=deepctl_cmd_debug_browser",
+        "--cov=deepctl_cmd_debug_network",
+        "--cov=deepctl_cmd_mcp",
+        "--cov-report=term-missing",
+        "--cov-report=html",
+        "-v",
+    ],
+]
+
+# py310, py311, py312 environments will inherit from env_run_base
+# No need to specify base_python - tox will infer it from the environment name
+
+[tool.tox.env.lint]
+# base_python will default to python3.11 as per the env name
+deps = ["uv", "mypy>=1.0.0", "flake8>=6.0.0", "black>=23.0.0"]
+allowlist_externals = ["uv"]
+commands_pre = [
+    [
+        "uv",
+        "pip",
+        "install",
+        "-e",
+        ".",
+        "-e",
+        "packages/deepctl-core",
+        "-e",
+        "packages/deepctl-shared-utils",
+    ],
+]
+commands = [
+    [
+        "black",
+        "--check",
+        "src/deepctl",
+        "packages/deepctl-core/src",
+        "packages/deepctl-shared-utils/src",
+        "packages/deepctl-cmd-login/src",
+        "packages/deepctl-cmd-projects/src",
+        "packages/deepctl-cmd-transcribe/src",
+        "packages/deepctl-cmd-usage/src",
+        "packages/deepctl-cmd-debug/src",
+        "packages/deepctl-cmd-debug-audio/src",
+        "packages/deepctl-cmd-debug-browser/src",
+        "packages/deepctl-cmd-debug-network/src",
+        "packages/deepctl-cmd-mcp/src",
+    ],
+    [
+        "flake8",
+        "src/deepctl",
+        "packages/deepctl-core/src",
+        "packages/deepctl-shared-utils/src",
+        "packages/deepctl-cmd-login/src",
+        "packages/deepctl-cmd-projects/src",
+        "packages/deepctl-cmd-transcribe/src",
+        "packages/deepctl-cmd-usage/src",
+        "packages/deepctl-cmd-debug/src",
+        "packages/deepctl-cmd-debug-audio/src",
+        "packages/deepctl-cmd-debug-browser/src",
+        "packages/deepctl-cmd-debug-network/src",
+        "packages/deepctl-cmd-mcp/src",
+    ],
+    [
+        "mypy",
+        "src/deepctl",
+    ],
 ]
 
 [tool.uv]
@@ -151,7 +284,7 @@ exclude_lines = [
 # Uncomment and configure as needed
 
 # Set the Python version constraint
-# python = ">=3.8"
+# python = ">=3.10"
 
 # Package index configuration
 # index-url = "https://pypi.org/simple"
@@ -174,6 +307,7 @@ deepctl-cmd-login = { workspace = true }
 deepctl-cmd-projects = { workspace = true }
 deepctl-cmd-transcribe = { workspace = true }
 deepctl-cmd-usage = { workspace = true }
+deepctl-cmd-mcp = { workspace = true }
 deepctl-cmd-debug = { workspace = true }
 deepctl-cmd-debug-browser = { workspace = true }
 deepctl-cmd-debug-network = { workspace = true }

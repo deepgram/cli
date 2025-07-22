@@ -8,24 +8,21 @@ version = "0.1.0"
 description = "Transcribe command for deepctl"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Deepgram", email = "support@deepgram.com" }]
-maintainers = [{ name = "Deepgram", email = "support@deepgram.com" }]
+authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 keywords = ["deepgram", "cli", "transcribe", "speech", "audio"]
-requires-python = ">=3.8.1"
+requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core",
-    "deepctl-shared-utils",
+    "deepctl-core>=0.1.0",
+    "deepctl-shared-utils>=0.1.0",
     "click>=8.0.0",
     "rich>=13.0.0",
     "deepgram-sdk>=3.0.0",
