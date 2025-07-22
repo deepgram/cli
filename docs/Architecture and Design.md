@@ -40,11 +40,13 @@ See [Workspace and Monorepo Architecture](Workspace%20and%20Monorepo%20Architect
 
 Commands are discovered and loaded via Python entry points:
 
-1. Each command package registers via `[project.entry-points."deepctl.commands"]`
-2. Main CLI loads all registered commands at startup
-3. Commands inherit from `BaseCommand` in deepctl-core
+1. Built-in commands register via `[project.entry-points."deepctl.commands"]`
+2. External plugins register via `[project.entry-points."deepctl.plugins"]`
+3. Main CLI loads all registered commands and plugins at startup
+4. Commands inherit from `BaseCommand` in deepctl-core
 
 See [Modular Commands Architecture](Modular%20Commands%20Architecture.md) for implementation details.
+See [Commands and Plugins Architecture](Commands%20and%20Plugins%20Architecture.md) for the distinction between built-in and external functionality.
 
 ## Authentication & Security
 
