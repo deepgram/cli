@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepctl-cmd-mcp"
+version = "0.1.0"
+description = "MCP server command for deepctl to interact with Deepgram's Gnosis server"
+readme = "README.md"
+authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "deepctl-core>=0.1.0",
+    "mcp>=1.0.0",
+    "rich>=13.9.4",
+    "click>=8.1.7",
+    "pydantic>=2.10.1",
+    "httpx>=0.28.1",
+]
+
+[project.entry-points."deepctl.commands"]
+mcp = "deepctl_cmd_mcp.command:McpCommand"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "mypy>=1.13.0",
+    "ruff>=0.8.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepctl_cmd_mcp*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "B", "Q"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
