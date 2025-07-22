@@ -25,7 +25,7 @@ keywords = ["deepgram", "cli", "plugin", "example"]
 requires-python = ">=3.8.1"
 dependencies = ["deepctl-core", "click>=8.0.0", "rich>=13.0.0"]
 
-[project.entry-points."deepctl.commands"]
+[project.entry-points."deepctl.plugins"]
 example = "deepctl_plugin_example.command:ExampleCommand"
 
 [tool.setuptools]
