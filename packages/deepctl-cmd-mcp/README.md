@@ -1,9 +1,9 @@
 # deepctl-cmd-mcp
 
-MCP (Model Context Protocol) server command the Deepgram CLI (deepctl). This package provides two main functionalities:
+This package provides two ways to interact with Deepgram's AI assistant:
 
-1. **MCP Server**: Run an MCP server that exposes Deepgram's Gnosis AI assistant tools
-2. **Gnosis Client**: Standalone Python client for interacting with Deepgram's Gnosis API
+1. **MCP Server**: Run an MCP server that exposes Deepgram's AI assistant tools
+2. **Python Client**: Standalone Python client for interacting with Deepgram's AI API
 
 ## Installation
 

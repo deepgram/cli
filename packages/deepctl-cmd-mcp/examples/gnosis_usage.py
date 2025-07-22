@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Example usage of the GnosisClient for programmatic access to Deepgram's Gnosis API."""
+"""Example usage of the GnosisClient for programmatic access to Deepgram's AI API."""
 
 import asyncio
 import os
@@ -8,15 +8,14 @@ from deepctl_cmd_mcp import GnosisClient
 
 async def basic_usage():
     """Demonstrate basic usage of the GnosisClient."""
-    print("=== Basic Usage Example ===\n")
+    print("\n=== Basic Usage ===")
 
-    # Initialize client (will use DEEPGRAM_API_KEY env var if not provided)
+    # Initialize client (uses DEEPGRAM_API_KEY env var by default)
     client = GnosisClient()
 
     # Ask a simple question
-    response = await client.ask_question("What is Deepgram's Nova model?")
-    print("Q: What is Deepgram's Nova model?")
-    print(f"A: {response}\n")
+    response = client.ask_question("What is Deepgram?")
+    print(f"Response: {response}")
 
 
 async def custom_system_prompt():
@@ -135,8 +134,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    print("Deepgram Gnosis Client Examples")
-    print("================================\n")
+    print("Deepgram AI Assistant Client Examples")
+    print("=" * 40)
     print("Make sure DEEPGRAM_API_KEY is set in your environment.\n")
 
     asyncio.run(main())

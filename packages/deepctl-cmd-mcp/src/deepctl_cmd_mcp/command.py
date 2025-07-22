@@ -15,11 +15,11 @@ console = Console()
 
 
 class McpCommand(BaseCommand):
-    """MCP server command for interacting with Deepgram's Gnosis server."""
+    """MCP server command for interacting with Deepgram's AI assistant."""
 
     name = "mcp"
-    help = "Run an MCP server that connects to Deepgram's Gnosis AI service"
-    short_help = "Run MCP server for Gnosis"
+    help = "Run an MCP server that connects to Deepgram's AI assistant service"
+    short_help = "Run MCP server for Deepgram AI"
 
     # MCP doesn't require existing auth to start, but can use it
     requires_auth = False
@@ -59,7 +59,7 @@ class McpCommand(BaseCommand):
             {
                 "names": ["--api-key"],
                 "help": (
-                    "Override API key for Gnosis server (falls back to "
+                    "Override API key for Deepgram AI service (falls back to "
                     "profile or DEEPGRAM_API_KEY env var)"
                 ),
                 "type": str,
@@ -68,7 +68,7 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--gnosis-url"],
-                "help": "Base URL for Gnosis server",
+                "help": "Base URL for Deepgram AI service",
                 "type": str,
                 "default": "https://gnosis.deepgram.com",
                 "required": False,
@@ -169,9 +169,9 @@ class McpCommand(BaseCommand):
 
 
 def create_mcp_server() -> FastMCP:
-    """Create the MCP server with Deepgram Gnosis tools."""
+    """Create the MCP server with Deepgram AI assistant tools."""
     # Create FastMCP instance
-    mcp = FastMCP("Deepgram Gnosis")
+    mcp = FastMCP("Deepgram AI Assistant")
 
     # Get configuration from environment
     gnosis_api_key = os.getenv("DEEPGRAM_API_KEY")
@@ -223,7 +223,7 @@ def create_mcp_server() -> FastMCP:
         """
         if not gnosis_client:
             return (
-                "Error: Gnosis API key not configured. Please set "
+                "Error: Deepgram API key not configured. Please set "
                 "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
                 "credential."
             )
@@ -266,7 +266,7 @@ def create_mcp_server() -> FastMCP:
         """
         if not gnosis_client:
             return (
-                "Error: Gnosis API key not configured. Please set "
+                "Error: Deepgram API key not configured. Please set "
                 "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
                 "credential."
             )
@@ -312,7 +312,7 @@ def create_mcp_server() -> FastMCP:
         """
         if not gnosis_client:
             return (
-                "Error: Gnosis API key not configured. Please set "
+                "Error: Deepgram API key not configured. Please set "
                 "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
                 "credential."
             )
@@ -356,7 +356,7 @@ def create_mcp_server() -> FastMCP:
         """
         if not gnosis_client:
             return (
-                "Error: Gnosis API key not configured. Please set "
+                "Error: Deepgram API key not configured. Please set "
                 "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
                 "credential."
             )

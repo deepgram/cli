@@ -129,24 +129,26 @@ class GnosisClient:
 
                 gnosis_response = GnosisResponse(**response.json())
                 if gnosis_response.choices and gnosis_response.choices[0].get(
-                    "message"
-                ):
+                    "message", {}
+                ).get("content"):
                     return gnosis_response.choices[0]["message"]["content"]
-                else:
-                    return "No response from Gnosis"
 
+                return "No response from Deepgram AI"
             except httpx.HTTPStatusError as e:
-                error_msg = (
-                    f"HTTP error: {e.response.status_code} - {e.response.text}"
-                )
                 if self.debug:
-                    print(f"[DEBUG] {error_msg}", file=sys.stderr)
-                raise
+                    print(f"[DEBUG] HTTP Error: {e}", file=sys.stderr)
+                    print(
+                        f"[DEBUG] Response: {e.response.text}", file=sys.stderr
+                    )
+                return f"HTTP Error {e.response.status_code}: {e.response.text}"
             except Exception as e:
-                error_msg = f"Error calling Gnosis: {str(e)}"
+                error_msg = f"Error calling Deepgram AI: {str(e)}"
                 if self.debug:
+                    import traceback
+
                     print(f"[DEBUG] {error_msg}", file=sys.stderr)
-                raise
+                    traceback.print_exc()
+                return error_msg
 
     async def ask_question(
         self, question: str, system_prompt: Optional[str] = None
@@ -193,8 +195,10 @@ async def main():
     """Main function for standalone CLI usage."""
     import argparse
 
+    # Create parser
     parser = argparse.ArgumentParser(
-        description="Interact with Deepgram's Gnosis API",
+        prog="deepctl_cmd_mcp.gnosis",
+        description="Interact with Deepgram's AI assistant API",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -203,34 +207,37 @@ Examples:
 
   # Ask with a custom system prompt
   python -m deepctl_cmd_mcp.gnosis "Explain streaming" \\
-        --system "You are a technical expert"
+    --system-prompt "You are a technical expert"
 
   # Interactive chat mode
   python -m deepctl_cmd_mcp.gnosis --chat
 
-  # Use a specific API key
+  # JSON output for integration
   python -m deepctl_cmd_mcp.gnosis "What models are available?" \\
-        --api-key YOUR_KEY
-  # Enable debug output
+    --json-output
+
+  # Debug mode to see API calls
   python -m deepctl_cmd_mcp.gnosis "Test question" --debug
 """,
     )
+
     parser.add_argument(
         "question",
         nargs="?",
-        help="Question to ask Gnosis (omit for interactive chat mode)",
+        help="Question to ask Deepgram AI (omit for interactive chat mode)",
+    )
+    parser.add_argument(
+        "--url",
+        type=str,
+        default="https://gnosis.deepgram.com",
+        help="Base URL for Deepgram AI API",
     )
     parser.add_argument(
         "--api-key",
         help="Deepgram API key (defaults to DEEPGRAM_API_KEY env var)",
     )
     parser.add_argument(
-        "--base-url",
-        default="https://gnosis.deepgram.com",
-        help="Base URL for Gnosis API",
-    )
-    parser.add_argument(
-        "--system",
+        "--system-prompt",
         help="System prompt to set context",
     )
     parser.add_argument(
@@ -260,7 +267,7 @@ Examples:
         help="Enable debug output",
     )
     parser.add_argument(
-        "--json",
+        "--json-output",
         action="store_true",
         help="Output raw JSON response",
     )
@@ -275,7 +282,7 @@ Examples:
     try:
         client = GnosisClient(
             api_key=args.api_key,
-            base_url=args.base_url,
+            base_url=args.url,
             debug=args.debug,
         )
     except ValueError as e:
@@ -286,14 +293,14 @@ Examples:
         if args.chat:
             # Interactive chat mode
             print(
-                "Gnosis Chat (type 'exit' or 'quit' to end, 'clear' to reset)"
+                "Deepgram AI Chat (type 'exit' or 'quit' to end, 'clear' to reset)"
             )
-            print("-" * 50)
+            print("-" * 60)
 
-            messages = []
-            if args.system:
-                print(f"System: {args.system}")
-                print("-" * 50)
+            history = []
+            if args.system_prompt:
+                print(f"System: {args.system_prompt}")
+                print("-" * 60)
 
             while True:
                 try:
@@ -303,42 +310,43 @@ Examples:
                     break
 
                 if user_input.lower() in ["exit", "quit"]:
-                    print("Goodbye!")
+                    print("\nGoodbye!")
                     break
                 elif user_input.lower() == "clear":
-                    messages = []
-                    print("Chat history cleared.")
+                    history = []
+                    print("\nChat history cleared.")
                     continue
                 elif not user_input:
                     continue
 
-                messages.append({"role": "user", "content": user_input})
+                # Add to history
+                history.append({"role": "user", "content": user_input})
 
-                try:
-                    response = await client.chat(
-                        messages,
-                        system_prompt=args.system,
-                    )
-                    print(f"\nGnosis: {response}")
-                    messages.append({"role": "assistant", "content": response})
-                except Exception as e:
-                    print(f"\nError: {e}", file=sys.stderr)
-                    # Remove the failed message
-                    messages.pop()
+                # Get response
+                response = await client.chat(
+                    history, system_prompt=args.system_prompt
+                )
+
+                # Add response to history
+                history.append({"role": "assistant", "content": response})
+
+                # Display response
+                print(f"\nDeepgram AI: {response}")
 
         else:
             # Single question mode
-            if args.json:
+            if args.json_output:
                 # For JSON output, get the raw response
                 messages = []
-                if args.system:
-                    messages.append({"role": "system", "content": args.system})
+                if args.system_prompt:
+                    messages.append(
+                        {"role": "system", "content": args.system_prompt})
                 messages.append({"role": "user", "content": args.question})
 
                 # We need to modify the client to return the full response
                 # For now, just get the text response
                 response = await client.ask_question(
-                    args.question, args.system
+                    args.question, args.system_prompt
                 )
                 result = {
                     "question": args.question,
@@ -348,7 +356,7 @@ Examples:
                 print(json.dumps(result, indent=2))
             else:
                 response = await client.ask_question(
-                    args.question, args.system
+                    args.question, args.system_prompt
                 )
                 print(response)
 

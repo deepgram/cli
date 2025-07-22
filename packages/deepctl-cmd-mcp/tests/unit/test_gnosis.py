@@ -77,8 +77,9 @@ class TestGnosisClient:
         )
 
         with patch("httpx.AsyncClient.post", return_value=mock_response):
-            with pytest.raises(httpx.HTTPStatusError):
-                await client.call([{"role": "user", "content": "Test"}])
+            result = await client.call([{"role": "user", "content": "Test"}])
+            assert "HTTP Error 401" in result
+            assert "Unauthorized" in result
 
     @pytest.mark.asyncio
     async def test_call_no_response(self):
@@ -92,7 +93,7 @@ class TestGnosisClient:
 
         with patch("httpx.AsyncClient.post", return_value=mock_response):
             result = await client.call([{"role": "user", "content": "Test"}])
-            assert result == "No response from Gnosis"
+            assert result == "No response from Deepgram AI"
 
     @pytest.mark.asyncio
     async def test_ask_question(self):

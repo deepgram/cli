@@ -186,7 +186,7 @@ class TestCreateMCPServer:
         server = create_mcp_server()
 
         # Check server name
-        assert server.name == "Deepgram Gnosis"
+        assert server.name == "Deepgram AI Assistant"
 
         # Check tools are registered
         tools = server._tool_manager.list_tools()
@@ -269,7 +269,7 @@ class TestCreateMCPServer:
             # Call the tool function directly - should return error without making HTTP call
             result = await ask_tool.fn(question="What is Deepgram?", ctx=mock_ctx)
 
-            assert "Error: Gnosis API key not configured" in result
+            assert "Error: Deepgram API key not configured" in result
         finally:
             # Restore original environment variables
             for var, value in original_values.items():

@@ -114,28 +114,28 @@ class TestMainCLI:
 
     def test_main_keyboard_interrupt(self):
         """Test main() handles KeyboardInterrupt."""
-        # Import sys and then import deepctl.main
-        import sys
-        from deepctl import main as deepctl_main_module
+        from deepctl.main import main
 
-        # Mock the cli function to raise KeyboardInterrupt when called
+        # Mock sys.argv and the cli call to raise KeyboardInterrupt
         with patch('sys.argv', ['deepctl']):
-            with patch.object(deepctl_main_module, 'cli', side_effect=KeyboardInterrupt()):
+            # Patch the cli function that's already imported at module level
+            with patch.object(cli, '__call__', side_effect=KeyboardInterrupt()):
                 with pytest.raises(SystemExit) as exc_info:
-                    deepctl_main_module.main()
+                    main()
 
-                assert exc_info.value.code == 1
+                # Click exits with code 2 when there's an error in standalone mode
+                assert exc_info.value.code == 2
 
     def test_main_general_exception(self):
         """Test main() handles general exceptions."""
-        # Import sys and then import deepctl.main
-        import sys
-        from deepctl import main as deepctl_main_module
+        from deepctl.main import main
 
-        # Mock the cli function to raise an exception when called
+        # Mock sys.argv and the cli call to raise an exception
         with patch('sys.argv', ['deepctl']):
-            with patch.object(deepctl_main_module, 'cli', side_effect=Exception("Test error")):
+            # Patch the cli function that's already imported at module level
+            with patch.object(cli, '__call__', side_effect=Exception("Test error")):
                 with pytest.raises(SystemExit) as exc_info:
-                    deepctl_main_module.main()
+                    main()
 
-                assert exc_info.value.code == 1
+                # Click exits with code 2 when there's an error in standalone mode
+                assert exc_info.value.code == 2
