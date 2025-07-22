@@ -31,6 +31,28 @@ cli/
 
 ## Running Tests
 
+### Using Tox (Recommended for CI and Multi-Version Testing)
+
+Tox provides isolated test environments and ensures consistent test execution:
+
+```bash
+# Run tests for all Python versions
+uv run tox
+
+# Run tests for specific Python version
+uv run tox -e py310
+uv run tox -e py311
+uv run tox -e py312
+
+# Run linting
+uv run tox -e lint
+
+# Run specific environments
+uv run tox -e py311,lint
+```
+
+### Using pytest directly (For Development)
+
 See [Testing With Flexible Options](Testing%20With%20Flexible%20Options.md) for detailed test runner usage.
 
 Quick commands:
@@ -61,6 +83,6 @@ uv run pytest --cov
 
 GitHub Actions runs tests on:
 
-- Multiple Python versions (3.8-3.12)
+- Multiple Python versions (3.10-3.12)
 - Multiple platforms (Linux, Windows, macOS)
 - Both x86_64 and ARM architectures
