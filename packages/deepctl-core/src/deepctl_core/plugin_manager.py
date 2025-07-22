@@ -36,17 +36,44 @@ class PluginManager:
         self._load_external_plugins(cli_group)
 
     def _load_builtin_commands(self, cli_group: click.Group) -> None:
-        """Load built-in commands from the commands package."""
-        # Built-in commands are no longer used - all commands are now
-        # loaded as external plugins via entry points
-        pass
-
-    def _load_external_plugins(self, cli_group: click.Group) -> None:
-        """Load external plugins from entry points."""
+        """Load built-in commands from the commands entry point group."""
         try:
-            # Load plugins from entry points using importlib.metadata (modern API)
+            # Load built-in commands from entry points
             entry_points = metadata.entry_points()
             for entry_point in entry_points.select(group="deepctl.commands"):
+                try:
+                    # Load the command class
+                    command_class = entry_point.load()
+
+                    # Create instance
+                    command_instance = command_class()
+
+                    # Create Click command
+                    click_command = self._create_click_command(
+                        command_instance)
+
+                    # Add to CLI group
+                    cli_group.add_command(click_command)
+
+                    # Store reference
+                    self.command_classes[entry_point.name] = command_class
+
+                    console.print(
+                        f"[dim]Loaded built-in command:[/dim] {entry_point.name}")
+
+                except Exception as e:
+                    console.print(
+                        f"[red]Error loading command {entry_point.name}:[/red] {e}")
+
+        except Exception as e:
+            console.print(f"[red]Error loading built-in commands:[/red] {e}")
+
+    def _load_external_plugins(self, cli_group: click.Group) -> None:
+        """Load external plugins from the plugins entry point group."""
+        try:
+            # Load plugins from entry points
+            entry_points = metadata.entry_points()
+            for entry_point in entry_points.select(group="deepctl.plugins"):
                 try:
                     # Load the plugin class
                     plugin_class = entry_point.load()
@@ -155,41 +182,48 @@ class PluginManager:
             group: Click Group to add subcommands to
             group_instance: Instance of BaseGroupCommand
         """
-        # Load subcommands from entry points using the pattern deepctl.subcommands.{parent}
-        subcommand_group = f"deepctl.subcommands.{group_instance.name}"
+        # Load both built-in subcommands and plugin subcommands
+        subcommand_groups = [
+            # Built-in subcommands
+            f"deepctl.subcommands.{group_instance.name}",
+            f"deepctl.subplugins.{group_instance.name}"    # Plugin subcommands
+        ]
 
-        try:
-            entry_points = metadata.entry_points()
-            for entry_point in entry_points.select(group=subcommand_group):
-                try:
-                    # Load the subcommand class
-                    subcommand_class = entry_point.load()
+        for subcommand_group in subcommand_groups:
+            try:
+                entry_points = metadata.entry_points()
+                for entry_point in entry_points.select(group=subcommand_group):
+                    try:
+                        # Load the subcommand class
+                        subcommand_class = entry_point.load()
 
-                    # Create instance
-                    subcommand_instance = subcommand_class()
+                        # Create instance
+                        subcommand_instance = subcommand_class()
 
-                    # Create Click command for the subcommand
-                    click_subcommand = self._create_click_command(
-                        subcommand_instance)
+                        # Create Click command for the subcommand
+                        click_subcommand = self._create_click_command(
+                            subcommand_instance)
 
-                    # Add to the group
-                    group.add_command(click_subcommand)
+                        # Add to the group
+                        group.add_command(click_subcommand)
 
-                    # Store reference in the group instance
-                    if hasattr(group_instance, 'add_subcommand'):
-                        group_instance.add_subcommand(
-                            entry_point.name, subcommand_class)
+                        # Store reference in the group instance
+                        if hasattr(group_instance, 'add_subcommand'):
+                            group_instance.add_subcommand(
+                                entry_point.name, subcommand_class)
 
-                    console.print(
-                        f"[dim]Loaded subcommand:[/dim] {group_instance.name} {entry_point.name}")
+                        # Determine type for logging
+                        cmd_type = "plugin subcommand" if "subplugins" in subcommand_group else "subcommand"
+                        console.print(
+                            f"[dim]Loaded {cmd_type}:[/dim] {group_instance.name} {entry_point.name}")
 
-                except Exception as e:
-                    console.print(
-                        f"[red]Error loading subcommand {entry_point.name} for {group_instance.name}:[/red] {e}")
+                    except Exception as e:
+                        console.print(
+                            f"[red]Error loading subcommand {entry_point.name} for {group_instance.name}:[/red] {e}")
 
-        except Exception as e:
-            console.print(
-                f"[red]Error loading subcommands for {group_instance.name}:[/red] {e}")
+            except Exception as e:
+                console.print(
+                    f"[red]Error loading subcommands from {subcommand_group}:[/red] {e}")
 
     def _add_command_arguments(self, cmd: click.Command, command_instance) -> click.Command:
         """Add arguments and options to a Click command.

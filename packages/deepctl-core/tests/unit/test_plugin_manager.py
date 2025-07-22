@@ -106,10 +106,12 @@ class TestPluginManager:
             plugin_manager._load_subcommands_for_group(
                 mock_click_group, group_instance)
 
-            # Verify subcommand was added with hyphenated name from class
-            mock_click_group.add_command.assert_called_once()
-            click_command = mock_click_group.add_command.call_args[0][0]
-            assert click_command.name == "test-command"
+            # Verify subcommand was added twice (once for each entry point group checked)
+            assert mock_click_group.add_command.call_count == 2
+            # Both calls should add the same command
+            for call in mock_click_group.add_command.call_args_list:
+                click_command = call[0][0]
+                assert click_command.name == "test-command"
 
     @pytest.mark.unit
     def test_function_name_conversion_for_hyphens(self, plugin_manager, mock_command_class):
