@@ -1,12 +1,19 @@
 """Unit tests for the main CLI entry point."""
 
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, MagicMock
 
 import click
 import pytest
 from click.testing import CliRunner
+import sys
 
-from deepctl.main import cli, load_commands
+
+# Mock PluginManager before importing deepctl.main to prevent plugin loading
+with patch("deepctl_core.PluginManager") as mock_pm_class:
+    mock_pm = MagicMock()
+    mock_pm_class.return_value = mock_pm
+    mock_pm.load_plugins = MagicMock()
+    from deepctl.main import cli, load_commands
 
 
 class TestMainCLI:
@@ -39,18 +46,16 @@ class TestMainCLI:
         config_file = tmp_path / "custom.yaml"
         config_file.write_text("version: 1.0\n")
 
-        with patch("deepctl.main.load_commands"):
-            result = runner.invoke(
-                cli, ["--config", str(config_file), "--help"])
-            assert result.exit_code == 0
+        result = runner.invoke(
+            cli, ["--config", str(config_file), "--help"])
+        assert result.exit_code == 0
 
     def test_cli_with_output_format(self, runner):
         """Test CLI with different output formats."""
         for format_type in ["json", "yaml", "table", "csv"]:
-            with patch("deepctl.main.load_commands"):
-                result = runner.invoke(
-                    cli, ["--output", format_type, "--help"])
-                assert result.exit_code == 0
+            result = runner.invoke(
+                cli, ["--output", format_type, "--help"])
+            assert result.exit_code == 0
 
     def test_cli_with_invalid_output_format(self, runner):
         """Test CLI with invalid output format."""
@@ -102,30 +107,35 @@ class TestMainCLI:
             assert "config" in ctx.obj
             assert ctx.obj["config"] is not None
 
-        with patch("deepctl.main.load_commands"):
-            result = runner.invoke(cli, ["test_cmd"])
-            # Command won't be found since we patched load_commands
-            # but we're just testing the context setup
-            assert result.exit_code != 0
+        result = runner.invoke(cli, ["test_cmd"])
+        # Command won't be found since we didn't actually register it properly
+        # but we're just testing the context setup
+        assert result.exit_code != 0
 
-    @patch("deepctl.main.cli")
-    def test_main_keyboard_interrupt(self, mock_cli):
+    def test_main_keyboard_interrupt(self):
         """Test main() handles KeyboardInterrupt."""
-        mock_cli.side_effect = KeyboardInterrupt()
+        # Import sys and then import deepctl.main
+        import sys
+        from deepctl import main as deepctl_main_module
 
-        with pytest.raises(SystemExit) as exc_info:
-            from deepctl.main import main
-            main()
+        # Mock the cli function to raise KeyboardInterrupt when called
+        with patch('sys.argv', ['deepctl']):
+            with patch.object(deepctl_main_module, 'cli', side_effect=KeyboardInterrupt()):
+                with pytest.raises(SystemExit) as exc_info:
+                    deepctl_main_module.main()
 
-        assert exc_info.value.code == 1
+                assert exc_info.value.code == 1
 
-    @patch("deepctl.main.cli")
-    def test_main_general_exception(self, mock_cli):
+    def test_main_general_exception(self):
         """Test main() handles general exceptions."""
-        mock_cli.side_effect = Exception("Test error")
+        # Import sys and then import deepctl.main
+        import sys
+        from deepctl import main as deepctl_main_module
 
-        with pytest.raises(SystemExit) as exc_info:
-            from deepctl.main import main
-            main()
+        # Mock the cli function to raise an exception when called
+        with patch('sys.argv', ['deepctl']):
+            with patch.object(deepctl_main_module, 'cli', side_effect=Exception("Test error")):
+                with pytest.raises(SystemExit) as exc_info:
+                    deepctl_main_module.main()
 
-        assert exc_info.value.code == 1
+                assert exc_info.value.code == 1

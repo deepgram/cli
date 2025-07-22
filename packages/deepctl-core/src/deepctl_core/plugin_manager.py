@@ -1,7 +1,5 @@
 """Plugin manager for deepctl command discovery and loading."""
 
-import importlib
-import inspect
 from pathlib import Path
 from typing import Dict, List, Type, Any
 from importlib import metadata
@@ -18,7 +16,7 @@ console = Console()
 class PluginManager:
     """Manager for loading and organizing CLI plugins/commands."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize plugin manager."""
         self.loaded_plugins: Dict[str, Any] = {}
         self.command_classes: Dict[str, Type] = {}
@@ -50,7 +48,8 @@ class PluginManager:
 
                     # Create Click command
                     click_command = self._create_click_command(
-                        command_instance)
+                        command_instance
+                    )
 
                     # Add to CLI group
                     cli_group.add_command(click_command)
@@ -59,11 +58,15 @@ class PluginManager:
                     self.command_classes[entry_point.name] = command_class
 
                     console.print(
-                        f"[dim]Loaded built-in command:[/dim] {entry_point.name}")
+                        f"[dim]Loaded built-in command:[/dim] "
+                        f"{entry_point.name}"
+                    )
 
                 except Exception as e:
                     console.print(
-                        f"[red]Error loading command {entry_point.name}:[/red] {e}")
+                        f"[red]Error loading command "
+                        f"{entry_point.name}:[/red] {e}"
+                    )
 
         except Exception as e:
             console.print(f"[red]Error loading built-in commands:[/red] {e}")
@@ -91,11 +94,15 @@ class PluginManager:
                     self.loaded_plugins[entry_point.name] = plugin_instance
 
                     console.print(
-                        f"[dim]Loaded external plugin:[/dim] {entry_point.name}")
+                        f"[dim]Loaded external plugin:[/dim] "
+                        f"{entry_point.name}"
+                    )
 
                 except Exception as e:
                     console.print(
-                        f"[red]Error loading plugin {entry_point.name}:[/red] {e}")
+                        f"[red]Error loading plugin {entry_point.name}:[/red] "
+                        f"{e}"
+                    )
 
         except Exception as e:
             console.print(f"[red]Error loading external plugins:[/red] {e}")
@@ -110,7 +117,9 @@ class PluginManager:
             Click command object
         """
         # Check if this is a group command
-        if isinstance(command_instance, BaseGroupCommand) or getattr(command_instance, 'is_group', False):
+        if isinstance(command_instance, BaseGroupCommand) or getattr(
+            command_instance, "is_group", False
+        ):
             # Create a Click Group for group commands
             return self._create_click_group(command_instance)
 
@@ -129,7 +138,7 @@ class PluginManager:
             name=command_instance.name,
             callback=command_func,
             help=command_instance.help,
-            short_help=command_instance.short_help or command_instance.help
+            short_help=command_instance.short_help or command_instance.help,
         )
 
         # Add arguments and options
@@ -137,7 +146,9 @@ class PluginManager:
 
         return cmd
 
-    def _create_click_group(self, group_instance: BaseGroupCommand) -> click.Group:
+    def _create_click_group(
+        self, group_instance: BaseGroupCommand
+    ) -> click.Group:
         """Create a Click group from a BaseGroupCommand instance.
 
         Args:
@@ -147,7 +158,7 @@ class PluginManager:
             Click group object
         """
         # Use the group's own method to create the Click group
-        if hasattr(group_instance, 'get_click_group'):
+        if hasattr(group_instance, "get_click_group"):
             group = group_instance.get_click_group()
         else:
             # Fallback for basic group creation
@@ -164,7 +175,8 @@ class PluginManager:
                 help=group_instance.help,
                 short_help=group_instance.short_help or group_instance.help,
                 invoke_without_command=getattr(
-                    group_instance, 'invoke_without_command', False)
+                    group_instance, "invoke_without_command", False
+                ),
             )
 
             # Add arguments and options to the group
@@ -175,7 +187,9 @@ class PluginManager:
 
         return group
 
-    def _load_subcommands_for_group(self, group: click.Group, group_instance: BaseGroupCommand) -> None:
+    def _load_subcommands_for_group(
+        self, group: click.Group, group_instance: BaseGroupCommand
+    ) -> None:
         """Load subcommands for a group command.
 
         Args:
@@ -186,7 +200,7 @@ class PluginManager:
         subcommand_groups = [
             # Built-in subcommands
             f"deepctl.subcommands.{group_instance.name}",
-            f"deepctl.subplugins.{group_instance.name}"    # Plugin subcommands
+            f"deepctl.subplugins.{group_instance.name}",  # Plugin subcommands
         ]
 
         for subcommand_group in subcommand_groups:
@@ -202,30 +216,45 @@ class PluginManager:
 
                         # Create Click command for the subcommand
                         click_subcommand = self._create_click_command(
-                            subcommand_instance)
+                            subcommand_instance
+                        )
 
                         # Add to the group
                         group.add_command(click_subcommand)
 
                         # Store reference in the group instance
-                        if hasattr(group_instance, 'add_subcommand'):
+                        if hasattr(group_instance, "add_subcommand"):
                             group_instance.add_subcommand(
-                                entry_point.name, subcommand_class)
+                                entry_point.name, subcommand_class
+                            )
 
                         # Determine type for logging
-                        cmd_type = "plugin subcommand" if "subplugins" in subcommand_group else "subcommand"
+                        cmd_type = (
+                            "plugin subcommand"
+                            if "subplugins" in subcommand_group
+                            else "subcommand"
+                        )
                         console.print(
-                            f"[dim]Loaded {cmd_type}:[/dim] {group_instance.name} {entry_point.name}")
+                            f"[dim]Loaded {cmd_type}:[/dim] "
+                            f"{group_instance.name} {entry_point.name}"
+                        )
 
                     except Exception as e:
                         console.print(
-                            f"[red]Error loading subcommand {entry_point.name} for {group_instance.name}:[/red] {e}")
+                            f"[red]Error loading subcommand "
+                            f"{entry_point.name} for "
+                            f"{group_instance.name}:[/red] {e}"
+                        )
 
             except Exception as e:
                 console.print(
-                    f"[red]Error loading subcommands from {subcommand_group}:[/red] {e}")
+                    f"[red]Error loading subcommands from "
+                    f"{subcommand_group}:[/red] {e}"
+                )
 
-    def _add_command_arguments(self, cmd: click.Command, command_instance) -> click.Command:
+    def _add_command_arguments(
+        self, cmd: click.Command, command_instance
+    ) -> click.Command:
         """Add arguments and options to a Click command.
 
         Args:
@@ -236,29 +265,30 @@ class PluginManager:
             Updated Click command
         """
         # Get arguments from command instance
-        if hasattr(command_instance, 'get_arguments'):
+        if hasattr(command_instance, "get_arguments"):
             arguments = command_instance.get_arguments()
 
-            # Add arguments in reverse order (Click applies decorators in reverse)
+            # Add arguments in reverse order (Click applies decorators
+            # in reverse)
             for arg in reversed(arguments):
-                if arg.get('is_option', False):
+                if arg.get("is_option", False):
                     # Add as option
                     cmd = click.option(
-                        *arg.get('names', []),
-                        default=arg.get('default'),
-                        help=arg.get('help', ''),
-                        type=arg.get('type', str),
-                        required=arg.get('required', False),
-                        is_flag=arg.get('is_flag', False),
-                        multiple=arg.get('multiple', False)
+                        *arg.get("names", []),
+                        default=arg.get("default"),
+                        help=arg.get("help", ""),
+                        type=arg.get("type", str),
+                        required=arg.get("required", False),
+                        is_flag=arg.get("is_flag", False),
+                        multiple=arg.get("multiple", False),
                     )(cmd)
                 else:
                     # Add as argument
                     cmd = click.argument(
-                        arg.get('name', ''),
-                        type=arg.get('type', str),
-                        required=arg.get('required', True),
-                        nargs=arg.get('nargs', 1)
+                        arg.get("name", ""),
+                        type=arg.get("type", str),
+                        required=arg.get("required", True),
+                        nargs=arg.get("nargs", 1),
                     )(cmd)
 
         return cmd
@@ -269,7 +299,9 @@ class PluginManager:
         Returns:
             List of command names
         """
-        return list(self.command_classes.keys()) + list(self.loaded_plugins.keys())
+        return list(self.command_classes.keys()) + list(
+            self.loaded_plugins.keys()
+        )
 
     def get_command_info(self, command_name: str) -> PluginInfo | ErrorResult:
         """Get information about a specific command.
@@ -366,6 +398,7 @@ class PluginManager:
 
         # User plugins directory
         from .config import Config
+
         config = Config()
         user_plugins = config.config_dir / "plugins"
         if user_plugins.exists():

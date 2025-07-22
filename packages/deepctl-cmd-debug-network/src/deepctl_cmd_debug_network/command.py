@@ -7,14 +7,13 @@ import subprocess
 import sys
 import time
 import warnings
-from typing import Any, List, Dict, Optional, Tuple
+from typing import Any, List, Dict
 import requests
 import urllib3
 from urllib.parse import urlparse
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from deepctl_core import BaseCommand, Config, AuthManager, DeepgramClient
@@ -26,7 +25,7 @@ from .models import (
     RevocationEndpointTest,
     PythonRequestsTest,
     CommandExecutionResult,
-    EndpointTestResult
+    EndpointTestResult,
 )
 
 console = Console()
@@ -55,47 +54,52 @@ class NetworkCommand(BaseCommand):
         return [
             {
                 "names": ["--endpoint", "-e"],
-                "help": "Specific endpoint to test (default: api.deepgram.com)",
+                "help": (
+                    "Specific endpoint to test " "(default: api.deepgram.com)"
+                ),
                 "type": str,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--verbose", "-v"],
                 "help": "Show detailed diagnostic information",
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--skip-commands"],
                 "help": "Skip system command execution (openssl, curl, etc.)",
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--timeout"],
-                "help": "Timeout in seconds for network operations (default: 10)",
+                "help": (
+                    "Timeout in seconds for network operations "
+                    "(default: 10)"
+                ),
                 "type": int,
                 "default": 10,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--simulate-blocked-crl"],
                 "help": "Simulate blocked CRL/OCSP endpoints (for testing)",
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--save-report"],
                 "help": "Save full diagnostic report to file",
                 "type": str,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--test-websocket"],
                 "help": "Also test WebSocket connectivity (wss://)",
                 "is_flag": True,
-                "is_option": True
-            }
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -103,7 +107,7 @@ class NetworkCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """Handle network debug command execution."""
         endpoint = kwargs.get("endpoint") or "api.deepgram.com"
@@ -121,10 +125,11 @@ class NetworkCommand(BaseCommand):
         console.print(
             Panel.fit(
                 "[bold cyan]🔍 Deepgram Network Diagnostics[/bold cyan]\n\n"
-                f"[dim]Testing connectivity to:[/dim] [yellow]{endpoint}[/yellow]\n"
+                f"[dim]Testing connectivity to:[/dim] "
+                f"[yellow]{endpoint}[/yellow]\n"
                 "[dim]Running comprehensive TLS/SSL analysis...[/dim]",
                 title="Network Debug",
-                border_style="cyan"
+                border_style="cyan",
             )
         )
 
@@ -136,47 +141,55 @@ class NetworkCommand(BaseCommand):
 
             # 1. Collect environment information
             task = progress.add_task(
-                "Collecting environment information...", total=None)
+                "Collecting environment information...", total=None
+            )
             self._collect_environment_info(result)
             progress.remove_task(task)
 
             # 2. DNS Resolution
             task = progress.add_task(
-                "Performing DNS resolution...", total=None)
+                "Performing DNS resolution...", total=None
+            )
             self._test_dns_resolution(endpoint, result, timeout)
             progress.remove_task(task)
 
             # 3. Basic connectivity test
             task = progress.add_task(
-                "Testing basic connectivity...", total=None)
+                "Testing basic connectivity...", total=None
+            )
             self._test_basic_connectivity(endpoint, result, timeout)
             progress.remove_task(task)
 
             # 4. TLS/SSL analysis
             if not skip_commands:
                 task = progress.add_task(
-                    "Analyzing TLS/SSL certificates...", total=None)
+                    "Analyzing TLS/SSL certificates...", total=None
+                )
                 self._analyze_tls_certificates(
-                    endpoint, result, verbose, simulate_blocked_crl)
+                    endpoint, result, verbose, simulate_blocked_crl
+                )
                 progress.remove_task(task)
 
             # 5. Python requests tests
             task = progress.add_task(
-                "Testing Python requests library...", total=None)
+                "Testing Python requests library...", total=None
+            )
             self._test_python_requests(endpoint, result, timeout)
             progress.remove_task(task)
 
             # 6. System command tests
             if not skip_commands:
                 task = progress.add_task(
-                    "Running system diagnostics...", total=None)
+                    "Running system diagnostics...", total=None
+                )
                 self._run_system_diagnostics(endpoint, result, verbose)
                 progress.remove_task(task)
 
             # 7. WebSocket test (if requested)
             if test_websocket:
                 task = progress.add_task(
-                    "Testing WebSocket connectivity...", total=None)
+                    "Testing WebSocket connectivity...", total=None
+                )
                 self._test_websocket_connectivity(endpoint, result, timeout)
                 progress.remove_task(task)
 
@@ -206,15 +219,25 @@ class NetworkCommand(BaseCommand):
                 "HTTP_PROXY": os.environ.get("HTTP_PROXY", "Not set"),
                 "HTTPS_PROXY": os.environ.get("HTTPS_PROXY", "Not set"),
                 "NO_PROXY": os.environ.get("NO_PROXY", "Not set"),
-            }
+            },
         }
 
         # Check if proxy is configured
-        if any(os.environ.get(var) for var in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"]):
+        if any(
+            os.environ.get(var)
+            for var in [
+                "http_proxy",
+                "https_proxy",
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+            ]
+        ):
             result.proxy_detected = True
             result.proxy_settings = result.environment_info["proxy_env_vars"]
 
-    def _test_dns_resolution(self, hostname: str, result: NetworkDebugResult, timeout: int) -> None:
+    def _test_dns_resolution(
+        self, hostname: str, result: NetworkDebugResult, timeout: int
+    ) -> None:
         """Test DNS resolution for the hostname."""
         dns_result = DNSResult(hostname=hostname, resolved=False)
 
@@ -234,20 +257,18 @@ class NetworkCommand(BaseCommand):
 
         result.dns_results[hostname] = dns_result
 
-    def _test_basic_connectivity(self, hostname: str, result: NetworkDebugResult, timeout: int) -> None:
+    def _test_basic_connectivity(
+        self, hostname: str, result: NetworkDebugResult, timeout: int
+    ) -> None:
         """Test basic HTTPS connectivity."""
         endpoint_test = EndpointTestResult(
-            name="HTTPS",
-            url=f"https://{hostname}",
-            reachable=False
+            name="HTTPS", url=f"https://{hostname}", reachable=False
         )
 
         try:
             start_time = time.time()
             response = requests.get(
-                f"https://{hostname}/",
-                timeout=timeout,
-                allow_redirects=False
+                f"https://{hostname}/", timeout=timeout, allow_redirects=False
             )
             endpoint_test.response_time_ms = (time.time() - start_time) * 1000
             endpoint_test.status_code = response.status_code
@@ -264,21 +285,30 @@ class NetworkCommand(BaseCommand):
 
         result.endpoint_results.append(endpoint_test)
 
-    def _analyze_tls_certificates(self, hostname: str, result: NetworkDebugResult, verbose: bool, simulate_blocked_crl: bool = False) -> None:
+    def _analyze_tls_certificates(
+        self,
+        hostname: str,
+        result: NetworkDebugResult,
+        verbose: bool,
+        simulate_blocked_crl: bool = False,
+    ) -> None:
         """Analyze TLS certificates and check revocation endpoints."""
         tls_result = TLSTestResult(
-            hostname=hostname, port=443, connected=False)
+            hostname=hostname, port=443, connected=False
+        )
 
         # Get certificate chain using openssl
         try:
             # First, get the full certificate chain
-            cmd = ["openssl", "s_client", "-connect",
-                   f"{hostname}:443", "-showcerts"]
+            cmd = [
+                "openssl",
+                "s_client",
+                "-connect",
+                f"{hostname}:443",
+                "-showcerts",
+            ]
             proc = subprocess.run(
-                cmd,
-                input=b"",
-                capture_output=True,
-                timeout=10
+                cmd, input=b"", capture_output=True, timeout=10
             )
 
             if verbose:
@@ -292,11 +322,13 @@ class NetworkCommand(BaseCommand):
 
                 # Test revocation endpoints
                 self._test_revocation_endpoints(
-                    tls_result, result, simulate_blocked_crl)
+                    tls_result, result, simulate_blocked_crl
+                )
 
             else:
                 tls_result.chain_errors.append(
-                    f"OpenSSL connection failed: {proc.stderr.decode()}")
+                    f"OpenSSL connection failed: {proc.stderr.decode()}"
+                )
                 result.network_issues_detected = True
 
         except subprocess.TimeoutExpired:
@@ -308,11 +340,15 @@ class NetworkCommand(BaseCommand):
 
         result.tls_test_results[hostname] = tls_result
 
-    def _parse_certificate_chain(self, openssl_output: str, tls_result: TLSTestResult) -> None:
+    def _parse_certificate_chain(
+        self, openssl_output: str, tls_result: TLSTestResult
+    ) -> None:
         """Parse certificate chain from OpenSSL output."""
         # Extract certificates
         cert_pattern = re.compile(
-            r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', re.DOTALL)
+            r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+            re.DOTALL,
+        )
         certificates = cert_pattern.findall(openssl_output)
 
         for i, cert_pem in enumerate(certificates):
@@ -321,19 +357,26 @@ class NetworkCommand(BaseCommand):
             try:
                 # Get certificate details
                 proc = subprocess.run(
-                    ["openssl", "x509", "-noout", "-subject", "-issuer",
-                        "-ext", "crlDistributionPoints,authorityInfoAccess"],
+                    [
+                        "openssl",
+                        "x509",
+                        "-noout",
+                        "-subject",
+                        "-issuer",
+                        "-ext",
+                        "crlDistributionPoints,authorityInfoAccess",
+                    ],
                     input=cert_pem.encode(),
                     capture_output=True,
-                    timeout=5
+                    timeout=5,
                 )
 
                 if proc.returncode == 0:
                     output = proc.stdout.decode()
 
                     # Parse subject and issuer
-                    subject_match = re.search(r'subject=(.+)', output)
-                    issuer_match = re.search(r'issuer=(.+)', output)
+                    subject_match = re.search(r"subject=(.+)", output)
+                    issuer_match = re.search(r"issuer=(.+)", output)
 
                     if subject_match:
                         cert_info.subject = subject_match.group(1).strip()
@@ -341,28 +384,36 @@ class NetworkCommand(BaseCommand):
                         cert_info.issuer = issuer_match.group(1).strip()
 
                     # Parse CRL distribution points
-                    crl_matches = re.findall(r'URI:(.+)', output)
+                    crl_matches = re.findall(r"URI:(.+)", output)
                     for url in crl_matches:
                         url = url.strip()
-                        if url.startswith('http://') and 'c.lencr.org' in url:
+                        if url.startswith("http://") and "c.lencr.org" in url:
                             cert_info.crl_distribution_points.append(url)
 
                     # Parse OCSP and CA issuer URLs
-                    ocsp_matches = re.findall(r'OCSP - URI:(.+)', output)
+                    ocsp_matches = re.findall(r"OCSP - URI:(.+)", output)
                     cert_info.ocsp_urls = [url.strip() for url in ocsp_matches]
 
                     ca_issuer_matches = re.findall(
-                        r'CA Issuers - URI:(.+)', output)
+                        r"CA Issuers - URI:(.+)", output
+                    )
                     cert_info.ca_issuer_urls = [
-                        url.strip() for url in ca_issuer_matches]
+                        url.strip() for url in ca_issuer_matches
+                    ]
 
                     tls_result.certificate_chain.append(cert_info)
 
             except Exception as e:
                 tls_result.chain_errors.append(
-                    f"Error parsing certificate {i}: {str(e)}")
+                    f"Error parsing certificate {i}: {str(e)}"
+                )
 
-    def _test_revocation_endpoints(self, tls_result: TLSTestResult, result: NetworkDebugResult, simulate_blocked_crl: bool = False) -> None:
+    def _test_revocation_endpoints(
+        self,
+        tls_result: TLSTestResult,
+        result: NetworkDebugResult,
+        simulate_blocked_crl: bool = False,
+    ) -> None:
         """Test accessibility of CRL/OCSP/CA issuer endpoints."""
         all_endpoints = []
 
@@ -387,23 +438,26 @@ class NetworkCommand(BaseCommand):
             tested_urls.add(url)
 
             endpoint_test = RevocationEndpointTest(
-                url=url,
-                endpoint_type=endpoint_type,
-                accessible=False
+                url=url, endpoint_type=endpoint_type, accessible=False
             )
 
             # Simulate blocked CRL/OCSP endpoints for testing
             if simulate_blocked_crl and endpoint_type in ["crl", "ocsp"]:
-                endpoint_test.error = "Connection timed out (simulated corporate firewall blocking)"
+                endpoint_test.error = (
+                    "Connection timed out (simulated corporate "
+                    "firewall blocking)"
+                )
                 endpoint_test.accessible = False
                 result.network_issues_detected = True
             else:
                 try:
                     start_time = time.time()
                     response = requests.head(
-                        url, timeout=5, allow_redirects=True)
+                        url, timeout=5, allow_redirects=True
+                    )
                     endpoint_test.response_time_ms = (
-                        time.time() - start_time) * 1000
+                        time.time() - start_time
+                    ) * 1000
                     endpoint_test.status_code = response.status_code
                     endpoint_test.accessible = response.status_code < 400
 
@@ -413,13 +467,13 @@ class NetworkCommand(BaseCommand):
 
             tls_result.revocation_endpoints.append(endpoint_test)
 
-    def _test_python_requests(self, hostname: str, result: NetworkDebugResult, timeout: int) -> None:
+    def _test_python_requests(
+        self, hostname: str, result: NetworkDebugResult, timeout: int
+    ) -> None:
         """Test connectivity using Python requests library."""
         # Test with SSL verification enabled
         test_with_verify = PythonRequestsTest(
-            url=f"https://{hostname}/",
-            success=False,
-            ssl_verify_enabled=True
+            url=f"https://{hostname}/", success=False, ssl_verify_enabled=True
         )
 
         try:
@@ -428,10 +482,11 @@ class NetworkCommand(BaseCommand):
                 f"https://{hostname}/",
                 timeout=timeout,
                 verify=True,
-                allow_redirects=False
+                allow_redirects=False,
             )
             test_with_verify.response_time_ms = (
-                time.time() - start_time) * 1000
+                time.time() - start_time
+            ) * 1000
             test_with_verify.status_code = response.status_code
             test_with_verify.success = True
 
@@ -445,9 +500,7 @@ class NetworkCommand(BaseCommand):
 
         # Test with SSL verification disabled (for comparison)
         test_without_verify = PythonRequestsTest(
-            url=f"https://{hostname}/",
-            success=False,
-            ssl_verify_enabled=False
+            url=f"https://{hostname}/", success=False, ssl_verify_enabled=False
         )
 
         try:
@@ -459,10 +512,11 @@ class NetworkCommand(BaseCommand):
                 f"https://{hostname}/",
                 timeout=timeout,
                 verify=False,
-                allow_redirects=False
+                allow_redirects=False,
             )
             test_without_verify.response_time_ms = (
-                time.time() - start_time) * 1000
+                time.time() - start_time
+            ) * 1000
             test_without_verify.status_code = response.status_code
             test_without_verify.success = True
 
@@ -474,23 +528,30 @@ class NetworkCommand(BaseCommand):
 
         result.python_requests_tests.append(test_without_verify)
 
-    def _run_system_diagnostics(self, hostname: str, result: NetworkDebugResult, verbose: bool) -> None:
+    def _run_system_diagnostics(
+        self, hostname: str, result: NetworkDebugResult, verbose: bool
+    ) -> None:
         """Run system diagnostic commands."""
         commands = [
             # Basic connectivity
             ["ping", "-c", "3", hostname],
-
             # Traceroute (platform-specific)
-            ["traceroute", "-m", "10",
-                hostname] if sys.platform != "win32" else ["tracert", "-h", "10", hostname],
-
+            (
+                ["traceroute", "-m", "10", hostname]
+                if sys.platform != "win32"
+                else ["tracert", "-h", "10", hostname]
+            ),
             # OpenSSL connection test
-            ["openssl", "s_client", "-connect",
-                f"{hostname}:443", "-servername", hostname],
-
+            [
+                "openssl",
+                "s_client",
+                "-connect",
+                f"{hostname}:443",
+                "-servername",
+                hostname,
+            ],
             # Curl test
             ["curl", "-I", "--connect-timeout", "10", f"https://{hostname}/"],
-
             # Curl with verbose SSL info
             ["curl", "-v", "--connect-timeout", "10", f"https://{hostname}/"],
         ]
@@ -501,9 +562,7 @@ class NetworkCommand(BaseCommand):
                 continue
 
             cmd_result = CommandExecutionResult(
-                command=" ".join(cmd),
-                success=False,
-                exit_code=-1
+                command=" ".join(cmd), success=False, exit_code=-1
             )
 
             try:
@@ -512,20 +571,14 @@ class NetworkCommand(BaseCommand):
                 # Special handling for openssl s_client (needs input)
                 if cmd[0] == "openssl" and "s_client" in cmd:
                     proc = subprocess.run(
-                        cmd,
-                        input=b"",
-                        capture_output=True,
-                        timeout=15
+                        cmd, input=b"", capture_output=True, timeout=15
                     )
                 else:
-                    proc = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        timeout=15
-                    )
+                    proc = subprocess.run(cmd, capture_output=True, timeout=15)
 
                 cmd_result.execution_time_ms = (
-                    time.time() - start_time) * 1000
+                    time.time() - start_time
+                ) * 1000
                 cmd_result.exit_code = proc.returncode
                 cmd_result.success = proc.returncode == 0
 
@@ -548,57 +601,79 @@ class NetworkCommand(BaseCommand):
         """Check if a command exists on the system."""
         try:
             subprocess.run(
-                ["which", command] if sys.platform != "win32" else [
-                    "where", command],
+                (
+                    ["which", command]
+                    if sys.platform != "win32"
+                    else ["where", command]
+                ),
                 capture_output=True,
-                check=False
+                check=False,
             )
             return True
-        except:
+        except Exception:
             return False
 
-    def _test_websocket_connectivity(self, hostname: str, result: NetworkDebugResult, timeout: int) -> None:
+    def _test_websocket_connectivity(
+        self, hostname: str, result: NetworkDebugResult, timeout: int
+    ) -> None:
         """Test WebSocket connectivity to the endpoint."""
         ws_test = EndpointTestResult(
             name="WebSocket",
             url=f"wss://{hostname}/v1/listen",
-            reachable=False
+            reachable=False,
         )
 
         # Test with curl if available
         if self._command_exists("curl"):
             cmd_result = CommandExecutionResult(
-                command=f"curl -i -N -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Key: test' -H 'Sec-WebSocket-Version: 13' https://{hostname}/v1/listen",
+                command=(
+                    f"curl -i -N -H 'Connection: Upgrade' "
+                    f"-H 'Upgrade: websocket' "
+                    f"-H 'Sec-WebSocket-Key: test' "
+                    f"-H 'Sec-WebSocket-Version: 13' "
+                    f"https://{hostname}/v1/listen"
+                ),
                 success=False,
-                exit_code=-1
+                exit_code=-1,
             )
 
             try:
                 start_time = time.time()
                 proc = subprocess.run(
                     [
-                        "curl", "-i", "-N",
-                        "-H", "Connection: Upgrade",
-                        "-H", "Upgrade: websocket",
-                        "-H", "Sec-WebSocket-Key: test",
-                        "-H", "Sec-WebSocket-Version: 13",
-                        f"https://{hostname}/v1/listen"
+                        "curl",
+                        "-i",
+                        "-N",
+                        "-H",
+                        "Connection: Upgrade",
+                        "-H",
+                        "Upgrade: websocket",
+                        "-H",
+                        "Sec-WebSocket-Key: test",
+                        "-H",
+                        "Sec-WebSocket-Version: 13",
+                        f"https://{hostname}/v1/listen",
                     ],
                     capture_output=True,
-                    timeout=timeout
+                    timeout=timeout,
                 )
 
                 cmd_result.execution_time_ms = (
-                    time.time() - start_time) * 1000
+                    time.time() - start_time
+                ) * 1000
                 cmd_result.exit_code = proc.returncode
                 cmd_result.success = proc.returncode == 0
                 cmd_result.stdout = proc.stdout.decode()[:1000]
                 cmd_result.stderr = proc.stderr.decode()[:1000]
 
                 # Check if we got a valid WebSocket upgrade response
-                if "HTTP" in cmd_result.stdout and ("101" in cmd_result.stdout or "401" in cmd_result.stdout):
+                if "HTTP" in cmd_result.stdout and (
+                    "101" in cmd_result.stdout or "401" in cmd_result.stdout
+                ):
                     ws_test.reachable = True
-                    ws_test.status_code = 101 if "101" in cmd_result.stdout else 401
+                    ws_test.status_code = (
+                        101 if "101" in cmd_result.stdout else 401
+                    )
 
             except Exception as e:
                 cmd_result.stderr = str(e)
@@ -607,7 +682,9 @@ class NetworkCommand(BaseCommand):
 
         result.endpoint_results.append(ws_test)
 
-    def _save_report(self, result: NetworkDebugResult, filename: str, verbose: bool) -> None:
+    def _save_report(
+        self, result: NetworkDebugResult, filename: str, verbose: bool
+    ) -> None:
         """Save diagnostic report to file."""
         import json
         from datetime import datetime
@@ -617,7 +694,7 @@ class NetworkCommand(BaseCommand):
             report = {
                 "timestamp": datetime.now().isoformat(),
                 "result": result.model_dump(),
-                "verbose": verbose
+                "verbose": verbose,
             }
 
             # Save to file
@@ -629,7 +706,9 @@ class NetworkCommand(BaseCommand):
         except Exception as e:
             console.print(f"\n[red]❌ Failed to save report: {str(e)}[/red]")
 
-    def _display_results(self, result: NetworkDebugResult, verbose: bool) -> None:
+    def _display_results(
+        self, result: NetworkDebugResult, verbose: bool
+    ) -> None:
         """Display diagnostic results."""
         console.print("\n[bold cyan]📊 Diagnostic Results[/bold cyan]\n")
 
@@ -639,10 +718,14 @@ class NetworkCommand(BaseCommand):
             for hostname, dns_result in result.dns_results.items():
                 if dns_result.resolved:
                     console.print(
-                        f"  ✅ {hostname} → {', '.join(dns_result.ip_addresses)}")
+                        f"  ✅ {hostname} → "
+                        f"{', '.join(dns_result.ip_addresses)}"
+                    )
                     if dns_result.resolution_time_ms:
                         console.print(
-                            f"     [dim]Resolution time: {dns_result.resolution_time_ms:.2f}ms[/dim]")
+                            f"     [dim]Resolution time: "
+                            f"{dns_result.resolution_time_ms:.2f}ms[/dim]"
+                        )
                 else:
                     console.print(f"  ❌ {hostname} - {dns_result.error}")
             console.print()
@@ -655,7 +738,9 @@ class NetworkCommand(BaseCommand):
                     console.print(f"  ✅ {endpoint.name} - {endpoint.url}")
                     if endpoint.response_time_ms:
                         console.print(
-                            f"     [dim]Response time: {endpoint.response_time_ms:.2f}ms[/dim]")
+                            f"     [dim]Response time: "
+                            f"{endpoint.response_time_ms:.2f}ms[/dim]"
+                        )
                 else:
                     console.print(f"  ❌ {endpoint.name} - {endpoint.error}")
             console.print()
@@ -670,27 +755,37 @@ class NetworkCommand(BaseCommand):
                     # Show certificate chain
                     for i, cert in enumerate(tls_result.certificate_chain):
                         console.print(
-                            f"\n  [bold]Certificate #{i + 1}:[/bold]")
+                            f"\n  [bold]Certificate #{i + 1}:[/bold]"
+                        )
                         console.print(
-                            f"    Subject: [yellow]{cert.subject}[/yellow]")
+                            f"    Subject: [yellow]{cert.subject}[/yellow]"
+                        )
                         console.print(
-                            f"    Issuer: [cyan]{cert.issuer}[/cyan]")
+                            f"    Issuer: [cyan]{cert.issuer}[/cyan]"
+                        )
 
                         if verbose:
                             if cert.ocsp_urls:
                                 console.print(
-                                    f"    OCSP URLs: {', '.join(cert.ocsp_urls)}")
+                                    f"    OCSP URLs: "
+                                    f"{', '.join(cert.ocsp_urls)}"
+                                )
                             if cert.ca_issuer_urls:
                                 console.print(
-                                    f"    CA Issuer URLs: {', '.join(cert.ca_issuer_urls)}")
+                                    f"    CA Issuer URLs: "
+                                    f"{', '.join(cert.ca_issuer_urls)}"
+                                )
                             if cert.crl_distribution_points:
-                                console.print(
-                                    f"    CRL URLs: {', '.join(cert.crl_distribution_points)}")
+                                crl_urls = ", ".join(
+                                    cert.crl_distribution_points
+                                )
+                                console.print(f"    CRL URLs: {crl_urls}")
 
                     # Show revocation endpoint test results
                     if tls_result.revocation_endpoints:
                         console.print(
-                            "\n  [bold]Revocation Endpoint Tests:[/bold]")
+                            "\n  [bold]Revocation Endpoint Tests:[/bold]"
+                        )
 
                         # Group by type
                         by_type = {}
@@ -701,18 +796,27 @@ class NetworkCommand(BaseCommand):
 
                         for endpoint_type, endpoints in by_type.items():
                             console.print(
-                                f"\n    [yellow]{endpoint_type.upper()} Endpoints:[/yellow]")
+                                f"\n    [yellow]{endpoint_type.upper()} "
+                                f"Endpoints:[/yellow]"
+                            )
                             for endpoint in endpoints:
                                 if endpoint.accessible:
                                     console.print(f"      ✅ {endpoint.url}")
                                     if verbose and endpoint.response_time_ms:
+                                        resp_time = (
+                                            f"{endpoint.response_time_ms:.2f}"
+                                        )
                                         console.print(
-                                            f"         [dim]Response time: {endpoint.response_time_ms:.2f}ms[/dim]")
+                                            f"         [dim]Response time: "
+                                            f"{resp_time}ms[/dim]"
+                                        )
                                 else:
                                     console.print(f"      ❌ {endpoint.url}")
                                     if endpoint.error:
                                         console.print(
-                                            f"         [red]Error: {endpoint.error}[/red]")
+                                            f"         [red]Error: "
+                                            f"{endpoint.error}[/red]"
+                                        )
 
                 else:
                     console.print(f"  ❌ Failed to connect to {hostname}:443")
@@ -724,13 +828,20 @@ class NetworkCommand(BaseCommand):
         if result.python_requests_tests:
             console.print("[bold]Python Requests Library Tests:[/bold]")
             for test in result.python_requests_tests:
-                verify_status = "with SSL verification" if test.ssl_verify_enabled else "without SSL verification"
+                verify_status = (
+                    "with SSL verification"
+                    if test.ssl_verify_enabled
+                    else "without SSL verification"
+                )
                 if test.success:
                     console.print(
-                        f"  ✅ Successfully connected {verify_status}")
+                        f"  ✅ Successfully connected {verify_status}"
+                    )
                     if test.response_time_ms:
                         console.print(
-                            f"     [dim]Response time: {test.response_time_ms:.2f}ms[/dim]")
+                            f"     [dim]Response time: "
+                            f"{test.response_time_ms:.2f}ms[/dim]"
+                        )
                 else:
                     console.print(f"  ❌ Failed to connect {verify_status}")
                     if test.error:
@@ -740,7 +851,8 @@ class NetworkCommand(BaseCommand):
         # Environment Info
         if result.proxy_detected:
             console.print(
-                "[bold yellow]⚠️  Proxy Configuration Detected:[/bold yellow]")
+                "[bold yellow]⚠️  Proxy Configuration Detected:[/bold yellow]"
+            )
             for var, value in result.proxy_settings.items():
                 if value and value != "Not set":
                     console.print(f"  {var}: {value}")
@@ -752,15 +864,16 @@ class NetworkCommand(BaseCommand):
             for cmd_result in result.command_results:
                 status = "✅" if cmd_result.success else "❌"
                 console.print(
-                    f"\n  {status} Command: [cyan]{cmd_result.command}[/cyan]")
+                    f"\n  {status} Command: [cyan]{cmd_result.command}[/cyan]"
+                )
                 console.print(f"     Exit code: {cmd_result.exit_code}")
                 if cmd_result.stdout.strip():
                     console.print("     [dim]Output:[/dim]")
-                    for line in cmd_result.stdout.strip().split('\n')[:10]:
+                    for line in cmd_result.stdout.strip().split("\n")[:10]:
                         console.print(f"       {line}")
                 if cmd_result.stderr.strip():
                     console.print("     [dim red]Errors:[/dim red]")
-                    for line in cmd_result.stderr.strip().split('\n')[:5]:
+                    for line in cmd_result.stderr.strip().split("\n")[:5]:
                         console.print(f"       {line}")
 
     def _generate_recommendations(self, result: NetworkDebugResult) -> None:
@@ -771,14 +884,16 @@ class NetworkCommand(BaseCommand):
         for hostname, dns_result in result.dns_results.items():
             if not dns_result.resolved:
                 recommendations.append(
-                    f"❌ DNS resolution failed for {hostname}. Check your DNS settings and network connectivity."
+                    f"❌ DNS resolution failed for {hostname}. "
+                    f"Check your DNS settings and network connectivity."
                 )
 
         # Check TLS/SSL issues
         for hostname, tls_result in result.tls_test_results.items():
             if not tls_result.connected:
                 recommendations.append(
-                    f"❌ Failed to establish TLS connection to {hostname}. This may indicate a firewall or network issue."
+                    f"❌ Failed to establish TLS connection to {hostname}. "
+                    f"This may indicate a firewall or network issue."
                 )
 
             # Check revocation endpoint accessibility
@@ -789,10 +904,13 @@ class NetworkCommand(BaseCommand):
 
             if blocked_endpoints:
                 recommendations.append(
-                    "⚠️  Certificate revocation endpoints are blocked. This is a security issue that prevents proper certificate validation."
+                    "⚠️  Certificate revocation endpoints are blocked. "
+                    "This is a security issue that prevents proper "
+                    "certificate validation."
                 )
                 recommendations.append(
-                    "   To fix this, ensure the following domains are accessible on port 80 (HTTP):"
+                    "   To fix this, ensure the following domains are "
+                    "accessible on port 80 (HTTP):"
                 )
 
                 # Group by domain
@@ -805,7 +923,8 @@ class NetworkCommand(BaseCommand):
                     recommendations.append(f"   • {domain}")
 
                 recommendations.append(
-                    "   These endpoints are required by Let's Encrypt for certificate validation."
+                    "   These endpoints are required by Let's Encrypt for "
+                    "certificate validation."
                 )
 
         # Check Python SSL issues
@@ -813,36 +932,37 @@ class NetworkCommand(BaseCommand):
         ssl_noverify_success = False
 
         for test in result.python_requests_tests:
-            if test.ssl_verify_enabled and not test.success and "SSL" in str(test.error):
+            if (
+                test.ssl_verify_enabled
+                and not test.success
+                and "SSL" in str(test.error)
+            ):
                 ssl_verify_failed = True
             elif not test.ssl_verify_enabled and test.success:
                 ssl_noverify_success = True
 
         if ssl_verify_failed and ssl_noverify_success:
             recommendations.append(
-                "⚠️  Python requests fails with SSL verification but succeeds without it."
+                "⚠️  Python requests fails with SSL verification but "
+                "succeeds without it."
             )
             recommendations.append(
-                "   This typically indicates certificate validation issues, possibly due to:"
+                "   This typically indicates certificate validation "
+                "issues, possibly due to:"
             )
             recommendations.append(
                 "   • Blocked certificate revocation endpoints (see above)"
             )
-            recommendations.append(
-                "   • Missing or outdated CA certificates"
-            )
-            recommendations.append(
-                "   • Corporate proxy interference"
-            )
+            recommendations.append("   • Missing or outdated CA certificates")
+            recommendations.append("   • Corporate proxy interference")
 
         # Check proxy configuration
         if result.proxy_detected:
             recommendations.append(
-                "ℹ️  Proxy configuration detected. Ensure your proxy allows access to:"
+                "ℹ️  Proxy configuration detected. Ensure your proxy "
+                "allows access to:"
             )
-            recommendations.append(
-                "   • api.deepgram.com (port 443)"
-            )
+            recommendations.append("   • api.deepgram.com (port 443)")
             recommendations.append(
                 "   • Certificate validation endpoints (port 80)"
             )
@@ -854,6 +974,7 @@ class NetworkCommand(BaseCommand):
                 console.print(f"  {rec}")
         else:
             console.print(
-                "\n[bold green]✅ All network diagnostics passed![/bold green]")
+                "\n[bold green]✅ All network diagnostics passed![/bold green]"
+            )
 
         result.recommendations = recommendations

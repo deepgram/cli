@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 class ProfileConfig(BaseModel):
     """Configuration for a specific profile."""
+
     api_key: Optional[str] = None
     project_id: Optional[str] = None
     base_url: str = "https://api.deepgram.com"
@@ -18,6 +19,7 @@ class ProfileConfig(BaseModel):
 
 class OutputConfig(BaseModel):
     """Output formatting configuration."""
+
     format: str = Field(default="json", pattern="^(json|yaml|table|csv)$")
     color: bool = True
     quiet: bool = False
@@ -26,12 +28,14 @@ class OutputConfig(BaseModel):
 
 class PluginConfig(BaseModel):
     """Plugin configuration."""
+
     enabled: list[str] = Field(default_factory=list)
     disabled: list[str] = Field(default_factory=list)
 
 
 class DeepgramConfig(BaseModel):
     """Main configuration model."""
+
     default_profile: str = "default"
     profiles: Dict[str, ProfileConfig] = Field(default_factory=dict)
     output: OutputConfig = Field(default_factory=OutputConfig)
@@ -41,15 +45,20 @@ class DeepgramConfig(BaseModel):
 class Config:
     """Cross-platform configuration manager."""
 
-    def __init__(self, config_path: Optional[str] = None, profile: Optional[str] = None):
+    def __init__(
+        self, config_path: Optional[str] = None, profile: Optional[str] = None
+    ):
         """Initialize configuration manager.
 
         Args:
             config_path: Optional path to configuration file
             profile: Optional profile name to use
         """
-        self.config_path = Path(
-            config_path) if config_path else self._get_default_config_path()
+        self.config_path = (
+            Path(config_path)
+            if config_path
+            else self._get_default_config_path()
+        )
         self.profile = profile
         self._config: Optional[DeepgramConfig] = None
         self._load_config()
@@ -66,10 +75,12 @@ class Config:
         return config_dir / "config.yaml"
 
     def _migrate_config_if_needed(self, new_config_dir: Path) -> None:
-        """Migrate config from old deepgram directory to new deepctl directory."""
+        """Migrate config from old deepgram directory to new deepctl
+        directory."""
         # Check for old config location
         old_config_dir = Path(
-            platformdirs.user_config_dir("deepgram", "deepgram"))
+            platformdirs.user_config_dir("deepgram", "deepgram")
+        )
         old_config_path = old_config_dir / "config.yaml"
         new_config_path = new_config_dir / "config.yaml"
 
@@ -77,8 +88,11 @@ class Config:
         if old_config_path.exists() and not new_config_path.exists():
             try:
                 import shutil
+
                 print(
-                    f"Migrating config from {old_config_path} to {new_config_path}")
+                    f"Migrating config from {old_config_path} to "
+                    f"{new_config_path}"
+                )
                 shutil.copy2(old_config_path, new_config_path)
                 print("✓ Config migrated successfully")
             except Exception as e:
@@ -103,7 +117,9 @@ class Config:
             except Exception as e:
                 # Don't fail on config load errors, just warn
                 print(
-                    f"Warning: Could not load config from {self.config_path}: {e}")
+                    f"Warning: Could not load config from "
+                    f"{self.config_path}: {e}"
+                )
 
         # Load from project config file
         project_config_path = self._get_project_config_path()
@@ -115,7 +131,9 @@ class Config:
                         self._merge_config(project_config)
             except Exception as e:
                 print(
-                    f"Warning: Could not load project config from {project_config_path}: {e}")
+                    f"Warning: Could not load project config from "
+                    f"{project_config_path}: {e}"
+                )
 
         # Override with environment variables
         self._load_env_config()
@@ -124,7 +142,9 @@ class Config:
         """Merge configuration dictionary into current config."""
         # Deep merge configuration
         if "profiles" in config_dict:
-            for profile_name, profile_config in config_dict["profiles"].items():
+            for profile_name, profile_config in config_dict[
+                "profiles"
+            ].items():
                 if profile_name not in self._config.profiles:
                     self._config.profiles[profile_name] = ProfileConfig()
 
@@ -132,7 +152,8 @@ class Config:
                 for key, value in profile_config.items():
                     if hasattr(self._config.profiles[profile_name], key):
                         setattr(
-                            self._config.profiles[profile_name], key, value)
+                            self._config.profiles[profile_name], key, value
+                        )
 
         # Update other top-level config
         for key, value in config_dict.items():
@@ -214,7 +235,9 @@ class Config:
 
     def get_profile(self, profile_name: Optional[str] = None) -> ProfileConfig:
         """Get configuration for a specific profile."""
-        profile_name = profile_name or self.profile or self._config.default_profile
+        profile_name = (
+            profile_name or self.profile or self._config.default_profile
+        )
 
         if profile_name not in self._config.profiles:
             self._config.profiles[profile_name] = ProfileConfig()
@@ -223,17 +246,15 @@ class Config:
 
     def save(self) -> None:
         """Save configuration to file."""
-        # Use model_dump (Pydantic v2) with fallback to dict() for v1 compatibility
-        def _dump(model: BaseModel) -> dict:
-            if hasattr(model, "model_dump"):
-                return model.model_dump(exclude_none=True)
-            return model.dict(exclude_none=True)
 
         config_dict = {
             "default_profile": self._config.default_profile,
-            "profiles": {name: _dump(profile) for name, profile in self._config.profiles.items()},
-            "output": _dump(self._config.output),
-            "plugins": _dump(self._config.plugins),
+            "profiles": {
+                name: profile.model_dump(exclude_none=True)
+                for name, profile in self._config.profiles.items()
+            },
+            "output": self._config.output.model_dump(exclude_none=True),
+            "plugins": self._config.plugins.model_dump(exclude_none=True),
         }
 
         # Ensure config directory exists
@@ -241,7 +262,8 @@ class Config:
 
         with open(self.config_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(
-                config_dict, f, default_flow_style=False, sort_keys=False)
+                config_dict, f, default_flow_style=False, sort_keys=False
+            )
 
     def list_profiles(self) -> list[str]:
         """List all available profiles."""

@@ -201,6 +201,7 @@ class TestCreateMCPServer:
 
     @patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"})
     @patch("httpx.AsyncClient.post")
+    @pytest.mark.asyncio
     async def test_ask_question_tool(self, mock_post):
         """Test ask_question tool functionality."""
         # Create server
@@ -239,6 +240,7 @@ class TestCreateMCPServer:
         assert result == "Deepgram is a speech recognition platform."
         mock_post.assert_called_once()
 
+    @pytest.mark.asyncio
     async def test_tool_without_api_key(self):
         """Test tool behavior without API key."""
         # Clean environment to ensure no API key is set

@@ -39,7 +39,8 @@ class GnosisResponse(BaseModel):
     model: Optional[str] = Field(default=None, description="Model used")
     id: Optional[str] = Field(default=None, description="Response ID")
     created: Optional[int] = Field(
-        default=None, description="Creation timestamp")
+        default=None, description="Creation timestamp"
+    )
 
 
 class GnosisClient:
@@ -55,7 +56,8 @@ class GnosisClient:
         """Initialize the Gnosis client.
 
         Args:
-            api_key: Deepgram API key. If not provided, will check DEEPGRAM_API_KEY env var.
+            api_key: Deepgram API key. If not provided, will check
+                DEEPGRAM_API_KEY env var.
             base_url: Base URL for Gnosis API.
             timeout: Request timeout in seconds.
             debug: Enable debug logging.
@@ -67,7 +69,8 @@ class GnosisClient:
 
         if not self.api_key:
             raise ValueError(
-                "API key is required. Provide it as a parameter or set DEEPGRAM_API_KEY environment variable."
+                "API key is required. Provide it as a parameter or set "
+                "DEEPGRAM_API_KEY environment variable."
             )
 
     async def call(
@@ -80,7 +83,8 @@ class GnosisClient:
         """Make a request to the Gnosis API.
 
         Args:
-            messages: List of message dictionaries with 'role' and 'content' keys.
+            messages: List of message dictionaries with 'role' and 'content'
+                keys.
             model: Model to use for generation.
             temperature: Temperature for generation.
             max_tokens: Maximum tokens to generate.
@@ -101,7 +105,9 @@ class GnosisClient:
 
         if self.debug:
             print(
-                f"[DEBUG] Request: {request.model_dump_json()}", file=sys.stderr)
+                f"[DEBUG] Request: {request.model_dump_json()}",
+                file=sys.stderr,
+            )
 
         async with httpx.AsyncClient() as client:
             try:
@@ -118,16 +124,21 @@ class GnosisClient:
 
                 if self.debug:
                     print(
-                        f"[DEBUG] Response: {response.text}", file=sys.stderr)
+                        f"[DEBUG] Response: {response.text}", file=sys.stderr
+                    )
 
                 gnosis_response = GnosisResponse(**response.json())
-                if gnosis_response.choices and gnosis_response.choices[0].get("message"):
+                if gnosis_response.choices and gnosis_response.choices[0].get(
+                    "message"
+                ):
                     return gnosis_response.choices[0]["message"]["content"]
                 else:
                     return "No response from Gnosis"
 
             except httpx.HTTPStatusError as e:
-                error_msg = f"HTTP error: {e.response.status_code} - {e.response.text}"
+                error_msg = (
+                    f"HTTP error: {e.response.status_code} - {e.response.text}"
+                )
                 if self.debug:
                     print(f"[DEBUG] {error_msg}", file=sys.stderr)
                 raise
@@ -137,7 +148,9 @@ class GnosisClient:
                     print(f"[DEBUG] {error_msg}", file=sys.stderr)
                 raise
 
-    async def ask_question(self, question: str, system_prompt: Optional[str] = None) -> str:
+    async def ask_question(
+        self, question: str, system_prompt: Optional[str] = None
+    ) -> str:
         """Ask a question to Gnosis with an optional system prompt.
 
         Args:
@@ -187,16 +200,17 @@ async def main():
 Examples:
   # Ask a single question
   python -m deepctl_cmd_mcp.gnosis "What is Deepgram?"
-  
+
   # Ask with a custom system prompt
-  python -m deepctl_cmd_mcp.gnosis "Explain streaming" --system "You are a technical expert"
-  
+  python -m deepctl_cmd_mcp.gnosis "Explain streaming" \\
+        --system "You are a technical expert"
+
   # Interactive chat mode
   python -m deepctl_cmd_mcp.gnosis --chat
-  
+
   # Use a specific API key
-  python -m deepctl_cmd_mcp.gnosis "What models are available?" --api-key YOUR_KEY
-  
+  python -m deepctl_cmd_mcp.gnosis "What models are available?" \\
+        --api-key YOUR_KEY
   # Enable debug output
   python -m deepctl_cmd_mcp.gnosis "Test question" --debug
 """,
@@ -271,7 +285,9 @@ Examples:
     try:
         if args.chat:
             # Interactive chat mode
-            print("Gnosis Chat (type 'exit' or 'quit' to end, 'clear' to reset)")
+            print(
+                "Gnosis Chat (type 'exit' or 'quit' to end, 'clear' to reset)"
+            )
             print("-" * 50)
 
             messages = []
@@ -321,7 +337,9 @@ Examples:
 
                 # We need to modify the client to return the full response
                 # For now, just get the text response
-                response = await client.ask_question(args.question, args.system)
+                response = await client.ask_question(
+                    args.question, args.system
+                )
                 result = {
                     "question": args.question,
                     "response": response,
@@ -329,7 +347,9 @@ Examples:
                 }
                 print(json.dumps(result, indent=2))
             else:
-                response = await client.ask_question(args.question, args.system)
+                response = await client.ask_question(
+                    args.question, args.system
+                )
                 print(response)
 
     except Exception as e:

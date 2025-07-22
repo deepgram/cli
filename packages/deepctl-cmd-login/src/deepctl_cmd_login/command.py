@@ -2,9 +2,16 @@
 
 from typing import Optional, Dict, List, Any
 from rich.console import Console
-from deepgram import DeepgramError
 
-from deepctl_core import Config, AuthManager, AuthenticationError, DeepgramClient, BaseCommand, ProfileInfo, ProfilesResult
+from deepctl_core import (
+    Config,
+    AuthManager,
+    AuthenticationError,
+    DeepgramClient,
+    BaseCommand,
+    ProfileInfo,
+    ProfilesResult,
+)
 from .models import LoginResult, LogoutResult
 
 console = Console()
@@ -30,28 +37,31 @@ class LoginCommand(BaseCommand):
                 "help": "Configure the CLI with your Deepgram API key",
                 "type": str,
                 "required": False,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--project-id", "-p"],
                 "help": "Configure the CLI with your Deepgram project ID",
                 "type": str,
                 "required": False,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--force-write", "-f"],
-                "help": "Don't prompt for confirmation when providing credentials",
+                "help": (
+                    "Don't prompt for confirmation when providing "
+                    "credentials"
+                ),
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--profile"],
                 "help": "Profile name to use for storing credentials",
                 "type": str,
                 "required": False,
-                "is_option": True
-            }
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -59,7 +69,7 @@ class LoginCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """Handle login command."""
         api_key = kwargs.get("api_key")
@@ -73,16 +83,23 @@ class LoginCommand(BaseCommand):
 
         # Check if user is already logged in
         if auth_manager.is_authenticated() and not force_write:
-            current_profile = config.get_profile()
             console.print(
-                f"[yellow]Already logged in to profile:[/yellow] {config.profile or 'default'}")
+                f"[yellow]Already logged in to profile:[/yellow] "
+                f"{config.profile or 'default'}"
+            )
 
             if not self.confirm("Do you want to login again?", default=False):
-                return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
+                return LoginResult(
+                    status="cancelled",
+                    message="Login cancelled by user",
+                    profile=config.profile or "default",
+                )
 
         # Determine authentication method
         if api_key:
-            return self._cli_auth(config, auth_manager, api_key, project_id, force_write)
+            return self._cli_auth(
+                config, auth_manager, api_key, project_id, force_write
+            )
         else:
             return self._web_auth(config, auth_manager, force_write)
 
@@ -92,7 +109,7 @@ class LoginCommand(BaseCommand):
         auth_manager: AuthManager,
         api_key: str,
         project_id: Optional[str],
-        force_write: bool
+        force_write: bool,
     ) -> LoginResult:
         """Handle CLI authentication with API key."""
         console.print("[blue]Configuring CLI with API key...[/blue]")
@@ -100,30 +117,56 @@ class LoginCommand(BaseCommand):
         # Validate API key format
         if not api_key.startswith(("sk-", "pk-")):
             console.print(
-                "[yellow]Warning:[/yellow] API key format doesn't match expected pattern")
-            if not force_write and not self.confirm("Continue anyway?", default=False):
-                return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
+                "[yellow]Warning:[/yellow] API key format doesn't match "
+                "expected pattern"
+            )
+            if not force_write and not self.confirm(
+                "Continue anyway?", default=False
+            ):
+                return LoginResult(
+                    status="cancelled",
+                    message="Login cancelled by user",
+                    profile=config.profile or "default",
+                )
 
         # Validate project ID is provided with API key
         if not project_id:
             console.print("[yellow]Warning:[/yellow] Project ID not provided")
             console.print(
-                "You can set it later with: deepctl login --project-id <project_id>")
+                "You can set it later with: "
+                "deepctl login --project-id <project_id>"
+            )
             console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
 
         # Check if config file exists and prompt for overwrite
         if not force_write:
             if config.config_path.exists():
                 console.print(
-                    f"[yellow]Configuration file already exists:[/yellow] {config.config_path}")
-                if not self.confirm("Overwrite existing configuration?", default=False):
-                    return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
+                    f"[yellow]Configuration file already exists:[/yellow] "
+                    f"{config.config_path}"
+                )
+                if not self.confirm(
+                    "Overwrite existing configuration?", default=False
+                ):
+                    return LoginResult(
+                        status="cancelled",
+                        message="Login cancelled by user",
+                        profile=config.profile or "default",
+                    )
             else:
-                if not self.confirm("Do you want to write these credentials to config?", default=True):
-                    return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
+                if not self.confirm(
+                    "Do you want to write these credentials to config?",
+                    default=True,
+                ):
+                    return LoginResult(
+                        status="cancelled",
+                        message="Login cancelled by user",
+                        profile=config.profile or "default",
+                    )
 
         try:
-            # Store credentials (verification happens inside login_with_api_key)
+            # Store credentials (verification happens inside
+            # login_with_api_key)
             auth_manager.login_with_api_key(api_key, project_id, force_write)
 
             profile_name = config.profile or "default"
@@ -138,17 +181,22 @@ class LoginCommand(BaseCommand):
 
         except AuthenticationError as e:
             console.print(f"[red]Authentication failed:[/red] {e}")
-            return LoginResult(status="error", message=str(e), profile=config.profile or "default")
+            return LoginResult(
+                status="error",
+                message=str(e),
+                profile=config.profile or "default",
+            )
 
         except Exception as e:
             console.print(f"[red]Error during CLI authentication:[/red] {e}")
-            return LoginResult(status="error", message=str(e), profile=config.profile or "default")
+            return LoginResult(
+                status="error",
+                message=str(e),
+                profile=config.profile or "default",
+            )
 
     def _web_auth(
-        self,
-        config: Config,
-        auth_manager: AuthManager,
-        force_write: bool
+        self, config: Config, auth_manager: AuthManager, force_write: bool
     ) -> LoginResult:
         """Handle web authentication with device flow."""
         console.print("[blue]Starting web authentication...[/blue]")
@@ -157,9 +205,17 @@ class LoginCommand(BaseCommand):
         if not force_write:
             if config.config_path.exists():
                 console.print(
-                    f"[yellow]Configuration file already exists:[/yellow] {config.config_path}")
-                if not self.confirm("Overwrite existing configuration?", default=False):
-                    return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
+                    f"[yellow]Configuration file already exists:[/yellow] "
+                    f"{config.config_path}"
+                )
+                if not self.confirm(
+                    "Overwrite existing configuration?", default=False
+                ):
+                    return LoginResult(
+                        status="cancelled",
+                        message="Login cancelled by user",
+                        profile=config.profile or "default",
+                    )
 
         try:
             # Start device flow
@@ -187,16 +243,29 @@ class LoginCommand(BaseCommand):
 
         except AuthenticationError as e:
             console.print(f"[red]Authentication failed:[/red] {e}")
-            return LoginResult(status="error", message=str(e), profile=config.profile or "default")
+            return LoginResult(
+                status="error",
+                message=str(e),
+                profile=config.profile or "default",
+            )
 
         except KeyboardInterrupt:
             console.print(
-                "\n[yellow]Authentication cancelled by user[/yellow]")
-            return LoginResult(status="cancelled", message="Login cancelled by user", profile=config.profile or "default")
+                "\n[yellow]Authentication cancelled by user[/yellow]"
+            )
+            return LoginResult(
+                status="cancelled",
+                message="Login cancelled by user",
+                profile=config.profile or "default",
+            )
 
         except Exception as e:
             console.print(f"[red]Error during web authentication:[/red] {e}")
-            return LoginResult(status="error", message=str(e), profile=config.profile or "default")
+            return LoginResult(
+                status="error",
+                message=str(e),
+                profile=config.profile or "default",
+            )
 
 
 class LogoutCommand(BaseCommand):
@@ -219,14 +288,14 @@ class LogoutCommand(BaseCommand):
                 "help": "Profile to logout from (default: current profile)",
                 "type": str,
                 "required": False,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--all"],
                 "help": "Logout from all profiles",
                 "is_flag": True,
-                "is_option": True
-            }
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -234,7 +303,7 @@ class LogoutCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """Handle logout command."""
         profile = kwargs.get("profile")
@@ -250,11 +319,13 @@ class LogoutCommand(BaseCommand):
                     auth_manager_for_profile.logout()
 
                 console.print(
-                    f"[green]✓[/green] Successfully logged out from all profiles ({len(profiles)} profiles)")
+                    f"[green]✓[/green] Successfully logged out from all "
+                    f"profiles ({len(profiles)} profiles)"
+                )
                 return LogoutResult(
                     status="success",
                     message="Logged out from all profiles",
-                    profiles_count=len(profiles)
+                    profiles_count=len(profiles),
                 )
 
             else:
@@ -264,15 +335,19 @@ class LogoutCommand(BaseCommand):
 
                 if not auth_manager.is_authenticated():
                     console.print("[yellow]Not currently logged in[/yellow]")
-                    return LogoutResult(status="info", message="Not currently logged in")
+                    return LogoutResult(
+                        status="info", message="Not currently logged in"
+                    )
 
                 auth_manager.logout()
 
                 profile_name = config.profile or "default"
                 return LogoutResult(
                     status="success",
-                    message=f"Successfully logged out from profile: {profile_name}",
-                    profile=profile_name
+                    message=(
+                        f"Successfully logged out from profile: {profile_name}"
+                    ),
+                    profile=profile_name,
                 )
 
         except Exception as e:
@@ -299,21 +374,21 @@ class ProfilesCommand(BaseCommand):
                 "names": ["--list", "-l"],
                 "help": "List all profiles",
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--current"],
                 "help": "Show current profile",
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--switch"],
                 "help": "Switch to a different profile",
                 "type": str,
                 "required": False,
-                "is_option": True
-            }
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -321,7 +396,7 @@ class ProfilesCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """Handle profiles command."""
         list_profiles = kwargs.get("list", False)
@@ -333,16 +408,22 @@ class ProfilesCommand(BaseCommand):
             profiles = profiles_result.profiles
             if not profiles:
                 console.print("[yellow]No profiles found[/yellow]")
-                return ProfilesResult(status="info", message="No profiles found", profiles={})
+                return ProfilesResult(
+                    status="info", message="No profiles found", profiles={}
+                )
 
             console.print("[blue]Available profiles:[/blue]")
             for name, info in profiles.items():
-                current_marker = " (current)" if name == (
-                    config.profile or "default") else ""
+                current_marker = (
+                    " (current)"
+                    if name == (config.profile or "default")
+                    else ""
+                )
                 console.print(f"  • {name}{current_marker}")
                 console.print(f"    API Key: {info.api_key or 'Not set'}")
                 console.print(
-                    f"    Project ID: {info.project_id or 'Not set'}")
+                    f"    Project ID: {info.project_id or 'Not set'}"
+                )
                 console.print(f"    Base URL: {info.base_url}")
                 console.print()
             return profiles_result
@@ -350,20 +431,26 @@ class ProfilesCommand(BaseCommand):
         elif show_current:
             current_profile = config.profile or "default"
             profile_info = auth_manager.list_profiles().profiles.get(
-                current_profile, ProfileInfo(api_key=None, project_id=None, base_url=""))
+                current_profile,
+                ProfileInfo(api_key=None, project_id=None, base_url=""),
+            )
 
             console.print(f"[blue]Current profile:[/blue] {current_profile}")
             console.print(
-                f"[dim]API Key:[/dim] {profile_info.api_key or 'Not set'}")
+                f"[dim]API Key:[/dim] {profile_info.api_key or 'Not set'}"
+            )
             console.print(
-                f"[dim]Project ID:[/dim] {profile_info.project_id or 'Not set'}")
+                f"[dim]Project ID:[/dim] "
+                f"{profile_info.project_id or 'Not set'}"
+            )
             console.print(
-                f"[dim]Base URL:[/dim] {profile_info.base_url or 'Not set'}")
+                f"[dim]Base URL:[/dim] {profile_info.base_url or 'Not set'}"
+            )
 
             return ProfilesResult(
                 status="success",
                 current_profile=current_profile,
-                profiles={current_profile: profile_info}
+                profiles={current_profile: profile_info},
             )
 
         elif switch_profile:
@@ -371,19 +458,24 @@ class ProfilesCommand(BaseCommand):
 
             if switch_profile not in profiles:
                 console.print(
-                    f"[red]Profile '{switch_profile}' not found[/red]")
-                return ProfilesResult(status="error", message=f"Profile '{switch_profile}' not found")
+                    f"[red]Profile '{switch_profile}' not found[/red]"
+                )
+                return ProfilesResult(
+                    status="error",
+                    message=f"Profile '{switch_profile}' not found",
+                )
 
             # Update default profile in config
             config._config.default_profile = switch_profile
             config.save()
 
             console.print(
-                f"[green]✓[/green] Switched to profile: {switch_profile}")
+                f"[green]✓[/green] Switched to profile: {switch_profile}"
+            )
             return ProfilesResult(
                 status="success",
                 message=f"Switched to profile: {switch_profile}",
-                current_profile=switch_profile
+                current_profile=switch_profile,
             )
 
         else:

@@ -17,8 +17,9 @@ console = Console()
 def preprocess_hyphenated_commands(args: List[str]) -> List[str]:
     """Convert hyphenated commands to nested commands.
 
-    This function looks for commands in the format 'group-subcommand' and converts
-    them to 'group subcommand' to support both syntaxes.
+    This function looks for commands in the format 'group-subcommand' and
+    converts them to the nested format Click expects (e.g., 'group
+    subcommand').
 
     Args:
         args: Command line arguments
@@ -38,17 +39,18 @@ def preprocess_hyphenated_commands(args: List[str]) -> List[str]:
     try:
         entry_points = metadata.entry_points()
         for entry_point in entry_points.select(group="deepctl.commands"):
-            # We'll need to check if it's a group, but for now we'll use a heuristic
-            # that if there are subcommands registered for it, it's a group
+            # We'll need to check if it's a group, but for now we'll use a
+            # heuristic
             subcommand_group = f"deepctl.subcommands.{entry_point.name}"
             try:
                 subcommand_eps = list(
-                    entry_points.select(group=subcommand_group))
+                    entry_points.select(group=subcommand_group)
+                )
                 if subcommand_eps:
                     group_commands.add(entry_point.name)
-            except:
+            except Exception:
                 pass
-    except:
+    except Exception:
         pass
 
     # Process arguments
@@ -59,18 +61,18 @@ def preprocess_hyphenated_commands(args: List[str]) -> List[str]:
         arg = args[i]
 
         # Skip if it's an option (starts with -)
-        if arg.startswith('-'):
+        if arg.startswith("-"):
             new_args.append(arg)
             i += 1
             # If it's an option with a value, include the next arg too
-            if i < len(args) and not args[i].startswith('-'):
+            if i < len(args) and not args[i].startswith("-"):
                 new_args.append(args[i])
                 i += 1
             continue
 
         # Check if this could be a hyphenated command
-        if '-' in arg and not arg.startswith('-'):
-            parts = arg.split('-', 1)
+        if "-" in arg and not arg.startswith("-"):
+            parts = arg.split("-", 1)
             if len(parts) == 2:
                 group_name, subcommand = parts
 
@@ -128,7 +130,8 @@ def cli(
     quiet: bool,
     verbose: bool,
 ) -> None:
-    """deepctl - Official Deepgram CLI for speech recognition and audio intelligence."""
+    """deepctl - Official Deepgram CLI for speech recognition and audio
+    intelligence."""
 
     # Initialize configuration
     ctx.ensure_object(dict)
@@ -143,7 +146,7 @@ def cli(
 
 
 # Load commands from entry points
-def load_commands():
+def load_commands() -> None:
     """Load commands from package entry points."""
     # Use the plugin manager to load all commands
     from deepctl_core import PluginManager

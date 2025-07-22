@@ -32,7 +32,7 @@ class DebugCommand(BaseGroupCommand):
                 "names": ["--verbose", "-v"],
                 "help": "Enable verbose debug output",
                 "is_flag": True,
-                "is_option": True
+                "is_option": True,
             }
         ]
 
@@ -41,12 +41,13 @@ class DebugCommand(BaseGroupCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """Handle group-specific logic.
 
-        This is called when the group is invoked, whether or not a subcommand
-        is specified. We can use this for group-level initialization or logging.
+        This is called when the group is invoked, whether or not a
+        subcommand is specified. We can use this for group-level
+        initialization or logging.
         """
         verbose = kwargs.get("verbose", False)
 
@@ -63,7 +64,9 @@ class DebugCommand(BaseGroupCommand):
             console.print("  • network - Debug network connectivity")
             console.print("  • audio   - Debug audio file issues")
             console.print(
-                "\n[dim]Use 'deepctl debug <subcommand> --help' for more information[/dim]")
+                "\n[dim]Use 'deepctl debug <subcommand> --help' for "
+                "more information[/dim]"
+            )
 
             return DebugGroupResult(
                 status="info",
@@ -71,8 +74,8 @@ class DebugCommand(BaseGroupCommand):
                 subcommands={
                     "browser": "Debug browser-related issues",
                     "network": "Debug network connectivity",
-                    "audio": "Debug audio file issues"
-                }
+                    "audio": "Debug audio file issues",
+                },
             )
 
         # A subcommand was invoked, we can optionally do something here

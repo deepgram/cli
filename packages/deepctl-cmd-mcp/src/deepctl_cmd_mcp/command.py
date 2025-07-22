@@ -31,7 +31,10 @@ class McpCommand(BaseCommand):
         return [
             {
                 "names": ["--transport", "-t"],
-                "help": "Transport mode: stdio (default), sse, or streamable-http",
+                "help": (
+                    "Transport mode: stdio (default), sse, "
+                    "or streamable-http"
+                ),
                 "type": str,
                 "default": "stdio",
                 "required": False,
@@ -55,7 +58,10 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--api-key"],
-                "help": "Override API key for Gnosis server (falls back to profile or DEEPGRAM_API_KEY env var)",
+                "help": (
+                    "Override API key for Gnosis server (falls back to "
+                    "profile or DEEPGRAM_API_KEY env var)"
+                ),
                 "type": str,
                 "required": False,
                 "is_option": True,
@@ -87,10 +93,7 @@ class McpCommand(BaseCommand):
         transport = kwargs.get("transport", "stdio").lower()
         port = kwargs.get("port", 8000)
         host = kwargs.get("host", "127.0.0.1")
-        gnosis_api_key = (
-            kwargs.get("api_key")
-            or os.getenv("DEEPGRAM_API_KEY")
-        )
+        gnosis_api_key = kwargs.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
         # Fallback to stored credentials if no key provided
         if not gnosis_api_key:
             gnosis_api_key = auth_manager.get_api_key()
@@ -101,7 +104,8 @@ class McpCommand(BaseCommand):
         valid_transports = ["stdio", "sse", "streamable-http"]
         if transport not in valid_transports:
             console.print(
-                f"[red]Invalid transport type:[/red] {transport}. Must be one of: {', '.join(valid_transports)}"
+                f"[red]Invalid transport type:[/red] {transport}. "
+                f"Must be one of: {', '.join(valid_transports)}"
             )
             return MCPServerResult(
                 status="error", message=f"Invalid transport type: {transport}"
@@ -131,7 +135,8 @@ class McpCommand(BaseCommand):
                 mcp_server.run(transport="sse", port=port)
             elif transport == "streamable-http":
                 console.print(
-                    f"[blue]Starting MCP Streamable HTTP server on {host}:{port}...[/blue]"
+                    f"[blue]Starting MCP Streamable HTTP server on "
+                    f"{host}:{port}...[/blue]"
                 )
                 mcp_server.run(transport="streamable-http", port=port)
 
@@ -170,15 +175,19 @@ def create_mcp_server() -> FastMCP:
 
     # Get configuration from environment
     gnosis_api_key = os.getenv("DEEPGRAM_API_KEY")
-    gnosis_url = os.getenv("DEEPGRAM_GNOSIS_URL",
-                           "https://gnosis.deepgram.com")
+    gnosis_url = os.getenv(
+        "DEEPGRAM_GNOSIS_URL", "https://gnosis.deepgram.com"
+    )
     debug = os.getenv("DEEPGRAM_MCP_DEBUG", "").lower() in ("1", "true", "yes")
 
     # Debug logging to diagnose URL issue
     if debug:
         import sys
+
         print(
-            f"[DEBUG] DEEPGRAM_GNOSIS_URL from env: {gnosis_url}", file=sys.stderr)
+            f"[DEBUG] DEEPGRAM_GNOSIS_URL from env: {gnosis_url}",
+            file=sys.stderr,
+        )
 
     # Create a shared Gnosis client instance
     try:
@@ -195,12 +204,12 @@ def create_mcp_server() -> FastMCP:
     async def ask_question(question: str, ctx: Context) -> str:
         """Ask questions about Deepgram products and services.
 
-        This is the **catch-all** helper for natural-language queries about anything
-        related to Deepgram. Use it for general product or feature questions,
-        onboarding advice ("How do I get started with live transcription?"),
-        pricing, SDK capabilities, best practices, model details, or any other
-        information request that does **not** obviously belong to one of the
-        specialised tools below.
+        This is the **catch-all** helper for natural-language queries about
+        anything related to Deepgram. Use it for general product or feature
+        questions, onboarding advice ("How do I get started with live
+        transcription?"), pricing, SDK capabilities, best practices, model
+        details, or any other information request that does **not** obviously
+        belong to one of the specialised tools below.
 
         Example questions that should route to this tool:
         • "What is the difference between pre-recorded and live transcription?"
@@ -208,11 +217,16 @@ def create_mcp_server() -> FastMCP:
         • "How accurate is Nova-2 on telephone audio?"
 
         Args:
-            question: The question to ask about Deepgram (products, services, SDKs, APIs, pricing, etc.)
+            question: The question to ask about Deepgram (products, services,
+                SDKs, APIs, pricing, etc.)
             ctx: MCP context used by FastMCP
         """
         if not gnosis_client:
-            return "Error: Gnosis API key not configured. Please set DEEPGRAM_API_KEY, use the --api-key flag, or store a credential."
+            return (
+                "Error: Gnosis API key not configured. Please set "
+                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
+                "credential."
+            )
 
         if debug:
             await ctx.info(f"Asking question: {question}")
@@ -220,7 +234,10 @@ def create_mcp_server() -> FastMCP:
         try:
             return await gnosis_client.ask_question(
                 question,
-                system_prompt="You are a helpful assistant that answers questions about Deepgram products and services.",
+                system_prompt=(
+                    "You are a helpful assistant that answers questions about "
+                    "Deepgram products and services."
+                ),
             )
         except Exception as e:
             return f"Error: {str(e)}"
@@ -231,10 +248,10 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         """Retrieve Deepgram **API reference** details.
 
-        Use this tool when the user explicitly asks for endpoint specifics, HTTP
-        verbs, WebSocket event schemas, request/response bodies, authentication
-        headers, rate limits, or error codes—anything that belongs to the formal
-        API specification.
+        Use this tool when the user explicitly asks for endpoint specifics,
+        HTTP verbs, WebSocket event schemas, request/response bodies,
+        authentication headers, rate limits, or error codes—anything that
+        belongs to the formal API specification.
 
         Example queries that should trigger this tool:
         • "Show me the REST API spec for /v1/listen"
@@ -243,16 +260,23 @@ def create_mcp_server() -> FastMCP:
 
         Args:
             api_type: Either 'rest' or 'websocket'. Defaults to 'rest'.
-            endpoint: Optional specific endpoint path (e.g., "/v1/listen"). Leave blank for an overview.
+            endpoint: Optional specific endpoint path (e.g., "/v1/listen").
+                Leave blank for an overview.
             ctx: MCP context
         """
         if not gnosis_client:
-            return "Error: Gnosis API key not configured. Please set DEEPGRAM_API_KEY, use the --api-key flag, or store a credential."
+            return (
+                "Error: Gnosis API key not configured. Please set "
+                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
+                "credential."
+            )
 
         if ctx and debug:
             await ctx.info(f"Checking API spec: {api_type} {endpoint}")
 
-        prompt = f"Provide the API specification for Deepgram's {api_type.upper()} "
+        prompt = (
+            f"Provide the API specification for Deepgram's {api_type.upper()} "
+        )
         if endpoint:
             prompt += f"endpoint: {endpoint}"
         else:
@@ -261,7 +285,10 @@ def create_mcp_server() -> FastMCP:
         try:
             return await gnosis_client.ask_question(
                 prompt,
-                system_prompt="You are a technical assistant that provides detailed API specifications for Deepgram.",
+                system_prompt=(
+                    "You are a technical assistant that provides detailed API "
+                    "specifications for Deepgram."
+                ),
             )
         except Exception as e:
             return f"Error: {str(e)}"
@@ -277,12 +304,18 @@ def create_mcp_server() -> FastMCP:
         transcription" or "Show a JavaScript snippet for batch processing".
 
         Args:
-            language: Target programming language (python, javascript, typescript, go, java, csharp, etc.)
-            use_case: The scenario for the snippet (e.g., "real-time transcription", "batch processing").
+            language: Target programming language (python, javascript,
+                typescript, go, java, csharp, etc.)
+            use_case: The scenario for the snippet (e.g., "real-time
+                transcription", "batch processing").
             ctx: MCP context
         """
         if not gnosis_client:
-            return "Error: Gnosis API key not configured. Please set DEEPGRAM_API_KEY, use the --api-key flag, or store a credential."
+            return (
+                "Error: Gnosis API key not configured. Please set "
+                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
+                "credential."
+            )
 
         if ctx and debug:
             await ctx.info(f"Getting code example: {language} for {use_case}")
@@ -292,7 +325,10 @@ def create_mcp_server() -> FastMCP:
         try:
             return await gnosis_client.ask_question(
                 prompt,
-                system_prompt=f"You are a code assistant that provides {language} code examples for Deepgram.",
+                system_prompt=(
+                    f"You are a code assistant that provides {language} "
+                    f"code examples for Deepgram."
+                ),
             )
         except Exception as e:
             return f"Error: {str(e)}"
@@ -303,9 +339,10 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         """Keyword search across official Deepgram documentation.
 
-        Ideal for requests that mention "documentation", "docs", "guide", or when
-        the user wants a how-to or tutorial section. The search can be narrowed
-        to specific categories like guides, SDK references, or API reference.
+        Ideal for requests that mention "documentation", "docs", "guide",
+        or when the user wants a how-to or tutorial section. The search can
+        be narrowed to specific categories like guides, SDK references, or
+        API reference.
 
         Example queries:
         • "Find the docs page about audio formats"
@@ -313,11 +350,16 @@ def create_mcp_server() -> FastMCP:
 
         Args:
             query: Search terms to look for.
-            category: One of 'guides', 'api-reference', 'sdks', or 'all'. Defaults to 'all'.
+            category: One of 'guides', 'api-reference', 'sdks', or 'all'.
+                Defaults to 'all'.
             ctx: MCP context
         """
         if not gnosis_client:
-            return "Error: Gnosis API key not configured. Please set DEEPGRAM_API_KEY, use the --api-key flag, or store a credential."
+            return (
+                "Error: Gnosis API key not configured. Please set "
+                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
+                "credential."
+            )
 
         if ctx and debug:
             await ctx.info(f"Searching docs: {query} in {category}")
@@ -329,7 +371,10 @@ def create_mcp_server() -> FastMCP:
         try:
             return await gnosis_client.ask_question(
                 search_prompt,
-                system_prompt="You are a documentation assistant that helps find relevant information in Deepgram's docs.",
+                system_prompt=(
+                    "You are a documentation assistant that helps find "
+                    "relevant information in Deepgram's docs."
+                ),
             )
         except Exception as e:
             return f"Error: {str(e)}"

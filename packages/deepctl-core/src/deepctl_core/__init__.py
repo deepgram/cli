@@ -4,7 +4,13 @@ from .config import Config
 from .auth import AuthManager, AuthenticationError
 from .client import DeepgramClient
 from .plugin_manager import PluginManager
-from .models import ProfileInfo, ProfilesResult, PluginInfo, ErrorResult, BaseResult
+from .models import (
+    ProfileInfo,
+    ProfilesResult,
+    PluginInfo,
+    ErrorResult,
+    BaseResult,
+)
 from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
 from .output import (
@@ -15,7 +21,7 @@ from .output import (
     print_error,
     print_warning,
     print_info,
-    get_console
+    get_console,
 )
 
 __all__ = [
@@ -39,5 +45,5 @@ __all__ = [
     "print_error",
     "print_warning",
     "print_info",
-    "get_console"
+    "get_console",
 ]

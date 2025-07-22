@@ -1,12 +1,14 @@
 """Deepgram SDK wrapper for deepctl with authentication integration."""
 
-import os
 from typing import Optional, Dict, Any, Union
 from pathlib import Path
 
-from deepgram import DeepgramClient as DGClient, DeepgramClientOptions, DeepgramError
+from deepgram import (
+    DeepgramClient as DGClient,
+    DeepgramClientOptions,
+    DeepgramError,
+)
 from deepgram.clients.prerecorded import PrerecordedOptions
-from deepgram.clients.live import LiveOptions
 from rich.console import Console
 
 from .config import Config
@@ -56,9 +58,7 @@ class DeepgramClient:
             # Create options if we have a custom base URL
             options = None
             if current_profile.base_url:
-                options = DeepgramClientOptions(
-                    url=current_profile.base_url
-                )
+                options = DeepgramClientOptions(url=current_profile.base_url)
 
             # Create client with API key and options
             if options:
@@ -78,7 +78,7 @@ class DeepgramClient:
     def transcribe_file(
         self,
         file_path: Union[str, Path],
-        options: Optional[Dict[str, Any]] = None
+        options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Transcribe an audio file.
 
@@ -98,7 +98,7 @@ class DeepgramClient:
         default_options = {
             "model": "nova-2",
             "smart_format": True,
-            "language": "en-US"
+            "language": "en-US",
         }
 
         if options:
@@ -114,8 +114,7 @@ class DeepgramClient:
 
                 # Make request using the new SDK API
                 response = self.client.listen.rest.v("1").transcribe_file(
-                    payload,
-                    prerecorded_options
+                    payload, prerecorded_options
                 )
 
                 return response
@@ -125,9 +124,7 @@ class DeepgramClient:
             raise DeepgramError(f"Transcription failed: {e}")
 
     def transcribe_url(
-        self,
-        url: str,
-        options: Optional[Dict[str, Any]] = None
+        self, url: str, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Transcribe audio from URL.
 
@@ -142,7 +139,7 @@ class DeepgramClient:
         default_options = {
             "model": "nova-2",
             "smart_format": True,
-            "language": "en-US"
+            "language": "en-US",
         }
 
         if options:
@@ -157,8 +154,7 @@ class DeepgramClient:
 
             # Make request using the new SDK API
             response = self.client.listen.rest.v("1").transcribe_url(
-                payload,
-                prerecorded_options
+                payload, prerecorded_options
             )
 
             return response
@@ -206,7 +202,9 @@ class DeepgramClient:
             console.print(f"[red]Error getting project:[/red] {e}")
             raise DeepgramError(f"Failed to get project: {e}")
 
-    def create_project(self, name: str, company: Optional[str] = None) -> Dict[str, Any]:
+    def create_project(
+        self, name: str, company: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Create a new project.
 
         Args:
@@ -232,7 +230,7 @@ class DeepgramClient:
         self,
         project_id: Optional[str] = None,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get usage statistics.
 
@@ -260,8 +258,9 @@ class DeepgramClient:
             if end_date:
                 params["end"] = end_date
 
-            response = self.client.manage.v(
-                "1").get_usage_summary(project_id, params)
+            response = self.client.manage.v("1").get_usage_summary(
+                project_id, params
+            )
             # Add project_id to response for consistency
             if isinstance(response, dict):
                 response["project_id"] = project_id
@@ -286,7 +285,8 @@ class DeepgramClient:
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         try:
-            # The new SDK doesn't have get_models, this is likely part of get_project
+            # The new SDK doesn't have get_models, this is likely part of
+            # get_project
             response = self.client.manage.v("1").get_project(project_id)
             return response
 
@@ -306,7 +306,8 @@ class DeepgramClient:
         # Use the auth manager's verification method
         project_id = self.auth_manager.get_project_id()
         success, _, _ = self.auth_manager.verify_credentials(
-            api_key=api_key, project_id=project_id)
+            api_key=api_key, project_id=project_id
+        )
         return success
 
     def test_connection(self) -> bool:

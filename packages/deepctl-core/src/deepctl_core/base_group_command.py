@@ -1,10 +1,13 @@
 """Base class for group commands that can contain subcommands."""
 
-from typing import Dict, Type, List, Any, Optional
+from typing import Dict, Type, Any
 import click
 from rich.console import Console
 
 from .base_command import BaseCommand
+from .config import Config
+from .auth import AuthManager
+from .client import DeepgramClient
 
 console = Console()
 
@@ -22,7 +25,8 @@ class BaseGroupCommand(BaseCommand):
             help = "Debug utilities for troubleshooting"
 
             def handle_group(self, config, auth_manager, client, **kwargs):
-                # Optional: logic to run when group is invoked without subcommand
+                # Optional: logic to run when group is invoked without
+                # subcommand
                 console.print("Debug command requires a subcommand")
     """
 
@@ -33,10 +37,12 @@ class BaseGroupCommand(BaseCommand):
         self.is_group = True
         # By default, groups show help when invoked without subcommand
         # Only set if not already defined at class level
-        if not hasattr(self, 'invoke_without_command'):
+        if not hasattr(self, "invoke_without_command"):
             self.invoke_without_command = False
 
-    def add_subcommand(self, name: str, command_class: Type[BaseCommand]) -> None:
+    def add_subcommand(
+        self, name: str, command_class: Type[BaseCommand]
+    ) -> None:
         """Add a subcommand to this group.
 
         Args:
@@ -55,10 +61,10 @@ class BaseGroupCommand(BaseCommand):
 
     def handle(
         self,
-        config: "Config",
-        auth_manager: "AuthManager",
-        client: "DeepgramClient",
-        **kwargs
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
+        **kwargs,
     ) -> Any:
         """Handle the group command execution.
 
@@ -82,7 +88,9 @@ class BaseGroupCommand(BaseCommand):
             # No subcommand was invoked
             if self.invoke_without_command:
                 # Call the group handler if defined
-                return self.handle_group(config, auth_manager, client, **kwargs)
+                return self.handle_group(
+                    config, auth_manager, client, **kwargs
+                )
             else:
                 # Show help by default
                 click.echo(ctx.get_help())
@@ -94,19 +102,19 @@ class BaseGroupCommand(BaseCommand):
 
     def handle_group(
         self,
-        config: "Config",
-        auth_manager: "AuthManager",
-        client: "DeepgramClient",
-        **kwargs
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
+        **kwargs,
     ) -> Any:
         """Handle group-specific logic.
 
-        Override this method to provide custom behavior when the group is invoked.
-        This is called regardless of whether a subcommand is invoked.
+        Override this method to provide custom behavior when the group is
+        invoked.
 
         Args:
             config: Configuration instance
-            auth_manager: Authentication manager instance  
+            auth_manager: Authentication manager instance
             client: Deepgram client instance
             **kwargs: Additional keyword arguments from CLI
 
@@ -132,29 +140,29 @@ class BaseGroupCommand(BaseCommand):
             help=self.help,
             short_help=self.short_help or self.help,
             invoke_without_command=self.invoke_without_command,
-            callback=self._create_group_callback()
+            callback=self._create_group_callback(),
         )
 
         # Add any group-level options/arguments
-        if hasattr(self, 'get_arguments'):
+        if hasattr(self, "get_arguments"):
             arguments = self.get_arguments()
             for arg in reversed(arguments):
-                if arg.get('is_option', False):
+                if arg.get("is_option", False):
                     group = click.option(
-                        *arg.get('names', []),
-                        default=arg.get('default'),
-                        help=arg.get('help', ''),
-                        type=arg.get('type', str),
-                        required=arg.get('required', False),
-                        is_flag=arg.get('is_flag', False),
-                        multiple=arg.get('multiple', False)
+                        *arg.get("names", []),
+                        default=arg.get("default"),
+                        help=arg.get("help", ""),
+                        type=arg.get("type", str),
+                        required=arg.get("required", False),
+                        is_flag=arg.get("is_flag", False),
+                        multiple=arg.get("multiple", False),
                     )(group)
                 else:
                     group = click.argument(
-                        arg.get('name', ''),
-                        type=arg.get('type', str),
-                        required=arg.get('required', True),
-                        nargs=arg.get('nargs', 1)
+                        arg.get("name", ""),
+                        type=arg.get("type", str),
+                        required=arg.get("required", True),
+                        nargs=arg.get("nargs", 1),
                     )(group)
 
         return group
@@ -165,6 +173,7 @@ class BaseGroupCommand(BaseCommand):
         Returns:
             Callback function for the group
         """
+
         def group_callback(**kwargs):
             # Pass CLI context and arguments to the command
             ctx = click.get_current_context()

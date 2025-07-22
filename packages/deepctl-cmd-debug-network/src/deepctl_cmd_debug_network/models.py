@@ -2,7 +2,6 @@
 
 from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 from deepctl_core import BaseResult
 
@@ -65,7 +64,8 @@ class TLSTestResult(BaseModel):
     cipher_suite: Optional[str] = None
     certificate_chain: List[CertificateInfo] = Field(default_factory=list)
     revocation_endpoints: List[RevocationEndpointTest] = Field(
-        default_factory=list)
+        default_factory=list
+    )
     chain_valid: bool = False
     chain_errors: List[str] = Field(default_factory=list)
     raw_openssl_output: Optional[str] = None
@@ -101,7 +101,8 @@ class NetworkDebugResult(BaseResult):
     endpoint_results: List[EndpointTestResult] = Field(default_factory=list)
     tls_test_results: Dict[str, TLSTestResult] = Field(default_factory=dict)
     python_requests_tests: List[PythonRequestsTest] = Field(
-        default_factory=list)
+        default_factory=list
+    )
     command_results: List[CommandExecutionResult] = Field(default_factory=list)
     proxy_detected: bool = False
     proxy_settings: Optional[Dict[str, str]] = None

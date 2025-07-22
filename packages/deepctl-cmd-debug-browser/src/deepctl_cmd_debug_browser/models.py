@@ -1,6 +1,6 @@
 """Data models for browser debug command."""
 
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field, field_serializer
 from datetime import datetime
 from enum import Enum
@@ -10,6 +10,7 @@ from deepctl_core import BaseResult
 
 class MessageType(str, Enum):
     """Types of messages from the browser debugger."""
+
     CAPABILITY_CHECK = "capability_check"
     ERROR = "error"
     INFO = "info"
@@ -19,6 +20,7 @@ class MessageType(str, Enum):
 
 class BrowserCapability(BaseModel):
     """Individual browser capability check result."""
+
     name: str
     supported: bool
     version: Optional[str] = None
@@ -28,6 +30,7 @@ class BrowserCapability(BaseModel):
 
 class BrowserCapabilities(BaseModel):
     """All browser capability check results."""
+
     web_audio_api: BrowserCapability
     audio_context: BrowserCapability
     audio_worklet: BrowserCapability
@@ -44,12 +47,13 @@ class BrowserCapabilities(BaseModel):
 
 class WebSocketMessage(BaseModel):
     """Message received from the browser via WebSocket."""
+
     type: MessageType
     timestamp: datetime = Field(default_factory=datetime.now)
     data: Dict[str, Any]
     message: Optional[str] = None
 
-    @field_serializer('timestamp')
+    @field_serializer("timestamp")
     def serialize_timestamp(self, timestamp: datetime) -> str:
         """Serialize datetime to ISO format string."""
         return timestamp.isoformat()

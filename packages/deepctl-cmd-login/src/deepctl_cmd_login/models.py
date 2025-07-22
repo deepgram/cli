@@ -10,7 +10,8 @@ class LoginResult(BaseResult):
 
     profile: str
     api_key_masked: Optional[str] = Field(
-        None, description="Obfuscated key for display – e.g. ****abcd")
+        None, description="Obfuscated key for display – e.g. ****abcd"
+    )
     project_id: Optional[str] = None
     config_path: Optional[str] = None
 

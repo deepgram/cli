@@ -62,9 +62,12 @@ class BaseCommand(ABC):
             project_id = auth_manager.get_project_id()
             if not project_id:
                 console.print(
-                    "[red]Error:[/red] Project ID is required for this command")
+                    "[red]Error:[/red] Project ID is required for this command"
+                )
                 console.print(
-                    "Set DEEPGRAM_PROJECT_ID environment variable or configure via profile")
+                    "Set DEEPGRAM_PROJECT_ID environment variable or "
+                    "configure via profile"
+                )
                 raise click.ClickException("Project ID required")
 
         # Execute the command
@@ -91,7 +94,7 @@ class BaseCommand(ABC):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs,
     ) -> Any:
         """Handle the command execution.
 
@@ -132,7 +135,11 @@ class BaseCommand(ABC):
 
         if isinstance(result, _PydanticBaseModel):
             result = result.model_dump()
-        elif (isinstance(result, list) and result and isinstance(result[0], _PydanticBaseModel)):
+        elif (
+            isinstance(result, list)
+            and result
+            and isinstance(result[0], _PydanticBaseModel)
+        ):
             result = [item.model_dump() for item in result]
 
         if output_format == "json":
@@ -164,13 +171,18 @@ class BaseCommand(ABC):
             console.print(yaml.dump(result, default_flow_style=False))
         else:
             console.print(
-                yaml.dump({"result": str(result)}, default_flow_style=False))
+                yaml.dump({"result": str(result)}, default_flow_style=False)
+            )
 
     def _output_table(self, result: Any) -> None:
         """Output result as table."""
         from rich.table import Table
 
-        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
+        if (
+            isinstance(result, list)
+            and len(result) > 0
+            and isinstance(result[0], dict)
+        ):
             # List of dictionaries - create table
             table = Table(show_header=True, header_style="bold blue")
 
@@ -181,8 +193,9 @@ class BaseCommand(ABC):
 
                 # Add rows
                 for item in result:
-                    table.add_row(*[str(item.get(key, ""))
-                                  for key in result[0].keys()])
+                    table.add_row(
+                        *[str(item.get(key, "")) for key in result[0].keys()]
+                    )
 
             console.print(table)
 
@@ -206,7 +219,11 @@ class BaseCommand(ABC):
         import csv
         import io
 
-        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
+        if (
+            isinstance(result, list)
+            and len(result) > 0
+            and isinstance(result[0], dict)
+        ):
             # List of dictionaries
             output = io.StringIO()
             writer = csv.DictWriter(output, fieldnames=result[0].keys())
@@ -246,7 +263,12 @@ class BaseCommand(ABC):
         except click.Abort:
             return False
 
-    def prompt(self, message: str, default: Optional[str] = None, hide_input: bool = False) -> str:
+    def prompt(
+        self,
+        message: str,
+        default: Optional[str] = None,
+        hide_input: bool = False,
+    ) -> str:
         """Prompt user for input.
 
         Args:
@@ -262,7 +284,9 @@ class BaseCommand(ABC):
             return default
 
         try:
-            return click.prompt(message, default=default, hide_input=hide_input)
+            return click.prompt(
+                message, default=default, hide_input=hide_input
+            )
         except click.Abort:
             raise click.ClickException("User cancelled input")
 
@@ -292,12 +316,14 @@ class BaseCommand(ABC):
         import re
 
         url_pattern = re.compile(
-            r'^https?://'  # http:// or https://
+            r"^https?://"  # http:// or https://
             # domain...
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'
-            r'localhost|'  # localhost...
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
-            r'(?::\d+)?'  # optional port
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+            r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"
+            r"localhost|"  # localhost...
+            r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # ...or ip
+            r"(?::\d+)?"  # optional port
+            r"(?:/?|[/?]\S+)$",
+            re.IGNORECASE,
+        )
 
         return url_pattern.match(url) is not None
