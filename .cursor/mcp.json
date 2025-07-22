@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "deepctl-mcp": {
+      "command": "uv",
+      "args": [
+        "run",
+        "deepctl",
+        "mcp",
+        "--gnosis-url",
+        "https://gnosis-staging.fly.dev",
+        "--debug"
+      ]
+    }
+  }
+}
