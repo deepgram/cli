@@ -56,7 +56,7 @@ deepctl example --show-info
 
 ## How It Works
 
-1. **Entry Point Registration**: The plugin registers itself via the `deepctl.commands` entry point in `pyproject.toml`
+1. **Entry Point Registration**: The plugin registers itself via the `deepctl.plugins` entry point in `pyproject.toml`
 2. **Command Discovery**: The CLI's PluginManager discovers the plugin at runtime using `importlib.metadata`
 3. **Command Loading**: The plugin's command class is instantiated and added to the CLI
 4. **Execution**: When the user runs the command, the plugin's `handle()` method is called
