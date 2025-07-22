@@ -75,7 +75,7 @@ audio_file = audio_path.replace("\\", "/")
 
 ```bash
 # Test with different Python versions
-uv venv --python 3.8 && uv run pytest
+uv venv --python 3.10 && uv run pytest
 uv venv --python 3.12 && uv run pytest
 ```
 
@@ -86,7 +86,7 @@ Tests run automatically on:
 - Ubuntu (latest)
 - Windows (latest)
 - macOS (latest, both Intel and ARM)
-- Python 3.8 through 3.12
+- Python 3.10 through 3.12
 
 ## Common Issues and Solutions
 

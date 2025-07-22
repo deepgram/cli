@@ -30,14 +30,21 @@ Welcome to the deepctl documentation. This wiki contains architectural decisions
 
 - **[Testing and Test Strategy](Testing%20and%20Test%20Strategy.md)** - Overview of the testing approach and requirements
 
-- **[Testing With Flexible Options](Testing%20With%20Flexible%20Options.md)** - How to use the custom test runner for monorepo testing
+- **[Testing With Tox](Testing%20With%20Tox.md)** - How to use tox for testing across the monorepo
+
+- **[Python Version Compatibility](Python%20Version%20Compatibility.md)** - Testing across Python versions and compatibility requirements
+
+## Versioning & Release
+
+- **[Versioning Strategy](Versioning%20Strategy.md)** - Synchronized versioning approach and release process for PyPI publishing
+
+- **[PyPI Publishing Guide](PyPI%20Publishing%20Guide.md)** - Complete guide for publishing packages to PyPI
 
 ## Quick Links
 
 - Main repository: `/cli/`
 - Core package: `/cli/packages/deepctl-core/`
 - Command packages: `/cli/packages/deepctl-cmd-*/`
-- Test runner: `/cli/scripts/test_runner.py`
 
 ## Key Commands
 
@@ -49,9 +56,9 @@ uv sync
 uv run deepctl --help
 
 # Run tests
-uv run pytest              # Main CLI tests only
-uv run pytest --all        # All tests
-uv run pytest --package=deepctl-core  # Specific package
+uv run tox                 # All Python versions
+uv run tox -e py311        # Specific Python version
+uv run tox -e lint         # Linting only
 
 # Build packages
 uv build

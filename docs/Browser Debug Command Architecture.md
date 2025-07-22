@@ -113,7 +113,7 @@ Messages use JSON format with the following structure:
 
 ### Static File Serving
 
-The HTML file is served from the package's static directory using `importlib.resources` for Python 3.9+ compatibility, with fallbacks for older Python versions.
+The HTML file is served from the package's static directory using `importlib.resources`.
 
 ### Async Implementation
 
