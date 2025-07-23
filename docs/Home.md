@@ -12,6 +12,8 @@ Welcome to the deepctl documentation. This wiki contains architectural decisions
 
 - **[Commands and Plugins Architecture](Commands%20and%20Plugins%20Architecture.md)** - Distinction between built-in commands and external plugins, with entry point groups
 
+- **[Plugin Installation Guide](Plugin%20Installation%20Guide.md)** - How to install and manage external plugins in various scenarios
+
 - **[MCP Server Command Architecture](MCP%20Server%20Command%20Architecture.md)** - Implementation of the Model Context Protocol server for Deepgram's Gnosis AI service
 
 ## Security & Authentication

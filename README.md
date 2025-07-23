@@ -19,10 +19,10 @@ uvx deepctl transcribe audio.wav
 ### Install permanently
 
 ```bash
-# Using pipx
+# Recommended: Using pipx (supports plugins!)
 pipx install deepctl
 
-# Using uv (recommended)
+# Alternative: Using uv tool (plugins require manual workarounds)
 uv tool install deepctl
 ```
 
@@ -137,9 +137,24 @@ See [Workspace and Monorepo Architecture](docs/Workspace%20and%20Monorepo%20Arch
 uv run pytest
 ```
 
-## Plugin Development
+## Plugin Support
 
-The CLI supports custom plugins. Create a new command by extending the `BaseCommand` class:
+### Installing Plugins
+
+Deepctl supports external plugins that add custom commands:
+
+```bash
+# First, install deepctl globally with pipx
+pipx install deepctl
+
+# Then inject plugins into the same environment
+pipx inject deepctl deepctl-plugin-example
+pipx inject deepctl your-custom-plugin
+```
+
+### Creating Plugins
+
+Create custom commands by extending the `BaseCommand` class:
 
 ```python
 from deepctl_core.base_command import BaseCommand
@@ -152,6 +167,8 @@ class MyCommand(BaseCommand):
         # Command implementation
         pass
 ```
+
+See [packages/deepctl-plugin-example](packages/deepctl-plugin-example) for a complete example.
 
 ## Support
 

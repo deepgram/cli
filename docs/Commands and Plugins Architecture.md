@@ -89,10 +89,48 @@ To create an external plugin:
 Users install plugins with:
 
 ```bash
+# Recommended: Using pipx (if deepctl was installed with pipx)
+pipx inject deepctl deepctl-plugin-yourname
+
+# Alternative: Direct pip install (only works in development environments)
 pip install deepctl-plugin-yourname
 ```
 
 The plugin is automatically discovered on the next run of `deepctl`.
+
+### Global Installation with Plugins
+
+For the best plugin experience:
+
+1. **Install deepctl globally with pipx**:
+
+   ```bash
+   pipx install deepctl
+   ```
+
+2. **Add plugins to the same environment**:
+
+   ```bash
+   pipx inject deepctl deepctl-plugin-example
+   pipx inject deepctl community-plugin-name
+   ```
+
+3. **Manage plugins**:
+
+   ```bash
+   # List installed packages
+   pipx list
+
+   # Upgrade deepctl and all injected plugins
+   pipx upgrade deepctl --include-injected
+
+   # Uninstall a plugin
+   pipx uninject deepctl deepctl-plugin-example
+   ```
+
+### Why pipx?
+
+When deepctl is installed globally (via pipx, uv tool, or system package managers), it runs in an isolated Python environment. Plugins must be installed into that same environment to be discovered. pipx's `inject` command handles this automatically, while other tools require manual workarounds.
 
 ## Future Enhancements
 

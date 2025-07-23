@@ -11,7 +11,7 @@ This plugin shows how to extend deepctl with custom commands that can be:
 - Installed alongside the CLI
 - Discovered automatically at runtime
 
-**Note:** This plugin is NOT a dependency of deepctl. It must be installed separately to demonstrate how the plugin system works for third-party developers.
+**Note:** This plugin is NOT a dependency of deepctl. It must be installed separately to demonstrate how the plugin system works for third-party developers. This example plugin is published to PyPI with each deepctl release to ensure the documentation is always testable.
 
 ## Installation
 
@@ -29,15 +29,18 @@ uv pip install -e .
 
 ### Production Installation
 
-In a real-world scenario, you would publish this to PyPI and users would install it:
+For users who have deepctl installed globally:
 
 ```bash
-# Install the CLI
-pip install deepctl
+# Recommended: Using pipx (if deepctl was installed with pipx)
+pipx install deepctl  # If not already installed
+pipx inject deepctl deepctl-plugin-example
 
-# Install the plugin separately
-pip install deepctl-plugin-example
+# Alternative: Using pip (only works in development environments)
+pip install deepctl deepctl-plugin-example
 ```
+
+**Note:** If you installed deepctl with `uv tool install`, plugin installation requires manual workarounds. We recommend using pipx for the best plugin experience.
 
 ## Usage
 
@@ -72,6 +75,7 @@ To create your own deepctl plugin:
 5. **Implement logic** in the `handle()` method
 6. **Test locally** with `pip install -e .`
 7. **Publish to PyPI** when ready
+8. **Users install it** with `pipx inject deepctl your-plugin-name`
 
 ### Key Requirements
 
