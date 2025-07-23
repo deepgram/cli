@@ -7,7 +7,7 @@ name = "deepctl"
 version = "0.1.0"
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 maintainers = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 classifiers = [
