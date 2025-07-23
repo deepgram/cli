@@ -57,23 +57,25 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
-    "twine>=4.0.0",
-    "build>=0.10.0",
-    "tox>=4.0.0",
-]
-test = [
+    # Testing
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
     "responses>=0.23.0",
+    # Code Quality
+    "black>=23.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.0.0",
+    # Type Stubs
+    "types-PyYAML>=6.0.0",
+    "types-requests>=2.31.0",
+    # Development Tools
+    "pre-commit>=3.0.0",
+    "tox>=4.0.0",
+    # Publishing
+    "twine>=4.0.0",
+    "build>=0.10.0",
 ]
 
 [project.urls]
@@ -109,18 +111,8 @@ include = '\.pyi?$'
 
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
 strict = true
+files = "src/,packages/*/src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests"]
@@ -226,7 +218,14 @@ commands = [
 
 [tool.tox.env.lint]
 # base_python will default to python3.11 as per the env name
-deps = ["uv", "mypy>=1.0.0", "flake8>=6.0.0", "black>=23.0.0"]
+deps = [
+    "uv",
+    "mypy>=1.0.0",
+    "ruff>=0.8.0",
+    "black>=23.0.0",
+    "types-PyYAML>=6.0.0",
+    "types-requests>=2.31.0",
+]
 allowlist_externals = ["uv"]
 commands_pre = [
     [
@@ -245,7 +244,7 @@ commands = [
     [
         "black",
         "--check",
-        "src/deepctl",
+        "src/",
         "packages/deepctl-core/src",
         "packages/deepctl-shared-utils/src",
         "packages/deepctl-cmd-login/src",
@@ -259,8 +258,9 @@ commands = [
         "packages/deepctl-cmd-mcp/src",
     ],
     [
-        "flake8",
-        "src/deepctl",
+        "ruff",
+        "check",
+        "src/",
         "packages/deepctl-core/src",
         "packages/deepctl-shared-utils/src",
         "packages/deepctl-cmd-login/src",
@@ -275,7 +275,18 @@ commands = [
     ],
     [
         "mypy",
-        "src/deepctl",
+        "src/",
+        "packages/deepctl-core/src",
+        "packages/deepctl-shared-utils/src",
+        "packages/deepctl-cmd-login/src",
+        "packages/deepctl-cmd-projects/src",
+        "packages/deepctl-cmd-transcribe/src",
+        "packages/deepctl-cmd-usage/src",
+        "packages/deepctl-cmd-debug/src",
+        "packages/deepctl-cmd-debug-audio/src",
+        "packages/deepctl-cmd-debug-browser/src",
+        "packages/deepctl-cmd-debug-network/src",
+        "packages/deepctl-cmd-mcp/src",
     ],
 ]
 
@@ -317,4 +328,65 @@ deepctl-shared-utils = { workspace = true }
 [tool.uv.workspace]
 # Workspace configuration
 members = ["packages/*"]
+
+[dependency-groups]
+dev = ["types-pyyaml>=6.0.12.20250516", "types-requests>=2.32.4.20250611"]
+
+[tool.ruff]
+# Exclude common directories
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "dist",
+    "build",
+    "*.egg-info",
+]
+
+# Same line length as Black
+line-length = 88
+
+# Target Python 3.10+
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable multiple rule sets
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "RUF", # Ruff-specific rules
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function calls in argument defaults
+    "B904",   # raise from exception
+    "SIM105", # try-except-pass
+    "RUF001", # ambiguous unicode characters (info symbol)
+    "ARG001", # unused function arguments (often needed for interfaces)
+    "E721",   # type comparison (sometimes needed for Pydantic)
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore unused imports in __init__ files
+"**/__init__.py" = ["F401"]
+# Ignore imports in tests
+"**/test_*.py" = ["F401", "ARG"]
+# Ignore unused arguments in command handler methods
+"**/command.py" = ["ARG002"]
+"**/commands.py" = ["ARG002"]
 # The root project (deepctl) is implicitly a member since it contains [project]
