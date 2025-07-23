@@ -45,8 +45,13 @@ class BaseCommand(ABC):
         if not config:
             config = Config()
 
-        # Create auth manager
-        auth_manager = AuthManager(config)
+        # Extract explicit credentials from kwargs if provided
+        explicit_api_key = kwargs.get("api_key")
+        explicit_project_id = kwargs.get("project_id")
+
+        # Create auth manager with explicit credentials
+        auth_manager = AuthManager(
+            config, explicit_api_key, explicit_project_id)
 
         # Create Deepgram client
         client = DeepgramClient(config, auth_manager)
@@ -55,6 +60,26 @@ class BaseCommand(ABC):
         if self.requires_auth:
             try:
                 auth_manager.guard()
+
+                # Log credential source and project ID for transparency
+                if not config.get("output.quiet", False):
+                    source = auth_manager.get_credential_source()
+                    project_id = auth_manager.get_project_id()
+
+                    # Only log if not using a profile (i.e., using env vars or flags)
+                    if source in ["explicit flags", "environment variables"]:
+                        console.print(
+                            f"[dim]Using credentials from {source}[/dim]"
+                        )
+                        if project_id:
+                            console.print(
+                                f"[dim]Affecting project: {project_id}[/dim]"
+                            )
+                        else:
+                            console.print(
+                                "[yellow]Warning: No project ID specified[/yellow]"
+                            )
+
             except Exception as e:
                 console.print(f"[red]Authentication required:[/red] {e}")
                 raise click.ClickException(str(e))

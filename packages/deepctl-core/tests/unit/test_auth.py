@@ -275,3 +275,217 @@ class TestAuthManager:
     def test_is_ci_mode_false_no_env_vars(self, auth_manager):
         """Test CI mode detection when no env vars are set."""
         assert auth_manager.is_ci_mode() is False
+
+
+class TestAuthPrecedence:
+    """Test authentication precedence rules."""
+
+    def test_explicit_credentials_highest_priority(self, mock_config):
+        """Test that explicit credentials have highest priority."""
+        # Set up environment variables
+        with patch.dict("os.environ", {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project"
+        }):
+            # Set up profile credentials
+            mock_profile = Mock()
+            mock_profile.api_key = "sk-profile-key"
+            mock_profile.project_id = "profile-project"
+            mock_config.get_profile.return_value = mock_profile
+
+            # Create auth manager with explicit credentials
+            auth_manager = AuthManager(
+                mock_config,
+                explicit_api_key="sk-explicit-key",
+                explicit_project_id="explicit-project"
+            )
+
+            # Explicit credentials should take precedence
+            assert auth_manager.get_api_key() == "sk-explicit-key"
+            assert auth_manager.get_project_id() == "explicit-project"
+            assert auth_manager.get_credential_source() == "explicit flags"
+
+    def test_profile_credentials_over_env(self, mock_config):
+        """Test that profile credentials take precedence over environment."""
+        # Set up environment variables
+        with patch.dict("os.environ", {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project"
+        }):
+            # Set up profile credentials in keyring
+            with patch("deepctl_core.auth.keyring") as mock_keyring:
+                def get_password_side_effect(service, key):
+                    if key == "api-key.default":
+                        return "sk-profile-key"
+                    return None
+
+                mock_keyring.get_password.side_effect = get_password_side_effect
+
+                mock_profile = Mock()
+                mock_profile.api_key = None  # Not in config
+                mock_profile.project_id = "profile-project"
+                mock_config.get_profile.return_value = mock_profile
+
+                auth_manager = AuthManager(mock_config)
+
+                # Profile credentials should take precedence
+                assert auth_manager.get_api_key() == "sk-profile-key"
+                assert auth_manager.get_project_id() == "profile-project"
+                assert auth_manager.get_credential_source() == "profile 'default'"
+
+    @patch.dict("os.environ", {
+        "DEEPGRAM_API_KEY": "sk-env-key",
+        "DEEPGRAM_PROJECT_ID": "env-project"
+    })
+    def test_env_credentials_fallback(self, mock_config):
+        """Test that environment variables are used as fallback."""
+        # No profile credentials
+        mock_profile = Mock()
+        mock_profile.api_key = None
+        mock_profile.project_id = None
+        mock_config.get_profile.return_value = mock_profile
+
+        with patch("deepctl_core.auth.keyring") as mock_keyring:
+            mock_keyring.get_password.return_value = None
+
+            auth_manager = AuthManager(mock_config)
+
+            # Should fall back to environment variables
+            assert auth_manager.get_api_key() == "sk-env-key"
+            assert auth_manager.get_project_id() == "env-project"
+            assert auth_manager.get_credential_source() == "environment variables"
+
+    def test_ignore_env_parameter(self, mock_config):
+        """Test that ignore_env parameter works correctly."""
+        with patch.dict("os.environ", {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project"
+        }):
+            # No profile credentials
+            mock_profile = Mock()
+            mock_profile.api_key = None
+            mock_profile.project_id = None
+            mock_config.get_profile.return_value = mock_profile
+
+            with patch("deepctl_core.auth.keyring") as mock_keyring:
+                mock_keyring.get_password.return_value = None
+
+                auth_manager = AuthManager(mock_config)
+
+                # With ignore_env=True, should return None
+                assert auth_manager.get_api_key(ignore_env=True) is None
+                assert auth_manager.get_project_id(ignore_env=True) is None
+
+                # Without ignore_env, should return env values
+                assert auth_manager.get_api_key(
+                    ignore_env=False) == "sk-env-key"
+                assert auth_manager.get_project_id(
+                    ignore_env=False) == "env-project"
+
+
+class TestCredentialDetection:
+    """Test credential detection methods."""
+
+    @patch.dict("os.environ", {
+        "DEEPGRAM_API_KEY": "sk-env-key",
+        "DEEPGRAM_PROJECT_ID": "env-project"
+    })
+    def test_has_env_credentials_both(self, auth_manager):
+        """Test detection when both env vars are set."""
+        has_key, has_project = auth_manager.has_env_credentials()
+        assert has_key is True
+        assert has_project is True
+
+    @patch.dict("os.environ", {"DEEPGRAM_API_KEY": "sk-env-key"})
+    def test_has_env_credentials_key_only(self, auth_manager):
+        """Test detection when only API key is set."""
+        has_key, has_project = auth_manager.has_env_credentials()
+        assert has_key is True
+        assert has_project is False
+
+    @patch.dict("os.environ", {})
+    def test_has_env_credentials_none(self, auth_manager):
+        """Test detection when no env vars are set."""
+        has_key, has_project = auth_manager.has_env_credentials()
+        assert has_key is False
+        assert has_project is False
+
+    def test_has_profile_credentials_in_keyring(self, mock_config):
+        """Test profile credential detection from keyring."""
+        with patch("deepctl_core.auth.keyring") as mock_keyring:
+            # Set up keyring to return API key
+            mock_keyring.get_password.side_effect = lambda service, key: {
+                "api-key.test-profile": "sk-profile-key"
+            }.get(key)
+
+            mock_profile = Mock()
+            mock_profile.api_key = None
+            mock_profile.project_id = "profile-project"
+            mock_config.get_profile.return_value = mock_profile
+
+            auth_manager = AuthManager(mock_config)
+            has_key, has_project = auth_manager.has_profile_credentials(
+                "test-profile")
+
+            assert has_key is True
+            assert has_project is True
+
+    def test_has_profile_credentials_in_config(self, mock_config):
+        """Test profile credential detection from config."""
+        with patch("deepctl_core.auth.keyring") as mock_keyring:
+            mock_keyring.get_password.return_value = None
+
+            mock_profile = Mock()
+            mock_profile.api_key = "sk-config-key"
+            mock_profile.project_id = "config-project"
+            mock_config.get_profile.return_value = mock_profile
+
+            auth_manager = AuthManager(mock_config)
+            has_key, has_project = auth_manager.has_profile_credentials(
+                "test-profile")
+
+            assert has_key is True
+            assert has_project is True
+
+    def test_has_profile_credentials_none(self, mock_config):
+        """Test profile credential detection when none exist."""
+        with patch("deepctl_core.auth.keyring") as mock_keyring:
+            mock_keyring.get_password.return_value = None
+
+            mock_profile = Mock()
+            mock_profile.api_key = None
+            mock_profile.project_id = None
+            mock_config.get_profile.return_value = mock_profile
+
+            auth_manager = AuthManager(mock_config)
+            has_key, has_project = auth_manager.has_profile_credentials(
+                "test-profile")
+
+            assert has_key is False
+            assert has_project is False
+
+    def test_is_authenticated_with_explicit_key(self, mock_config):
+        """Test is_authenticated with explicit API key."""
+        auth_manager = AuthManager(mock_config, explicit_api_key="sk-explicit")
+        assert auth_manager.is_authenticated() is True
+
+    def test_is_authenticated_check_profile_only(self, mock_config):
+        """Test is_authenticated with check_profile_only flag."""
+        with patch.dict("os.environ", {"DEEPGRAM_API_KEY": "sk-env-key"}):
+            # No profile credentials
+            mock_profile = Mock()
+            mock_profile.api_key = None
+            mock_config.get_profile.return_value = mock_profile
+
+            with patch("deepctl_core.auth.keyring") as mock_keyring:
+                mock_keyring.get_password.return_value = None
+
+                auth_manager = AuthManager(mock_config)
+
+                # Should be False when checking profile only
+                assert auth_manager.is_authenticated(
+                    check_profile_only=True) is False
+
+                # Should be True when checking all sources
+                assert auth_manager.is_authenticated(
+                    check_profile_only=False) is True

@@ -67,37 +67,82 @@ class AuthenticationError(Exception):
 class AuthManager:
     """Cross-platform authentication manager."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, explicit_api_key: str | None = None,
+                 explicit_project_id: str | None = None):
         """Initialize authentication manager.
 
         Args:
             config: Configuration manager instance
+            explicit_api_key: Explicitly provided API key (e.g., from CLI flags)
+            explicit_project_id: Explicitly provided project ID (e.g., from CLI flags)
         """
         self.config = config
+        self.explicit_api_key = explicit_api_key
+        self.explicit_project_id = explicit_project_id
         # Disable SSL verification for local development
         verify = not COMMUNITY_BASE_URL.startswith("https://community-local")
         self.client = httpx.Client(timeout=30.0, verify=verify)
 
-    def is_authenticated(self) -> bool:
-        """Check if user is authenticated."""
-        # Check for API key in environment
-        if os.getenv("DEEPGRAM_API_KEY"):
-            return True
+    def has_env_credentials(self) -> tuple[bool, bool]:
+        """Check if environment variables are set.
 
-        # Check keyring
+        Returns:
+            Tuple of (has_api_key, has_project_id)
+        """
+        return bool(os.getenv("DEEPGRAM_API_KEY")), bool(os.getenv("DEEPGRAM_PROJECT_ID"))
+
+    def has_profile_credentials(self, profile_name: str | None = None) -> tuple[bool, bool]:
+        """Check if profile has stored credentials.
+
+        Args:
+            profile_name: Profile to check (uses current profile if not specified)
+
+        Returns:
+            Tuple of (has_api_key, has_project_id)
+        """
+        profile_name = profile_name or self.config.profile or "default"
+
+        # Check keyring for API key
+        has_api_key = False
         try:
-            profile_name = self.config.profile or "default"
             api_key = keyring.get_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}"
-            )
-            if api_key:
-                return True
+                KEYRING_SERVICE, f"api-key.{profile_name}")
+            has_api_key = bool(api_key)
         except Exception:
             pass
 
-        # Check for API key in config (backward compatibility)
-        current_profile = self.config.get_profile()
-        return bool(current_profile.api_key)
+        # If not in keyring, check config
+        if not has_api_key:
+            profile = self.config.get_profile(profile_name)
+            has_api_key = bool(profile.api_key)
+
+        # Check for project ID in profile
+        profile = self.config.get_profile(profile_name)
+        has_project_id = bool(profile.project_id)
+
+        return has_api_key, has_project_id
+
+    def is_authenticated(self, check_profile_only: bool = False) -> bool:
+        """Check if user is authenticated.
+
+        Args:
+            check_profile_only: If True, only check profile credentials, not env vars
+        """
+        # Check explicit credentials first (highest priority)
+        if self.explicit_api_key:
+            return True
+
+        # Check profile credentials
+        profile_name = self.config.profile or "default"
+        has_profile_key, _ = self.has_profile_credentials(profile_name)
+        if has_profile_key:
+            return True
+
+        # Check environment variables (unless checking profile only)
+        if not check_profile_only and os.getenv("DEEPGRAM_API_KEY"):
+            return True
+
+        return False
 
     def is_ci_mode(self) -> bool:
         """Check if running in CI mode (credentials from environment)."""
@@ -107,54 +152,87 @@ class AuthManager:
             os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID")
         )
 
-    def get_api_key(self) -> str | None:
-        """Get API key from keyring, then environment, then config."""
-        # Environment variable takes precedence (CI-friendly)
-        api_key = os.getenv("DEEPGRAM_API_KEY")
-        if api_key:
-            return api_key
+    def get_api_key(self, ignore_env: bool = False) -> str | None:
+        """Get API key following precedence: explicit > profile > env.
 
-        # Check keyring next
+        Args:
+            ignore_env: If True, don't check environment variables
+        """
+        # Explicit credentials have highest priority
+        if self.explicit_api_key:
+            return self.explicit_api_key
+
+        # Check profile credentials next
+        profile_name = self.config.profile or "default"
+
+        # Check keyring first
         try:
             api_key = keyring.get_password(
-                KEYRING_SERVICE, f"api-key.{self.config.profile or 'default'}"
+                KEYRING_SERVICE, f"api-key.{profile_name}"
             )
             if api_key:
                 return api_key
         except Exception:
             pass  # Keyring not available or error
 
-        # Fall back to config file (for backward compatibility)
-        current_profile = self.config.get_profile()
+        # Check config file
+        current_profile = self.config.get_profile(profile_name)
         if current_profile.api_key:
             return current_profile.api_key
 
+        # Environment variable has lowest priority
+        if not ignore_env:
+            api_key = os.getenv("DEEPGRAM_API_KEY")
+            if api_key:
+                return api_key
+
         return None
 
-    def get_project_id(self) -> str | None:
-        """Get project ID from environment or config."""
-        # Environment variable takes precedence (CI-friendly)
-        project_id = os.getenv("DEEPGRAM_PROJECT_ID")
-        if project_id:
-            return project_id
+    def get_project_id(self, ignore_env: bool = False) -> str | None:
+        """Get project ID following precedence: explicit > profile > env.
 
-        # Check keyring for project ID (if stored there)
-        try:
-            project_id = keyring.get_password(
-                KEYRING_SERVICE,
-                f"project-id.{self.config.profile or 'default'}",
-            )
-            if project_id:
-                return project_id
-        except Exception:
-            pass
+        Args:
+            ignore_env: If True, don't check environment variables
+        """
+        # Explicit credentials have highest priority
+        if self.explicit_project_id:
+            return self.explicit_project_id
 
-        # Check current profile config
-        current_profile = self.config.get_profile()
+        # Check profile next
+        profile_name = self.config.profile or "default"
+        current_profile = self.config.get_profile(profile_name)
         if current_profile.project_id:
             return current_profile.project_id
 
+        # Environment variable has lowest priority
+        if not ignore_env:
+            project_id = os.getenv("DEEPGRAM_PROJECT_ID")
+            if project_id:
+                return project_id
+
         return None
+
+    def get_credential_source(self) -> str:
+        """Get a description of where credentials are coming from.
+
+        Returns:
+            Description like "explicit flags", "profile 'default'", or "environment variables"
+        """
+        if self.explicit_api_key or self.explicit_project_id:
+            return "explicit flags"
+
+        profile_name = self.config.profile or "default"
+        has_profile_key, has_profile_project = self.has_profile_credentials(
+            profile_name)
+
+        if has_profile_key or has_profile_project:
+            return f"profile '{profile_name}'"
+
+        has_env_key, has_env_project = self.has_env_credentials()
+        if has_env_key or has_env_project:
+            return "environment variables"
+
+        return "no credentials"
 
     def verify_credentials(
         self, api_key: str | None = None, project_id: str | None = None
@@ -318,27 +396,23 @@ class AuthManager:
             keyring.set_password(
                 KEYRING_SERVICE, f"api-key.{profile_name}", api_key
             )
-            if project_id:
-                keyring.set_password(
-                    KEYRING_SERVICE, f"project-id.{profile_name}", project_id
-                )
+            # Don't store project ID in keyring - it goes in profile config only
             console.print(
-                "[green]✓[/green] Credentials stored securely in system "
-                "keyring"
+                "[green]✓[/green] API key stored securely in system keyring"
             )
             keyring_available = True
         except Exception as e:
             console.print(
                 f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
             )
-            console.print("Credentials will be stored in config file instead")
+            console.print("API key will be stored in config file instead")
 
         # Update config with non-sensitive data
         # Only store API key in config if keyring is not available
         self.config.create_profile(
             profile_name,
             api_key=api_key if not keyring_available else None,
-            project_id=project_id,
+            project_id=project_id,  # Always store project ID in config
             base_url=self.config.get_profile(profile_name).base_url,
         )
 
@@ -366,16 +440,6 @@ class AuthManager:
     def login_with_device_flow(self) -> None:
         """Login using device flow (interactive method)."""
         console.print("[blue]Starting device flow authentication...[/blue]")
-
-        # Check if already authenticated
-        if self.is_authenticated():
-            console.print("[yellow]You're already logged in.[/yellow]")
-            if (
-                not console.input("Do you want to login again? [y/N]: ")
-                .lower()
-                .startswith("y")
-            ):
-                return
 
         try:
             # Get hostname for device identification
@@ -547,51 +611,53 @@ class AuthManager:
             keyring.set_password(
                 KEYRING_SERVICE, f"api-key.{profile_name}", api_key
             )
-            if project_id:
-                keyring.set_password(
-                    KEYRING_SERVICE, f"project-id.{profile_name}", project_id
-                )
+            # Don't store project ID in keyring - it goes in profile config only
             console.print(
-                "[green]✓[/green] Credentials stored securely in system "
-                "keyring"
+                "[green]✓[/green] API key stored securely in system keyring"
             )
             keyring_available = True
         except Exception as e:
             console.print(
                 f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
             )
-            console.print("Credentials will be stored in config file instead")
+            console.print("API key will be stored in config file instead")
 
         # Update config - only store API key if keyring is not available
         self.config.create_profile(
             profile_name,
             api_key=api_key if not keyring_available else None,
-            project_id=project_id,
+            project_id=project_id,  # Always store project ID in config
         )
 
-    def logout(self) -> None:
-        """Logout user and clear credentials."""
+    def logout(self, keep_config: bool = False) -> None:
+        """Logout user and clear credentials.
+
+        Args:
+            keep_config: If True, keep profile configuration (project ID, base URL)
+                        and only clear credentials. If False, remove profile completely.
+        """
         profile_name = self.config.profile or "default"
 
-        # Clear keyring
+        # Clear keyring (API key only)
         try:
             keyring.delete_password(KEYRING_SERVICE, f"api-key.{profile_name}")
-            keyring.delete_password(
-                KEYRING_SERVICE, f"project-id.{profile_name}"
-            )
-            console.print("[dim]Cleared credentials from system keyring[/dim]")
+            console.print("[dim]Cleared API key from system keyring[/dim]")
         except Exception:
             pass  # Ignore errors if not stored
 
-        # Clear sensitive data from config but keep profile
-        if profile_name in self.config.list_profiles():
-            profile = self.config.get_profile(profile_name)
-            self.config.create_profile(
-                profile_name,
-                api_key=None,  # Clear API key
-                project_id=profile.project_id,  # Keep project ID
-                base_url=profile.base_url,  # Keep base URL
-            )
+        if keep_config:
+            # Clear sensitive data from config but keep profile
+            if profile_name in self.config.list_profiles():
+                profile = self.config.get_profile(profile_name)
+                self.config.create_profile(
+                    profile_name,
+                    api_key=None,  # Clear API key
+                    project_id=profile.project_id,  # Keep project ID
+                    base_url=profile.base_url,  # Keep base URL
+                )
+        else:
+            # Clear profile completely from config
+            self.config.delete_profile(profile_name)
 
         console.print("[green]✓[/green] Successfully logged out")
 
@@ -610,12 +676,7 @@ class AuthManager:
                 api_key = keyring.get_password(
                     KEYRING_SERVICE, f"api-key.{profile_name}"
                 )
-                # Also check if project_id is in keyring
-                keyring_project_id = keyring.get_password(
-                    KEYRING_SERVICE, f"project-id.{profile_name}"
-                )
-                if keyring_project_id:
-                    project_id = keyring_project_id
+                # Project ID is only stored in config, not keyring
             except Exception:
                 # Fall back to config
                 api_key = profile.api_key

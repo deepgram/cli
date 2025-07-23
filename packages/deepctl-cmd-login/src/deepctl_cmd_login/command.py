@@ -12,6 +12,7 @@ from deepctl_core import (
     ProfilesResult,
 )
 from rich.console import Console
+from rich.prompt import Prompt
 
 from .models import LoginResult, LogoutResult
 
@@ -82,20 +83,79 @@ class LoginCommand(BaseCommand):
         if profile:
             config.profile = profile
 
-        # Check if user is already logged in
-        if auth_manager.is_authenticated() and not force_write:
+        current_profile = config.profile or "default"
+
+        # Check for environment variables
+        has_env_key, has_env_project = auth_manager.has_env_credentials()
+
+        if has_env_key and not force_write:
             console.print(
-                f"[yellow]Already logged in to profile:[/yellow] "
-                f"{config.profile or 'default'}"
+                "[yellow]Environment variable DEEPGRAM_API_KEY is set.[/yellow]"
+            )
+            if has_env_project:
+                console.print(
+                    "[yellow]Environment variable DEEPGRAM_PROJECT_ID is also set.[/yellow]\n"
+                    "[green]Commands will work using these environment variables.[/green]"
+                )
+            else:
+                console.print(
+                    "[yellow]Note: DEEPGRAM_PROJECT_ID is not set. "
+                    "You'll need to set it or provide it via --project-id flag.[/yellow]"
+                )
+
+            console.print(
+                "\n[dim]Logging in will create a profile that takes precedence "
+                "over environment variables.[/dim]"
             )
 
-            if not self.confirm("Do you want to login again?", default=False):
+            if not self.confirm(
+                "Do you still want to login with a profile?",
+                default=False
+            ):
                 return LoginResult(
                     status="cancelled",
-                    message="Login cancelled by user",
-                    profile=config.profile or "default",
+                    message="Login cancelled - using environment variables",
+                    profile=current_profile,
                     api_key_masked=None,
                 )
+
+        # Check if already logged into this profile
+        has_profile_key, has_profile_project = auth_manager.has_profile_credentials(
+            current_profile
+        )
+
+        if has_profile_key and not force_write:
+            console.print(
+                f"[yellow]Already logged in to profile:[/yellow] {current_profile}"
+            )
+
+            # Ask if they want to re-login to this profile
+            if self.confirm(
+                f"Do you want to re-login to profile '{current_profile}'?",
+                default=False
+            ):
+                # Continue with login
+                pass
+            else:
+                # Ask if they want to login with another profile
+                if self.confirm(
+                    "Do you want to login with another profile?",
+                    default=False
+                ):
+                    # Prompt for new profile name
+                    new_profile = Prompt.ask(
+                        "Enter profile name",
+                        default=f"{current_profile}-2"
+                    )
+                    config.profile = new_profile
+                    current_profile = new_profile
+                else:
+                    return LoginResult(
+                        status="cancelled",
+                        message="Login cancelled by user",
+                        profile=current_profile,
+                        api_key_masked=None,
+                    )
 
         # Determine authentication method
         if api_key:
@@ -141,33 +201,7 @@ class LoginCommand(BaseCommand):
             )
             console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
 
-        # Check if config file exists and prompt for overwrite
-        if not force_write:
-            if config.config_path.exists():
-                console.print(
-                    f"[yellow]Configuration file already exists:[/yellow] "
-                    f"{config.config_path}"
-                )
-                if not self.confirm(
-                    "Overwrite existing configuration?", default=False
-                ):
-                    return LoginResult(
-                        status="cancelled",
-                        message="Login cancelled by user",
-                        profile=config.profile or "default",
-                        api_key_masked=None,
-                    )
-            else:
-                if not self.confirm(
-                    "Do you want to write these credentials to config?",
-                    default=True,
-                ):
-                    return LoginResult(
-                        status="cancelled",
-                        message="Login cancelled by user",
-                        profile=config.profile or "default",
-                        api_key_masked=None,
-                    )
+        # No need to check for existing config - we handle that in the main flow
 
         try:
             # Store credentials (verification happens inside
@@ -177,6 +211,11 @@ class LoginCommand(BaseCommand):
             )
 
             profile_name = config.profile or "default"
+
+            # Update the active profile in config
+            config._config.active_profile = profile_name
+            config.save()
+
             return LoginResult(
                 status="success",
                 message="Successfully logged in with API key",
@@ -210,27 +249,17 @@ class LoginCommand(BaseCommand):
         """Handle web authentication with device flow."""
         console.print("[blue]Starting web authentication...[/blue]")
 
-        # Check if config file exists and prompt for overwrite
-        if not force_write and config.config_path.exists():
-            console.print(
-                f"[yellow]Configuration file already exists:[/yellow] "
-                f"{config.config_path}"
-            )
-            if not self.confirm(
-                "Overwrite existing configuration?", default=False
-            ):
-                return LoginResult(
-                    status="cancelled",
-                    message="Login cancelled by user",
-                    profile=config.profile or "default",
-                    api_key_masked=None,
-                )
+        # No need to check for existing config - we handle that in the main flow
 
         try:
             # Start device flow
             auth_manager.login_with_device_flow()
 
             profile_name = config.profile or "default"
+
+            # Update the active profile in config
+            config._config.active_profile = profile_name
+            config.save()
 
             # Retrieve the stored credentials
             api_key = auth_manager.get_api_key()
@@ -308,6 +337,12 @@ class LogoutCommand(BaseCommand):
                 "is_flag": True,
                 "is_option": True,
             },
+            {
+                "names": ["--keep-config"],
+                "help": "Keep profile configuration (project ID, base URL) and only clear credentials",
+                "is_flag": True,
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -320,6 +355,7 @@ class LogoutCommand(BaseCommand):
         """Handle logout command."""
         profile = kwargs.get("profile")
         logout_all = kwargs.get("all", False)
+        keep_config = kwargs.get("keep_config", False)
 
         try:
             if logout_all:
@@ -328,7 +364,11 @@ class LogoutCommand(BaseCommand):
                 for profile_name in profiles:
                     config.profile = profile_name
                     auth_manager_for_profile = AuthManager(config)
-                    auth_manager_for_profile.logout()
+                    auth_manager_for_profile.logout(keep_config=keep_config)
+
+                # Clear active profile since we logged out from all
+                config._config.active_profile = None
+                config.save()
 
                 console.print(
                     f"[green]✓[/green] Successfully logged out from all "
@@ -345,15 +385,23 @@ class LogoutCommand(BaseCommand):
                 if profile:
                     config.profile = profile
 
-                if not auth_manager.is_authenticated():
-                    console.print("[yellow]Not currently logged in[/yellow]")
+                profile_name = config.profile or "default"
+
+                # Check if profile exists (not just if authenticated)
+                if profile_name not in config.list_profiles():
+                    console.print(
+                        f"[yellow]Profile '{profile_name}' does not exist[/yellow]")
                     return LogoutResult(
-                        status="info", message="Not currently logged in"
+                        status="info", message=f"Profile '{profile_name}' does not exist"
                     )
 
-                auth_manager.logout()
+                auth_manager.logout(keep_config=keep_config)
 
-                profile_name = config.profile or "default"
+                # Clear active profile if we logged out from the current active profile
+                if config._config.active_profile == profile_name:
+                    config._config.active_profile = None
+                    config.save()
+
                 return LogoutResult(
                     status="success",
                     message=(
@@ -477,18 +525,68 @@ class ProfilesCommand(BaseCommand):
                     message=f"Profile '{switch_profile}' not found",
                 )
 
-            # Update default profile in config
-            config._config.default_profile = switch_profile
-            config.save()
-
+            # Require re-authentication when switching profiles
             console.print(
-                f"[green]✓[/green] Switched to profile: {switch_profile}"
+                f"[blue]Switching to profile:[/blue] {switch_profile}"
             )
-            return ProfilesResult(
-                status="success",
-                message=f"Switched to profile: {switch_profile}",
-                current_profile=switch_profile,
+            console.print(
+                "[dim]Re-authentication required to confirm access to credentials[/dim]"
             )
+
+            # Try to get API key from keyring to verify access
+            try:
+                import keyring
+                from deepctl_core.auth import KEYRING_SERVICE
+
+                api_key = keyring.get_password(
+                    KEYRING_SERVICE, f"api-key.{switch_profile}"
+                )
+
+                if not api_key:
+                    # Check if API key is in config instead
+                    profile_config = config.get_profile(switch_profile)
+                    if not profile_config.api_key:
+                        console.print(
+                            f"[red]No credentials found for profile '{switch_profile}'[/red]"
+                        )
+                        console.print(
+                            "[yellow]Please login to this profile first:[/yellow] "
+                            f"deepctl login --profile {switch_profile}"
+                        )
+                        return ProfilesResult(
+                            status="error",
+                            message=f"No credentials found for profile '{switch_profile}'",
+                        )
+
+                # Update active profile in config
+                config._config.active_profile = switch_profile
+                config.save()
+
+                console.print(
+                    f"[green]✓[/green] Switched to profile: {switch_profile}"
+                )
+
+                # Log the project ID being used
+                project_id = config.get_profile(switch_profile).project_id
+                if project_id:
+                    console.print(
+                        f"[dim]Using project ID:[/dim] {project_id}"
+                    )
+
+                return ProfilesResult(
+                    status="success",
+                    message=f"Switched to profile: {switch_profile}",
+                    current_profile=switch_profile,
+                )
+
+            except Exception as e:
+                console.print(
+                    f"[red]Error accessing credentials:[/red] {e}"
+                )
+                return ProfilesResult(
+                    status="error",
+                    message=f"Could not access credentials: {e}",
+                )
 
         else:
             # Default behavior - show current profile

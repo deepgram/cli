@@ -37,6 +37,7 @@ class DeepgramConfig(BaseModel):
     """Main configuration model."""
 
     default_profile: str = "default"
+    active_profile: str | None = None  # Currently selected profile
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
     output: OutputConfig = Field(default_factory=OutputConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
@@ -59,9 +60,26 @@ class Config:
             if config_path
             else self._get_default_config_path()
         )
-        self.profile = profile
+        self._explicit_profile = profile  # Store explicitly set profile
         self._config: DeepgramConfig
         self._load_config()
+
+    @property
+    def profile(self) -> str | None:
+        """Get the current profile name.
+
+        Precedence: explicit profile > active profile > default profile
+        """
+        return (
+            self._explicit_profile
+            or self._config.active_profile
+            or self._config.default_profile
+        )
+
+    @profile.setter
+    def profile(self, value: str | None) -> None:
+        """Set the profile name."""
+        self._explicit_profile = value
 
     def _get_default_config_path(self) -> Path:
         """Get the default configuration path for the current platform."""
@@ -255,6 +273,7 @@ class Config:
 
         config_dict = {
             "default_profile": self._config.default_profile,
+            "active_profile": self._config.active_profile,
             "profiles": {
                 name: profile.model_dump(exclude_none=True)
                 for name, profile in self._config.profiles.items()

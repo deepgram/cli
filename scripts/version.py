@@ -134,7 +134,7 @@ def main():
         f"\n✅ Successfully updated {len(SYNCHRONIZED_PACKAGES)} packages to v{new_version}")
     print("\n📋 Next steps:")
     print("1. Review changes: git diff")
-    print(f"2. Commit: git commit -am 'Bump version to v{new_version}'")
+    print(f"2. Commit: git commit -am 'chore: bump version to v{new_version}'")
     print(f"3. Tag: git tag v{new_version}")
     print("4. Push: git push && git push --tags")
 
