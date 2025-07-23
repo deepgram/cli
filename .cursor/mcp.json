@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "deepctl-mcp": {
-      "command": "uv",
+      "command": "pipx",
       "args": [
         "run",
         "deepctl",
