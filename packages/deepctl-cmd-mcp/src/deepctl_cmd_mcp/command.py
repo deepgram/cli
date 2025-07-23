@@ -98,6 +98,8 @@ class McpCommand(BaseCommand):
         self._shutdown_event.set()
         # Restore original handler to allow force quit on second Ctrl+C
         signal.signal(signal.SIGINT, self._original_sigint_handler)
+        # Raise KeyboardInterrupt to actually interrupt the blocking run() call
+        raise KeyboardInterrupt()
 
     def output_result(self, result: Any, config: Config) -> None:
         """Output command result, handling I/O errors gracefully."""

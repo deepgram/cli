@@ -196,8 +196,9 @@ class TestMcpCommand:
         original_handler = MagicMock()
         command._original_sigint_handler = original_handler
 
-        # Test signal handling
-        command._handle_shutdown(None, None)
+        # Test signal handling - should raise KeyboardInterrupt
+        with pytest.raises(KeyboardInterrupt):
+            command._handle_shutdown(None, None)
 
         # Check that interrupted flag was set
         assert command._interrupted is True
