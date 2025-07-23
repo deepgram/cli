@@ -1,17 +1,18 @@
 """Transcribe command for deepctl."""
 
-from typing import Dict, Any, List
 from pathlib import Path
-from rich.console import Console
+from typing import Any
 
 from deepctl_core import (
-    Config,
     AuthManager,
-    DeepgramClient,
     BaseCommand,
     BaseResult,
+    Config,
+    DeepgramClient,
 )
 from deepctl_shared_utils import validate_audio_file, validate_url
+from rich.console import Console
+
 from .models import TranscribeResult
 
 console = Console()
@@ -29,7 +30,7 @@ class TranscribeCommand(BaseCommand):
     requires_project = False  # Project ID is optional for transcription
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -104,7 +105,7 @@ class TranscribeCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> BaseResult:
         """Handle transcribe command."""
         source = kwargs.get("source")
@@ -118,12 +119,15 @@ class TranscribeCommand(BaseCommand):
         save_to = kwargs.get("save_to")
         no_validate = kwargs.get("no_validate", False)
 
+        # Check if source is provided
+        if not source:
+            return BaseResult(
+                status="error", message="No audio source provided"
+            )
+
         # Validate input if not skipped
-        if not no_validate:
-            if not self._validate_source(source):
-                return BaseResult(
-                    status="error", message="Invalid audio source"
-                )
+        if not no_validate and not self._validate_source(source):
+            return BaseResult(status="error", message="Invalid audio source")
 
         # Build transcription options
         options = {
@@ -199,7 +203,7 @@ class TranscribeCommand(BaseCommand):
         """Check if source is a URL."""
         return source.startswith(("http://", "https://"))
 
-    def _extract_transcript(self, result: dict) -> str:
+    def _extract_transcript(self, result: dict[str, Any]) -> str:
         """Extract transcript text from API result."""
         try:
             # Handle different response formats
@@ -207,15 +211,11 @@ class TranscribeCommand(BaseCommand):
                 # Standard format
                 channels = result["results"]["channels"]
                 if channels and "alternatives" in channels[0]:
-                    alternatives = channels[0]["alternatives"]
-                    if alternatives and "transcript" in alternatives[0]:
-                        return alternatives[0]["transcript"]
+                    return str(channels[0]["alternatives"][0]["transcript"])
 
-            # Fallback: try to find transcript in any structure
-            if isinstance(result, dict):
-                for key, value in result.items():
-                    if "transcript" in key.lower():
-                        return str(value)
+            # Fallback to looking for transcript in other locations
+            if "transcript" in result:
+                return str(result["transcript"])
 
             return "No transcript found in response"
 

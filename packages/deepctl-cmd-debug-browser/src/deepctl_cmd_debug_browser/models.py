@@ -1,11 +1,11 @@
 """Data models for browser debug command."""
 
-from typing import Optional, Dict, List, Any
-from pydantic import BaseModel, Field, field_serializer
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from deepctl_core import BaseResult
+from pydantic import BaseModel, Field, field_serializer
 
 
 class MessageType(str, Enum):
@@ -23,8 +23,8 @@ class BrowserCapability(BaseModel):
 
     name: str
     supported: bool
-    version: Optional[str] = None
-    details: Optional[str] = None
+    version: str | None = None
+    details: str | None = None
     required: bool = True
 
 
@@ -50,8 +50,8 @@ class WebSocketMessage(BaseModel):
 
     type: MessageType
     timestamp: datetime = Field(default_factory=datetime.now)
-    data: Dict[str, Any]
-    message: Optional[str] = None
+    data: dict[str, Any]
+    message: str | None = None
 
     @field_serializer("timestamp")
     def serialize_timestamp(self, timestamp: datetime) -> str:
@@ -64,9 +64,9 @@ class BrowserDebugResult(BaseResult):
 
     status: str = "success"
     port: int
-    capabilities: Optional[BrowserCapabilities] = None
-    messages: List[WebSocketMessage] = Field(default_factory=list)
-    errors: List[str] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    duration_seconds: Optional[float] = None
+    capabilities: BrowserCapabilities | None = None
+    messages: list[WebSocketMessage] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    duration_seconds: float | None = None
     browser_opened: bool = False

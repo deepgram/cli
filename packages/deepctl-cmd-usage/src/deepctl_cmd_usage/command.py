@@ -1,18 +1,19 @@
 """Usage command for deepctl."""
 
-from typing import List, Dict, Any
 from datetime import datetime, timedelta
-from rich.console import Console
+from typing import Any
 
 from deepctl_core import (
-    Config,
     AuthManager,
-    DeepgramClient,
     BaseCommand,
     BaseResult,
+    Config,
+    DeepgramClient,
 )
 from deepctl_shared_utils import validate_date_format
-from .models import UsageResult, UsageBucket
+from rich.console import Console
+
+from .models import UsageBucket, UsageResult
 
 console = Console()
 
@@ -29,7 +30,7 @@ class UsageCommand(BaseCommand):
     requires_project = True
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -81,7 +82,7 @@ class UsageCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> BaseResult:
         """Handle usage command."""
         project_id = kwargs.get("project_id")
@@ -161,7 +162,11 @@ class UsageCommand(BaseCommand):
         return first_day.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
 
     def _process_usage_result(
-        self, result: Any, summary_only: bool, start_date: str, end_date: str
+        self,
+        result: Any,
+        summary_only: bool,
+        start_date: str | None,
+        end_date: str | None,
     ) -> BaseResult:
         """Process usage result and display formatted output."""
         try:
@@ -297,17 +302,17 @@ class UsageCommand(BaseCommand):
             traceback.print_exc()
             return BaseResult(status="error", message=str(e))
 
-    def _extract_usage_data(self, result: dict) -> Dict[str, Any]:
+    def _extract_usage_data(self, result: dict[str, Any]) -> dict[str, Any]:
         """Extract usage data from API response."""
         if "usage" in result:
-            return result["usage"]
+            return dict(result["usage"])
         elif "results" in result:
-            return result["results"]
+            return dict(result["results"])
         else:
             return result
 
     def _display_usage_summary(
-        self, usage_data: Dict[str, Any], start_date: str, end_date: str
+        self, usage_data: dict[str, Any], start_date: str, end_date: str
     ) -> None:
         """Display usage summary."""
         console.print(
@@ -323,7 +328,7 @@ class UsageCommand(BaseCommand):
             console.print(f"  Total Requests: {total_requests:,}")
 
         if total_duration:
-            if isinstance(total_duration, (int, float)):
+            if isinstance(total_duration, int | float):
                 hours = total_duration / 3600
                 console.print(
                     f"  Total Duration: {hours:.2f} hours "
@@ -344,7 +349,7 @@ class UsageCommand(BaseCommand):
                 "details",
                 "breakdown",
             ]:
-                if isinstance(value, (int, float)):
+                if isinstance(value, int | float):
                     console.print(
                         f"  {key.replace('_', ' ').title()}: " f"{value:,}"
                     )
@@ -353,7 +358,7 @@ class UsageCommand(BaseCommand):
                         f"  {key.replace('_', ' ').title()}: {value}"
                     )
 
-    def _display_usage_details(self, usage_data: Dict[str, Any]) -> None:
+    def _display_usage_details(self, usage_data: dict[str, Any]) -> None:
         """Display detailed usage breakdown."""
         console.print("\n[blue]Detailed Breakdown:[/blue]")
 
@@ -366,7 +371,7 @@ class UsageCommand(BaseCommand):
 
                 if isinstance(data, dict):
                     for key, value in data.items():
-                        if isinstance(value, (int, float)):
+                        if isinstance(value, int | float):
                             console.print(
                                 f"    {key.replace('_', ' ').title()}: "
                                 f"{value:,}"

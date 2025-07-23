@@ -1,26 +1,26 @@
 """Output formatting utilities for deepctl."""
 
 import json
-import sys
-from typing import Any, Dict, List, Optional
 from io import StringIO
+from typing import Any
 
 import yaml
 from rich.console import Console
-from rich.table import Table
+from rich.json import JSON
+from rich.panel import Panel
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
-from rich.json import JSON
 from rich.syntax import Syntax
-from rich.panel import Panel
+from rich.table import Table
 
 # Global console instance
 console = Console()
+stderr_console = Console(stderr=True)
 
 # Global output configuration
 _output_config = {
@@ -109,27 +109,34 @@ class OutputFormatter:
                 # Try to parse as JSON first
                 try:
                     parsed = json.loads(data)
-                    return yaml.dump(
-                        parsed, default_flow_style=False, allow_unicode=True
+                    return str(
+                        yaml.dump(
+                            parsed,
+                            default_flow_style=False,
+                            allow_unicode=True,
+                        )
                     )
                 except json.JSONDecodeError:
                     # If not JSON, wrap in object
-                    return yaml.dump(
-                        {"result": data},
-                        default_flow_style=False,
-                        allow_unicode=True,
+                    return str(
+                        yaml.dump(
+                            {"result": data},
+                            default_flow_style=False,
+                            allow_unicode=True,
+                        )
                     )
             else:
-                return yaml.dump(
-                    data,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                    default=str,
+                return str(
+                    yaml.dump(
+                        data, default_flow_style=False, allow_unicode=True
+                    )
                 )
         except Exception as e:
-            return yaml.dump(
-                {"error": f"YAML formatting failed: {e}"},
-                default_flow_style=False,
+            return str(
+                yaml.dump(
+                    {"error": f"YAML formatting failed: {e}"},
+                    default_flow_style=False,
+                )
             )
 
     def _format_table(self, data: Any) -> str:
@@ -156,9 +163,11 @@ class OutputFormatter:
         try:
             if isinstance(data, list) and len(data) > 0:
                 if isinstance(data[0], dict):
-                    writer = csv.DictWriter(output, fieldnames=data[0].keys())
-                    writer.writeheader()
-                    writer.writerows(data)
+                    dict_writer = csv.DictWriter(
+                        output, fieldnames=data[0].keys()
+                    )
+                    dict_writer.writeheader()
+                    dict_writer.writerows(data)
                 else:
                     writer = csv.writer(output)
                     writer.writerow(["Value"])
@@ -178,21 +187,21 @@ class OutputFormatter:
         except Exception as e:
             return f"CSV formatting failed: {e}"
 
-    def _create_table_from_dict_list(self, data: List[Dict]) -> str:
+    def _create_table_from_dict_list(self, data: list[dict[str, Any]]) -> str:
         """Create table from list of dictionaries."""
         table = Table(show_header=True, header_style="bold blue")
 
         # Add columns
         if data:
-            for key in data[0].keys():
+            for key in data[0]:
                 table.add_column(key.replace("_", " ").title())
 
             # Add rows
             for item in data:
                 row = []
-                for key in data[0].keys():
+                for key in data[0]:
                     value = item.get(key, "")
-                    if isinstance(value, (dict, list)):
+                    if isinstance(value, dict | list):
                         row.append(json.dumps(value, default=str))
                     else:
                         row.append(str(value))
@@ -204,14 +213,14 @@ class OutputFormatter:
 
         return capture.get()
 
-    def _create_table_from_dict(self, data: Dict) -> str:
+    def _create_table_from_dict(self, data: dict[str, Any]) -> str:
         """Create table from dictionary."""
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("Key")
         table.add_column("Value")
 
         for key, value in data.items():
-            if isinstance(value, (dict, list)):
+            if isinstance(value, dict | list):
                 value_str = json.dumps(value, default=str)
             else:
                 value_str = str(value)
@@ -223,7 +232,7 @@ class OutputFormatter:
 
         return capture.get()
 
-    def _create_simple_table(self, data: List) -> str:
+    def _create_simple_table(self, data: list[Any]) -> str:
         """Create simple table from list."""
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("Value")
@@ -238,7 +247,7 @@ class OutputFormatter:
         return capture.get()
 
 
-def print_output(data: Any, format_type: Optional[str] = None) -> None:
+def print_output(data: Any, format_type: str | None = None) -> None:
     """Print data in the specified format.
 
     Args:
@@ -248,7 +257,7 @@ def print_output(data: Any, format_type: Optional[str] = None) -> None:
     if _output_config["quiet"]:
         return
 
-    format_type = format_type or _output_config["format"]
+    format_type = format_type or str(_output_config["format"])
     formatter = OutputFormatter(format_type)
 
     if format_type == "json":
@@ -291,7 +300,7 @@ def print_error(message: str) -> None:
     Args:
         message: Error message
     """
-    console.print(f"[red]✗[/red] {message}", file=sys.stderr)
+    stderr_console.print(f"[red]✗[/red] {message}")
 
 
 def print_warning(message: str) -> None:
@@ -339,7 +348,7 @@ def create_progress_bar(description: str = "Processing...") -> Progress:
         BarColumn(),
         TaskProgressColumn(),
         console=console,
-        disable=_output_config["quiet"],
+        disable=bool(_output_config["quiet"]),
     )
 
 
@@ -356,7 +365,7 @@ def create_spinner(description: str = "Processing...") -> Progress:
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
-        disable=_output_config["quiet"],
+        disable=bool(_output_config["quiet"]),
     )
 
 
@@ -415,7 +424,7 @@ def confirm_action(message: str, default: bool = False) -> bool:
         return response in ("y", "yes")
 
 
-def prompt_input(message: str, default: Optional[str] = None) -> str:
+def prompt_input(message: str, default: str | None = None) -> str:
     """Prompt for user input.
 
     Args:
@@ -431,7 +440,7 @@ def prompt_input(message: str, default: Optional[str] = None) -> str:
     try:
         import click
 
-        return click.prompt(message, default=default)
+        return str(click.prompt(message, default=default))
     except ImportError:
         # Fallback implementation
         prompt_text = f"{message}"

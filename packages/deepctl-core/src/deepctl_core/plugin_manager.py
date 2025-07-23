@@ -1,14 +1,15 @@
 """Plugin manager for deepctl command discovery and loading."""
 
-from pathlib import Path
-from typing import Dict, List, Type, Any
 from importlib import metadata
-from .models import PluginInfo, ErrorResult
-from .base_group_command import BaseGroupCommand
-from .base_command import BaseCommand
+from pathlib import Path
+from typing import Any, cast
 
 import click
 from rich.console import Console
+
+from .base_command import BaseCommand
+from .base_group_command import BaseGroupCommand
+from .models import ErrorResult, PluginInfo
 
 console = Console()
 
@@ -18,8 +19,8 @@ class PluginManager:
 
     def __init__(self) -> None:
         """Initialize plugin manager."""
-        self.loaded_plugins: Dict[str, Any] = {}
-        self.command_classes: Dict[str, Type] = {}
+        self.loaded_plugins: dict[str, Any] = {}
+        self.command_classes: dict[str, type[Any]] = {}
 
     def load_plugins(self, cli_group: click.Group) -> None:
         """Load all plugins into the CLI group.
@@ -107,7 +108,7 @@ class PluginManager:
         except Exception as e:
             console.print(f"[red]Error loading external plugins:[/red] {e}")
 
-    def _create_click_command(self, command_instance) -> click.Command:
+    def _create_click_command(self, command_instance: Any) -> click.Command:
         """Create a Click command from a BaseCommand instance.
 
         Args:
@@ -124,7 +125,7 @@ class PluginManager:
             return self._create_click_group(command_instance)
 
         # Create the command function
-        def command_func(**kwargs):
+        def command_func(**kwargs: Any) -> Any:
             # Pass CLI context and arguments to the command
             ctx = click.get_current_context()
             return command_instance.execute(ctx, **kwargs)
@@ -162,7 +163,7 @@ class PluginManager:
             group = group_instance.get_click_group()
         else:
             # Fallback for basic group creation
-            def group_func(**kwargs):
+            def group_func(**kwargs: Any) -> Any:
                 ctx = click.get_current_context()
                 return group_instance.execute(ctx, **kwargs)
 
@@ -180,7 +181,10 @@ class PluginManager:
             )
 
             # Add arguments and options to the group
-            group = self._add_command_arguments(group, group_instance)
+            group = cast(
+                "click.Group",
+                self._add_command_arguments(group, group_instance),
+            )
 
         # Load subcommands for this group
         self._load_subcommands_for_group(group, group_instance)
@@ -253,7 +257,7 @@ class PluginManager:
                 )
 
     def _add_command_arguments(
-        self, cmd: click.Command, command_instance
+        self, cmd: click.Command, command_instance: Any
     ) -> click.Command:
         """Add arguments and options to a Click command.
 
@@ -293,7 +297,7 @@ class PluginManager:
 
         return cmd
 
-    def get_command_list(self) -> List[str]:
+    def get_command_list(self) -> list[str]:
         """Get list of loaded command names.
 
         Returns:
@@ -352,7 +356,7 @@ class PluginManager:
         # Reload plugins
         self.load_plugins(cli_group)
 
-    def validate_plugin(self, plugin_class: Type) -> bool:
+    def validate_plugin(self, plugin_class: type[Any]) -> bool:
         """Validate that a plugin class is properly implemented.
 
         Args:
@@ -375,15 +379,12 @@ class PluginManager:
                     return False
 
             # Check if execute method exists
-            if not hasattr(instance, "execute"):
-                return False
-
-            return True
+            return hasattr(instance, "execute")
 
         except Exception:
             return False
 
-    def discover_plugin_directories(self) -> List[Path]:
+    def discover_plugin_directories(self) -> list[Path]:
         """Discover directories that might contain plugins.
 
         Returns:

@@ -2,11 +2,10 @@
 implementation."""
 
 import os
-import time
-import webbrowser
 import random
 import string
-from typing import Optional, Dict, Tuple
+import time
+import webbrowser
 from urllib.parse import urlencode
 
 import httpx
@@ -35,7 +34,7 @@ class DeviceCodeResponse(BaseModel):
     """Response from device code request."""
 
     device_code: str
-    user_code: Optional[str] = None  # Not used in current implementation
+    user_code: str | None = None  # Not used in current implementation
     verification_uri: str
     expires_in: int
     interval: int
@@ -46,9 +45,9 @@ class TokenResponse(BaseModel):
 
     access_token: str
     project_id: str
-    token_type: Optional[str] = None
-    expires_in: Optional[int] = None
-    scope: Optional[str] = None
+    token_type: str | None = None
+    expires_in: int | None = None
+    scope: str | None = None
 
     # The access_token returned is the actual Deepgram API key
     @property
@@ -98,10 +97,7 @@ class AuthManager:
 
         # Check for API key in config (backward compatibility)
         current_profile = self.config.get_profile()
-        if current_profile.api_key:
-            return True
-
-        return False
+        return bool(current_profile.api_key)
 
     def is_ci_mode(self) -> bool:
         """Check if running in CI mode (credentials from environment)."""
@@ -111,7 +107,7 @@ class AuthManager:
             os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID")
         )
 
-    def get_api_key(self) -> Optional[str]:
+    def get_api_key(self) -> str | None:
         """Get API key from keyring, then environment, then config."""
         # Environment variable takes precedence (CI-friendly)
         api_key = os.getenv("DEEPGRAM_API_KEY")
@@ -135,7 +131,7 @@ class AuthManager:
 
         return None
 
-    def get_project_id(self) -> Optional[str]:
+    def get_project_id(self) -> str | None:
         """Get project ID from environment or config."""
         # Environment variable takes precedence (CI-friendly)
         project_id = os.getenv("DEEPGRAM_PROJECT_ID")
@@ -161,8 +157,8 @@ class AuthManager:
         return None
 
     def verify_credentials(
-        self, api_key: Optional[str] = None, project_id: Optional[str] = None
-    ) -> Tuple[bool, str, Optional[str]]:
+        self, api_key: str | None = None, project_id: str | None = None
+    ) -> tuple[bool, str, str | None]:
         """Verify API key and project ID by making a request to the
         Deepgram API.
 
@@ -275,7 +271,7 @@ class AuthManager:
                 raise AuthenticationError(message)
 
     def login_with_api_key(
-        self, api_key: str, project_id: str, force_write: bool = False
+        self, api_key: str, project_id: str, _force_write: bool = False
     ) -> None:
         """Login with API key directly (CI-friendly method).
 
@@ -445,7 +441,7 @@ class AuthManager:
             console.print(f"[red]Error during device flow:[/red] {e}")
             raise AuthenticationError(f"Device flow failed: {e}")
 
-    def _request_device_code(self) -> Tuple[DeviceCodeResponse, str]:
+    def _request_device_code(self) -> tuple[DeviceCodeResponse, str]:
         """Request device code from community site.
 
         Returns:
@@ -601,7 +597,7 @@ class AuthManager:
 
     def list_profiles(self) -> ProfilesResult:
         """Return all profiles wrapped in ProfilesResult model."""
-        profiles: Dict[str, ProfileInfo] = {}
+        profiles: dict[str, ProfileInfo] = {}
 
         for profile_name in self.config.list_profiles():
             profile = self.config.get_profile(profile_name)
@@ -640,7 +636,7 @@ class AuthManager:
             or self.config._config.default_profile,
         )
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup HTTP client."""
         if hasattr(self, "client"):
             self.client.close()

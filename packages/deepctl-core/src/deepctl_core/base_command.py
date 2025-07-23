@@ -1,12 +1,14 @@
 """Base command class for deepctl commands."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 import click
 from rich.console import Console
 
-from . import Config, AuthManager, DeepgramClient
+from .auth import AuthManager
+from .client import DeepgramClient
+from .config import Config
 
 console = Console()
 
@@ -17,21 +19,21 @@ class BaseCommand(ABC):
     # Command metadata (to be overridden by subclasses)
     name: str = ""
     help: str = ""
-    short_help: Optional[str] = None
+    short_help: str | None = None
 
     # Command requirements
     requires_auth: bool = False
     requires_project: bool = False
     ci_friendly: bool = True
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize base command."""
         if not self.name:
             raise ValueError("Command must have a name")
         if not self.help:
             raise ValueError("Command must have help text")
 
-    def execute(self, ctx: click.Context, **kwargs) -> None:
+    def execute(self, ctx: click.Context, **kwargs: Any) -> None:
         """Execute the command with Click context.
 
         Args:
@@ -94,7 +96,7 @@ class BaseCommand(ABC):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle the command execution.
 
@@ -109,7 +111,7 @@ class BaseCommand(ABC):
         """
         pass
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options.
 
         Returns:
@@ -158,7 +160,7 @@ class BaseCommand(ABC):
         """Output result as JSON."""
         import json
 
-        if isinstance(result, (dict, list)):
+        if isinstance(result, dict | list):
             console.print_json(json.dumps(result, indent=2))
         else:
             console.print(json.dumps({"result": str(result)}, indent=2))
@@ -167,7 +169,7 @@ class BaseCommand(ABC):
         """Output result as YAML."""
         import yaml
 
-        if isinstance(result, (dict, list)):
+        if isinstance(result, dict | list):
             console.print(yaml.dump(result, default_flow_style=False))
         else:
             console.print(
@@ -188,13 +190,13 @@ class BaseCommand(ABC):
 
             # Add columns
             if result:
-                for key in result[0].keys():
+                for key in result[0]:
                     table.add_column(key.replace("_", " ").title())
 
                 # Add rows
                 for item in result:
                     table.add_row(
-                        *[str(item.get(key, "")) for key in result[0].keys()]
+                        *[str(item.get(key, "")) for key in result[0]]
                     )
 
             console.print(table)
@@ -226,9 +228,9 @@ class BaseCommand(ABC):
         ):
             # List of dictionaries
             output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=result[0].keys())
-            writer.writeheader()
-            writer.writerows(result)
+            dict_writer = csv.DictWriter(output, fieldnames=result[0].keys())
+            dict_writer.writeheader()
+            dict_writer.writerows(result)
             console.print(output.getvalue())
 
         elif isinstance(result, dict):
@@ -266,7 +268,7 @@ class BaseCommand(ABC):
     def prompt(
         self,
         message: str,
-        default: Optional[str] = None,
+        default: str | None = None,
         hide_input: bool = False,
     ) -> str:
         """Prompt user for input.
@@ -284,8 +286,8 @@ class BaseCommand(ABC):
             return default
 
         try:
-            return click.prompt(
-                message, default=default, hide_input=hide_input
+            return str(
+                click.prompt(message, default=default, hide_input=hide_input)
             )
         except click.Abort:
             raise click.ClickException("User cancelled input")

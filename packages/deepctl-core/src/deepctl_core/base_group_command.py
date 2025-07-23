@@ -1,13 +1,14 @@
 """Base class for group commands that can contain subcommands."""
 
-from typing import Dict, Type, Any
+from typing import Any
+
 import click
 from rich.console import Console
 
-from .base_command import BaseCommand
-from .config import Config
 from .auth import AuthManager
+from .base_command import BaseCommand
 from .client import DeepgramClient
+from .config import Config
 
 console = Console()
 
@@ -30,10 +31,10 @@ class BaseGroupCommand(BaseCommand):
                 console.print("Debug command requires a subcommand")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the group command."""
         super().__init__()
-        self.subcommands: Dict[str, Type[BaseCommand]] = {}
+        self.subcommands: dict[str, type[BaseCommand]] = {}
         self.is_group = True
         # By default, groups show help when invoked without subcommand
         # Only set if not already defined at class level
@@ -41,7 +42,7 @@ class BaseGroupCommand(BaseCommand):
             self.invoke_without_command = False
 
     def add_subcommand(
-        self, name: str, command_class: Type[BaseCommand]
+        self, name: str, command_class: type[BaseCommand]
     ) -> None:
         """Add a subcommand to this group.
 
@@ -51,7 +52,7 @@ class BaseGroupCommand(BaseCommand):
         """
         self.subcommands[name] = command_class
 
-    def get_subcommands(self) -> Dict[str, Type[BaseCommand]]:
+    def get_subcommands(self) -> dict[str, type[BaseCommand]]:
         """Get all registered subcommands.
 
         Returns:
@@ -64,7 +65,7 @@ class BaseGroupCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle the group command execution.
 
@@ -105,7 +106,7 @@ class BaseGroupCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle group-specific logic.
 
@@ -167,14 +168,14 @@ class BaseGroupCommand(BaseCommand):
 
         return group
 
-    def _create_group_callback(self):
+    def _create_group_callback(self) -> Any:
         """Create the callback function for the Click group.
 
         Returns:
             Callback function for the group
         """
 
-        def group_callback(**kwargs):
+        def group_callback(**kwargs: Any) -> Any:
             # Pass CLI context and arguments to the command
             ctx = click.get_current_context()
             return self.execute(ctx, **kwargs)

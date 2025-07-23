@@ -1,49 +1,49 @@
 """Core components for deepctl."""
 
-from .config import Config
-from .auth import AuthManager, AuthenticationError
-from .client import DeepgramClient
-from .plugin_manager import PluginManager
-from .models import (
-    ProfileInfo,
-    ProfilesResult,
-    PluginInfo,
-    ErrorResult,
-    BaseResult,
-)
+from .auth import AuthenticationError, AuthManager
 from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
+from .client import DeepgramClient
+from .config import Config
+from .models import (
+    BaseResult,
+    ErrorResult,
+    PluginInfo,
+    ProfileInfo,
+    ProfilesResult,
+)
 from .output import (
-    setup_output,
     OutputFormatter,
+    get_console,
+    print_error,
+    print_info,
     print_output,
     print_success,
-    print_error,
     print_warning,
-    print_info,
-    get_console,
+    setup_output,
 )
+from .plugin_manager import PluginManager
 
 __all__ = [
-    "Config",
     "AuthManager",
     "AuthenticationError",
+    "BaseCommand",
+    "BaseGroupCommand",
+    "BaseResult",
+    "Config",
     "DeepgramClient",
+    "ErrorResult",
+    "OutputFormatter",
+    "PluginInfo",
     "PluginManager",
     "ProfileInfo",
     "ProfilesResult",
-    "PluginInfo",
-    "ErrorResult",
-    "BaseResult",
-    "BaseCommand",
-    "BaseGroupCommand",
-    # Output utilities
-    "setup_output",
-    "OutputFormatter",
+    "get_console",
+    "print_error",
+    "print_info",
     "print_output",
     "print_success",
-    "print_error",
     "print_warning",
-    "print_info",
-    "get_console",
+    # Output utilities
+    "setup_output",
 ]

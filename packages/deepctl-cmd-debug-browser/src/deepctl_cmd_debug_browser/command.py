@@ -1,27 +1,27 @@
 """Browser debug command for deepctl."""
 
 import asyncio
+import importlib.resources
 import json
 import socket
 import time
 import webbrowser
-from typing import Any, List, Dict, Optional
 from pathlib import Path
-import importlib.resources
+from typing import Any
 
+from aiohttp import WSMsgType, web
+from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from aiohttp import web, WSMsgType
+from rich.table import Table
 
-from deepctl_core import BaseCommand, Config, AuthManager, DeepgramClient
 from .models import (
-    BrowserDebugResult,
-    WebSocketMessage,
-    MessageType,
     BrowserCapabilities,
     BrowserCapability,
+    BrowserDebugResult,
+    MessageType,
+    WebSocketMessage,
 )
 
 console = Console()
@@ -39,15 +39,15 @@ class BrowserCommand(BaseCommand):
     requires_project = False
     ci_friendly = False  # This command opens a browser
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.messages: List[WebSocketMessage] = []
-        self.capabilities_data = {}
-        self.ws_clients = set()
+        self.messages: list[WebSocketMessage] = []
+        self.capabilities_data: dict[str, Any] = {}
+        self.ws_clients: set[Any] = set()
         self.debug_complete = False
-        self.start_time = None
+        self.start_time: float | None = None
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -91,7 +91,7 @@ class BrowserCommand(BaseCommand):
             f"Could not find available port starting from {start_port}"
         )
 
-    async def websocket_handler(self, request):
+    async def websocket_handler(self, request: Any) -> Any:
         """Handle WebSocket connections from the browser."""
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -163,7 +163,7 @@ class BrowserCommand(BaseCommand):
 
         return ws
 
-    async def http_handler(self, request):
+    async def http_handler(self, request: Any) -> Any:
         """Serve the debug HTML page."""
         if request.path == "/":
             # Read the HTML template from the static directory
@@ -178,7 +178,7 @@ class BrowserCommand(BaseCommand):
             return web.Response(text=html_content, content_type="text/html")
         return web.Response(status=404)
 
-    async def run_servers(self, port: int, timeout: int) -> Dict[str, Any]:
+    async def run_servers(self, port: int, timeout: int) -> dict[str, Any]:
         """Run both HTTP and WebSocket servers."""
         # Create aiohttp app
         app = web.Application()
@@ -213,9 +213,9 @@ class BrowserCommand(BaseCommand):
 
     def display_results(
         self,
-        capabilities: Optional[BrowserCapabilities],
-        messages: List[WebSocketMessage],
-    ):
+        capabilities: BrowserCapabilities | None,
+        messages: list[WebSocketMessage],
+    ) -> None:
         """Display the debug results in a formatted way."""
         console.print("\n[bold cyan]Browser Debug Results[/bold cyan]\n")
 
@@ -307,7 +307,7 @@ class BrowserCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle browser debug command execution."""
         port = kwargs.get("port")

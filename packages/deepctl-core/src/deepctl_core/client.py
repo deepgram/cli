@@ -1,18 +1,22 @@
 """Deepgram SDK wrapper for deepctl with authentication integration."""
 
-from typing import Optional, Dict, Any, Union
 from pathlib import Path
+from typing import Any
 
-from deepgram import (
+from deepgram import (  # type: ignore[import-untyped]
     DeepgramClient as DGClient,
+)
+from deepgram import (
     DeepgramClientOptions,
     DeepgramError,
 )
-from deepgram.clients.prerecorded import PrerecordedOptions
+from deepgram.clients.prerecorded import (  # type: ignore[import-untyped]
+    PrerecordedOptions,
+)
 from rich.console import Console
 
-from .config import Config
 from .auth import AuthManager
+from .config import Config
 
 console = Console()
 
@@ -29,8 +33,8 @@ class DeepgramClient:
         """
         self.config = config
         self.auth_manager = auth_manager
-        self._client: Optional[DGClient] = None
-        self._project_id: Optional[str] = None
+        self._client: DGClient | None = None
+        self._project_id: str | None = None
 
     @property
     def client(self) -> DGClient:
@@ -61,10 +65,9 @@ class DeepgramClient:
                 options = DeepgramClientOptions(url=current_profile.base_url)
 
             # Create client with API key and options
-            if options:
-                client = DGClient(api_key, options)
-            else:
-                client = DGClient(api_key)
+            client = (
+                DGClient(api_key, options) if options else DGClient(api_key)
+            )
 
             # Store project ID for later use
             self._project_id = project_id
@@ -77,9 +80,9 @@ class DeepgramClient:
 
     def transcribe_file(
         self,
-        file_path: Union[str, Path],
-        options: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        file_path: str | Path,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Transcribe an audio file.
 
         Args:
@@ -117,15 +120,15 @@ class DeepgramClient:
                     payload, prerecorded_options
                 )
 
-                return response
+                return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error transcribing file:[/red] {e}")
             raise DeepgramError(f"Transcription failed: {e}")
 
     def transcribe_url(
-        self, url: str, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, url: str, options: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Transcribe audio from URL.
 
         Args:
@@ -157,13 +160,13 @@ class DeepgramClient:
                 payload, prerecorded_options
             )
 
-            return response
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error transcribing URL:[/red] {e}")
             raise DeepgramError(f"Transcription failed: {e}")
 
-    def get_projects(self) -> Dict[str, Any]:
+    def get_projects(self) -> dict[str, Any]:
         """Get user's projects.
 
         Returns:
@@ -171,13 +174,13 @@ class DeepgramClient:
         """
         try:
             response = self.client.manage.v("1").get_projects()
-            return response
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error getting projects:[/red] {e}")
             raise DeepgramError(f"Failed to get projects: {e}")
 
-    def get_project(self, project_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_project(self, project_id: str | None = None) -> dict[str, Any]:
         """Get specific project.
 
         Args:
@@ -196,15 +199,15 @@ class DeepgramClient:
 
         try:
             response = self.client.manage.v("1").get_project(project_id)
-            return response
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error getting project:[/red] {e}")
             raise DeepgramError(f"Failed to get project: {e}")
 
     def create_project(
-        self, name: str, company: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, name: str, company: str | None = None
+    ) -> dict[str, Any]:
         """Create a new project.
 
         Args:
@@ -220,7 +223,7 @@ class DeepgramClient:
                 project_data["company"] = company
 
             response = self.client.manage.v("1").create_project(project_data)
-            return response
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error creating project:[/red] {e}")
@@ -228,10 +231,10 @@ class DeepgramClient:
 
     def get_usage(
         self,
-        project_id: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        project_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
         """Get usage statistics.
 
         Args:
@@ -264,13 +267,13 @@ class DeepgramClient:
             # Add project_id to response for consistency
             if isinstance(response, dict):
                 response["project_id"] = project_id
-            return response
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error getting usage:[/red] {e}")
             raise DeepgramError(f"Failed to get usage: {e}")
 
-    def get_models(self, project_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_models(self, project_id: str | None = None) -> dict[str, Any]:
         """Get available models.
 
         Args:
@@ -288,13 +291,13 @@ class DeepgramClient:
             # The new SDK doesn't have get_models, this is likely part of
             # get_project
             response = self.client.manage.v("1").get_project(project_id)
-            return response
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error getting models:[/red] {e}")
             raise DeepgramError(f"Failed to get models: {e}")
 
-    def validate_api_key(self, api_key: Optional[str] = None) -> bool:
+    def validate_api_key(self, api_key: str | None = None) -> bool:
         """Validate API key by making a simple API call.
 
         Args:

@@ -1,9 +1,9 @@
 """Data models for network debug command."""
 
-from typing import Optional, Dict, List, Any
-from pydantic import BaseModel, Field
+from typing import Any
 
 from deepctl_core import BaseResult
+from pydantic import BaseModel, Field
 
 
 class EndpointTestResult(BaseModel):
@@ -12,9 +12,9 @@ class EndpointTestResult(BaseModel):
     name: str
     url: str
     reachable: bool
-    status_code: Optional[int] = None
-    response_time_ms: Optional[float] = None
-    error: Optional[str] = None
+    status_code: int | None = None
+    response_time_ms: float | None = None
+    error: str | None = None
     ssl_valid: bool = True
 
 
@@ -23,9 +23,9 @@ class DNSResult(BaseModel):
 
     hostname: str
     resolved: bool
-    ip_addresses: List[str] = Field(default_factory=list)
-    resolution_time_ms: Optional[float] = None
-    error: Optional[str] = None
+    ip_addresses: list[str] = Field(default_factory=list)
+    resolution_time_ms: float | None = None
+    error: str | None = None
 
 
 class CertificateInfo(BaseModel):
@@ -33,14 +33,14 @@ class CertificateInfo(BaseModel):
 
     subject: str
     issuer: str
-    not_before: Optional[str] = None
-    not_after: Optional[str] = None
-    serial_number: Optional[str] = None
-    signature_algorithm: Optional[str] = None
+    not_before: str | None = None
+    not_after: str | None = None
+    serial_number: str | None = None
+    signature_algorithm: str | None = None
     is_self_signed: bool = False
-    ocsp_urls: List[str] = Field(default_factory=list)
-    ca_issuer_urls: List[str] = Field(default_factory=list)
-    crl_distribution_points: List[str] = Field(default_factory=list)
+    ocsp_urls: list[str] = Field(default_factory=list)
+    ca_issuer_urls: list[str] = Field(default_factory=list)
+    crl_distribution_points: list[str] = Field(default_factory=list)
 
 
 class RevocationEndpointTest(BaseModel):
@@ -49,9 +49,9 @@ class RevocationEndpointTest(BaseModel):
     url: str
     endpoint_type: str  # 'ocsp', 'crl', or 'ca_issuer'
     accessible: bool
-    status_code: Optional[int] = None
-    response_time_ms: Optional[float] = None
-    error: Optional[str] = None
+    status_code: int | None = None
+    response_time_ms: float | None = None
+    error: str | None = None
 
 
 class TLSTestResult(BaseModel):
@@ -60,15 +60,15 @@ class TLSTestResult(BaseModel):
     hostname: str
     port: int
     connected: bool
-    tls_version: Optional[str] = None
-    cipher_suite: Optional[str] = None
-    certificate_chain: List[CertificateInfo] = Field(default_factory=list)
-    revocation_endpoints: List[RevocationEndpointTest] = Field(
+    tls_version: str | None = None
+    cipher_suite: str | None = None
+    certificate_chain: list[CertificateInfo] = Field(default_factory=list)
+    revocation_endpoints: list[RevocationEndpointTest] = Field(
         default_factory=list
     )
     chain_valid: bool = False
-    chain_errors: List[str] = Field(default_factory=list)
-    raw_openssl_output: Optional[str] = None
+    chain_errors: list[str] = Field(default_factory=list)
+    raw_openssl_output: str | None = None
 
 
 class PythonRequestsTest(BaseModel):
@@ -76,11 +76,11 @@ class PythonRequestsTest(BaseModel):
 
     url: str
     success: bool
-    status_code: Optional[int] = None
-    response_time_ms: Optional[float] = None
+    status_code: int | None = None
+    response_time_ms: float | None = None
     ssl_verify_enabled: bool = True
-    error: Optional[str] = None
-    ssl_info: Optional[Dict[str, Any]] = None
+    error: str | None = None
+    ssl_info: dict[str, Any] | None = None
 
 
 class CommandExecutionResult(BaseModel):
@@ -91,24 +91,24 @@ class CommandExecutionResult(BaseModel):
     exit_code: int
     stdout: str = ""
     stderr: str = ""
-    execution_time_ms: Optional[float] = None
+    execution_time_ms: float | None = None
 
 
 class NetworkDebugResult(BaseResult):
     """Result from network debug command execution."""
 
-    dns_results: Dict[str, DNSResult] = Field(default_factory=dict)
-    endpoint_results: List[EndpointTestResult] = Field(default_factory=list)
-    tls_test_results: Dict[str, TLSTestResult] = Field(default_factory=dict)
-    python_requests_tests: List[PythonRequestsTest] = Field(
+    dns_results: dict[str, DNSResult] = Field(default_factory=dict)
+    endpoint_results: list[EndpointTestResult] = Field(default_factory=list)
+    tls_test_results: dict[str, TLSTestResult] = Field(default_factory=dict)
+    python_requests_tests: list[PythonRequestsTest] = Field(
         default_factory=list
     )
-    command_results: List[CommandExecutionResult] = Field(default_factory=list)
+    command_results: list[CommandExecutionResult] = Field(default_factory=list)
     proxy_detected: bool = False
-    proxy_settings: Optional[Dict[str, str]] = None
+    proxy_settings: dict[str, str] | None = None
     network_issues_detected: bool = False
-    recommendations: List[str] = Field(default_factory=list)
-    environment_info: Dict[str, Any] = Field(default_factory=dict)
+    recommendations: list[str] = Field(default_factory=list)
+    environment_info: dict[str, Any] = Field(default_factory=dict)
 
 
 class DeepgramEndpoint(BaseModel):
@@ -118,4 +118,4 @@ class DeepgramEndpoint(BaseModel):
     url: str
     description: str
     protocol: str = "https"  # https or wss
-    region: Optional[str] = None
+    region: str | None = None

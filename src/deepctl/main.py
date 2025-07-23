@@ -1,20 +1,18 @@
 """Main entry point for deepctl."""
 
 import sys
-from typing import Optional, List
 
 import click
+from deepctl_core import Config, setup_output
 from rich.console import Console
 from rich.traceback import install
-
-from deepctl_core import Config, setup_output
 
 # Install rich traceback for better error messages
 install(show_locals=True)
 console = Console()
 
 
-def preprocess_hyphenated_commands(args: List[str]) -> List[str]:
+def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     """Convert hyphenated commands to nested commands.
 
     This function looks for commands in the format 'group-subcommand' and
@@ -124,9 +122,9 @@ def preprocess_hyphenated_commands(args: List[str]) -> List[str]:
 @click.pass_context
 def cli(
     ctx: click.Context,
-    config: Optional[str],
-    profile: Optional[str],
-    output: Optional[str],
+    config: str | None,
+    profile: str | None,
+    output: str | None,
     quiet: bool,
     verbose: bool,
 ) -> None:

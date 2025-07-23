@@ -1,11 +1,11 @@
 """Example plugin command for deepctl."""
 
-from typing import Dict, List, Any
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
+from typing import Any
 
-from deepctl_core import Config, AuthManager, DeepgramClient, BaseCommand
+from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -22,7 +22,7 @@ class ExampleCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -31,7 +31,7 @@ class ExampleCommand(BaseCommand):
                 "type": str,
                 "default": "Hello",
                 "required": False,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--name", "-n"],
@@ -39,14 +39,14 @@ class ExampleCommand(BaseCommand):
                 "type": str,
                 "default": "World",
                 "required": False,
-                "is_option": True
+                "is_option": True,
             },
             {
                 "names": ["--show-info"],
                 "help": "Show plugin system information",
                 "is_flag": True,
-                "is_option": True
-            }
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -54,7 +54,7 @@ class ExampleCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs
+        **kwargs: Any,
     ) -> Any:
         """Handle the example command."""
         greeting = kwargs.get("greeting", "Hello")
@@ -77,15 +77,16 @@ class ExampleCommand(BaseCommand):
 
         # Return result for output formatting
         from .models import ExampleResult
+
         return ExampleResult(
             message=f"{greeting}, {name}!",
             plugin="deepctl-plugin-example",
             version="0.1.0",
             greeting=greeting,
-            name=name
+            name=name,
         )
 
-    def _show_help(self):
+    def _show_help(self) -> None:
         """Show help information about the plugin."""
         # Create help panel
         help_content = """
@@ -115,11 +116,11 @@ custom commands that integrate seamlessly with the CLI.
             help_content.strip(),
             title="[bold]Example Plugin Help[/bold]",
             border_style="blue",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         console.print(panel)
 
-    def _show_plugin_info(self):
+    def _show_plugin_info(self) -> None:
         """Show information about the plugin system."""
         console.print("[bold]Plugin System Information[/bold]\n")
 
@@ -155,6 +156,6 @@ To create your own plugin:
 - Install with: pip install -e ./your-plugin/""",
             title="[bold]Plugin Development Guide[/bold]",
             border_style="green",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         console.print(info_panel)

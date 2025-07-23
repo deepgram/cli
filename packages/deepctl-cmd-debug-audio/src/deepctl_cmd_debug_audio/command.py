@@ -1,18 +1,18 @@
 """Audio debug command for deepctl."""
 
-import subprocess
-import shutil
 import json
-from typing import Any, List, Dict, Optional
+import shutil
+import subprocess
+from typing import Any
 
+import ffmpeg  # type: ignore[import-untyped]
+from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich import box
-import ffmpeg
 
-from deepctl_core import BaseCommand, Config, AuthManager, DeepgramClient
-from .models import AudioDebugResult, AudioInfo, AudioFormat, AudioStream
+from .models import AudioDebugResult, AudioFormat, AudioInfo, AudioStream
 
 console = Console()
 
@@ -29,7 +29,7 @@ class AudioCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -67,8 +67,8 @@ class AudioCommand(BaseCommand):
         return shutil.which("ffprobe") is not None
 
     def run_ffprobe(
-        self, file_path: str, custom_args: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, file_path: str, custom_args: str | None = None
+    ) -> dict[str, Any]:
         """Run ffprobe on the given file."""
         try:
             if custom_args:
@@ -81,15 +81,15 @@ class AudioCommand(BaseCommand):
                 if result.returncode != 0:
                     raise Exception(f"ffprobe failed: {result.stderr}")
 
-                return json.loads(result.stdout)
+                return dict(json.loads(result.stdout))
             else:
                 # Use python-ffmpeg for standard probe
                 probe = ffmpeg.probe(file_path)
-                return probe
+                return dict(probe)
         except Exception as e:
-            raise Exception(f"Failed to probe file: {str(e)}")
+            raise Exception(f"Failed to probe file: {e!s}")
 
-    def parse_audio_info(self, probe_data: Dict[str, Any]) -> AudioInfo:
+    def parse_audio_info(self, probe_data: dict[str, Any]) -> AudioInfo:
         """Parse ffprobe output into AudioInfo model."""
         audio_info = AudioInfo(raw_data=probe_data)
 
@@ -140,7 +140,7 @@ class AudioCommand(BaseCommand):
 
         return audio_info
 
-    def display_basic_info(self, audio_info: AudioInfo):
+    def display_basic_info(self, audio_info: AudioInfo) -> None:
         """Display basic audio information."""
         console.print("\n[green]✓[/green] Audio File Analysis Complete\n")
 
@@ -191,7 +191,7 @@ class AudioCommand(BaseCommand):
                         f"  • Stream Bit Rate: {bit_rate_kbps:.0f} kbps"
                     )
 
-    def display_verbose_info(self, audio_info: AudioInfo):
+    def display_verbose_info(self, audio_info: AudioInfo) -> None:
         """Display detailed audio information in table format."""
         console.print("\n[green]✓[/green] Detailed Audio File Analysis\n")
 
@@ -258,12 +258,13 @@ class AudioCommand(BaseCommand):
                 if i < len(audio_info.streams) - 1:
                     console.print()
 
-    def display_extra_verbose_info(self, audio_info: AudioInfo):
+    def display_extra_verbose_info(self, audio_info: AudioInfo) -> None:
         """Display raw ffprobe output."""
         console.print("\n[green]✓[/green] Raw FFprobe Output\n")
 
         if audio_info.raw_data:
             import json
+
             from rich.syntax import Syntax
 
             json_str = json.dumps(audio_info.raw_data, indent=2)
@@ -277,13 +278,22 @@ class AudioCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle audio debug command execution."""
         audio_file = kwargs.get("file")
         verbose = kwargs.get("verbose", False)
         extra_verbose = kwargs.get("extra_verbose", False)
         ffprobe_args = kwargs.get("ffprobe_args")
+
+        # Validate audio_file
+        if not audio_file:
+            return AudioDebugResult(
+                status="error",
+                message="No audio file specified",
+                audio_file="",
+                ffmpeg_installed=self.check_ffmpeg_installed(),
+            )
 
         # Check if ffmpeg is installed
         if not self.check_ffmpeg_installed():
@@ -315,7 +325,7 @@ class AudioCommand(BaseCommand):
             console.print(f"[blue]Analyzing audio file:[/blue] {audio_file}")
 
             # Run ffprobe
-            probe_data = self.run_ffprobe(audio_file, ffprobe_args)
+            probe_data = self.run_ffprobe(str(audio_file), ffprobe_args)
 
             # Parse the data
             audio_info = self.parse_audio_info(probe_data)
@@ -369,7 +379,7 @@ class AudioCommand(BaseCommand):
             console.print(
                 Panel(
                     f"[red]✗ Error analyzing audio file[/red]\n\n"
-                    f"[dim]{str(e)}[/dim]",
+                    f"[dim]{e!s}[/dim]",
                     title="Analysis Failed",
                     border_style="red",
                 )

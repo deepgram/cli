@@ -1,10 +1,11 @@
 """Debug command group for deepctl."""
 
-from typing import Any, List, Dict
-from rich.console import Console
-import click
+from typing import Any
 
-from deepctl_core import BaseGroupCommand, Config, AuthManager, DeepgramClient
+import click
+from deepctl_core import AuthManager, BaseGroupCommand, Config, DeepgramClient
+from rich.console import Console
+
 from .models import DebugGroupResult
 
 console = Console()
@@ -25,7 +26,7 @@ class DebugCommand(BaseGroupCommand):
     # Show help when invoked without subcommand
     invoke_without_command = False
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -41,7 +42,7 @@ class DebugCommand(BaseGroupCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle group-specific logic.
 

@@ -1,11 +1,11 @@
 """Browser debug subcommand for deepctl."""
 
 from .command import BrowserCommand
-from .models import BrowserDebugResult, BrowserCapabilities, BrowserCapability
+from .models import BrowserCapabilities, BrowserCapability, BrowserDebugResult
 
 __all__ = [
-    "BrowserCommand",
-    "BrowserDebugResult",
     "BrowserCapabilities",
     "BrowserCapability",
+    "BrowserCommand",
+    "BrowserDebugResult",
 ]

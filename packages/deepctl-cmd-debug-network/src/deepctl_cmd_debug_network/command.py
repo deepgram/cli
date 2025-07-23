@@ -7,25 +7,25 @@ import subprocess
 import sys
 import time
 import warnings
-from typing import Any, List, Dict
-import requests
-import urllib3
+from typing import Any
 from urllib.parse import urlparse
 
+import requests
+import urllib3
+from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from deepctl_core import BaseCommand, Config, AuthManager, DeepgramClient
 from .models import (
-    NetworkDebugResult,
-    DNSResult,
-    TLSTestResult,
     CertificateInfo,
-    RevocationEndpointTest,
-    PythonRequestsTest,
     CommandExecutionResult,
+    DNSResult,
     EndpointTestResult,
+    NetworkDebugResult,
+    PythonRequestsTest,
+    RevocationEndpointTest,
+    TLSTestResult,
 )
 
 console = Console()
@@ -49,7 +49,7 @@ class NetworkCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -107,7 +107,7 @@ class NetworkCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle network debug command execution."""
         endpoint = kwargs.get("endpoint") or "api.deepgram.com"
@@ -211,7 +211,7 @@ class NetworkCommand(BaseCommand):
             "python_version": sys.version,
             "platform": sys.platform,
             "requests_version": requests.__version__,
-            "urllib3_version": urllib3.__version__,
+            "urllib3_version": getattr(urllib3, "__version__", "unknown"),
             "proxy_env_vars": {
                 "http_proxy": os.environ.get("http_proxy", "Not set"),
                 "https_proxy": os.environ.get("https_proxy", "Not set"),
@@ -247,7 +247,7 @@ class NetworkCommand(BaseCommand):
             dns_result.resolution_time_ms = (time.time() - start_time) * 1000
 
             # Extract unique IP addresses
-            ips = list(set([addr[4][0] for addr in ip_addresses]))
+            ips = list({str(addr[4][0]) for addr in ip_addresses})
             dns_result.ip_addresses = ips
             dns_result.resolved = True
 
@@ -276,7 +276,7 @@ class NetworkCommand(BaseCommand):
             endpoint_test.ssl_valid = True
 
         except requests.exceptions.SSLError as e:
-            endpoint_test.error = f"SSL Error: {str(e)}"
+            endpoint_test.error = f"SSL Error: {e!s}"
             endpoint_test.ssl_valid = False
             result.network_issues_detected = True
         except Exception as e:
@@ -335,7 +335,7 @@ class NetworkCommand(BaseCommand):
             tls_result.chain_errors.append("OpenSSL command timed out")
             result.network_issues_detected = True
         except Exception as e:
-            tls_result.chain_errors.append(f"Error running OpenSSL: {str(e)}")
+            tls_result.chain_errors.append(f"Error running OpenSSL: {e!s}")
             result.network_issues_detected = True
 
         result.tls_test_results[hostname] = tls_result
@@ -405,7 +405,7 @@ class NetworkCommand(BaseCommand):
 
             except Exception as e:
                 tls_result.chain_errors.append(
-                    f"Error parsing certificate {i}: {str(e)}"
+                    f"Error parsing certificate {i}: {e!s}"
                 )
 
     def _test_revocation_endpoints(
@@ -491,7 +491,7 @@ class NetworkCommand(BaseCommand):
             test_with_verify.success = True
 
         except requests.exceptions.SSLError as e:
-            test_with_verify.error = f"SSL verification failed: {str(e)}"
+            test_with_verify.error = f"SSL verification failed: {e!s}"
             result.network_issues_detected = True
         except Exception as e:
             test_with_verify.error = str(e)
@@ -704,7 +704,7 @@ class NetworkCommand(BaseCommand):
             console.print(f"\n[green]✅ Report saved to: {filename}[/green]")
 
         except Exception as e:
-            console.print(f"\n[red]❌ Failed to save report: {str(e)}[/red]")
+            console.print(f"\n[red]❌ Failed to save report: {e!s}[/red]")
 
     def _display_results(
         self, result: NetworkDebugResult, verbose: bool
@@ -788,11 +788,13 @@ class NetworkCommand(BaseCommand):
                         )
 
                         # Group by type
-                        by_type = {}
-                        for endpoint in tls_result.revocation_endpoints:
-                            if endpoint.endpoint_type not in by_type:
-                                by_type[endpoint.endpoint_type] = []
-                            by_type[endpoint.endpoint_type].append(endpoint)
+                        by_type: dict[str, list[Any]] = {}
+                        for rev_endpoint in tls_result.revocation_endpoints:
+                            if rev_endpoint.endpoint_type not in by_type:
+                                by_type[rev_endpoint.endpoint_type] = []
+                            by_type[rev_endpoint.endpoint_type].append(
+                                rev_endpoint
+                            )
 
                         for endpoint_type, endpoints in by_type.items():
                             console.print(
@@ -848,8 +850,8 @@ class NetworkCommand(BaseCommand):
                         console.print(f"     [red]{test.error}[/red]")
             console.print()
 
-        # Environment Info
-        if result.proxy_detected:
+        # Proxy Detection Warning
+        if result.proxy_settings:
             console.print(
                 "[bold yellow]⚠️  Proxy Configuration Detected:[/bold yellow]"
             )

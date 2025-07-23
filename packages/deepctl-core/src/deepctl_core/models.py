@@ -1,6 +1,5 @@
 """Core models for deepgram-core package."""
 
-from typing import Optional, Dict
 from pydantic import BaseModel, Field
 
 
@@ -10,22 +9,22 @@ class BaseResult(BaseModel):
     status: str = Field(
         default="success", description="Outcome marker/messages key"
     )
-    message: Optional[str] = None
+    message: str | None = None
 
 
 class ProfileInfo(BaseModel):
     """Profile information."""
 
-    api_key: Optional[str]
-    project_id: Optional[str]
+    api_key: str | None
+    project_id: str | None
     base_url: str
 
 
 class ProfilesResult(BaseResult):
     """List of profiles with optional current indicator."""
 
-    current_profile: Optional[str] = None
-    profiles: Dict[str, ProfileInfo] = Field(default_factory=dict)
+    current_profile: str | None = None
+    profiles: dict[str, ProfileInfo] = Field(default_factory=dict)
 
 
 class PluginInfo(BaseModel):
@@ -33,7 +32,7 @@ class PluginInfo(BaseModel):
 
     name: str
     help: str
-    short_help: Optional[str]
+    short_help: str | None
     type: str  # builtin | external
     module: str
 

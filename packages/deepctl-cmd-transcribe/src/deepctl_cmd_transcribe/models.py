@@ -1,6 +1,7 @@
 """Models for transcribe command."""
 
-from typing import Dict, Any, Optional
+from typing import Any
+
 from deepctl_core import BaseResult
 
 
@@ -9,5 +10,5 @@ class TranscribeResult(BaseResult):
     model: str
     language: str
     transcript: str
-    saved_to: Optional[str] = None
-    full_result: Dict[str, Any]
+    saved_to: str | None = None
+    full_result: dict[str, Any]

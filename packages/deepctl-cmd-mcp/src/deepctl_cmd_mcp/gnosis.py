@@ -131,7 +131,9 @@ class GnosisClient:
                 if gnosis_response.choices and gnosis_response.choices[0].get(
                     "message", {}
                 ).get("content"):
-                    return gnosis_response.choices[0]["message"]["content"]
+                    return str(
+                        gnosis_response.choices[0]["message"]["content"]
+                    )
 
                 return "No response from Deepgram AI"
             except httpx.HTTPStatusError as e:
@@ -193,7 +195,7 @@ class GnosisClient:
         return await self.call(all_messages)
 
 
-async def main():
+async def main() -> None:
     """Main function for standalone CLI usage."""
     import argparse
 
@@ -297,7 +299,7 @@ Examples:
             print("Deepgram AI Chat ('exit' to quit, 'clear' to reset)")
             print("-" * 60)
 
-            history = []
+            history: list[dict[str, str]] = []
             if args.system_prompt:
                 print(f"System: {args.system_prompt}")
                 print("-" * 60)

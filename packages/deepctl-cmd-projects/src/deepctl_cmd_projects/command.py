@@ -1,16 +1,17 @@
 """Projects command for deepctl."""
 
-from typing import Optional, List, Dict, Any
-from rich.console import Console
+from typing import Any
 
 from deepctl_core import (
-    Config,
     AuthManager,
-    DeepgramClient,
     BaseCommand,
     BaseResult,
+    Config,
+    DeepgramClient,
 )
-from .models import ProjectsResult, ProjectInfo
+from rich.console import Console
+
+from .models import ProjectInfo, ProjectsResult
 
 console = Console()
 
@@ -27,7 +28,7 @@ class ProjectsCommand(BaseCommand):
     requires_project = False  # Project ID is optional for listing
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -73,7 +74,7 @@ class ProjectsCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> BaseResult:
         """Handle projects command."""
         list_projects = kwargs.get("list", False)
@@ -173,7 +174,7 @@ class ProjectsCommand(BaseCommand):
             return BaseResult(status="error", message=str(e))
 
     def _create_project(
-        self, client: DeepgramClient, name: str, company: Optional[str]
+        self, client: DeepgramClient, name: str, company: str | None
     ) -> ProjectsResult | BaseResult:
         """Create a new project."""
         console.print(f"[blue]Creating project:[/blue] {name}")

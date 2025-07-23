@@ -1,9 +1,8 @@
 """Input validation utilities for deepctl."""
 
-import re
 import os
+import re
 from pathlib import Path
-from typing import Union
 from urllib.parse import urlparse
 
 import httpx
@@ -52,7 +51,7 @@ AUDIO_MIME_TYPES = {
 }
 
 
-def validate_audio_file(file_path: Union[str, Path]) -> bool:
+def validate_audio_file(file_path: str | Path) -> bool:
     """Validate that a file exists and appears to be an audio file.
 
     Args:
@@ -433,7 +432,7 @@ def validate_date_format(date_str: str) -> bool:
     return False
 
 
-def validate_file_permissions(file_path: Union[str, Path]) -> bool:
+def validate_file_permissions(file_path: str | Path) -> bool:
     """Validate file permissions.
 
     Args:
@@ -514,7 +513,7 @@ def validate_output_format(format_type: str) -> bool:
     return True
 
 
-def get_file_info(file_path: Union[str, Path]) -> FileInfo:
+def get_file_info(file_path: str | Path) -> FileInfo:
     """Get detailed information about a file.
 
     Args:

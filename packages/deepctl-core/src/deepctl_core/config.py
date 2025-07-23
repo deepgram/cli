@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import platformdirs
 import yaml
@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 class ProfileConfig(BaseModel):
     """Configuration for a specific profile."""
 
-    api_key: Optional[str] = None
-    project_id: Optional[str] = None
+    api_key: str | None = None
+    project_id: str | None = None
     base_url: str = "https://api.deepgram.com"
 
 
@@ -37,7 +37,7 @@ class DeepgramConfig(BaseModel):
     """Main configuration model."""
 
     default_profile: str = "default"
-    profiles: Dict[str, ProfileConfig] = Field(default_factory=dict)
+    profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
     output: OutputConfig = Field(default_factory=OutputConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
 
@@ -46,7 +46,7 @@ class Config:
     """Cross-platform configuration manager."""
 
     def __init__(
-        self, config_path: Optional[str] = None, profile: Optional[str] = None
+        self, config_path: str | None = None, profile: str | None = None
     ):
         """Initialize configuration manager.
 
@@ -60,7 +60,7 @@ class Config:
             else self._get_default_config_path()
         )
         self.profile = profile
-        self._config: Optional[DeepgramConfig] = None
+        self._config: DeepgramConfig
         self._load_config()
 
     def _get_default_config_path(self) -> Path:
@@ -110,7 +110,7 @@ class Config:
         # Load from user config file
         if self.config_path.exists():
             try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
+                with open(self.config_path, encoding="utf-8") as f:
                     user_config = yaml.safe_load(f)
                     if user_config:
                         self._merge_config(user_config)
@@ -125,7 +125,7 @@ class Config:
         project_config_path = self._get_project_config_path()
         if project_config_path.exists():
             try:
-                with open(project_config_path, "r", encoding="utf-8") as f:
+                with open(project_config_path, encoding="utf-8") as f:
                     project_config = yaml.safe_load(f)
                     if project_config:
                         self._merge_config(project_config)
@@ -138,7 +138,7 @@ class Config:
         # Override with environment variables
         self._load_env_config()
 
-    def _merge_config(self, config_dict: Dict[str, Any]) -> None:
+    def _merge_config(self, config_dict: dict[str, Any]) -> None:
         """Merge configuration dictionary into current config."""
         # Deep merge configuration
         if "profiles" in config_dict:
@@ -187,10 +187,16 @@ class Config:
         for env_key, (config_path, config_type) in env_mappings.items():
             if env_key in env_vars:
                 value = env_vars[env_key]
+                converted_value: Any = value
                 if config_type == bool:
-                    value = value.lower() in ("true", "1", "yes", "on")
+                    converted_value = value.lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "on",
+                    )
 
-                self._set_config_value(config_path, value)
+                self._set_config_value(config_path, converted_value)
 
     def _set_config_value(self, path: str, value: Any) -> None:
         """Set a configuration value using dot notation."""
@@ -233,7 +239,7 @@ class Config:
         except (AttributeError, KeyError):
             return default
 
-    def get_profile(self, profile_name: Optional[str] = None) -> ProfileConfig:
+    def get_profile(self, profile_name: str | None = None) -> ProfileConfig:
         """Get configuration for a specific profile."""
         profile_name = (
             profile_name or self.profile or self._config.default_profile
@@ -269,7 +275,7 @@ class Config:
         """List all available profiles."""
         return list(self._config.profiles.keys())
 
-    def create_profile(self, name: str, **kwargs) -> None:
+    def create_profile(self, name: str, **kwargs: Any) -> None:
         """Create a new profile."""
         self._config.profiles[name] = ProfileConfig(**kwargs)
         self.save()

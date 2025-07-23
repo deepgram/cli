@@ -1,23 +1,22 @@
 """Models for login command."""
 
-from typing import Optional
-from pydantic import Field
 from deepctl_core import BaseResult
+from pydantic import Field
 
 
 class LoginResult(BaseResult):
     """Return structure for `deepctl login` command."""
 
     profile: str
-    api_key_masked: Optional[str] = Field(
+    api_key_masked: str | None = Field(
         None, description="Obfuscated key for display – e.g. ****abcd"
     )
-    project_id: Optional[str] = None
-    config_path: Optional[str] = None
+    project_id: str | None = None
+    config_path: str | None = None
 
 
 class LogoutResult(BaseResult):
     """Return structure for logout command."""
 
-    profile: Optional[str] = None
-    profiles_count: Optional[int] = None  # when --all is used
+    profile: str | None = None
+    profiles_count: int | None = None  # when --all is used

@@ -1,17 +1,18 @@
 """Login command for deepctl."""
 
-from typing import Optional, Dict, List, Any
-from rich.console import Console
+from typing import Any
 
 from deepctl_core import (
-    Config,
-    AuthManager,
     AuthenticationError,
-    DeepgramClient,
+    AuthManager,
     BaseCommand,
+    Config,
+    DeepgramClient,
     ProfileInfo,
     ProfilesResult,
 )
+from rich.console import Console
+
 from .models import LoginResult, LogoutResult
 
 console = Console()
@@ -29,7 +30,7 @@ class LoginCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -69,7 +70,7 @@ class LoginCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle login command."""
         api_key = kwargs.get("api_key")
@@ -93,12 +94,13 @@ class LoginCommand(BaseCommand):
                     status="cancelled",
                     message="Login cancelled by user",
                     profile=config.profile or "default",
+                    api_key_masked=None,
                 )
 
         # Determine authentication method
         if api_key:
             return self._cli_auth(
-                config, auth_manager, api_key, project_id, force_write
+                config, auth_manager, str(api_key), project_id, force_write
             )
         else:
             return self._web_auth(config, auth_manager, force_write)
@@ -108,7 +110,7 @@ class LoginCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         api_key: str,
-        project_id: Optional[str],
+        project_id: str | None,
         force_write: bool,
     ) -> LoginResult:
         """Handle CLI authentication with API key."""
@@ -127,6 +129,7 @@ class LoginCommand(BaseCommand):
                     status="cancelled",
                     message="Login cancelled by user",
                     profile=config.profile or "default",
+                    api_key_masked=None,
                 )
 
         # Validate project ID is provided with API key
@@ -152,6 +155,7 @@ class LoginCommand(BaseCommand):
                         status="cancelled",
                         message="Login cancelled by user",
                         profile=config.profile or "default",
+                        api_key_masked=None,
                     )
             else:
                 if not self.confirm(
@@ -162,12 +166,15 @@ class LoginCommand(BaseCommand):
                         status="cancelled",
                         message="Login cancelled by user",
                         profile=config.profile or "default",
+                        api_key_masked=None,
                     )
 
         try:
             # Store credentials (verification happens inside
             # login_with_api_key)
-            auth_manager.login_with_api_key(api_key, project_id, force_write)
+            auth_manager.login_with_api_key(
+                api_key, project_id or "", force_write
+            )
 
             profile_name = config.profile or "default"
             return LoginResult(
@@ -185,6 +192,7 @@ class LoginCommand(BaseCommand):
                 status="error",
                 message=str(e),
                 profile=config.profile or "default",
+                api_key_masked=None,
             )
 
         except Exception as e:
@@ -193,6 +201,7 @@ class LoginCommand(BaseCommand):
                 status="error",
                 message=str(e),
                 profile=config.profile or "default",
+                api_key_masked=None,
             )
 
     def _web_auth(
@@ -202,20 +211,20 @@ class LoginCommand(BaseCommand):
         console.print("[blue]Starting web authentication...[/blue]")
 
         # Check if config file exists and prompt for overwrite
-        if not force_write:
-            if config.config_path.exists():
-                console.print(
-                    f"[yellow]Configuration file already exists:[/yellow] "
-                    f"{config.config_path}"
+        if not force_write and config.config_path.exists():
+            console.print(
+                f"[yellow]Configuration file already exists:[/yellow] "
+                f"{config.config_path}"
+            )
+            if not self.confirm(
+                "Overwrite existing configuration?", default=False
+            ):
+                return LoginResult(
+                    status="cancelled",
+                    message="Login cancelled by user",
+                    profile=config.profile or "default",
+                    api_key_masked=None,
                 )
-                if not self.confirm(
-                    "Overwrite existing configuration?", default=False
-                ):
-                    return LoginResult(
-                        status="cancelled",
-                        message="Login cancelled by user",
-                        profile=config.profile or "default",
-                    )
 
         try:
             # Start device flow
@@ -247,6 +256,7 @@ class LoginCommand(BaseCommand):
                 status="error",
                 message=str(e),
                 profile=config.profile or "default",
+                api_key_masked=None,
             )
 
         except KeyboardInterrupt:
@@ -257,6 +267,7 @@ class LoginCommand(BaseCommand):
                 status="cancelled",
                 message="Login cancelled by user",
                 profile=config.profile or "default",
+                api_key_masked=None,
             )
 
         except Exception as e:
@@ -265,6 +276,7 @@ class LoginCommand(BaseCommand):
                 status="error",
                 message=str(e),
                 profile=config.profile or "default",
+                api_key_masked=None,
             )
 
 
@@ -280,7 +292,7 @@ class LogoutCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -303,7 +315,7 @@ class LogoutCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle logout command."""
         profile = kwargs.get("profile")
@@ -367,7 +379,7 @@ class ProfilesCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
@@ -396,7 +408,7 @@ class ProfilesCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle profiles command."""
         list_profiles = kwargs.get("list", False)
@@ -454,9 +466,9 @@ class ProfilesCommand(BaseCommand):
             )
 
         elif switch_profile:
-            profiles = config.list_profiles()
+            profile_names = config.list_profiles()
 
-            if switch_profile not in profiles:
+            if switch_profile not in profile_names:
                 console.print(
                     f"[red]Profile '{switch_profile}' not found[/red]"
                 )

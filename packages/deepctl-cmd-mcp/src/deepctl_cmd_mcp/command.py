@@ -1,12 +1,11 @@
 """MCP server command for deepctl."""
 
 import os
-from typing import Any, Dict, List
-
-from mcp.server.fastmcp import Context, FastMCP
-from rich.console import Console
+from typing import Any, Dict, List, Optional
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from mcp.server.fastmcp import Context, FastMCP
+from rich.console import Console
 
 from .gnosis import GnosisClient
 from .models import MCPServerResult, TransportType
@@ -87,7 +86,7 @@ class McpCommand(BaseCommand):
         config: Config,
         auth_manager: AuthManager,
         client: DeepgramClient,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle MCP server command."""
         transport = kwargs.get("transport", "stdio").lower()
@@ -132,13 +131,13 @@ class McpCommand(BaseCommand):
                 console.print(
                     f"[blue]Starting MCP SSE server on {host}:{port}...[/blue]"
                 )
-                mcp_server.run(transport="sse", port=port)
+                mcp_server.run(transport="sse")
             elif transport == "streamable-http":
                 console.print(
                     f"[blue]Starting MCP Streamable HTTP server on "
                     f"{host}:{port}...[/blue]"
                 )
-                mcp_server.run(transport="streamable-http", port=port)
+                mcp_server.run(transport="streamable-http")
 
             return MCPServerResult(
                 status="success",
@@ -201,7 +200,7 @@ def create_mcp_server() -> FastMCP:
         gnosis_client = None
 
     @mcp.tool()
-    async def ask_question(question: str, ctx: Context) -> str:
+    async def ask_question(question: str, ctx: Context[Any, Any, Any]) -> str:
         """Ask questions about Deepgram products and services.
 
         This is the **catch-all** helper for natural-language queries about
@@ -244,7 +243,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     async def check_api_spec(
-        api_type: str = "rest", endpoint: str = "", ctx: Context = None
+        api_type: str = "rest",
+        endpoint: str = "",
+        ctx: Optional[Context[Any, Any, Any]] = None,
     ) -> str:
         """Retrieve Deepgram **API reference** details.
 
@@ -295,7 +296,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     async def get_code_example(
-        language: str, use_case: str, ctx: Context = None
+        language: str,
+        use_case: str,
+        ctx: Optional[Context[Any, Any, Any]] = None,
     ) -> str:
         """Return **ready-to-run code samples** that integrate Deepgram.
 
@@ -335,7 +338,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     async def search_docs(
-        query: str, category: str = "all", ctx: Context = None
+        query: str,
+        category: str = "all",
+        ctx: Optional[Context[Any, Any, Any]] = None,
     ) -> str:
         """Keyword search across official Deepgram documentation.
 
