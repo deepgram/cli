@@ -1,14 +1,34 @@
-.PHONY: help install install-dev test lint format typecheck clean build install-local run-help dev-setup all-checks
+# ===================================================================
+# deepctl Makefile
+# ===================================================================
 
-# Default target
+.PHONY: help
+.DEFAULT_GOAL := help
+
+# ===================================================================
+# HELP & INFO
+# ===================================================================
+
 help: ## Show this help message
-	@echo "🔧 deepctl"
+	@echo "🔧 deepctl - Deepgram CLI Development Tools"
 	@echo ""
-	@echo "Available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Main Targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v '^\.' | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-# Development environment setup
-dev-setup: ## Set up development environment
+info: ## Show project information
+	@echo "🔧 deepctl - Deepgram CLI"
+	@echo "📁 $(shell pwd)"
+	@echo "🐍 Python: $(shell python --version 2>/dev/null || echo 'Not found')"
+	@echo "📦 uv: $(shell uv --version 2>/dev/null || echo 'Not found')"
+	@echo "🎯 Virtual env: $(shell echo $$VIRTUAL_ENV || echo 'Not activated')"
+
+# ===================================================================
+# DEVELOPMENT SETUP
+# ===================================================================
+
+dev-setup: ## Set up complete development environment
 	uv venv
 	uv pip install -e ".[dev]"
 	@echo "✅ Development environment ready!"
@@ -17,95 +37,160 @@ dev-setup: ## Set up development environment
 install: ## Install runtime dependencies only
 	uv pip install -e .
 
-install-dev: ## Install development dependencies
+install-dev: ## Install all development dependencies (includes testing)
 	uv pip install -e ".[dev]"
 
-install-test: ## Install test dependencies
-	uv pip install -e ".[test]"
+# ===================================================================
+# QUICK DEVELOPMENT WORKFLOWS
+# ===================================================================
 
-# Code quality and testing
-test: ## Run tests with coverage
-	uv run pytest
+dev: format lint-fix test ## Run full development cycle: format, fix lints, test
+	@echo "✅ Development cycle complete!"
+
+check: format-check lint typecheck ## Quick quality check (no tests)
+	@echo "✅ Quick check complete!"
+
+ci: ## Run full CI pipeline (all Python versions + lint)
+	uv run tox -p auto
+
+# ===================================================================
+# TESTING
+# ===================================================================
+
+test: ## Run tests with pytest (development mode)
+	uv run pytest --all
+
+test-quick: ## Run tests quickly (no coverage)
+	uv run pytest -x
 
 test-verbose: ## Run tests with verbose output
-	uv run pytest -v
+	uv run pytest -xvs --all
 
 test-watch: ## Run tests in watch mode (requires pytest-watch)
 	uv run ptw
 
-lint: ## Run flake8 linter
-	uv run flake8 src/ tests/
+test-full: ## Run tests on all Python versions using tox
+	uv run tox
 
-format: ## Format code with black
-	uv run black src/ tests/
+test-py310: ## Test with Python 3.10
+	uv run tox -e py310
 
-format-check: ## Check if code is formatted (CI-friendly)
-	uv run black --check src/ tests/
+test-py311: ## Test with Python 3.11
+	uv run tox -e py311
 
+test-py312: ## Test with Python 3.12
+	uv run tox -e py312
+
+test-parallel: ## Run all tox environments in parallel
+	uv run tox -p auto
+
+# ===================================================================
+# CODE QUALITY
+# ===================================================================
+
+## Formatting
+format: ## Auto-format code with black
+	uv run black src/ packages/**/src
+
+format-check: ## Check code formatting (no changes)
+	uv run black --check src/ packages/**/src
+
+## Linting
+lint: ## Run all linters via tox
+	uv run tox -e lint
+
+lint-fix: ## Run ruff with auto-fix
+	uv run ruff check --fix src/ packages/**/src
+
+lint-check: ## Run ruff without fixes
+	uv run ruff check src/ packages/**/src
+
+## Type Checking
 typecheck: ## Run mypy type checker
-	uv run mypy src/
+	uv run mypy src/ packages/**/src
 
-# Combined checks
-all-checks: format-check lint typecheck test ## Run all code quality checks
+## All Checks
+quality: format-check lint-check typecheck ## Run all quality checks
 
-# Building and distribution
-build: ## Build the package
+# ===================================================================
+# BUILD & DISTRIBUTION  
+# ===================================================================
+
+build: clean ## Build the package
 	uv build
 
-clean: ## Clean build artifacts and cache
+publish-test: build ## Publish to TestPyPI
+	uv run twine upload --repository testpypi dist/*
+
+publish: build ## Publish to PyPI (use with caution!)
+	uv run twine upload dist/*
+
+install-local: build ## Install package locally from built wheel
+	uv tool install dist/*.whl --force
+
+# ===================================================================
+# RUNNING THE CLI
+# ===================================================================
+
+run: ## Run the CLI (show help)
+	uv run python -m deepctl --help
+
+run-version: ## Show CLI version
+	uv run python -m deepctl --version
+
+# ===================================================================
+# CLEANUP
+# ===================================================================
+
+clean: ## Clean all build artifacts and caches
 	rm -rf build/
 	rm -rf dist/
 	rm -rf *.egg-info/
+	rm -rf packages/**/*.egg-info/
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 	rm -rf .pytest_cache/
 	rm -rf .coverage
 	rm -rf htmlcov/
 	rm -rf .mypy_cache/
+	rm -rf .ruff_cache/
+	rm -rf .tox/
 
-# Installation and running
-install-local: build ## Install package locally from built wheel
-	uv tool install dist/*.whl --force
+clean-env: ## Remove virtual environment
+	rm -rf .venv/
 
-run:
-	uv run python -m deepctl --help
+# ===================================================================
+# PRE-COMMIT HOOKS
+# ===================================================================
 
-run-help:
-	uv run python -m deepctl transcribe --help
-
-# Development workflow shortcuts
-check: format lint typecheck ## Quick code quality check (no tests)
-
-ci: all-checks ## Full CI pipeline (format, lint, typecheck, test)
-
-# Pre-commit setup
 pre-commit-install: ## Install pre-commit hooks
 	uv run pre-commit install
 
 pre-commit-run: ## Run pre-commit on all files
 	uv run pre-commit run --all-files
 
-# Documentation
-docs-serve: ## Serve documentation locally (if using MkDocs or similar)
+# ===================================================================
+# DOCUMENTATION
+# ===================================================================
+
+docs-list: ## List documentation files
+	@echo "📚 Documentation files:"
+	@ls -la docs/
+
+docs-serve: ## Serve documentation (placeholder)
 	@echo "📚 Documentation is in docs/ directory"
 	@echo "📝 See README.md for usage instructions"
 
-# Release helpers
-version-patch: ## Bump patch version
-	@echo "📦 Current version bump requires manual edit of pyproject.toml"
-	@echo "🔧 Consider using bump2version or similar tool"
+# ===================================================================
+# ALIASES (for convenience)
+# ===================================================================
 
-version-minor: ## Bump minor version
-	@echo "📦 Current version bump requires manual edit of pyproject.toml"
-	@echo "🔧 Consider using bump2version or similar tool"
+.PHONY: t tc tl tf q f l
 
-# Quick development cycle
-dev: format lint test ## Quick development cycle: format, lint, test
-
-# Show project info
-info: ## Show project information
-	@echo "🔧 deepctl - Deepgram CLI"
-	@echo "📁 $(shell pwd)"
-	@echo "🐍 Python: $(shell python --version 2>/dev/null || echo 'Not found')"
-	@echo "📦 uv: $(shell uv --version 2>/dev/null || echo 'Not found')"
-	@echo "🎯 Virtual env: $(shell echo $$VIRTUAL_ENV || echo 'Not activated')" 
+t: test              ## Alias for test
+tc: test-full        ## Alias for test-full (tox complete)
+tl: lint             ## Alias for lint
+tf: test-parallel    ## Alias for test-parallel (tox fast)
+q: check             ## Alias for check (quick)
+f: format            ## Alias for format
+l: lint-fix          ## Alias for lint-fix 
