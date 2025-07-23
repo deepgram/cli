@@ -23,13 +23,14 @@ Returns:
 
 ## Verification Process
 
-1. **Credential Resolution**: Uses provided credentials or stored/environment values
+1. **Credential Resolution**: Uses provided credentials or falls back to stored/environment values
 2. **API Request**: `GET https://api.deepgram.com/v1/projects/{project_id}`
 3. **Response Handling**:
    - 200: Valid credentials
-   - 401: Invalid API key
-   - 403: Valid key, no project access
+   - 401: Invalid API key - authentication failed
+   - 403: Valid key but lacks permission for this project
    - 404: Project not found
+   - Network errors: Connection issues reported
 
 ## Integration Points
 
@@ -45,10 +46,13 @@ if not success:
 
 ### Command Execution
 
-The `guard()` method verifies before running protected commands:
+The `guard()` method verifies credentials before running protected commands:
 
-- Commands with `requires_auth = True` automatically verify
-- Provides specific error guidance based on failure type
+- Commands with `requires_auth = True` automatically verify credentials
+- Provides specific error guidance based on failure type:
+  - For invalid API keys: Suggests running `deepctl login` to re-authenticate
+  - For missing/invalid project IDs: Suggests running `deepctl login --project-id <valid-id>`
+  - For network errors: Reports the connection issue
 
 ## Error Handling
 

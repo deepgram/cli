@@ -22,6 +22,8 @@ config_dir = Path(user_config_dir("deepctl", "deepgram"))
 # Windows: %APPDATA%\deepctl
 ```
 
+**Note**: deepctl automatically migrates configuration from the old `deepgram` directory to the new `deepctl` directory on first run.
+
 ### Credential Storage
 
 ```python
@@ -94,6 +96,7 @@ Tests run automatically on:
 2. **Path too long on Windows**: Use shorter paths or enable long path support
 3. **SSL certificates**: Community site URL can be overridden via environment
 4. **Home directory**: Always use `Path.home()`, never `~`
+5. **Old config location**: Automatically migrated from `deepgram/` to `deepctl/`
 
 ## Development Tools
 

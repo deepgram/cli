@@ -16,15 +16,15 @@ All packages will be published with these names:
 - `deepctl` - Main CLI
 - `deepctl-core` - Core functionality
 - `deepctl-shared-utils` - Shared utilities
-- `deepctl-cmd-login` - Login command
+- `deepctl-cmd-login` - Login command (includes logout and profiles)
 - `deepctl-cmd-projects` - Projects command
 - `deepctl-cmd-transcribe` - Transcribe command
 - `deepctl-cmd-usage` - Usage command
 - `deepctl-cmd-debug` - Debug command group
-- `deepctl-cmd-debug-audio` - Audio debug
-- `deepctl-cmd-debug-browser` - Browser debug
-- `deepctl-cmd-debug-network` - Network debug
-- `deepctl-cmd-mcp` - MCP server command
+- `deepctl-cmd-debug-audio` - Audio debug subcommand
+- `deepctl-cmd-debug-browser` - Browser debug subcommand
+- `deepctl-cmd-debug-network` - Network debug subcommand
+- `deepctl-cmd-mcp` - MCP server command for AI assistant
 
 ### 3. **Build Packages**
 
@@ -32,7 +32,7 @@ All packages will be published with these names:
 # Clean and build all packages
 python scripts/build.py
 
-# Verify all 24 files (12 packages × 2 formats)
+# Verify all files (each package produces wheel and tar.gz)
 ls -la dist/
 ```
 

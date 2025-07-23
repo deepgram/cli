@@ -59,7 +59,9 @@ uv run deepctl --help
 uv run tox                 # All Python versions
 uv run tox -e py311        # Specific Python version
 uv run tox -e lint         # Linting only
+make test                  # Quick test of main CLI
+make test-all             # Test all packages
 
 # Build packages
-uv build
+python scripts/build.py    # Build all distribution packages
 ```

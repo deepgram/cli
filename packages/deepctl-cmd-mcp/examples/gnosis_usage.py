@@ -14,7 +14,7 @@ async def basic_usage():
     client = GnosisClient()
 
     # Ask a simple question
-    response = client.ask_question("What is Deepgram?")
+    response = await client.ask_question("What is Deepgram?")
     print(f"Response: {response}")
 
 

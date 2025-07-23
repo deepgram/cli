@@ -115,13 +115,15 @@ uv pip show deepgram-sdk
 ```yaml
 # .github/workflows/test.yml
 - name: Install uv
-  uses: astral-sh/setup-uv@v1
+  run: |
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
 - name: Install dependencies
   run: uv sync --all-extras
 
 - name: Run tests
-  run: uv run pytest
+  run: uv run tox -e py$(echo ${{ matrix.python-version }} | tr -d '.')
 ```
 
 ## Migration from pip/pipx

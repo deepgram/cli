@@ -53,22 +53,24 @@ uv run tox -e py311,lint
 
 ### Using pytest directly (For Development)
 
-See [Testing With Flexible Options](Testing%20With%20Flexible%20Options.md) for detailed test runner usage.
-
-Quick commands:
+For development, you can use the Makefile targets or run pytest directly:
 
 ```bash
-# Run main CLI tests only (default)
-uv run pytest
+# Using Makefile (recommended - includes custom pytest options)
+make test         # Run main CLI tests only
+make test-all     # Run all tests across workspace
+make test-dev     # Run with verbose output and stop on first failure
 
-# Run all tests across workspace
-uv run pytest --all
+# Direct pytest (basic usage)
+uv run pytest                    # Run tests in current directory
+uv run pytest tests/             # Run main CLI tests
+uv run pytest packages/*/tests/  # Run all package tests
 
 # Run specific package tests
-uv run pytest --package=deepctl-core
+uv run pytest packages/deepctl-core/tests/
 
-# Run with coverage report
-uv run pytest --cov
+# Run with coverage (requires pytest-cov)
+uv run pytest --cov=deepctl --cov=deepctl_core --cov-report=term-missing
 ```
 
 ## Test Requirements

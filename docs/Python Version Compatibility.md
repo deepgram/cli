@@ -58,24 +58,9 @@ tox -e py310
 tox -e lint
 ```
 
-**Alternative Local Testing:**
+### 3. Manual Testing with pyenv
 
-```bash
-# Use the shell script for quick local testing
-./scripts/test_local_python_versions.sh
-```
-
-### 3. Quick Local Test Script
-
-```bash
-# Make executable
-chmod +x scripts/test_python_versions.py
-
-# Test all versions
-python scripts/test_python_versions.py
-```
-
-### 4. Manual Testing with pyenv
+If you need to test multiple Python versions locally without tox:
 
 ```bash
 # Install Python versions

@@ -181,7 +181,7 @@ The SDK provides comprehensive error handling:
 #### Environment Variables
 
 - `DEEPGRAM_API_KEY` - API key (if not passed with --api-key)
-- `DEEPGRAM_GNOSIS_URL` - Base URL for Gnosis server
+- `DEEPGRAM_GNOSIS_URL` - Base URL for Gnosis server (internal use)
 - `DEEPGRAM_MCP_DEBUG` - Enable debug logging
 
 #### Command-Line Options
@@ -189,7 +189,7 @@ The SDK provides comprehensive error handling:
 - `--transport` - Transport mode selection (stdio, sse, streamable-http)
 - `--port` - Server port (SSE/HTTP modes)
 - `--host` - Server host address
-- `--gnosis-api-key` - API key override
+- `--api-key` - API key override
 - `--gnosis-url` - Custom Gnosis URL
 - `--debug` - Enable debug logging
 
@@ -252,7 +252,7 @@ Using the official MCP SDK provides:
       "command": "deepctl",
       "args": ["mcp"],
       "env": {
-        "DEEPGRAM_GNOSIS_API_KEY": "your_api_key"
+        "DEEPGRAM_API_KEY": "your_api_key"
       }
     }
   }
@@ -286,7 +286,7 @@ deepctl mcp
 deepctl mcp --transport sse --port 8000
 
 # Run with debug logging
-deepctl mcp --debug --gnosis-api-key YOUR_KEY
+deepctl mcp --debug --api-key YOUR_KEY
 ```
 
 #### Testing with MCP Inspector
