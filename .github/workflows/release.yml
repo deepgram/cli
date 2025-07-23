@@ -5,17 +5,13 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      test_pypi:
-        description: "Publish to Test PyPI instead of PyPI"
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   build:
     name: Build all packages
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +42,8 @@ jobs:
     name: Test installation
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -72,8 +70,9 @@ jobs:
     name: Publish to PyPI
     needs: [build, test]
     runs-on: ubuntu-latest
-    # environment: pypi  # Uncomment after configuring in GitHub settings
+    environment: pypi # Must be configured in GitHub repository settings
     permissions:
+      contents: read
       id-token: write # Required for PyPI trusted publishing
 
     steps:
@@ -85,15 +84,7 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish to Test PyPI
-        if: github.event.inputs.test_pypi == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-
       - name: Publish to PyPI
-        if: github.event.inputs.test_pypi != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
