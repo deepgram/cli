@@ -120,7 +120,13 @@ def main():
         print("\n🚀 To publish to PyPI:")
         print("  python scripts/publish.py")
         print("\n🧪 To test locally:")
-        print("  pip install dist/deepctl-0.1.0-py3-none-any.whl")
+        print("  # Option 1: Install with pipx (recommended for CLI tools)")
+        print("  pipx install --python python3.12 --pip-args=\"--find-links dist/\" dist/deepctl-0.1.0-py3-none-any.whl")
+        print("\n  # Option 2: Install with pip in a virtual environment")
+        print("  python3.12 -m venv test-env")
+        print("  source test-env/bin/activate  # On Windows: test-env\\Scripts\\activate")
+        print("  pip install --find-links dist/ dist/deepctl-0.1.0-py3-none-any.whl")
+        print("\n  Note: Python 3.13+ may not be supported by all dependencies yet")
 
 
 if __name__ == "__main__":
