@@ -1,6 +1,9 @@
 """MCP server command for deepctl."""
 
 import os
+import signal
+import sys
+import threading
 from typing import Any, Dict, List, Optional
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
@@ -24,6 +27,12 @@ class McpCommand(BaseCommand):
     requires_auth = False
     requires_project = False
     ci_friendly = True
+
+    def __init__(self):
+        """Initialize the MCP command."""
+        super().__init__()
+        self._shutdown_event = threading.Event()
+        self._original_sigint_handler = None
 
     def get_arguments(self) -> List[Dict[str, Any]]:
         """Get command arguments and options."""
@@ -81,6 +90,14 @@ class McpCommand(BaseCommand):
             },
         ]
 
+    def _handle_shutdown(self, signum, frame):
+        """Handle shutdown signals gracefully."""
+        self._shutdown_event.set()
+        # Restore original handler to allow force quit on second Ctrl+C
+        signal.signal(signal.SIGINT, self._original_sigint_handler)
+        # Raise KeyboardInterrupt to exit the run() method
+        raise KeyboardInterrupt()
+
     def handle(
         self,
         config: Config,
@@ -120,6 +137,10 @@ class McpCommand(BaseCommand):
 
         # Create and run the MCP server
         mcp_server = create_mcp_server()
+
+        # Set up signal handling for graceful shutdown
+        self._original_sigint_handler = signal.signal(
+            signal.SIGINT, self._handle_shutdown)
 
         try:
             if transport == "stdio":
@@ -165,6 +186,21 @@ class McpCommand(BaseCommand):
                 port=port if transport != "stdio" else None,
                 host=host if transport != "stdio" else None,
             )
+        finally:
+            # Restore original signal handler
+            signal.signal(signal.SIGINT, self._original_sigint_handler)
+            # Ensure clean shutdown - give threads time to terminate
+            if hasattr(mcp_server, '_shutdown') or hasattr(mcp_server, 'shutdown'):
+                try:
+                    # Try to call any shutdown method if available
+                    if hasattr(mcp_server, 'shutdown'):
+                        mcp_server.shutdown()
+                    elif hasattr(mcp_server, '_shutdown'):
+                        mcp_server._shutdown()
+                except Exception:
+                    pass
+            # Small delay to allow threads to clean up
+            threading.Event().wait(0.1)
 
 
 def create_mcp_server() -> FastMCP:

@@ -19,6 +19,9 @@ class TestMcpCommand:
         assert command.requires_auth is False
         assert command.requires_project is False
         assert command.ci_friendly is True
+        # Test new attributes from __init__
+        assert hasattr(command, '_shutdown_event')
+        assert hasattr(command, '_original_sigint_handler')
 
     def test_get_arguments(self):
         """Test command arguments."""
@@ -56,7 +59,8 @@ class TestMcpCommand:
         assert "Invalid transport type" in result.message
 
     @patch("deepctl_cmd_mcp.command.create_mcp_server")
-    def test_handle_stdio_transport(self, mock_create_server):
+    @patch("signal.signal")
+    def test_handle_stdio_transport(self, mock_signal, mock_create_server):
         """Test handling stdio transport."""
         command = McpCommand()
         config = MagicMock()
@@ -91,7 +95,8 @@ class TestMcpCommand:
         assert result.transport == TransportType.STDIO
 
     @patch("deepctl_cmd_mcp.command.create_mcp_server")
-    def test_handle_sse_transport(self, mock_create_server):
+    @patch("signal.signal")
+    def test_handle_sse_transport(self, mock_signal, mock_create_server):
         """Test handling SSE transport."""
         command = McpCommand()
         config = MagicMock()
@@ -125,7 +130,8 @@ class TestMcpCommand:
         assert result.port == 8080
 
     @patch("deepctl_cmd_mcp.command.create_mcp_server")
-    def test_handle_error(self, mock_create_server):
+    @patch("signal.signal")
+    def test_handle_error(self, mock_signal, mock_create_server):
         """Test handling server error."""
         command = McpCommand()
         config = MagicMock()
@@ -148,7 +154,8 @@ class TestMcpCommand:
         assert result.status == "error"
         assert "Test error" in result.message
 
-    def test_handle_sets_environment_variables(self):
+    @patch("signal.signal")
+    def test_handle_sets_environment_variables(self, mock_signal):
         """Test that environment variables are set correctly."""
         command = McpCommand()
         config = MagicMock()
@@ -175,6 +182,42 @@ class TestMcpCommand:
             assert os.environ.get(
                 "DEEPGRAM_GNOSIS_URL") == "https://test.gnosis.com"
             assert os.environ.get("DEEPGRAM_MCP_DEBUG") == "1"
+
+    @patch("threading.Event")
+    @patch("signal.signal")
+    @patch("deepctl_cmd_mcp.command.create_mcp_server")
+    def test_handle_cleanup_on_shutdown(self, mock_create_server, mock_signal, mock_event):
+        """Test that cleanup is performed on shutdown."""
+        command = McpCommand()
+        config = MagicMock()
+        auth_manager = MagicMock()
+        client = MagicMock()
+
+        # Mock the server instance with shutdown method
+        mock_server = MagicMock()
+        mock_server.shutdown = MagicMock()
+        mock_create_server.return_value = mock_server
+
+        # Mock run to raise KeyboardInterrupt to exit
+        mock_server.run.side_effect = KeyboardInterrupt()
+
+        # Mock event wait
+        mock_event_instance = MagicMock()
+        mock_event.return_value = mock_event_instance
+
+        result = command.handle(
+            config,
+            auth_manager,
+            client,
+            transport="stdio",
+        )
+
+        # Check that shutdown was called
+        mock_server.shutdown.assert_called_once()
+        # Check that we waited for cleanup
+        mock_event_instance.wait.assert_called_once_with(0.1)
+
+        assert result.status == "cancelled"
 
 
 class TestCreateMCPServer:
