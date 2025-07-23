@@ -4,6 +4,18 @@
 
 The `deepctl-cmd-mcp` package implements a Model Context Protocol (MCP) server that connects to Deepgram's Gnosis AI service using the official MCP Python SDK from Anthropic. This enables LLM clients (like Claude Desktop, VS Code, or custom applications) to interact with Deepgram's knowledge base through a standardized protocol.
 
+## Known Limitations
+
+### Signal Handling in STDIO Mode
+
+When running the MCP server in STDIO mode (the default), the server may require pressing Ctrl+C twice to shut down. This is a known limitation of the FastMCP framework's signal handling in STDIO mode. The first Ctrl+C will display "MCP server stopped by user" but the process may continue running until a second interrupt is sent.
+
+**Workarounds:**
+
+- Press Ctrl+C twice to ensure the server stops
+- Use a process manager or supervisor that can send SIGKILL if needed
+- For automated deployments, consider using SSE or HTTP transport modes which handle signals more gracefully
+
 ## Architecture
 
 ### Component Structure

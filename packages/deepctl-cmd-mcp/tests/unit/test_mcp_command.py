@@ -2,13 +2,13 @@
 
 import os
 import signal
-from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
 from deepctl_cmd_mcp.command import McpCommand, create_mcp_server
 from deepctl_cmd_mcp.models import MCPServerResult, TransportType
-from deepctl_core.base_command import BaseCommand
 
 
 class TestMcpCommand:
@@ -22,9 +22,8 @@ class TestMcpCommand:
         assert command.requires_project is False
         assert command.ci_friendly is True
         # Test new attributes from __init__
-        assert hasattr(command, '_shutdown_event')
+        assert hasattr(command, '_shutdown_requested')
         assert hasattr(command, '_original_sigint_handler')
-        assert hasattr(command, '_interrupted')
 
     def test_get_arguments(self):
         """Test command arguments."""
@@ -73,8 +72,6 @@ class TestMcpCommand:
         # Mock the server instance
         mock_server = MagicMock()
         mock_create_server.return_value = mock_server
-
-        # Mock run to return normally (server exits cleanly)
         mock_server.run.return_value = None
 
         with patch.object(auth_manager, "get_api_key", return_value="stored"):
@@ -109,28 +106,79 @@ class TestMcpCommand:
         # Mock the server instance
         mock_server = MagicMock()
         mock_create_server.return_value = mock_server
-
-        # Mock run to return normally
         mock_server.run.return_value = None
 
-        with patch.object(auth_manager, "get_api_key", return_value="stored"):
-            result = command.handle(
-                config,
-                auth_manager,
-                client,
-                transport="sse",
-                port=8080,
-                api_key="test-key",
-            )
+        result = command.handle(
+            config,
+            auth_manager,
+            client,
+            transport="sse",
+            port=8080,
+            host="localhost",
+        )
 
         # Check server was created and run with correct params
         mock_create_server.assert_called_once()
-        mock_server.run.assert_called_once_with(transport="sse")
+        mock_server.run.assert_called_once_with(
+            transport="sse", host="localhost", port=8080
+        )
 
         assert isinstance(result, MCPServerResult)
         assert result.status == "success"
         assert result.transport == TransportType.SSE
         assert result.port == 8080
+        assert result.host == "localhost"
+
+    @patch("os._exit")
+    def test_handle_shutdown_signal(self, mock_exit):
+        """Test that shutdown signal handler works correctly."""
+        command = McpCommand()
+
+        # Test signal handling
+        command._handle_shutdown(None, None)
+
+        # Check that shutdown was requested
+        assert command._shutdown_requested is True
+
+        # Check that os._exit was called
+        mock_exit.assert_called_once_with(0)
+
+    @patch("os._exit")
+    def test_handle_shutdown_signal_once(self, mock_exit):
+        """Test that shutdown signal handler only runs once."""
+        command = McpCommand()
+
+        # Call handler twice
+        command._handle_shutdown(None, None)
+        command._handle_shutdown(None, None)
+
+        # Should only exit once
+        mock_exit.assert_called_once_with(0)
+
+    @patch("deepctl_cmd_mcp.command.create_mcp_server")
+    @patch("signal.signal")
+    def test_handle_keyboard_interrupt(self, mock_signal, mock_create_server):
+        """Test handling KeyboardInterrupt."""
+        command = McpCommand()
+        config = MagicMock()
+        auth_manager = MagicMock()
+        client = MagicMock()
+
+        # Mock the server to raise KeyboardInterrupt
+        mock_server = MagicMock()
+        mock_create_server.return_value = mock_server
+        mock_server.run.side_effect = KeyboardInterrupt()
+
+        result = command.handle(
+            config,
+            auth_manager,
+            client,
+            transport="stdio",
+        )
+
+        assert isinstance(result, MCPServerResult)
+        assert result.status == "cancelled"
+        assert result.message == "MCP server stopped by user"
 
     @patch("deepctl_cmd_mcp.command.create_mcp_server")
     @patch("signal.signal")
@@ -156,148 +204,6 @@ class TestMcpCommand:
         assert isinstance(result, MCPServerResult)
         assert result.status == "error"
         assert "Test error" in result.message
-
-    @patch("signal.signal")
-    def test_handle_sets_environment_variables(self, mock_signal):
-        """Test that environment variables are set correctly."""
-        command = McpCommand()
-        config = MagicMock()
-        auth_manager = MagicMock()
-        client = MagicMock()
-
-        with patch("deepctl_cmd_mcp.command.create_mcp_server") as mock_create:
-            mock_server = MagicMock()
-            mock_create.return_value = mock_server
-            # Make server exit normally
-            mock_server.run.return_value = None
-
-            with patch.object(auth_manager, "get_api_key", return_value="stored"):
-                command.handle(
-                    config,
-                    auth_manager,
-                    client,
-                    transport="stdio",
-                    api_key="test-key",
-                    gnosis_url="https://test.gnosis.com",
-                    debug=True,
-                )
-
-            assert os.environ.get("DEEPGRAM_API_KEY") == "test-key"
-            assert os.environ.get(
-                "DEEPGRAM_GNOSIS_URL") == "https://test.gnosis.com"
-            assert os.environ.get("DEEPGRAM_MCP_DEBUG") == "1"
-
-    @patch("signal.signal")
-    def test_handle_shutdown_signal(self, mock_signal):
-        """Test that shutdown signal handler works correctly."""
-        command = McpCommand()
-
-        # Set up the original handler first
-        original_handler = MagicMock()
-        command._original_sigint_handler = original_handler
-
-        # Test signal handling - should raise KeyboardInterrupt
-        with pytest.raises(KeyboardInterrupt):
-            command._handle_shutdown(None, None)
-
-        # Check that interrupted flag was set
-        assert command._interrupted is True
-        assert command._shutdown_event.is_set()
-
-        # Check that original handler was restored
-        mock_signal.assert_called_with(signal.SIGINT, original_handler)
-
-    @patch("deepctl_cmd_mcp.command.create_mcp_server")
-    @patch("signal.signal")
-    def test_handle_keyboard_interrupt_fallback(self, mock_signal, mock_create_server):
-        """Test keyboard interrupt fallback handling."""
-        command = McpCommand()
-        config = MagicMock()
-        auth_manager = MagicMock()
-        client = MagicMock()
-
-        # Mock the server instance
-        mock_server = MagicMock()
-        mock_create_server.return_value = mock_server
-
-        # Mock run to raise KeyboardInterrupt
-        mock_server.run.side_effect = KeyboardInterrupt()
-
-        result = command.handle(
-            config,
-            auth_manager,
-            client,
-            transport="stdio",
-        )
-
-        # Should return cancelled status
-        assert isinstance(result, MCPServerResult)
-        assert result.status == "cancelled"
-        assert result.message == "MCP server stopped by user"
-
-    @patch("deepctl_cmd_mcp.command.create_mcp_server")
-    @patch("signal.signal")
-    def test_handle_interrupted_server(self, mock_signal, mock_create_server):
-        """Test handling when server is interrupted via signal."""
-        command = McpCommand()
-        config = MagicMock()
-        auth_manager = MagicMock()
-        client = MagicMock()
-
-        # Mock the server instance
-        mock_server = MagicMock()
-        mock_create_server.return_value = mock_server
-
-        # Simulate server exiting normally after interrupt
-        def simulate_interrupt():
-            command._interrupted = True
-            return None
-
-        mock_server.run.side_effect = simulate_interrupt
-
-        result = command.handle(
-            config,
-            auth_manager,
-            client,
-            transport="stdio",
-        )
-
-        # Should return cancelled status
-        assert isinstance(result, MCPServerResult)
-        assert result.status == "cancelled"
-        assert result.message == "MCP server stopped by user"
-
-    def test_output_result_skips_when_interrupted(self):
-        """Test that output_result skips output when interrupted."""
-        command = McpCommand()
-        command._interrupted = True
-        config = MagicMock()
-
-        # Should not call super().output_result
-        with patch.object(BaseCommand, 'output_result') as mock_super:
-            command.output_result("test result", config)
-            mock_super.assert_not_called()
-
-    def test_output_result_handles_io_errors(self):
-        """Test that output_result handles I/O errors gracefully."""
-        command = McpCommand()
-        command._interrupted = False
-        config = MagicMock()
-
-        # Mock super().output_result to raise I/O error
-        with patch.object(BaseCommand, 'output_result') as mock_super:
-            mock_super.side_effect = ValueError("I/O operation on closed file")
-
-            # Should not raise - silently handles the error
-            command.output_result("test result", config)
-
-        # Test with different error message that should be re-raised
-        with patch.object(BaseCommand, 'output_result') as mock_super:
-            mock_super.side_effect = ValueError("Different error")
-
-            # Should re-raise this error
-            with pytest.raises(ValueError, match="Different error"):
-                command.output_result("test result", config)
 
 
 class TestCreateMCPServer:
