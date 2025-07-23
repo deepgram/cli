@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-mcp"
-version = "0.1.5"
+version = "0.1.6"
 description = "MCP server command for deepctl to interact with Deepgram's AI assistant service"
 readme = "README.md"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "deepctl-core>=0.1.5",
+    "deepctl-core>=0.1.6",
     "mcp>=1.0.0",
     "rich>=13.9.4",
     "click>=8.1.7",
