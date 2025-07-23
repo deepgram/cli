@@ -73,3 +73,42 @@ jobs:
       - name: Run linters with tox
         run: |
           uv run tox -e lint
+
+  build-test:
+    name: Test Build Process
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install build dependencies
+        run: |
+          uv pip install --system build
+
+      - name: Test build process
+        run: |
+          python scripts/build.py
+
+      - name: Verify built packages
+        run: |
+          # Check that all expected packages were built
+          ls -la dist/
+          # Verify we have both wheel and source distributions
+          if [ $(ls dist/*.whl | wc -l) -eq 0 ]; then
+            echo "No wheel files found!"
+            exit 1
+          fi
+          if [ $(ls dist/*.tar.gz | wc -l) -eq 0 ]; then
+            echo "No source distributions found!"
+            exit 1
+          fi
+          echo "✅ Build verification passed"

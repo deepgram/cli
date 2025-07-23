@@ -87,6 +87,10 @@ def main():
     # Add all files
     cmd.extend(str(f) for f in files)
 
+    # Add skip-existing flag if requested
+    if "--skip-existing" in sys.argv:
+        cmd.append("--skip-existing")
+
     # Check for non-interactive mode
     if "--non-interactive" in sys.argv:
         print("\n📤 Uploading in non-interactive mode...")
@@ -113,6 +117,7 @@ def main():
         print("1. Check your PyPI credentials")
         print("2. Ensure packages don't already exist with this version")
         print("3. For test uploads, use: python scripts/publish.py --test")
+        print("4. To skip existing packages: python scripts/publish.py --skip-existing")
         sys.exit(1)
 
 
