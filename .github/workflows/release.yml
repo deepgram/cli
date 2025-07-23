@@ -62,7 +62,10 @@ jobs:
 
       - name: Test installation
         run: |
-          pip install dist/deepctl-*.whl
+          # Get absolute path to dist directory
+          DIST_DIR=$(pwd)/dist
+          # Install deepctl with local packages available for dependency resolution
+          pip install --find-links "$DIST_DIR" dist/deepctl-*.whl
           deepctl --version
 
   publish:
