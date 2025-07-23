@@ -140,7 +140,9 @@ class GnosisClient:
                     print(
                         f"[DEBUG] Response: {e.response.text}", file=sys.stderr
                     )
-                return f"HTTP Error {e.response.status_code}: {e.response.text}"
+                return (
+                    f"HTTP Error {e.response.status_code}: {e.response.text}"
+                )
             except Exception as e:
                 error_msg = f"Error calling Deepgram AI: {str(e)}"
                 if self.debug:
@@ -292,9 +294,7 @@ Examples:
     try:
         if args.chat:
             # Interactive chat mode
-            print(
-                "Deepgram AI Chat (type 'exit' or 'quit' to end, 'clear' to reset)"
-            )
+            print("Deepgram AI Chat ('exit' to quit, 'clear' to reset)")
             print("-" * 60)
 
             history = []
@@ -340,7 +340,8 @@ Examples:
                 messages = []
                 if args.system_prompt:
                     messages.append(
-                        {"role": "system", "content": args.system_prompt})
+                        {"role": "system", "content": args.system_prompt}
+                    )
                 messages.append({"role": "user", "content": args.question})
 
                 # We need to modify the client to return the full response
