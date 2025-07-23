@@ -33,6 +33,17 @@ class PluginConfig(BaseModel):
     disabled: list[str] = Field(default_factory=list)
 
 
+class UpdateConfig(BaseModel):
+    """Update configuration."""
+
+    check_enabled: bool = True
+    check_frequency: str = "daily"  # daily, weekly, never
+    last_check: str | None = None
+    installation_method: str | None = None
+    installation_path: str | None = None
+    cached_version_info: dict[str, Any] | None = None
+
+
 class DeepgramConfig(BaseModel):
     """Main configuration model."""
 
@@ -41,6 +52,7 @@ class DeepgramConfig(BaseModel):
     profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
     output: OutputConfig = Field(default_factory=OutputConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
+    update: UpdateConfig = Field(default_factory=UpdateConfig)
 
 
 class Config:

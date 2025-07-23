@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepctl-core"
+name = "deepctl-cmd-update"
 version = "0.1.5"
-description = "Core components for deepctl"
+description = "Update command for deepctl"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
@@ -19,20 +19,17 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-keywords = ["deepgram", "core", "auth", "config", "client"]
+keywords = ["deepgram", "cli", "update", "self-update"]
 requires-python = ">=3.10"
 dependencies = [
+    "deepctl-core>=0.1.5",
     "click>=8.0.0",
-    "deepgram-sdk>=3.0.0",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
-    "httpx>=0.24.0",
-    "pyjwt>=2.8.0",
-    "keyring>=24.0.0",
-    "pyyaml>=6.0.0",
-    "platformdirs>=3.0.0",
-    "packaging>=21.0",
 ]
+
+[project.entry-points."deepctl.commands"]
+update = "deepctl_cmd_update.command:UpdateCommand"
 
 [project.optional-dependencies]
 dev = [
@@ -47,4 +44,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepctl_core*"]
+include = ["deepctl_cmd_update*"]
+
+[tool.uv.sources]
+deepctl-core = { workspace = true }

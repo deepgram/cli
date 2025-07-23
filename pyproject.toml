@@ -43,6 +43,7 @@ dependencies = [
     "deepctl-cmd-debug-browser>=0.1.5", # Browser debug subcommand
     "deepctl-cmd-debug-network>=0.1.5", # Network debug subcommand
     "deepctl-cmd-debug-audio>=0.1.5",   # Audio debug subcommand
+    "deepctl-cmd-update>=0.1.5",        # Update/self-update command
     "deepctl-shared-utils>=0.1.5",      # Shared utilities
     "pydantic>=2.0.0",
     "rich>=13.0.0",
@@ -177,6 +178,8 @@ commands_pre = [
         "packages/deepctl-cmd-debug-network",
         "-e",
         "packages/deepctl-cmd-mcp",
+        "-e",
+        "packages/deepctl-cmd-update",
     ],
 ]
 change_dir = "{tox_root}"
@@ -323,6 +326,7 @@ deepctl-cmd-debug = { workspace = true }
 deepctl-cmd-debug-browser = { workspace = true }
 deepctl-cmd-debug-network = { workspace = true }
 deepctl-cmd-debug-audio = { workspace = true }
+deepctl-cmd-update = { workspace = true }
 deepctl-shared-utils = { workspace = true }
 
 [tool.uv.workspace]

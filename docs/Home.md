@@ -16,6 +16,10 @@ Welcome to the deepctl documentation. This wiki contains architectural decisions
 
 - **[MCP Server Command Architecture](MCP%20Server%20Command%20Architecture.md)** - Implementation of the Model Context Protocol server for Deepgram's Gnosis AI service
 
+- **[Self Update Architecture](Self%20Update%20Architecture.md)** - Design and implementation of the self-update feature
+
+- **[Self Update Demo](Self%20Update%20Demo.md)** - How to use the self-update feature with examples
+
 ## Security & Authentication
 
 - **[Authentication and Security Architecture](Authentication%20and%20Security%20Architecture.md)** - Authentication methods, credential storage, and security features
