@@ -117,16 +117,13 @@ quality: format-check lint-check typecheck ## Run all quality checks
 # ===================================================================
 
 build: clean ## Build the package
-	uv build
+	uv run scripts/build.py
 
 publish-test: build ## Publish to TestPyPI
-	uv run twine upload --repository testpypi dist/*
+	uv run scripts/publish.py --test
 
 publish: build ## Publish to PyPI (use with caution!)
-	uv run twine upload dist/*
-
-install-local: build ## Install package locally from built wheel
-	uv tool install dist/*.whl --force
+	uv run scripts/publish.py
 
 # ===================================================================
 # RUNNING THE CLI

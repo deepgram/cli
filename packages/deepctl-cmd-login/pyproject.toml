@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-login"
-version = "0.1.4"
+version = "0.1.5"
 description = "Login command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
 keywords = ["deepgram", "cli", "login", "authentication"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.4",
+    "deepctl-core>=0.1.5",
     "click>=8.0.0",
     "rich>=13.0.0",
     "deepgram-sdk>=3.0.0",
