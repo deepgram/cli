@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 import threading
+import atexit
 from typing import Any, Dict, List, Optional
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
@@ -33,6 +34,7 @@ class McpCommand(BaseCommand):
         super().__init__()
         self._shutdown_event = threading.Event()
         self._original_sigint_handler = None
+        self._interrupted = False
 
     def get_arguments(self) -> List[Dict[str, Any]]:
         """Get command arguments and options."""
@@ -92,11 +94,26 @@ class McpCommand(BaseCommand):
 
     def _handle_shutdown(self, signum, frame):
         """Handle shutdown signals gracefully."""
+        self._interrupted = True
         self._shutdown_event.set()
         # Restore original handler to allow force quit on second Ctrl+C
         signal.signal(signal.SIGINT, self._original_sigint_handler)
-        # Raise KeyboardInterrupt to exit the run() method
-        raise KeyboardInterrupt()
+
+    def output_result(self, result: Any, config: Config) -> None:
+        """Output command result, handling I/O errors gracefully."""
+        # If we were interrupted, skip output to avoid I/O errors
+        if self._interrupted:
+            return
+
+        try:
+            super().output_result(result, config)
+        except (ValueError, OSError) as e:
+            # Handle I/O errors that can occur during shutdown
+            if "closed file" in str(e) or "I/O operation" in str(e):
+                # Silently ignore - the server was interrupted
+                pass
+            else:
+                raise
 
     def handle(
         self,
@@ -160,13 +177,25 @@ class McpCommand(BaseCommand):
                 )
                 mcp_server.run(transport="streamable-http")
 
-            return MCPServerResult(
-                status="success",
-                message="MCP server stopped",
-                transport=TransportType(transport.replace("-", "")),
-                port=port if transport != "stdio" else None,
-                host=host if transport != "stdio" else None,
-            )
+            # Check if we were interrupted
+            if self._interrupted:
+                console.print("\n[yellow]MCP server stopped by user[/yellow]")
+                return MCPServerResult(
+                    status="cancelled",
+                    message="MCP server stopped by user",
+                    transport=TransportType(transport.replace("-", "")),
+                    port=port if transport != "stdio" else None,
+                    host=host if transport != "stdio" else None,
+                )
+            else:
+                # Normal exit
+                return MCPServerResult(
+                    status="success",
+                    message="MCP server stopped",
+                    transport=TransportType(transport.replace("-", "")),
+                    port=port if transport != "stdio" else None,
+                    host=host if transport != "stdio" else None,
+                )
 
         except KeyboardInterrupt:
             console.print("\n[yellow]MCP server stopped by user[/yellow]")
@@ -188,19 +217,8 @@ class McpCommand(BaseCommand):
             )
         finally:
             # Restore original signal handler
-            signal.signal(signal.SIGINT, self._original_sigint_handler)
-            # Ensure clean shutdown - give threads time to terminate
-            if hasattr(mcp_server, '_shutdown') or hasattr(mcp_server, 'shutdown'):
-                try:
-                    # Try to call any shutdown method if available
-                    if hasattr(mcp_server, 'shutdown'):
-                        mcp_server.shutdown()
-                    elif hasattr(mcp_server, '_shutdown'):
-                        mcp_server._shutdown()
-                except Exception:
-                    pass
-            # Small delay to allow threads to clean up
-            threading.Event().wait(0.1)
+            if self._original_sigint_handler:
+                signal.signal(signal.SIGINT, self._original_sigint_handler)
 
 
 def create_mcp_server() -> FastMCP:
