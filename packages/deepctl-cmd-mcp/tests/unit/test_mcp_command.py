@@ -117,7 +117,7 @@ class TestMcpCommand:
 
         # Check server was created and run with correct params
         mock_create_server.assert_called_once()
-        mock_server.run.assert_called_once_with(transport="sse", port=8080)
+        mock_server.run.assert_called_once_with(transport="sse")
 
         assert isinstance(result, MCPServerResult)
         assert result.status == "cancelled"
