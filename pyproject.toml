@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl"
-version = "0.1.1"
+version = "0.1.2"
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
 license = "MIT"
@@ -33,17 +33,17 @@ requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
     "deepgram-sdk>=3.0.0",
-    "deepctl-core>=0.1.1",              # Core components moved to separate package
-    "deepctl-cmd-login>=0.1.1",         # Login command package
-    "deepctl-cmd-projects>=0.1.1",      # Projects command package
-    "deepctl-cmd-transcribe>=0.1.1",    # Transcribe command package
-    "deepctl-cmd-usage>=0.1.1",         # Usage command package
-    "deepctl-cmd-mcp>=0.1.1",           # MCP server command package
-    "deepctl-cmd-debug>=0.1.1",         # Debug command group package
-    "deepctl-cmd-debug-browser>=0.1.1", # Browser debug subcommand
-    "deepctl-cmd-debug-network>=0.1.1", # Network debug subcommand
-    "deepctl-cmd-debug-audio>=0.1.1",   # Audio debug subcommand
-    "deepctl-shared-utils>=0.1.1",      # Shared utilities
+    "deepctl-core>=0.1.2",              # Core components moved to separate package
+    "deepctl-cmd-login>=0.1.2",         # Login command package
+    "deepctl-cmd-projects>=0.1.2",      # Projects command package
+    "deepctl-cmd-transcribe>=0.1.2",    # Transcribe command package
+    "deepctl-cmd-usage>=0.1.2",         # Usage command package
+    "deepctl-cmd-mcp>=0.1.2",           # MCP server command package
+    "deepctl-cmd-debug>=0.1.2",         # Debug command group package
+    "deepctl-cmd-debug-browser>=0.1.2", # Browser debug subcommand
+    "deepctl-cmd-debug-network>=0.1.2", # Network debug subcommand
+    "deepctl-cmd-debug-audio>=0.1.2",   # Audio debug subcommand
+    "deepctl-shared-utils>=0.1.2",      # Shared utilities
     "pydantic>=2.0.0",
     "rich>=13.0.0",
     "httpx>=0.24.0",

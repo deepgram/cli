@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-transcribe"
-version = "0.1.1"
+version = "0.1.2"
 description = "Transcribe command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,8 +21,8 @@ classifiers = [
 keywords = ["deepgram", "cli", "transcribe", "speech", "audio"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.1",
-    "deepctl-shared-utils>=0.1.1",
+    "deepctl-core>=0.1.2",
+    "deepctl-shared-utils>=0.1.2",
     "click>=8.0.0",
     "rich>=13.0.0",
     "deepgram-sdk>=3.0.0",
