@@ -65,32 +65,32 @@ jobs:
           pip install dist/deepctl-*.whl
           deepctl --version
 
-  # publish:
-  #   name: Publish to PyPI
-  #   needs: [build, test]
-  #   runs-on: ubuntu-latest
-  #   # environment: pypi  # Uncomment after configuring in GitHub settings
-  #   permissions:
-  #     id-token: write # Required for PyPI trusted publishing
+  publish:
+    name: Publish to PyPI
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    # environment: pypi  # Uncomment after configuring in GitHub settings
+    permissions:
+      id-token: write # Required for PyPI trusted publishing
 
-  #   steps:
-  #     - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@v3
-  #       with:
-  #         name: dist
-  #         path: dist/
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: dist
+          path: dist/
 
-  #     - name: Publish to Test PyPI
-  #       if: github.event.inputs.test_pypi == 'true'
-  #       uses: pypa/gh-action-pypi-publish@release/v1
-  #       with:
-  #         repository-url: https://test.pypi.org/legacy/
-  #         skip-existing: true
+      - name: Publish to Test PyPI
+        if: github.event.inputs.test_pypi == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
-  #     - name: Publish to PyPI
-  #       if: github.event.inputs.test_pypi != 'true'
-  #       uses: pypa/gh-action-pypi-publish@release/v1
-  #       with:
-  #         skip-existing: true
+      - name: Publish to PyPI
+        if: github.event.inputs.test_pypi != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
