@@ -20,11 +20,12 @@ SYNCHRONIZED_PACKAGES = [
     "packages/deepctl-cmd-debug-browser",
     "packages/deepctl-cmd-debug-network",
     "packages/deepctl-cmd-mcp",
+    "packages/deepctl-plugin-example",  # Example plugin (not a dependency)
 ]
 
 # Packages that version independently (community plugins)
 INDEPENDENT_PACKAGES = [
-    "packages/deepctl-plugin-example",  # Don't publish this one
+    # Community plugins would go here
 ]
 
 

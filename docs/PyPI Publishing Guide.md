@@ -25,6 +25,7 @@ All packages will be published with these names:
 - `deepctl-cmd-debug-browser` - Browser debug subcommand
 - `deepctl-cmd-debug-network` - Network debug subcommand
 - `deepctl-cmd-mcp` - MCP server command for AI assistant
+- `deepctl-plugin-example` - Example plugin (not a dependency, but published for testing)
 
 ### 3. **Build Packages**
 
@@ -74,7 +75,7 @@ After the first manual upload, set up trusted publishing for future automated re
    - Workflow name: `release.yml`
    - Environment: `pypi` (optional)
 
-3. **Repeat for all 12 packages**
+3. **Repeat for all 13 packages**
 
 ## Automated Releases (After Trusted Publishing)
 

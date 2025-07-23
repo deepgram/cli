@@ -14,12 +14,13 @@ All official packages are versioned together:
 - `deepctl-core` - Core functionality
 - `deepctl-shared-utils` - Shared utilities
 - `deepctl-cmd-*` - Official command packages
+- `deepctl-plugin-example` - Example plugin (for documentation/testing)
 
 ### Independent Packages
 
 Community plugins version independently:
 
-- `deepctl-plugin-*` - Third-party plugins
+- `deepctl-plugin-*` - Third-party plugins (except the example)
 
 ## Semantic Versioning
 
