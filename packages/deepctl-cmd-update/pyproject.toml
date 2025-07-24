@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-update"
-version = "0.1.5"
+version = "0.1.7"
 description = "Update command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -22,7 +22,7 @@ classifiers = [
 keywords = ["deepgram", "cli", "update", "self-update"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.5",
+    "deepctl-core>=0.1.7",
     "click>=8.0.0",
     "pydantic>=2.0.0",
     "rich>=13.0.0",

@@ -126,6 +126,86 @@ publish: build ## Publish to PyPI (use with caution!)
 	uv run scripts/publish.py
 
 # ===================================================================
+# RELEASE MANAGEMENT
+# ===================================================================
+
+verify-packages: ## Verify all packages are properly configured
+	@echo "🔍 Verifying package configuration..."
+	@python3 scripts/verify_packages.py
+
+# Version management with optional VERSION parameter
+version: ## Update version in all packages (usage: make version VERSION=0.2.0)
+ifdef VERSION
+	@python3 scripts/version.py $(VERSION)
+else
+	@read -p "Enter new version: " VERSION && \
+	python3 scripts/version.py $$VERSION
+endif
+
+# Commit with optional [no-ci] flag
+commit: ## Commit changes (usage: make commit or make commit NOCI=1)
+ifdef NOCI
+	@echo "💾 Committing with [no-ci]..."
+	@git add -A && \
+	git commit -m "chore: bump version to v$$(python3 -c "import re; content=open('pyproject.toml').read(); print(re.search(r'version = \"(.+?)\"', content).group(1))") [no-ci]"
+else
+	@echo "💾 Committing..."
+	@git add -A && \
+	git commit -m "chore: bump version to v$$(python3 -c "import re; content=open('pyproject.toml').read(); print(re.search(r'version = \"(.+?)\"', content).group(1))")"
+endif
+
+tag: ## Create git tag for current version
+	@python3 scripts/tag.py
+
+# Modular release steps that use the base targets
+release-step-1: ## Step 1: Update versions (usage: make release-step-1 VERSION=0.2.0)
+	@echo "📝 Step 1: Updating versions..."
+	@$(MAKE) version VERSION=$(VERSION)
+	@echo "✅ Step 1 complete: Versions updated to $(VERSION)"
+
+release-step-2: ## Step 2: Commit changes (usage: make release-step-2 NOCI=1)
+	@echo "💾 Step 2: Committing changes..."
+	@$(MAKE) commit NOCI=$(NOCI)
+	@echo "✅ Step 2 complete: Changes committed"
+
+release-step-3: ## Step 3: Build packages
+	@echo "🔨 Step 3: Building packages..."
+	@$(MAKE) build
+	@echo "✅ Step 3 complete: Packages built"
+
+release-step-4: ## Step 4: Verify configuration
+	@echo "🔍 Step 4: Verifying configuration..."
+	@$(MAKE) verify-packages
+	@echo "✅ Step 4 complete: Configuration verified"
+
+release-step-5: ## Step 5: Create tag
+	@echo "🏷️  Step 5: Creating tag..."
+	@$(MAKE) tag
+	@echo "✅ Step 5 complete: Tag created"
+
+# Full automated release (with [no-ci])
+release: ## Run complete release process (version -> commit -> build -> verify -> tag)
+	@echo "🚀 Starting automated release process..."
+	@read -p "Enter version (e.g., 0.2.0): " VERSION && \
+	$(MAKE) release-step-1 VERSION=$$VERSION && \
+	$(MAKE) release-step-2 NOCI=1 && \
+	$(MAKE) release-step-3 && \
+	$(MAKE) release-step-4 && \
+	$(MAKE) release-step-5 && \
+	echo "✅ Release complete! Now run: git push origin main --tags"
+
+# Manual release process (without [no-ci])
+release-manual: ## Run release process with manual commit (no [no-ci])
+	@echo "🚀 Starting manual release process..."
+	@read -p "Enter version (e.g., 0.2.0): " VERSION && \
+	$(MAKE) release-step-1 VERSION=$$VERSION && \
+	$(MAKE) release-step-2 && \
+	$(MAKE) release-step-3 && \
+	$(MAKE) release-step-4 && \
+	$(MAKE) release-step-5 && \
+	echo "✅ Release complete! Now run: git push origin main --tags"
+
+# ===================================================================
 # RUNNING THE CLI
 # ===================================================================
 

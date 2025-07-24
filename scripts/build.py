@@ -21,6 +21,7 @@ PACKAGES_TO_BUILD = [
     "packages/deepctl-cmd-debug-browser",
     "packages/deepctl-cmd-debug-network",
     "packages/deepctl-cmd-mcp",
+    "packages/deepctl-cmd-update",
     "packages/deepctl-plugin-example",  # Example plugin (not a dependency)
 ]
 

@@ -20,6 +20,7 @@ SYNCHRONIZED_PACKAGES = [
     "packages/deepctl-cmd-debug-browser",
     "packages/deepctl-cmd-debug-network",
     "packages/deepctl-cmd-mcp",
+    "packages/deepctl-cmd-update",
     "packages/deepctl-plugin-example",  # Example plugin (not a dependency)
 ]
 
@@ -56,7 +57,7 @@ def update_version(package_path: str, new_version: str):
     for pkg in ["deepctl-core", "deepctl-shared-utils", "deepctl-cmd-debug",
                 "deepctl-cmd-login", "deepctl-cmd-projects", "deepctl-cmd-transcribe",
                 "deepctl-cmd-usage", "deepctl-cmd-debug-audio", "deepctl-cmd-debug-browser",
-                "deepctl-cmd-debug-network", "deepctl-cmd-mcp"]:
+                "deepctl-cmd-debug-network", "deepctl-cmd-mcp", "deepctl-cmd-update"]:
         # Update simple dependency format: "package-name"
         content = re.sub(
             f'"{pkg}"(?=,|\s*\])',
