@@ -73,10 +73,13 @@ def main():
 
     # Confirm before proceeding
     print(f"\n⚠️  This will upload {len(files)} files to {repository}")
-    response = input("Continue? [y/N] ")
-    if response.lower() != 'y':
-        print("Cancelled.")
-        sys.exit(0)
+    if "--non-interactive" not in sys.argv:
+        response = input("Continue? [y/N] ")
+        if response.lower() != 'y':
+            print("Cancelled.")
+            sys.exit(0)
+    else:
+        print("Running in non-interactive mode, skipping confirmation...")
 
     # Build twine command
     cmd = ["twine", "upload"]
