@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Publish all deepctl packages to PyPI."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -73,7 +74,13 @@ def main():
 
     # Confirm before proceeding
     print(f"\n⚠️  This will upload {len(files)} files to {repository}")
-    if "--non-interactive" not in sys.argv:
+
+    # Check if we're in CI or non-interactive mode
+    is_ci = any(os.environ.get(var, '').lower() == 'true' for var in [
+                'CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'CIRCLECI'])
+    is_non_interactive = "--non-interactive" in sys.argv or is_ci
+
+    if not is_non_interactive:
         response = input("Continue? [y/N] ")
         if response.lower() != 'y':
             print("Cancelled.")
@@ -95,7 +102,7 @@ def main():
         cmd.append("--skip-existing")
 
     # Check for non-interactive mode
-    if "--non-interactive" in sys.argv:
+    if is_non_interactive:
         print("\n📤 Uploading in non-interactive mode...")
         print("Make sure TWINE_USERNAME and TWINE_PASSWORD are set!")
     else:
