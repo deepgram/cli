@@ -67,8 +67,12 @@ class AuthenticationError(Exception):
 class AuthManager:
     """Cross-platform authentication manager."""
 
-    def __init__(self, config: Config, explicit_api_key: str | None = None,
-                 explicit_project_id: str | None = None):
+    def __init__(
+        self,
+        config: Config,
+        explicit_api_key: str | None = None,
+        explicit_project_id: str | None = None,
+    ):
         """Initialize authentication manager.
 
         Args:
@@ -89,9 +93,13 @@ class AuthManager:
         Returns:
             Tuple of (has_api_key, has_project_id)
         """
-        return bool(os.getenv("DEEPGRAM_API_KEY")), bool(os.getenv("DEEPGRAM_PROJECT_ID"))
+        return bool(os.getenv("DEEPGRAM_API_KEY")), bool(
+            os.getenv("DEEPGRAM_PROJECT_ID")
+        )
 
-    def has_profile_credentials(self, profile_name: str | None = None) -> tuple[bool, bool]:
+    def has_profile_credentials(
+        self, profile_name: str | None = None
+    ) -> tuple[bool, bool]:
         """Check if profile has stored credentials.
 
         Args:
@@ -106,7 +114,8 @@ class AuthManager:
         has_api_key = False
         try:
             api_key = keyring.get_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}")
+                KEYRING_SERVICE, f"api-key.{profile_name}"
+            )
             has_api_key = bool(api_key)
         except Exception:
             pass
@@ -139,10 +148,7 @@ class AuthManager:
             return True
 
         # Check environment variables (unless checking profile only)
-        if not check_profile_only and os.getenv("DEEPGRAM_API_KEY"):
-            return True
-
-        return False
+        return not check_profile_only and bool(os.getenv("DEEPGRAM_API_KEY"))
 
     def is_ci_mode(self) -> bool:
         """Check if running in CI mode (credentials from environment)."""
@@ -223,7 +229,8 @@ class AuthManager:
 
         profile_name = self.config.profile or "default"
         has_profile_key, has_profile_project = self.has_profile_credentials(
-            profile_name)
+            profile_name
+        )
 
         if has_profile_key or has_profile_project:
             return f"profile '{profile_name}'"

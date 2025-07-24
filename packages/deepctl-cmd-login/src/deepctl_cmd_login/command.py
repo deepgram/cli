@@ -109,8 +109,7 @@ class LoginCommand(BaseCommand):
             )
 
             if not self.confirm(
-                "Do you still want to login with a profile?",
-                default=False
+                "Do you still want to login with a profile?", default=False
             ):
                 return LoginResult(
                     status="cancelled",
@@ -120,8 +119,8 @@ class LoginCommand(BaseCommand):
                 )
 
         # Check if already logged into this profile
-        has_profile_key, has_profile_project = auth_manager.has_profile_credentials(
-            current_profile
+        has_profile_key, has_profile_project = (
+            auth_manager.has_profile_credentials(current_profile)
         )
 
         if has_profile_key and not force_write:
@@ -132,20 +131,18 @@ class LoginCommand(BaseCommand):
             # Ask if they want to re-login to this profile
             if self.confirm(
                 f"Do you want to re-login to profile '{current_profile}'?",
-                default=False
+                default=False,
             ):
                 # Continue with login
                 pass
             else:
                 # Ask if they want to login with another profile
                 if self.confirm(
-                    "Do you want to login with another profile?",
-                    default=False
+                    "Do you want to login with another profile?", default=False
                 ):
                     # Prompt for new profile name
                     new_profile = Prompt.ask(
-                        "Enter profile name",
-                        default=f"{current_profile}-2"
+                        "Enter profile name", default=f"{current_profile}-2"
                     )
                     config.profile = new_profile
                     current_profile = new_profile
@@ -390,9 +387,11 @@ class LogoutCommand(BaseCommand):
                 # Check if profile exists (not just if authenticated)
                 if profile_name not in config.list_profiles():
                     console.print(
-                        f"[yellow]Profile '{profile_name}' does not exist[/yellow]")
+                        f"[yellow]Profile '{profile_name}' does not exist[/yellow]"
+                    )
                     return LogoutResult(
-                        status="info", message=f"Profile '{profile_name}' does not exist"
+                        status="info",
+                        message=f"Profile '{profile_name}' does not exist",
                     )
 
                 auth_manager.logout(keep_config=keep_config)
@@ -569,9 +568,7 @@ class ProfilesCommand(BaseCommand):
                 # Log the project ID being used
                 project_id = config.get_profile(switch_profile).project_id
                 if project_id:
-                    console.print(
-                        f"[dim]Using project ID:[/dim] {project_id}"
-                    )
+                    console.print(f"[dim]Using project ID:[/dim] {project_id}")
 
                 return ProfilesResult(
                     status="success",
@@ -580,9 +577,7 @@ class ProfilesCommand(BaseCommand):
                 )
 
             except Exception as e:
-                console.print(
-                    f"[red]Error accessing credentials:[/red] {e}"
-                )
+                console.print(f"[red]Error accessing credentials:[/red] {e}")
                 return ProfilesResult(
                     status="error",
                     message=f"Could not access credentials: {e}",

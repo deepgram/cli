@@ -51,7 +51,8 @@ class BaseCommand(ABC):
 
         # Create auth manager with explicit credentials
         auth_manager = AuthManager(
-            config, explicit_api_key, explicit_project_id)
+            config, explicit_api_key, explicit_project_id
+        )
 
         # Create Deepgram client
         client = DeepgramClient(config, auth_manager)

@@ -1,9 +1,7 @@
-"""MCP server command for deepctl."""
+"""MCP server command for Deepgram AI agent tools."""
 
 import os
 import signal
-import sys
-import threading
 from typing import Any, Dict, List, Optional
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
@@ -28,11 +26,11 @@ class McpCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the MCP command."""
         super().__init__()
         self._shutdown_requested = False
-        self._original_sigint_handler = None
+        self._original_sigint_handler: Any = None
 
     def get_arguments(self) -> List[Dict[str, Any]]:
         """Get command arguments and options."""
@@ -90,7 +88,7 @@ class McpCommand(BaseCommand):
             },
         ]
 
-    def _handle_shutdown(self, signum, frame):
+    def _handle_shutdown(self, signum: int, frame: Any) -> None:
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
             self._shutdown_requested = True
@@ -139,7 +137,8 @@ class McpCommand(BaseCommand):
 
         # Set up signal handling for graceful shutdown
         self._original_sigint_handler = signal.signal(
-            signal.SIGINT, self._handle_shutdown)
+            signal.SIGINT, self._handle_shutdown
+        )
         # Also handle SIGTERM
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
@@ -153,14 +152,17 @@ class McpCommand(BaseCommand):
                 console.print(
                     f"[blue]Starting MCP SSE server on {host}:{port}...[/blue]"
                 )
+                # SSE transport requires host and port parameters per FastMCP documentation
                 mcp_server.run(transport="sse", host=host, port=port)
             elif transport == "streamable-http":
                 console.print(
                     f"[blue]Starting MCP Streamable HTTP server on "
                     f"{host}:{port}...[/blue]"
                 )
-                mcp_server.run(transport="streamable-http",
-                               host=host, port=port)
+                # HTTP transport requires host and port parameters per FastMCP documentation
+                mcp_server.run(
+                    transport="streamable-http", host=host, port=port
+                )
 
             # Normal exit
             return MCPServerResult(

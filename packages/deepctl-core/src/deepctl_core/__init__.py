@@ -35,9 +35,9 @@ __all__ = [
     "Config",
     "DeepgramClient",
     "ErrorResult",
+    "InstallMethod",
     "InstallationDetector",
     "InstallationInfo",
-    "InstallMethod",
     "OutputFormatter",
     "PluginInfo",
     "PluginManager",
@@ -52,6 +52,5 @@ __all__ = [
     "print_output",
     "print_success",
     "print_warning",
-    # Output utilities
     "setup_output",
 ]

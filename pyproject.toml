@@ -115,6 +115,11 @@ python_version = "3.10"
 strict = true
 files = "src/,packages/*/src"
 
+[[tool.mypy.overrides]]
+module = "deepctl_cmd_mcp.*"
+# FastMCP type stubs are incomplete for transport-specific parameters
+disable_error_code = ["call-arg"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests"]
 python_files = ["test_*.py", "*_test.py"]

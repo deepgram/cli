@@ -89,7 +89,8 @@ class TestBaseCommand:
             command.execute(mock_context, test_arg="value")
 
         # Verify AuthManager and DeepgramClient were created
-        mock_auth_class.assert_called_once_with(mock_context.obj["config"])
+        mock_auth_class.assert_called_once_with(
+            mock_context.obj["config"], None, None)
         mock_client_class.assert_called_once_with(
             mock_context.obj["config"], mock_auth_instance)
 
@@ -131,7 +132,8 @@ class TestBaseCommand:
         mock_config_class.assert_called_once()
 
         # Verify AuthManager and DeepgramClient were created with new config
-        mock_auth_class.assert_called_once_with(mock_config_instance)
+        mock_auth_class.assert_called_once_with(
+            mock_config_instance, None, None)
         mock_client_class.assert_called_once_with(
             mock_config_instance, mock_auth_instance)
 

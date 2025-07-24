@@ -6,7 +6,6 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -30,13 +29,13 @@ class InstallationInfo(BaseModel):
     virtual_env: bool
     editable: bool
     python_executable: str
-    package_location: Optional[str] = None
+    package_location: str | None = None
 
 
 class InstallationDetector:
     """Detects how deepctl was installed."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the detector."""
         self.executable_path = sys.executable
         self.base_prefix = getattr(sys, "base_prefix", sys.prefix)
@@ -66,11 +65,12 @@ class InstallationDetector:
             virtual_env=in_venv,
             editable=is_editable,
             python_executable=self.executable_path,
-            package_location=str(
-                package_location) if package_location else None,
+            package_location=(
+                str(package_location) if package_location else None
+            ),
         )
 
-    def get_update_command(self, method: InstallMethod) -> Optional[str]:
+    def get_update_command(self, method: InstallMethod) -> str | None:
         """Get appropriate update command for installation method.
 
         Args:
@@ -107,7 +107,9 @@ class InstallationDetector:
                 if Path("/etc/debian_version").exists():
                     return "Please update using apt: sudo apt update && sudo apt upgrade deepctl"
                 elif Path("/etc/redhat-release").exists():
-                    return "Please update using yum/dnf: sudo dnf upgrade deepctl"
+                    return (
+                        "Please update using yum/dnf: sudo dnf upgrade deepctl"
+                    )
             return "Please use your system package manager to update deepctl"
 
         elif info.method == InstallMethod.DEVELOPMENT:
@@ -151,7 +153,7 @@ class InstallationDetector:
             or os.environ.get("CONDA_DEFAULT_ENV") is not None  # Conda
         )
 
-    def _get_package_location(self) -> Optional[Path]:
+    def _get_package_location(self) -> Path | None:
         """Get the location of the deepctl package.
 
         Returns:
@@ -167,7 +169,7 @@ class InstallationDetector:
             pass
 
         # Try to find in site-packages
-        for site_dir in site.getsitepackages() + [site.getusersitepackages()]:
+        for site_dir in [*site.getsitepackages(), site.getusersitepackages()]:
             if site_dir:
                 deepctl_path = Path(site_dir) / "deepctl"
                 if deepctl_path.exists():
@@ -175,7 +177,7 @@ class InstallationDetector:
 
         return None
 
-    def _is_editable_install(self, package_location: Optional[Path]) -> bool:
+    def _is_editable_install(self, package_location: Path | None) -> bool:
         """Check if this is an editable installation.
 
         Args:
@@ -188,7 +190,7 @@ class InstallationDetector:
             return False
 
         # Check for .egg-link file (pip editable installs)
-        for site_dir in site.getsitepackages() + [site.getusersitepackages()]:
+        for site_dir in [*site.getsitepackages(), site.getusersitepackages()]:
             if site_dir:
                 egg_link = Path(site_dir) / "deepctl.egg-link"
                 if egg_link.exists():
@@ -215,7 +217,7 @@ class InstallationDetector:
 
     def _detect_method(
         self,
-        package_location: Optional[Path],
+        package_location: Path | None,
         in_venv: bool,
         is_editable: bool,
     ) -> InstallMethod:
@@ -299,7 +301,7 @@ class InstallationDetector:
 
         return False
 
-    def _is_system_install(self, package_location: Optional[Path]) -> bool:
+    def _is_system_install(self, package_location: Path | None) -> bool:
         """Check if this is a system installation.
 
         Args:

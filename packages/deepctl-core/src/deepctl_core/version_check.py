@@ -1,8 +1,6 @@
 """Version checking functionality for deepctl."""
 
-import json
 from datetime import datetime, timedelta
-from typing import Optional
 
 import httpx
 from packaging import version
@@ -17,8 +15,8 @@ class VersionInfo(BaseModel):
     current_version: str
     latest_version: str
     update_available: bool
-    release_date: Optional[datetime] = None
-    release_notes_url: Optional[str] = None
+    release_date: datetime | None = None
+    release_notes_url: str | None = None
     check_timestamp: datetime = Field(default_factory=datetime.now)
 
 
@@ -99,7 +97,7 @@ class VersionChecker:
 
             return version_info
 
-        except Exception as e:
+        except Exception:
             # On error, return current version with no update
             return VersionInfo(
                 current_version=self.current_version,
@@ -130,7 +128,7 @@ class VersionChecker:
 
         return True
 
-    def _get_cached_info(self) -> Optional[VersionInfo]:
+    def _get_cached_info(self) -> VersionInfo | None:
         """Get cached version info from config.
 
         Returns:
@@ -173,7 +171,9 @@ def format_version_message(info: VersionInfo) -> str:
     if not info.update_available:
         return f"You are using the latest version ({info.current_version})"
 
-    message = f"Update available: {info.current_version} → {info.latest_version}"
+    message = (
+        f"Update available: {info.current_version} → {info.latest_version}"
+    )
     if info.release_date:
         days_old = (datetime.now() - info.release_date).days
         if days_old == 0:
