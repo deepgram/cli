@@ -76,6 +76,8 @@ deepctl transcribe audio.wav --output csv
 
 This CLI is built with Python and uses a modular plugin architecture. **Cross-platform compatibility** is a core requirement - the CLI must work identically on Linux, Windows, macOS (Intel), and macOS (Apple Silicon).
 
+> **Important:** All development and release tasks should be performed using `make` commands. This ensures consistency across different environments and with our CI/CD pipeline.
+
 ### Requirements
 
 - Python 3.10+
@@ -131,11 +133,101 @@ cli/                    # Workspace root
 
 See [Workspace and Monorepo Architecture](docs/Workspace%20and%20Monorepo%20Architecture.md) for detailed information about the workspace structure and how to add new packages.
 
-### Running Tests
+### Development Workflow
+
+All development tasks should be performed using the Makefile:
 
 ```bash
-uv run pytest
+make help              # Show all available commands
+make test              # Run tests
+make format            # Format code
+make lint              # Run linters
+make build             # Build packages
 ```
+
+See [Makefile Commands Reference](docs/Makefile%20Commands%20Reference.md) for the complete list of commands.
+
+## Release Process
+
+### Automated Release (Recommended)
+
+The standard way to create a release:
+
+```bash
+make release
+# Enter version when prompted (e.g., 0.2.0)
+# This will:
+# 1. Update all package versions
+# 2. Commit changes with [no-ci]
+# 3. Build all packages
+# 4. Verify configuration
+# 5. Create git tag
+
+# Then push to trigger the release:
+git push origin main --tags
+```
+
+### Manual Release Process
+
+If you need more control over the release process:
+
+```bash
+make release-manual
+# Enter version when prompted
+# Same as above but commits without [no-ci]
+# Useful if you want CI to verify before pushing the tag
+```
+
+### Individual Release Steps
+
+For complete control, run each step separately:
+
+```bash
+# 1. Update versions
+make version VERSION=0.2.0
+
+# 2. Commit changes
+make commit         # Normal commit
+# or
+make commit NOCI=1  # With [no-ci] flag
+
+# 3. Build packages
+make build
+
+# 4. Verify everything is correct
+make verify-packages
+
+# 5. Create tag
+make tag
+
+# 6. Push to GitHub
+git push origin main --tags
+```
+
+### Release Verification
+
+Before any release, you can verify the configuration:
+
+```bash
+make verify-packages
+```
+
+This checks:
+
+- All packages are properly configured
+- Build scripts include all packages
+- Version scripts include all packages
+- Dependencies are correctly set
+- Packages have been built
+
+### What Happens After Push
+
+When you push a version tag (e.g., `v0.2.0`), GitHub Actions automatically:
+
+1. Verifies package configuration
+2. Builds all packages
+3. Tests installation
+4. Publishes to PyPI
 
 ## Plugin Support
 

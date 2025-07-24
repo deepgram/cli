@@ -1,5 +1,8 @@
 name: Test
 
+# This workflow runs tests and checks on every push and PR
+# It uses Makefile commands where possible for consistency with local development
+
 on:
   push:
     branches: [main]
@@ -95,20 +98,7 @@ jobs:
           uv pip install --system build
 
       - name: Test build process
-        run: |
-          python scripts/build.py
+        run: make build
 
-      - name: Verify built packages
-        run: |
-          # Check that all expected packages were built
-          ls -la dist/
-          # Verify we have both wheel and source distributions
-          if [ $(ls dist/*.whl | wc -l) -eq 0 ]; then
-            echo "No wheel files found!"
-            exit 1
-          fi
-          if [ $(ls dist/*.tar.gz | wc -l) -eq 0 ]; then
-            echo "No source distributions found!"
-            exit 1
-          fi
-          echo "✅ Build verification passed"
+      - name: Verify packages
+        run: make verify-packages

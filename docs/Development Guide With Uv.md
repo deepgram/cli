@@ -76,8 +76,8 @@ uv pip install -e ".[dev]"
 # Build all packages
 uv build
 
-# Or use the build script
-uv run python scripts/build.py
+# Or use make
+make build
 ```
 
 ### Tool Management

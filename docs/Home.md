@@ -69,5 +69,5 @@ make test                  # Quick test of main CLI
 make test-all             # Test all packages
 
 # Build packages
-python scripts/build.py    # Build all distribution packages
+make build                 # Build all distribution packages
 ```

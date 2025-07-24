@@ -36,10 +36,10 @@ We follow [Semantic Versioning](https://semver.org/):
 
 ```bash
 # Update all packages to new version
-python scripts/version.py 0.2.0
+make version VERSION=0.2.0
 
 # For pre-releases
-python scripts/version.py 1.0.0-rc.1
+make version VERSION=1.0.0-rc.1
 ```
 
 ### 2. Review Changes
@@ -87,7 +87,7 @@ The GitHub Actions workflow will:
 
 ```bash
 # Build all distribution packages
-python scripts/build.py
+make build
 
 # Check the dist/ directory
 ls -la dist/
@@ -122,13 +122,20 @@ python scripts/publish.py --test
 pip install --index-url https://test.pypi.org/simple/ deepctl
 ```
 
-## Version Management Script
+## Version Management
 
-The `scripts/version.py` script handles:
+The version management is handled through the Makefile:
 
-- Updating version in all `pyproject.toml` files
-- Updating internal dependency versions
-- Updating `__version__` in `src/deepctl/__init__.py`
+```bash
+make version              # Interactive version update
+make version VERSION=0.2.0  # Direct version update
+```
+
+This internally uses `scripts/version.py` which:
+
+- Updates version in all `pyproject.toml` files
+- Updates internal dependency versions
+- Updates `__version__` in `src/deepctl/__init__.py`
 
 ## Dependency Management
 
@@ -191,7 +198,7 @@ If a release fails:
 1. Check GitHub Actions logs
 2. Verify PyPI credentials/trusted publishing
 3. Ensure version doesn't already exist
-4. Try manual publishing: `python scripts/publish.py`
+4. Try manual publishing: `make publish`
 
 ## Best Practices
 

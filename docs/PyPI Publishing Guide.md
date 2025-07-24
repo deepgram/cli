@@ -31,7 +31,7 @@ All packages will be published with these names:
 
 ```bash
 # Clean and build all packages
-python scripts/build.py
+make build
 
 # Verify all files (each package produces wheel and tar.gz)
 ls -la dist/
@@ -52,10 +52,10 @@ ls -la dist/
 pip install twine
 
 # Test with TestPyPI first (optional but recommended)
-python scripts/publish.py --test
+make publish-test
 
 # Publish to PyPI
-python scripts/publish.py
+make publish
 ```
 
 You'll be prompted for your PyPI username and password (or API token).
@@ -82,13 +82,11 @@ After the first manual upload, set up trusted publishing for future automated re
 Once trusted publishing is configured:
 
 ```bash
-# Update version
-python scripts/version.py 0.2.0
+# Use the automated release process
+make release
+# Enter version: 0.2.0
 
-# Commit and tag
-git add -A
-git commit -m "Release v0.2.0"
-git tag v0.2.0
+# Push to trigger GitHub Actions
 git push origin main --tags
 
 # GitHub Actions will automatically:
@@ -103,7 +101,7 @@ git push origin main --tags
 
 ```bash
 # All packages share the same version
-python scripts/version.py 0.1.1
+make version VERSION=0.1.1
 ```
 
 ### Version Guidelines
