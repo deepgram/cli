@@ -6,7 +6,7 @@ import httpx
 from packaging import version
 from pydantic import BaseModel, Field
 
-from .config import Config
+from deepctl_core import Config
 
 
 class VersionInfo(BaseModel):

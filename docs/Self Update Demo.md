@@ -7,7 +7,7 @@ This document demonstrates how the self-update feature works in deepctl.
 The self-update feature automatically detects how deepctl was installed:
 
 ```python
-from deepctl_core import InstallationDetector
+from deepctl_cmd_update.installation import InstallationDetector
 
 detector = InstallationDetector()
 info = detector.detect()
@@ -23,7 +23,8 @@ print(f"Editable install: {info.editable}")
 Check for updates from PyPI:
 
 ```python
-from deepctl_core import VersionChecker, Config
+from deepctl_core import Config
+from deepctl_cmd_update.version_check import VersionChecker
 
 config = Config()
 checker = VersionChecker(config, current_version="0.1.5")

@@ -8,6 +8,7 @@ from deepctl_core import BaseResult
 class UpdateResult(BaseResult):
     """Result from update command."""
 
+    success: bool  # Override to make it required
     current_version: Optional[str] = None
     latest_version: Optional[str] = None
     update_available: Optional[bool] = None

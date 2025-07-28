@@ -6,15 +6,15 @@ from typing import Any, Dict
 from deepctl_core import (
     BaseCommand,
     Config,
-    InstallationDetector,
-    VersionChecker,
-    format_version_message,
     get_console,
     print_error,
     print_info,
     print_success,
     print_warning,
 )
+
+from .installation import InstallationDetector
+from .version_check import VersionChecker, format_version_message
 from rich.panel import Panel
 from rich.prompt import Confirm
 
