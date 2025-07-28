@@ -51,7 +51,9 @@ class TestConfig:
 
         config = Config()
 
-        assert config.config_path == Path("/mock/config/config.yaml")
+        # Use Path for cross-platform compatibility
+        expected_path = Path("/mock/config") / "config.yaml"
+        assert config.config_path == expected_path
 
     def test_init_custom_path(self):
         """Test initialization with custom config path."""
@@ -238,7 +240,9 @@ class TestConfig:
                 config = Config()
 
                 # Verify config was created with expected path
-                assert str(config.config_path) == "/mock/config/config.yaml"
+                # Use Path for cross-platform compatibility
+                expected_path = Path("/mock/config") / "config.yaml"
+                assert config.config_path == expected_path
 
     @patch.dict(os.environ, {
         "DEEPGRAM_OUTPUT_FORMAT": "json",
