@@ -60,13 +60,13 @@ def update_version(package_path: str, new_version: str):
                 "deepctl-cmd-debug-network", "deepctl-cmd-mcp", "deepctl-cmd-update"]:
         # Update simple dependency format: "package-name"
         content = re.sub(
-            f'"{pkg}"(?=,|\s*\])',
+            rf'"{pkg}"(?=,|\s*\])',
             f'"{pkg}>={new_version}"',
             content
         )
         # Update existing version constraints: "package-name>=X.X.X"
         content = re.sub(
-            f'"{pkg}>=[\d.]+"',
+            rf'"{pkg}>=[\d.]+"',
             f'"{pkg}>={new_version}"',
             content
         )
