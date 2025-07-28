@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-debug-browser"
-version = "0.1.7"
+version = "0.1.8"
 description = "Browser debug subcommand for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
 keywords = ["deepgram", "cli", "debug", "browser", "diagnostics"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.7",
+    "deepctl-core>=0.1.8",
     "click>=8.0.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
