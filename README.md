@@ -95,6 +95,12 @@ Deepctl includes a built-in plugin management system to easily extend functional
 ### Using the Plugin Command
 
 ```bash
+# Search for available plugins
+deepctl plugin search
+
+# Search for plugins by keyword
+deepctl plugin search audio
+
 # Install a plugin
 deepctl plugin install <package-name>
 
