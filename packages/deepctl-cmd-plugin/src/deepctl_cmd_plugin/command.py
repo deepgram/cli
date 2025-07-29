@@ -694,8 +694,13 @@ class PluginCommand(BaseGroupCommand):
         discovered_names = set()
 
         # Discover from main environment
-        plugins.extend(self._discover_from_environment(sys.executable))
-        discovered_names.update(p.name for p in plugins)
+        main_env_plugins = self._discover_from_environment(sys.executable)
+        for plugin in main_env_plugins:
+            # Use a combination of name and entry point to identify unique plugins
+            plugin_key = f"{plugin.name}:{plugin.entry_point}"
+            if plugin_key not in discovered_names:
+                discovered_names.add(plugin_key)
+                plugins.append(plugin)
 
         # Also discover from plugin environment if it exists
         if self._plugin_venv.exists():
@@ -704,7 +709,9 @@ class PluginCommand(BaseGroupCommand):
 
             # Add only plugins not already discovered
             for plugin in plugin_env_plugins:
-                if plugin.name not in discovered_names:
+                plugin_key = f"{plugin.name}:{plugin.entry_point}"
+                if plugin_key not in discovered_names:
+                    discovered_names.add(plugin_key)
                     plugins.append(plugin)
 
         return plugins
