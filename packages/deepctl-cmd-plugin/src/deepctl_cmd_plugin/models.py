@@ -12,6 +12,7 @@ class PluginAction(str, Enum):
     LIST = "list"
     UPDATE = "update"
     REMOVE = "remove"
+    SEARCH = "search"
 
 
 class PluginPackage(BaseModel):
@@ -24,6 +25,27 @@ class PluginPackage(BaseModel):
     available_version: str | None = None
     entry_point: str | None = None
     is_builtin: bool = False
+
+
+class PluginRegistryEntry(BaseModel):
+    """Entry in the plugin registry."""
+
+    name: str
+    description: str
+    version: str
+    author: str | None = None
+    url: str | None = None
+    keywords: list[str] = []
+    # Package name for installation if different from name
+    install_name: str | None = None
+
+
+class PluginSearchResult(BaseModel):
+    """Result from plugin search."""
+
+    plugin: PluginRegistryEntry
+    installed: bool = False
+    installed_version: str | None = None
 
 
 class PluginInstallOptions(BaseModel):
@@ -44,9 +66,9 @@ class PluginOperationResult(BaseModel):
     """Result of a plugin operation."""
 
     success: bool
-    action: PluginAction
+    action: str  # One of PluginAction values
     package: str
     message: str
+    error: str | None = None
     installed_version: str | None = None
     previous_version: str | None = None
-    error: str | None = None

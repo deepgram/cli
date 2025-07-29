@@ -23,6 +23,8 @@ from .models import (
     PluginInstallOptions,
     PluginOperationResult,
     PluginPackage,
+    PluginRegistryEntry,
+    PluginSearchResult,
 )
 
 console = Console()
@@ -117,6 +119,7 @@ class PluginCommand(BaseGroupCommand):
             self._create_list_command(context_wrapper),
             self._create_update_command(context_wrapper),
             self._create_remove_command(context_wrapper),
+            self._create_search_command(context_wrapper),
         ]
 
     def _ensure_plugin_environment(self) -> tuple[bool, str]:
@@ -400,6 +403,199 @@ class PluginCommand(BaseGroupCommand):
         else:
             print_error(result.error or result.message)
             raise click.ClickException(result.error or result.message)
+
+    def _create_search_command(self, context_wrapper: Any) -> click.Command:
+        """Create the search subcommand."""
+
+        @click.command(name="search", help="Search for available plugins")
+        @click.argument("query", required=False)
+        @click.option(
+            "--installed",
+            is_flag=True,
+            help="Show only installed plugins",
+        )
+        @click.option(
+            "--available",
+            is_flag=True,
+            help="Show only available (not installed) plugins",
+        )
+        def search_cmd(**kwargs: Any) -> None:
+            """Search plugins handler."""
+            pass  # Handler is wrapped by context_wrapper
+
+        # Apply the context wrapper
+        search_cmd.callback = context_wrapper(
+            lambda config, auth_manager, client, **kwargs: self._handle_search(
+                config, auth_manager, client, **kwargs
+            )
+        )
+
+        return search_cmd
+
+    def _handle_search(
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
+        **kwargs: Any,
+    ) -> None:
+        """Handle search command."""
+        query = kwargs.get("query", "")
+        show_installed = kwargs.get("installed", False)
+        show_available = kwargs.get("available", False)
+
+        # Get available plugins from registry
+        registry_plugins = self._get_plugin_registry()
+
+        # Get installed plugins
+        installed_plugins = {p.name: p for p in self._discover_plugins()}
+
+        # Filter plugins based on query
+        search_results = []
+        for plugin in registry_plugins:
+            # Check if plugin matches query
+            if query:
+                query_lower = query.lower()
+                if (
+                    query_lower not in plugin.name.lower()
+                    and query_lower not in plugin.description.lower()
+                    and not any(query_lower in kw.lower() for kw in plugin.keywords)
+                ):
+                    continue
+
+            # Check installed status
+            is_installed = plugin.install_name in installed_plugins or plugin.name in installed_plugins
+            installed_version = None
+            if is_installed:
+                installed_plugin = installed_plugins.get(
+                    plugin.install_name) or installed_plugins.get(plugin.name)
+                if installed_plugin:
+                    installed_version = installed_plugin.version
+
+            # Apply filters
+            if show_installed and not is_installed:
+                continue
+            if show_available and is_installed:
+                continue
+
+            search_results.append(
+                PluginSearchResult(
+                    plugin=plugin,
+                    installed=is_installed,
+                    installed_version=installed_version,
+                )
+            )
+
+        # Display results
+        if not search_results:
+            if query:
+                print_info(f"No plugins found matching '{query}'")
+            else:
+                print_info("No plugins found")
+            return
+
+        # Create table
+        table = Table(title="Available Plugins")
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Description", style="white")
+        table.add_column("Version", style="green")
+        table.add_column("Status", style="yellow")
+
+        for result in search_results:
+            status = "Installed" if result.installed else "Available"
+            if result.installed and result.installed_version:
+                status = f"Installed ({result.installed_version})"
+
+            table.add_row(
+                result.plugin.name,
+                result.plugin.description,
+                result.plugin.version,
+                status,
+            )
+
+        console.print(table)
+
+        # Show install hint
+        available_count = sum(1 for r in search_results if not r.installed)
+        if available_count > 0:
+            print_info(
+                f"\nTo install a plugin, use: deepctl plugin install <name>")
+
+    def _get_plugin_registry(self) -> list[PluginRegistryEntry]:
+        """Get the plugin registry.
+
+        For now, this returns a hardcoded list. In the future, this will
+        fetch from a .well-known URL or plugin registry service.
+
+        Returns:
+            List of available plugins
+        """
+        # TODO: Fetch from https://deepgram.com/.well-known/deepctl-plugins.json
+        return [
+            PluginRegistryEntry(
+                name="deepctl-plugin-example",
+                description="Example plugin demonstrating the plugin system",
+                version="0.1.8",
+                author="Deepgram DevRel",
+                url="https://github.com/deepgram/deepctl",
+                keywords=["example", "demo", "plugin"],
+                install_name="deepctl-plugin-example",
+            ),
+            PluginRegistryEntry(
+                name="deepctl-plugin-tts",
+                description="Text-to-speech functionality for Deepgram",
+                version="0.2.0",
+                author="Deepgram",
+                url="https://github.com/deepgram/deepctl-plugin-tts",
+                keywords=["tts", "text-to-speech", "audio", "synthesis"],
+                install_name="deepctl-plugin-tts",
+            ),
+            PluginRegistryEntry(
+                name="deepctl-plugin-analyze",
+                description="Advanced audio analysis tools",
+                version="0.1.0",
+                author="Deepgram",
+                url="https://github.com/deepgram/deepctl-plugin-analyze",
+                keywords=["analyze", "audio", "analysis", "metrics"],
+                install_name="deepctl-plugin-analyze",
+            ),
+            PluginRegistryEntry(
+                name="deepctl-plugin-batch",
+                description="Batch processing utilities for large-scale transcription",
+                version="0.3.1",
+                author="Deepgram",
+                url="https://github.com/deepgram/deepctl-plugin-batch",
+                keywords=["batch", "bulk", "processing", "scale"],
+                install_name="deepctl-plugin-batch",
+            ),
+            PluginRegistryEntry(
+                name="deepctl-plugin-export",
+                description="Export transcriptions to various formats (SRT, VTT, JSON, etc.)",
+                version="0.2.5",
+                author="Deepgram Community",
+                url="https://github.com/deepgram-community/deepctl-plugin-export",
+                keywords=["export", "srt", "vtt", "subtitle", "captions"],
+                install_name="deepctl-plugin-export",
+            ),
+            PluginRegistryEntry(
+                name="deepctl-plugin-realtime",
+                description="Enhanced real-time transcription with WebSocket support",
+                version="0.4.0",
+                author="Deepgram",
+                url="https://github.com/deepgram/deepctl-plugin-realtime",
+                keywords=["realtime", "websocket", "streaming", "live"],
+                install_name="deepctl-plugin-realtime",
+            ),
+            PluginRegistryEntry(
+                name="deepctl-plugin-translate",
+                description="Translation capabilities for transcribed text",
+                version="0.1.2",
+                author="Deepgram Labs",
+                url="https://github.com/deepgram-labs/deepctl-plugin-translate",
+                keywords=["translate", "translation", "language", "i18n"],
+                install_name="deepctl-plugin-translate",
+            ),
+        ]
 
     def install_plugin(
         self,
@@ -747,6 +943,14 @@ class PluginCommand(BaseGroupCommand):
                                     is_builtin=dist.name.startswith(
                                         "deepctl-cmd-")
                                 ))
+                            # Also check for external plugins
+                            for ep in eps.select(group="deepctl.plugins"):
+                                plugins.append(PluginPackage(
+                                    name=dist.name,
+                                    version=dist.version,
+                                    entry_point=f"{ep.name}={ep.value}",
+                                    is_builtin=False
+                                ))
                         else:
                             # Older versions
                             if "deepctl.commands" in eps:
@@ -758,9 +962,41 @@ class PluginCommand(BaseGroupCommand):
                                         is_builtin=dist.name.startswith(
                                             "deepctl-cmd-")
                                     ))
+                            # Also check for external plugins
+                            if "deepctl.plugins" in eps:
+                                for ep in eps["deepctl.plugins"]:
+                                    plugins.append(PluginPackage(
+                                        name=dist.name,
+                                        version=dist.version,
+                                        entry_point=f"{ep.name}={ep.value}",
+                                        is_builtin=False
+                                    ))
             else:
                 # For other environments, try subprocess
-                code = """import json;from importlib import metadata;plugins=[];[plugins.append({"name":dist.name,"version":dist.version,"entry_point":f"{ep.name}={ep.value}","is_builtin":dist.name.startswith("deepctl-cmd-")}) for dist in metadata.distributions() if dist.metadata for group in (dist.entry_points if hasattr(dist.entry_points,"__iter__") else []) if getattr(group,"group",None)=="deepctl.commands" for ep in group];print(json.dumps(plugins))"""
+                code = """import json;from importlib import metadata;plugins=[];
+for dist in metadata.distributions():
+    if dist.metadata:
+        eps = dist.entry_points
+        if hasattr(eps, 'select'):
+            for group in ['deepctl.commands', 'deepctl.plugins']:
+                for ep in eps.select(group=group):
+                    plugins.append({
+                        "name": dist.name,
+                        "version": dist.version,
+                        "entry_point": f"{ep.name}={ep.value}",
+                        "is_builtin": dist.name.startswith("deepctl-cmd-") if group == "deepctl.commands" else False
+                    })
+        else:
+            for group in ['deepctl.commands', 'deepctl.plugins']:
+                if group in eps:
+                    for ep in eps[group]:
+                        plugins.append({
+                            "name": dist.name,
+                            "version": dist.version,
+                            "entry_point": f"{ep.name}={ep.value}",
+                            "is_builtin": dist.name.startswith("deepctl-cmd-") if group == "deepctl.commands" else False
+                        })
+print(json.dumps(plugins))"""
 
                 result = subprocess.run(
                     [python_exe, "-c", code],

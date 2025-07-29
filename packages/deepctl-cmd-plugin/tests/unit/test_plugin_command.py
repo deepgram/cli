@@ -289,9 +289,84 @@ class TestPluginCommand:
         """Test that all subcommands are properly set up."""
         commands = self.command.setup_commands()
 
-        assert len(commands) == 4
+        assert len(commands) == 5
         command_names = [cmd.name for cmd in commands]
         assert "install" in command_names
         assert "list" in command_names
         assert "update" in command_names
         assert "remove" in command_names
+        assert "search" in command_names
+
+    def test_handle_search(self) -> None:
+        """Test the search command functionality."""
+        # Mock the registry
+        with patch.object(self.command, "_get_plugin_registry") as mock_registry:
+            from deepctl_cmd_plugin.models import PluginRegistryEntry
+
+            mock_registry.return_value = [
+                PluginRegistryEntry(
+                    name="test-plugin",
+                    description="Test plugin",
+                    version="1.0.0",
+                    keywords=["test", "demo"],
+                    install_name="test-plugin"
+                ),
+                PluginRegistryEntry(
+                    name="another-plugin",
+                    description="Another test plugin",
+                    version="2.0.0",
+                    keywords=["other"],
+                    install_name="another-plugin"
+                )
+            ]
+
+            # Mock discover_plugins to simulate one installed
+            with patch.object(self.command, "_discover_plugins") as mock_discover:
+                from deepctl_cmd_plugin.models import PluginPackage
+
+                mock_discover.return_value = [
+                    PluginPackage(name="test-plugin",
+                                  version="1.0.0", is_builtin=False)
+                ]
+
+                # Test search all
+                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
+                    with patch("deepctl_cmd_plugin.command.print_info") as mock_info:
+                        self.command._handle_search(
+                            self.config, self.auth_manager, self.client
+                        )
+
+                        # Should print a table
+                        mock_print.assert_called_once()
+                        # Should show install hint
+                        assert any("install" in str(call)
+                                   for call in mock_info.call_args_list)
+
+                # Test search with query
+                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
+                    self.command._handle_search(
+                        self.config, self.auth_manager, self.client,
+                        query="test"
+                    )
+
+                    # Should print a table with filtered results
+                    mock_print.assert_called_once()
+
+                # Test search installed only
+                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
+                    self.command._handle_search(
+                        self.config, self.auth_manager, self.client,
+                        installed=True
+                    )
+
+                    # Should print a table with only installed plugins
+                    mock_print.assert_called_once()
+
+    def test_get_plugin_registry(self) -> None:
+        """Test that plugin registry returns hardcoded plugins."""
+        registry = self.command._get_plugin_registry()
+
+        assert len(registry) > 0
+        assert any(p.name == "deepctl-plugin-example" for p in registry)
+        assert all(hasattr(p, "description") for p in registry)
+        assert all(hasattr(p, "version") for p in registry)
