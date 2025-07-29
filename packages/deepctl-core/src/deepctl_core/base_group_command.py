@@ -126,6 +126,16 @@ class BaseGroupCommand(BaseCommand):
         # Subclasses can override to add group-level logic
         pass
 
+    def setup_commands(self) -> list[click.Command]:
+        """Set up subcommands for this group.
+
+        Override this method to programmatically add subcommands.
+
+        Returns:
+            List of Click commands to add as subcommands
+        """
+        return []
+
     def get_click_group(self) -> click.Group:
         """Create and return a Click Group for this command.
 
@@ -165,6 +175,10 @@ class BaseGroupCommand(BaseCommand):
                         required=arg.get("required", True),
                         nargs=arg.get("nargs", 1),
                     )(group)
+
+        # Add programmatically defined subcommands
+        for command in self.setup_commands():
+            group.add_command(command)
 
         return group
 

@@ -21,6 +21,7 @@ SYNCHRONIZED_PACKAGES = [
     "packages/deepctl-cmd-debug-network",
     "packages/deepctl-cmd-mcp",
     "packages/deepctl-cmd-update",
+    "packages/deepctl-cmd-plugin",
     "packages/deepctl-plugin-example",  # Example plugin (not a dependency)
 ]
 

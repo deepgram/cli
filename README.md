@@ -1,30 +1,46 @@
 # deepctl
 
+> [!WARNING] > **Alpha Software**: This CLI is experimental and under active development. APIs and features may change without notice.
+
 The official Deepgram CLI.
 
-## Quick Start
+## Installation
 
-### Try it without installing (like `npx`)
+### Quick Try (No Installation)
+
+Try the CLI without installing:
 
 ```bash
-# Using pipx (traditional)
+# Using pipx (standard Python tool)
 pipx run deepctl --help
-pipx run deepctl transcribe audio.wav
 
-# Using uv (recommended - much faster!)
+# Using uvx (faster alternative)
 uvx deepctl --help
-uvx deepctl transcribe audio.wav
 ```
 
-### Install permanently
+### Global Installation
+
+Install permanently for regular use:
 
 ```bash
-# Recommended: Using pipx (supports plugins!)
+# Using pip (simple, direct installation)
+pip install deepctl
+
+# Using pipx (isolated environment)
 pipx install deepctl
 
-# Alternative: Using uv tool (plugins require manual workarounds)
+# Using uv (fast installation)
 uv tool install deepctl
+
+# Using Homebrew (macOS)
+brew install deepctl
+
+# Using system package managers (Linux)
+apt install deepctl  # Debian/Ubuntu
+yum install deepctl  # RHEL/CentOS
 ```
+
+> **Note:** All installation methods support plugins! System installations (brew, apt, etc.) automatically use an isolated plugin environment at `~/.deepctl/plugins/`.
 
 ## Usage
 
@@ -71,6 +87,79 @@ deepctl transcribe audio.wav --output yaml
 deepctl transcribe audio.wav --output table
 deepctl transcribe audio.wav --output csv
 ```
+
+## Plugin Management
+
+Deepctl includes a built-in plugin management system to easily extend functionality with additional commands.
+
+### Using the Plugin Command
+
+```bash
+# Install a plugin
+deepctl plugin install <package-name>
+
+# List installed plugins
+deepctl plugin list
+
+# Update a plugin
+deepctl plugin update <package-name>
+
+# Remove a plugin
+deepctl plugin remove <package-name>
+
+# Example: Install the example plugin
+deepctl plugin install deepctl-plugin-example
+```
+
+### Installation-Specific Behavior
+
+The `deepctl plugin` command works with ALL installation methods:
+
+**pip/pipx/uv installations:**
+
+- Plugins install directly into the same environment as deepctl
+- Simple and straightforward
+
+**System installations (brew, apt, yum, chocolatey):**
+
+- Plugins install into an isolated environment at `~/.deepctl/plugins/venv`
+- Completely automatic - no manual steps required
+- Maintains system package manager integrity
+
+### Advanced Plugin Sources
+
+```bash
+# Install from GitHub
+deepctl plugin install git+https://github.com/user/repo.git
+
+# Install from a specific branch/tag
+deepctl plugin install git+https://github.com/user/repo.git@main
+deepctl plugin install git+https://github.com/user/repo.git@v1.0.0
+
+# Install from local directory (development)
+deepctl plugin install -e /path/to/plugin
+
+# Install with specific version
+deepctl plugin install package-name==1.0.0
+```
+
+### Creating Plugins
+
+Create custom commands by extending the `BaseCommand` class:
+
+```python
+from deepctl_core.base_command import BaseCommand
+
+class MyCommand(BaseCommand):
+    name = "mycommand"
+    help = "Description of my command"
+
+    def handle(self, config, auth_manager, client, **kwargs):
+        # Command implementation
+        pass
+```
+
+See [packages/deepctl-plugin-example](packages/deepctl-plugin-example) for a complete example.
 
 ## Development
 
@@ -228,39 +317,6 @@ When you push a version tag (e.g., `v0.2.0`), GitHub Actions automatically:
 2. Builds all packages
 3. Tests installation
 4. Publishes to PyPI
-
-## Plugin Support
-
-### Installing Plugins
-
-Deepctl supports external plugins that add custom commands:
-
-```bash
-# First, install deepctl globally with pipx
-pipx install deepctl
-
-# Then inject plugins into the same environment
-pipx inject deepctl deepctl-plugin-example
-pipx inject deepctl your-custom-plugin
-```
-
-### Creating Plugins
-
-Create custom commands by extending the `BaseCommand` class:
-
-```python
-from deepctl_core.base_command import BaseCommand
-
-class MyCommand(BaseCommand):
-    name = "mycommand"
-    help = "Description of my command"
-
-    def handle(self, config, auth_manager, client, **kwargs):
-        # Command implementation
-        pass
-```
-
-See [packages/deepctl-plugin-example](packages/deepctl-plugin-example) for a complete example.
 
 ## Support
 
