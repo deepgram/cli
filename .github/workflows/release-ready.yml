@@ -1,0 +1,94 @@
+name: Release to PyPI
+
+# This workflow does all the release steps before publish to ensure
+# branches and PRs are not drifting away from releasable states
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The workflow follows the same steps as release:
+  # 1. Verify configuration (pre-build check)
+  # 2. Build packages
+  # 3. Verify built packages (post-build check)
+  # 4. Test installation
+  verify:
+    name: Verify package configuration
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Verify packages
+        run: make verify-packages
+
+  build:
+    name: Build all packages
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system build twine
+
+      - name: Build all packages
+        run: make build
+
+      - name: Verify built packages
+        run: make verify-packages
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  test:
+    name: Test installation
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Test installation
+        run: |
+          # Get absolute path to dist directory
+          DIST_DIR=$(pwd)/dist
+          # Install deepctl with local packages available for dependency resolution
+          pip install --find-links "$DIST_DIR" dist/deepctl-*.whl
+          deepctl --version
