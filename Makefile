@@ -259,6 +259,24 @@ docs-serve: ## Serve documentation (placeholder)
 	@echo "📝 See README.md for usage instructions"
 
 # ===================================================================
+# HOMEBREW TESTING
+# ===================================================================
+
+.PHONY: build-binary tap tap-install tap-uninstall
+
+build-binary: ## Build standalone binary for Homebrew testing
+	@./homebrew/scripts/build-binary.sh
+
+tap: ## Generate Homebrew formula (requires build-binary first)
+	@./homebrew/scripts/generate-tap.sh
+
+tap-install: ## Install deepctl via local Homebrew formula
+	@./homebrew/scripts/tap-install.sh
+
+tap-uninstall: ## Uninstall deepctl from Homebrew
+	@./homebrew/scripts/tap-uninstall.sh
+
+# ===================================================================
 # ALIASES (for convenience)
 # ===================================================================
 
