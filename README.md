@@ -73,16 +73,48 @@ See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
 - [`docs/Architecture and Design.md`](docs/Architecture%20and%20Design.md)
 - [`docs/Testing and Test Strategy.md`](docs/Testing%20and%20Test%20Strategy.md)
 
+## Release
+
+Semi-automated release (recommended)
+
+```bash
+# 1. Update versions
+make version VERSION=0.2.0
+
+# 2. Commit changes
+make commit
+
+# 3. Build packages
+make build
+
+# 4. Verify everything
+make verify-packages
+
+# 5. Create tag
+make tag
+
+# 6. Push to trigger PyPI publish
+git push origin main --tags
+```
+
+Full automated release
+
+```bash
+make release
+# Enter version when prompted (e.g., 0.2.0)
+git push origin main --tags
+```
+
 ## Installation
 
 ### Try Without Installing
 
 ```bash
-uvx deepctl --help
+uv run deepctl --help
 pipx run deepctl --help
 ```
 
-### Install
+### {WIP} Install
 
 ```bash
 pip install deepctl
