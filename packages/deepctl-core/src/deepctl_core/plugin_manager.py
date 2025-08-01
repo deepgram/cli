@@ -243,18 +243,6 @@ class PluginManager:
                                 entry_point.name, subcommand_class
                             )
 
-                        # Determine type for logging
-                        cmd_type = (
-                            "plugin subcommand"
-                            if "subplugins" in subcommand_group
-                            else "subcommand"
-                        )
-                        # Debug: Loaded subcommand
-                        # console.print(
-                        #     f"[dim]Loaded {cmd_type}:[/dim] "
-                        #     f"{group_instance.name} {entry_point.name}"
-                        # )
-
                     except Exception as e:
                         console.print(
                             f"[red]Error loading subcommand "

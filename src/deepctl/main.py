@@ -214,10 +214,10 @@ def main() -> None:
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Operation cancelled by user[/yellow]")
-        sys.exit(1)
+        sys.exit(2)
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

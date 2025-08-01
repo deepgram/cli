@@ -115,7 +115,8 @@ class TimingCollector:
         if not summary or not summary["timings"]:
             return
 
-        console.print("\n[bold cyan]⏱️  Performance Timing Summary[/bold cyan]")
+        console.print(
+            "\n[bold cyan]⏱️  Performance Timing Summary[/bold cyan]")
         console.print(
             f"[dim]Total execution time: {summary['total_time_ms']}ms ({summary['total_time_s']}s)[/dim]"
         )
@@ -180,7 +181,8 @@ def get_timing_collector() -> TimingCollector:
     """Get the thread-local timing collector."""
     if not hasattr(_timing_data, "collector"):
         _timing_data.collector = TimingCollector()
-    return _timing_data.collector
+    collector: TimingCollector = _timing_data.collector
+    return collector
 
 
 @contextmanager
