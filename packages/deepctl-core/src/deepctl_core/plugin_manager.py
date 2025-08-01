@@ -58,10 +58,11 @@ class PluginManager:
                     # Store reference
                     self.command_classes[entry_point.name] = command_class
 
-                    console.print(
-                        f"[dim]Loaded built-in command:[/dim] "
-                        f"{entry_point.name}"
-                    )
+                    # Debug: Loaded built-in command
+                    # console.print(
+                    #     f"[dim]Loaded built-in command:[/dim] "
+                    #     f"{entry_point.name}"
+                    # )
 
                 except Exception as e:
                     console.print(
@@ -94,10 +95,11 @@ class PluginManager:
                     # Store reference
                     self.loaded_plugins[entry_point.name] = plugin_instance
 
-                    console.print(
-                        f"[dim]Loaded external plugin:[/dim] "
-                        f"{entry_point.name}"
-                    )
+                    # Debug: Loaded external plugin
+                    # console.print(
+                    #     f"[dim]Loaded external plugin:[/dim] "
+                    #     f"{entry_point.name}"
+                    # )
 
                 except Exception as e:
                     console.print(
@@ -238,10 +240,11 @@ class PluginManager:
                             if "subplugins" in subcommand_group
                             else "subcommand"
                         )
-                        console.print(
-                            f"[dim]Loaded {cmd_type}:[/dim] "
-                            f"{group_instance.name} {entry_point.name}"
-                        )
+                        # Debug: Loaded subcommand
+                        # console.print(
+                        #     f"[dim]Loaded {cmd_type}:[/dim] "
+                        #     f"{group_instance.name} {entry_point.name}"
+                        # )
 
                     except Exception as e:
                         console.print(
