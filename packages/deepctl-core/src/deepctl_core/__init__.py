@@ -23,7 +23,13 @@ from .output import (
     setup_output,
 )
 from .plugin_manager import PluginManager
-from .timing import TimingContext, enable_timing, get_timing_summary, print_timing_summary, is_timing_enabled
+from .timing import (
+    TimingContext,
+    enable_timing,
+    get_timing_summary,
+    is_timing_enabled,
+    print_timing_summary,
+)
 
 __all__ = [
     "AuthManager",

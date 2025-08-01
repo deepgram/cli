@@ -72,7 +72,10 @@ class BaseCommand(ABC):
                             project_id = auth_manager.get_project_id()
 
                             # Only log if not using a profile (i.e., using env vars or flags)
-                            if source in ["explicit flags", "environment variables"]:
+                            if source in [
+                                "explicit flags",
+                                "environment variables",
+                            ]:
                                 console.print(
                                     f"[dim]Using credentials from {source}[/dim]"
                                 )
@@ -87,7 +90,8 @@ class BaseCommand(ABC):
 
                     except Exception as e:
                         console.print(
-                            f"[red]Authentication required:[/red] {e}")
+                            f"[red]Authentication required:[/red] {e}"
+                        )
                         raise click.ClickException(str(e))
 
             # Check project ID if required
@@ -108,7 +112,8 @@ class BaseCommand(ABC):
             try:
                 with TimingContext(f"command_{self.name}_handler"):
                     result = self.handle(
-                        config, auth_manager, client, **kwargs)
+                        config, auth_manager, client, **kwargs
+                    )
 
                 # Handle command result
                 if result is not None:
@@ -191,7 +196,8 @@ class BaseCommand(ABC):
                 self._output_csv(result)
             else:
                 console.print(
-                    f"[red]Unknown output format:[/red] {output_format}")
+                    f"[red]Unknown output format:[/red] {output_format}"
+                )
                 self._output_json(result)
 
     def _output_json(self, result: Any) -> None:

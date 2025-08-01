@@ -44,7 +44,8 @@ class PluginManager:
             with TimingContext("discover_entry_points"):
                 entry_points = metadata.entry_points()
                 command_entry_points = list(
-                    entry_points.select(group="deepctl.commands"))
+                    entry_points.select(group="deepctl.commands")
+                )
 
             for entry_point in command_entry_points:
                 with TimingContext(f"load_command_{entry_point.name}"):

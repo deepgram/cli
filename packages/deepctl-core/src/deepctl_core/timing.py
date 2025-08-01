@@ -1,10 +1,11 @@
 """Performance timing utilities for deepctl."""
 
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional
 from dataclasses import dataclass, field
 from threading import local
+from typing import Any
 
 from rich.console import Console
 
@@ -17,12 +18,13 @@ _timing_data = local()
 @dataclass
 class TimingEntry:
     """Represents a single timing measurement."""
+
     name: str
     start_time: float
-    end_time: Optional[float] = None
-    duration: Optional[float] = None
-    parent: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    end_time: float | None = None
+    duration: float | None = None
+    parent: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def finish(self) -> float:
         """Mark this timing entry as finished and calculate duration."""
@@ -36,7 +38,7 @@ class TimingCollector:
     """Collects and manages timing measurements."""
 
     def __init__(self) -> None:
-        self.entries: Dict[str, TimingEntry] = {}
+        self.entries: dict[str, TimingEntry] = {}
         self.stack: list[str] = []
         self.enabled = False
 
@@ -48,7 +50,9 @@ class TimingCollector:
         """Disable timing collection."""
         self.enabled = False
 
-    def start_timing(self, name: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def start_timing(
+        self, name: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Start timing for a named operation."""
         if not self.enabled:
             return
@@ -58,12 +62,12 @@ class TimingCollector:
             name=name,
             start_time=time.perf_counter(),
             parent=parent,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
         self.entries[name] = entry
         self.stack.append(name)
 
-    def end_timing(self, name: str) -> Optional[float]:
+    def end_timing(self, name: str) -> float | None:
         """End timing for a named operation."""
         if not self.enabled or name not in self.entries:
             return None
@@ -77,7 +81,7 @@ class TimingCollector:
 
         return duration
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Get a summary of all timing measurements."""
         if not self.enabled:
             return {}
@@ -91,7 +95,7 @@ class TimingCollector:
                     "duration_ms": round(entry.duration * 1000, 2),
                     "duration_s": round(entry.duration, 4),
                     "parent": entry.parent,
-                    "metadata": entry.metadata
+                    "metadata": entry.metadata,
                 }
                 if entry.parent is None:  # Top-level timing
                     total_time += entry.duration
@@ -99,7 +103,7 @@ class TimingCollector:
         return {
             "total_time_ms": round(total_time * 1000, 2),
             "total_time_s": round(total_time, 4),
-            "timings": timings
+            "timings": timings,
         }
 
     def print_summary(self, detailed: bool = False) -> None:
@@ -111,17 +115,17 @@ class TimingCollector:
         if not summary or not summary["timings"]:
             return
 
+        console.print("\n[bold cyan]⏱️  Performance Timing Summary[/bold cyan]")
         console.print(
-            "\n[bold cyan]⏱️  Performance Timing Summary[/bold cyan]")
-        console.print(
-            f"[dim]Total execution time: {summary['total_time_ms']}ms ({summary['total_time_s']}s)[/dim]")
+            f"[dim]Total execution time: {summary['total_time_ms']}ms ({summary['total_time_s']}s)[/dim]"
+        )
         console.print()
 
         # Sort by duration (descending)
         sorted_timings = sorted(
             summary["timings"].items(),
             key=lambda x: x[1]["duration_ms"],
-            reverse=True
+            reverse=True,
         )
 
         if detailed:
@@ -141,10 +145,12 @@ class TimingCollector:
                 # Format the timing line
                 if parent:
                     console.print(
-                        f"  └─ [yellow]{name}[/yellow]: {duration_ms}ms {percentage_str}")
+                        f"  └─ [yellow]{name}[/yellow]: {duration_ms}ms {percentage_str}"
+                    )
                 else:
                     console.print(
-                        f"[green]{name}[/green]: {duration_ms}ms {percentage_str}")
+                        f"[green]{name}[/green]: {duration_ms}ms {percentage_str}"
+                    )
 
                 # Show metadata if present
                 if metadata:
@@ -159,24 +165,28 @@ class TimingCollector:
                     # Calculate percentage of total time
                     if summary["total_time_ms"] > 0:
                         percentage = (
-                            duration_ms / summary["total_time_ms"]) * 100
+                            duration_ms / summary["total_time_ms"]
+                        ) * 100
                         percentage_str = f"({percentage:.1f}%)"
                     else:
                         percentage_str = ""
 
                     console.print(
-                        f"[green]{name}[/green]: {duration_ms}ms {percentage_str}")
+                        f"[green]{name}[/green]: {duration_ms}ms {percentage_str}"
+                    )
 
 
 def get_timing_collector() -> TimingCollector:
     """Get the thread-local timing collector."""
-    if not hasattr(_timing_data, 'collector'):
+    if not hasattr(_timing_data, "collector"):
         _timing_data.collector = TimingCollector()
     return _timing_data.collector
 
 
 @contextmanager
-def TimingContext(name: str, metadata: Optional[Dict[str, Any]] = None) -> Generator[None, None, None]:
+def TimingContext(
+    name: str, metadata: dict[str, Any] | None = None
+) -> Generator[None, None, None]:
     """Context manager for timing operations."""
     collector = get_timing_collector()
     collector.start_timing(name, metadata)
@@ -198,7 +208,7 @@ def disable_timing() -> None:
     collector.disable()
 
 
-def get_timing_summary() -> Dict[str, Any]:
+def get_timing_summary() -> dict[str, Any]:
     """Get the current timing summary."""
     collector = get_timing_collector()
     return collector.get_summary()
