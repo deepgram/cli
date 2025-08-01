@@ -2,6 +2,15 @@
 
 from pydantic import BaseModel, Field
 
+__all__ = [
+    "BaseModel",
+    "BaseResult",
+    "ErrorResult",
+    "PluginInfo",
+    "ProfileInfo",
+    "ProfilesResult",
+]
+
 
 class BaseResult(BaseModel):
     """Common base for all command result payloads."""
