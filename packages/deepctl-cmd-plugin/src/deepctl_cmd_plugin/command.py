@@ -270,12 +270,9 @@ class PluginCommand(BaseGroupCommand):
         package = kwargs.pop("package", "")
 
         # Check if package is a git URL
-        if (
-            package.startswith("git+")
-            or ((
-                package.startswith("http://") or package.startswith("https://")
-            )
-            and ".git" in package)
+        if package.startswith("git+") or (
+            (package.startswith("http://") or package.startswith("https://"))
+            and ".git" in package
         ):
             # This is a git URL
             kwargs["git_url"] = package

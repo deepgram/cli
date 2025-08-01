@@ -13,6 +13,7 @@ hiddenimports.extend(plugin_hiddenimports)
 # Collect subcommand entry points (for group commands)
 for group_name in ["debug"]:  # Add other group names as needed
     sub_datas, sub_hiddenimports = collect_entry_point(
-        f"deepctl.subcommands.{group_name}")
+        f"deepctl.subcommands.{group_name}"
+    )
     datas.extend(sub_datas)
     hiddenimports.extend(sub_hiddenimports)

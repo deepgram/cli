@@ -1,6 +1,5 @@
 """Models for update command."""
 
-
 from deepctl_core import BaseResult
 
 

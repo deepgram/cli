@@ -27,9 +27,11 @@ async def custom_system_prompt():
     # Ask with a technical expert system prompt
     response = await client.ask_question(
         "Explain the difference between streaming and batch transcription",
-        system_prompt="You are a technical expert who provides detailed, developer-focused explanations."
+        system_prompt="You are a technical expert who provides detailed, developer-focused explanations.",
     )
-    print("Q: Explain the difference between streaming and batch transcription")
+    print(
+        "Q: Explain the difference between streaming and batch transcription"
+    )
     print(f"A: {response}\n")
 
 
@@ -41,7 +43,10 @@ async def multi_turn_conversation():
 
     # Build a conversation
     messages = [
-        {"role": "user", "content": "What audio formats does Deepgram support?"},
+        {
+            "role": "user",
+            "content": "What audio formats does Deepgram support?",
+        },
     ]
 
     # First response
@@ -52,7 +57,8 @@ async def multi_turn_conversation():
     # Add the response to conversation history
     messages.append({"role": "assistant", "content": response1})
     messages.append(
-        {"role": "user", "content": "Which format provides the best quality?"})
+        {"role": "user", "content": "Which format provides the best quality?"}
+    )
 
     # Continue the conversation
     response2 = await client.chat(messages)
@@ -69,7 +75,7 @@ async def api_specification_example():
     # Get REST API spec
     response = await client.ask_question(
         "Show me the REST API specification for the /v1/listen endpoint",
-        system_prompt="You are a technical documentation expert. Provide detailed API specifications."
+        system_prompt="You are a technical documentation expert. Provide detailed API specifications.",
     )
     print("Q: Show me the REST API specification for the /v1/listen endpoint")
     print(f"A: {response}\n")
@@ -84,7 +90,7 @@ async def code_example():
     # Get a Python code example
     response = await client.ask_question(
         "Provide a Python code example for real-time transcription using Deepgram",
-        system_prompt="You are a code assistant that provides complete, runnable Python examples."
+        system_prompt="You are a code assistant that provides complete, runnable Python examples.",
     )
     print("Q: Provide a Python code example for real-time transcription")
     print(f"A: {response}\n")
@@ -102,8 +108,9 @@ async def error_handling_example():
         print(f"Expected error when no API key provided: {e}")
 
     # Now with proper API key
-    client = GnosisClient(api_key=os.getenv(
-        "DEEPGRAM_API_KEY", "your-api-key-here"))
+    client = GnosisClient(
+        api_key=os.getenv("DEEPGRAM_API_KEY", "your-api-key-here")
+    )
 
     try:
         # Make a request

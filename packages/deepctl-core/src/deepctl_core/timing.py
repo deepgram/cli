@@ -115,8 +115,7 @@ class TimingCollector:
         if not summary or not summary["timings"]:
             return
 
-        console.print(
-            "\n[bold cyan]⏱️  Performance Timing Summary[/bold cyan]")
+        console.print("\n[bold cyan]⏱️  Performance Timing Summary[/bold cyan]")
         console.print(
             f"[dim]Total execution time: {summary['total_time_ms']}ms ({summary['total_time_s']}s)[/dim]"
         )
