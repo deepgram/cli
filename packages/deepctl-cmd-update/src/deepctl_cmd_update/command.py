@@ -2,7 +2,8 @@
 
 import asyncio
 import subprocess
-from typing import Any, Dict
+from typing import Any
+
 from deepctl_core import (
     BaseCommand,
     Config,
@@ -12,13 +13,12 @@ from deepctl_core import (
     print_success,
     print_warning,
 )
-
-from .installation import InstallationDetector
-from .version_check import VersionChecker, format_version_message
 from rich.panel import Panel
 from rich.prompt import Confirm
 
+from .installation import InstallationDetector
 from .models import UpdateResult
+from .version_check import VersionChecker, format_version_message
 
 
 class UpdateCommand(BaseCommand):
@@ -57,7 +57,7 @@ class UpdateCommand(BaseCommand):
         auth_manager: Any,  # Not used for update command
         client: Any,  # Not used for update command
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Handle the update command execution."""
         console = get_console()
 
@@ -70,6 +70,7 @@ class UpdateCommand(BaseCommand):
         # Get current version from package metadata if possible
         try:
             import deepctl
+
             current_version = getattr(deepctl, "__version__", "0.1.5")
         except ImportError:
             current_version = "0.1.5"
@@ -80,7 +81,8 @@ class UpdateCommand(BaseCommand):
         with console.status("Checking for updates..."):
             try:
                 version_info = asyncio.run(
-                    version_checker.check_version(force=True))
+                    version_checker.check_version(force=True)
+                )
             except Exception as e:
                 print_error(f"Failed to check for updates: {e}")
                 return UpdateResult(
@@ -93,7 +95,8 @@ class UpdateCommand(BaseCommand):
 
         if version_info.update_available:
             console.print(
-                Panel(message, title="Update Available", border_style="yellow"))
+                Panel(message, title="Update Available", border_style="yellow")
+            )
         else:
             print_success(message)
             if not force:
@@ -122,13 +125,15 @@ class UpdateCommand(BaseCommand):
 
         # Store installation info for future use
         config._set_config_value(
-            "update.installation_method", install_info.method)
+            "update.installation_method", install_info.method
+        )
         config._set_config_value("update.installation_path", install_info.path)
         config.save()
 
         # Display installation info
         console.print(
-            f"Installation method: [cyan]{install_info.method}[/cyan]")
+            f"Installation method: [cyan]{install_info.method}[/cyan]"
+        )
         console.print(f"Installation path: [dim]{install_info.path}[/dim]")
         if install_info.virtual_env:
             console.print("[yellow]Virtual environment detected[/yellow]")
@@ -178,7 +183,8 @@ class UpdateCommand(BaseCommand):
 
             if result.returncode == 0:
                 print_success(
-                    f"Successfully updated to version {version_info.latest_version}")
+                    f"Successfully updated to version {version_info.latest_version}"
+                )
 
                 # Clear version cache
                 config._set_config_value("update.cached_version_info", None)
