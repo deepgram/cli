@@ -7,7 +7,13 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from deepctl_core import BaseCommand, BaseGroupCommand, AuthManager, DeepgramClient, Config
+from deepctl_core import (
+    BaseCommand,
+    BaseGroupCommand,
+    AuthManager,
+    DeepgramClient,
+    Config,
+)
 
 
 class TestBaseGroupCommand:
@@ -16,12 +22,18 @@ class TestBaseGroupCommand:
     @pytest.fixture
     def mock_group_command_class(self):
         """Create a mock group command class for testing."""
+
         class MockGroupCommand(BaseGroupCommand):
             name = "testgroup"
             help = "Test group command"
 
-            def handle_group(self, config: Config, auth_manager: AuthManager,
-                             client: DeepgramClient, **kwargs) -> Any:
+            def handle_group(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 """Mock handle_group method."""
                 return {"group_result": "success"}
 
@@ -30,12 +42,18 @@ class TestBaseGroupCommand:
     @pytest.fixture
     def mock_subcommand_class(self):
         """Create a mock subcommand class for testing."""
+
         class MockSubCommand(BaseCommand):
             name = "subtest"
             help = "Test subcommand"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 """Mock handle method."""
                 return {"subcommand_result": "success"}
 
@@ -50,7 +68,9 @@ class TestBaseGroupCommand:
         return ctx
 
     @pytest.mark.unit
-    def test_constructor_initializes_group_attributes(self, mock_group_command_class):
+    def test_constructor_initializes_group_attributes(
+        self, mock_group_command_class
+    ):
         """Test that constructor initializes group-specific attributes."""
         command = mock_group_command_class()
 
@@ -59,7 +79,9 @@ class TestBaseGroupCommand:
         assert command.invoke_without_command is False
 
     @pytest.mark.unit
-    def test_add_subcommand(self, mock_group_command_class, mock_subcommand_class):
+    def test_add_subcommand(
+        self, mock_group_command_class, mock_subcommand_class
+    ):
         """Test adding subcommands to a group."""
         group = mock_group_command_class()
         subcommand = mock_subcommand_class
@@ -70,7 +92,9 @@ class TestBaseGroupCommand:
         assert group.subcommands["subtest"] == subcommand
 
     @pytest.mark.unit
-    def test_get_subcommands(self, mock_group_command_class, mock_subcommand_class):
+    def test_get_subcommands(
+        self, mock_group_command_class, mock_subcommand_class
+    ):
         """Test getting all subcommands from a group."""
         group = mock_group_command_class()
 
@@ -85,20 +109,27 @@ class TestBaseGroupCommand:
         assert "sub2" in subcommands
 
     @pytest.mark.unit
-    def test_handle_without_subcommand_shows_help(self, mock_group_command_class, mock_context):
+    def test_handle_without_subcommand_shows_help(
+        self, mock_group_command_class, mock_context
+    ):
         """Test that handle shows help when no subcommand is invoked."""
         group = mock_group_command_class()
 
         # Mock click.echo to capture help output
-        with patch('deepctl_core.base_group_command.click.echo') as mock_echo, \
-                patch('deepctl_core.base_group_command.click.get_current_context', return_value=mock_context):
+        with (
+            patch("deepctl_core.base_group_command.click.echo") as mock_echo,
+            patch(
+                "deepctl_core.base_group_command.click.get_current_context",
+                return_value=mock_context,
+            ),
+        ):
 
             mock_context.get_help.return_value = "Mock help text"
 
             result = group.handle(
                 config=Mock(spec=Config),
                 auth_manager=Mock(spec=AuthManager),
-                client=Mock(spec=DeepgramClient)
+                client=Mock(spec=DeepgramClient),
             )
 
             # Verify help was shown
@@ -106,15 +137,23 @@ class TestBaseGroupCommand:
             assert result is None
 
     @pytest.mark.unit
-    def test_handle_with_invoke_without_command(self, mock_group_command_class, mock_context):
+    def test_handle_with_invoke_without_command(
+        self, mock_group_command_class, mock_context
+    ):
         """Test handle when invoke_without_command is True."""
+
         class InvokeWithoutCommandGroup(BaseGroupCommand):
             name = "testgroup"
             help = "Test group"
             invoke_without_command = True
 
-            def handle_group(self, config: Config, auth_manager: AuthManager,
-                             client: DeepgramClient, **kwargs) -> Any:
+            def handle_group(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"handled": True}
 
         group = InvokeWithoutCommandGroup()
@@ -122,26 +161,34 @@ class TestBaseGroupCommand:
         # Verify the attribute is set correctly
         assert group.invoke_without_command is True
 
-        with patch('deepctl_core.base_group_command.click.get_current_context', return_value=mock_context):
+        with patch(
+            "deepctl_core.base_group_command.click.get_current_context",
+            return_value=mock_context,
+        ):
             result = group.handle(
                 config=Mock(spec=Config),
                 auth_manager=Mock(spec=AuthManager),
-                client=Mock(spec=DeepgramClient)
+                client=Mock(spec=DeepgramClient),
             )
 
             assert result == {"handled": True}
 
     @pytest.mark.unit
-    def test_handle_with_subcommand_invoked(self, mock_group_command_class, mock_context):
+    def test_handle_with_subcommand_invoked(
+        self, mock_group_command_class, mock_context
+    ):
         """Test handle when a subcommand is invoked."""
         group = mock_group_command_class()
         mock_context.invoked_subcommand = "subtest"
 
-        with patch('deepctl_core.base_group_command.click.get_current_context', return_value=mock_context):
+        with patch(
+            "deepctl_core.base_group_command.click.get_current_context",
+            return_value=mock_context,
+        ):
             result = group.handle(
                 config=Mock(spec=Config),
                 auth_manager=Mock(spec=AuthManager),
-                client=Mock(spec=DeepgramClient)
+                client=Mock(spec=DeepgramClient),
             )
 
             # Should call handle_group which returns success
@@ -162,6 +209,7 @@ class TestBaseGroupCommand:
     @pytest.mark.unit
     def test_get_click_group_with_arguments(self):
         """Test Click Group creation with arguments."""
+
         class GroupWithArgs(BaseGroupCommand):
             name = "testgroup"
             help = "Test group"
@@ -172,12 +220,17 @@ class TestBaseGroupCommand:
                         "names": ["--verbose", "-v"],
                         "help": "Verbose output",
                         "is_flag": True,
-                        "is_option": True
+                        "is_option": True,
                     }
                 ]
 
-            def handle_group(self, config: Config, auth_manager: AuthManager,
-                             client: DeepgramClient, **kwargs) -> Any:
+            def handle_group(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"verbose": kwargs.get("verbose", False)}
 
         group = GroupWithArgs()
@@ -196,7 +249,7 @@ class TestBaseGroupCommand:
         # Create a test context
         runner = CliRunner()
 
-        with patch.object(group, 'execute') as mock_execute:
+        with patch.object(group, "execute") as mock_execute:
             mock_execute.return_value = {"executed": True}
 
             # Get the callback function
@@ -213,6 +266,7 @@ class TestBaseGroupCommand:
     @pytest.mark.unit
     def test_handle_group_default_implementation(self):
         """Test that default handle_group does nothing."""
+
         class MinimalGroup(BaseGroupCommand):
             name = "minimal"
             help = "Minimal group"
@@ -224,7 +278,7 @@ class TestBaseGroupCommand:
         result = group.handle_group(
             config=Mock(spec=Config),
             auth_manager=Mock(spec=AuthManager),
-            client=Mock(spec=DeepgramClient)
+            client=Mock(spec=DeepgramClient),
         )
 
         assert result is None
@@ -235,29 +289,35 @@ class TestBaseGroupCommand:
         group = mock_group_command_class()
 
         # Should have all BaseCommand attributes
-        assert hasattr(group, 'name')
-        assert hasattr(group, 'help')
-        assert hasattr(group, 'execute')
-        assert hasattr(group, 'requires_auth')
-        assert hasattr(group, 'requires_project')
+        assert hasattr(group, "name")
+        assert hasattr(group, "help")
+        assert hasattr(group, "execute")
+        assert hasattr(group, "requires_auth")
+        assert hasattr(group, "requires_project")
 
         # Plus group-specific attributes
-        assert hasattr(group, 'is_group')
-        assert hasattr(group, 'subcommands')
-        assert hasattr(group, 'add_subcommand')
-        assert hasattr(group, 'get_subcommands')
-        assert hasattr(group, 'get_click_group')
+        assert hasattr(group, "is_group")
+        assert hasattr(group, "subcommands")
+        assert hasattr(group, "add_subcommand")
+        assert hasattr(group, "get_subcommands")
+        assert hasattr(group, "get_click_group")
 
     @pytest.mark.unit
     def test_group_with_custom_short_help(self):
         """Test group with custom short_help."""
+
         class GroupWithShortHelp(BaseGroupCommand):
             name = "testgroup"
             help = "This is a long help text for the test group command"
             short_help = "Test group"
 
-            def handle_group(self, config: Config, auth_manager: AuthManager,
-                             client: DeepgramClient, **kwargs) -> Any:
+            def handle_group(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 pass
 
         group = GroupWithShortHelp()
@@ -266,7 +326,9 @@ class TestBaseGroupCommand:
         assert click_group.short_help == "Test group"
 
     @pytest.mark.unit
-    def test_nested_context_handling(self, mock_group_command_class, mock_context):
+    def test_nested_context_handling(
+        self, mock_group_command_class, mock_context
+    ):
         """Test that context is properly handled in nested scenarios."""
         group = mock_group_command_class()
 
@@ -274,12 +336,15 @@ class TestBaseGroupCommand:
         parent_ctx = Mock(spec=click.Context)
         mock_context.parent = parent_ctx
 
-        with patch('deepctl_core.base_group_command.click.get_current_context', return_value=mock_context):
+        with patch(
+            "deepctl_core.base_group_command.click.get_current_context",
+            return_value=mock_context,
+        ):
             # Execute the group
             group.handle(
                 config=Mock(spec=Config),
                 auth_manager=Mock(spec=AuthManager),
-                client=Mock(spec=DeepgramClient)
+                client=Mock(spec=DeepgramClient),
             )
 
             # Context should be accessible during execution
@@ -288,6 +353,7 @@ class TestBaseGroupCommand:
     @pytest.mark.unit
     def test_group_command_with_both_options_and_arguments(self):
         """Test group command with both options and arguments."""
+
         class ComplexGroup(BaseGroupCommand):
             name = "complex"
             help = "Complex group"
@@ -298,18 +364,23 @@ class TestBaseGroupCommand:
                         "name": "arg1",
                         "type": str,
                         "required": True,
-                        "is_option": False
+                        "is_option": False,
                     },
                     {
                         "names": ["--flag", "-f"],
                         "help": "A flag option",
                         "is_flag": True,
-                        "is_option": True
-                    }
+                        "is_option": True,
+                    },
                 ]
 
-            def handle_group(self, config: Config, auth_manager: AuthManager,
-                             client: DeepgramClient, **kwargs) -> Any:
+            def handle_group(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return kwargs
 
         group = ComplexGroup()
@@ -320,9 +391,11 @@ class TestBaseGroupCommand:
 
         # Find the argument and option
         arg_param = next(
-            p for p in click_group.params if isinstance(p, click.Argument))
+            p for p in click_group.params if isinstance(p, click.Argument)
+        )
         opt_param = next(
-            p for p in click_group.params if isinstance(p, click.Option))
+            p for p in click_group.params if isinstance(p, click.Option)
+        )
 
         assert arg_param.name == "arg1"
         assert opt_param.name == "flag"

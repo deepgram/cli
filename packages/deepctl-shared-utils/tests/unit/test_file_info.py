@@ -36,19 +36,18 @@ class TestFileInfo:
             "exists": True,
             "is_file": True,
             "is_audio": True,
-            "error": None
+            "error": None,
         }
 
     @pytest.fixture
     def minimal_file_data(self) -> Dict[str, Any]:
         """Minimal required FileInfo data."""
-        return {
-            "path": "/tmp/test.txt",
-            "exists": False
-        }
+        return {"path": "/tmp/test.txt", "exists": False}
 
     @pytest.mark.unit
-    def test_file_info_creation_with_valid_data(self, valid_file_data: Dict[str, Any]):
+    def test_file_info_creation_with_valid_data(
+        self, valid_file_data: Dict[str, Any]
+    ):
         """Test FileInfo model creation with all fields."""
         # Create the model
         file_info = FileInfo(**valid_file_data)
@@ -66,7 +65,9 @@ class TestFileInfo:
         assert file_info.error is None
 
     @pytest.mark.unit
-    def test_file_info_minimal_creation(self, minimal_file_data: Dict[str, Any]):
+    def test_file_info_minimal_creation(
+        self, minimal_file_data: Dict[str, Any]
+    ):
         """Test FileInfo model with minimal required fields."""
         file_info = FileInfo(**minimal_file_data)
 
@@ -81,27 +82,26 @@ class TestFileInfo:
         assert file_info.readable is None
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("path,expected_audio", [
-        ("/audio/file.mp3", True),
-        ("/audio/file.wav", True),
-        ("/audio/file.flac", True),
-        ("/audio/file.m4a", True),
-        ("/audio/file.aac", True),
-        ("/audio/file.ogg", True),
-        ("/audio/file.wma", True),
-        ("/docs/file.txt", False),
-        ("/docs/file.pdf", False),
-        ("/code/file.py", False),
-        ("/audio/file.MP3", True),  # Test case insensitive
-        ("/audio/file", None),  # No extension
-    ])
+    @pytest.mark.parametrize(
+        "path,expected_audio",
+        [
+            ("/audio/file.mp3", True),
+            ("/audio/file.wav", True),
+            ("/audio/file.flac", True),
+            ("/audio/file.m4a", True),
+            ("/audio/file.aac", True),
+            ("/audio/file.ogg", True),
+            ("/audio/file.wma", True),
+            ("/docs/file.txt", False),
+            ("/docs/file.pdf", False),
+            ("/code/file.py", False),
+            ("/audio/file.MP3", True),  # Test case insensitive
+            ("/audio/file", None),  # No extension
+        ],
+    )
     def test_file_info_audio_detection(self, path: str, expected_audio: bool):
         """Test audio file detection based on extension."""
-        file_data = {
-            "path": path,
-            "exists": True,
-            "is_audio": expected_audio
-        }
+        file_data = {"path": path, "exists": True, "is_audio": expected_audio}
 
         file_info = FileInfo(**file_data)
         assert file_info.is_audio == expected_audio
@@ -113,31 +113,39 @@ class TestFileInfo:
             "path": "/restricted/file.mp3",
             "exists": False,
             "readable": False,
-            "error": "Permission denied: Cannot access /restricted/file.mp3"
+            "error": "Permission denied: Cannot access /restricted/file.mp3",
         }
 
         file_info = FileInfo(**error_data)
-        assert file_info.error == "Permission denied: Cannot access /restricted/file.mp3"
+        assert (
+            file_info.error
+            == "Permission denied: Cannot access /restricted/file.mp3"
+        )
         assert file_info.readable is False
         assert file_info.exists is False
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("size_bytes,expected_mb", [
-        (0, 0.0),
-        (524288, 0.5),
-        (1048576, 1.0),
-        (1572864, 1.5),
-        (10485760, 10.0),
-        (104857600, 100.0),
-        (1073741824, 1024.0),  # 1 GB
-    ])
-    def test_file_info_size_calculations(self, size_bytes: int, expected_mb: float):
+    @pytest.mark.parametrize(
+        "size_bytes,expected_mb",
+        [
+            (0, 0.0),
+            (524288, 0.5),
+            (1048576, 1.0),
+            (1572864, 1.5),
+            (10485760, 10.0),
+            (104857600, 100.0),
+            (1073741824, 1024.0),  # 1 GB
+        ],
+    )
+    def test_file_info_size_calculations(
+        self, size_bytes: int, expected_mb: float
+    ):
         """Test file size conversion from bytes to MB."""
         file_data = {
             "path": "/tmp/file",
             "exists": True,
             "size_bytes": size_bytes,
-            "size_mb": expected_mb
+            "size_mb": expected_mb,
         }
 
         file_info = FileInfo(**file_data)
@@ -145,7 +153,9 @@ class TestFileInfo:
         assert file_info.size_mb == expected_mb
 
     @pytest.mark.unit
-    def test_file_info_model_serialization(self, valid_file_data: Dict[str, Any]):
+    def test_file_info_model_serialization(
+        self, valid_file_data: Dict[str, Any]
+    ):
         """Test model serialization to dict and JSON."""
         file_info = FileInfo(**valid_file_data)
 
@@ -186,7 +196,7 @@ class TestFileInfo:
         file_data = {
             "path": "/tmp/file.txt",
             "exists": True,
-            "modified": timestamp
+            "modified": timestamp,
         }
 
         file_info = FileInfo(**file_data)
@@ -219,7 +229,9 @@ class TestFileInfo:
 
     @pytest.mark.unit
     @pytest.mark.benchmark
-    def test_file_info_creation_performance(self, valid_file_data: Dict[str, Any]):
+    def test_file_info_creation_performance(
+        self, valid_file_data: Dict[str, Any]
+    ):
         """Benchmark FileInfo model creation performance."""
         import time
 
@@ -243,11 +255,13 @@ class TestFileInfo:
         original = FileInfo(**valid_file_data)
 
         # Create copy with updates
-        updated = original.model_copy(update={
-            "path": "/new/path/file.wav",
-            "extension": ".wav",
-            "is_audio": True
-        })
+        updated = original.model_copy(
+            update={
+                "path": "/new/path/file.wav",
+                "extension": ".wav",
+                "is_audio": True,
+            }
+        )
 
         # Verify original unchanged
         assert original.path == valid_file_data["path"]
@@ -266,10 +280,7 @@ class TestFileInfo:
     def test_file_info_field_aliases(self):
         """Test if model supports field aliases (if any defined)."""
         # This test documents alias behavior even if not currently used
-        file_data = {
-            "path": "/tmp/test.mp3",
-            "exists": True
-        }
+        file_data = {"path": "/tmp/test.mp3", "exists": True}
 
         file_info = FileInfo(**file_data)
 

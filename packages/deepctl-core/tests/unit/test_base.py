@@ -16,12 +16,18 @@ class TestBaseCommand:
     @pytest.fixture
     def mock_command_class(self):
         """Create a mock command class for testing."""
+
         class MockCommand(BaseCommand):
             name = "test"
             help = "Test command"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 """Mock handle method."""
                 return {"result": "success"}
 
@@ -38,11 +44,17 @@ class TestBaseCommand:
     def test_constructor_requires_name(self):
         """Test that constructor requires a name."""
         with pytest.raises(ValueError, match="Command must have a name"):
+
             class NoNameCommand(BaseCommand):
                 help = "Test command"
 
-                def handle(self, config: Config, auth_manager: AuthManager,
-                           client: DeepgramClient, **kwargs) -> Any:
+                def handle(
+                    self,
+                    config: Config,
+                    auth_manager: AuthManager,
+                    client: DeepgramClient,
+                    **kwargs,
+                ) -> Any:
                     pass
 
             NoNameCommand()
@@ -51,11 +63,17 @@ class TestBaseCommand:
     def test_constructor_requires_help(self):
         """Test that constructor requires help text."""
         with pytest.raises(ValueError, match="Command must have help text"):
+
             class NoHelpCommand(BaseCommand):
                 name = "test"
 
-                def handle(self, config: Config, auth_manager: AuthManager,
-                           client: DeepgramClient, **kwargs) -> Any:
+                def handle(
+                    self,
+                    config: Config,
+                    auth_manager: AuthManager,
+                    client: DeepgramClient,
+                    **kwargs,
+                ) -> Any:
                     pass
 
             NoHelpCommand()
@@ -72,10 +90,15 @@ class TestBaseCommand:
         assert command.ci_friendly is True
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    def test_execute_successful(self, mock_client_class, mock_auth_class,
-                                mock_command_class, mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_successful(
+        self,
+        mock_client_class,
+        mock_auth_class,
+        mock_command_class,
+        mock_context,
+    ):
         """Test successful command execution."""
         # Setup mocks
         mock_auth_instance = Mock()
@@ -85,14 +108,16 @@ class TestBaseCommand:
 
         # Create and execute command
         command = mock_command_class()
-        with patch.object(command, 'output_result') as mock_output:
+        with patch.object(command, "output_result") as mock_output:
             command.execute(mock_context, test_arg="value")
 
         # Verify AuthManager and DeepgramClient were created
         mock_auth_class.assert_called_once_with(
-            mock_context.obj["config"], None, None)
+            mock_context.obj["config"], None, None
+        )
         mock_client_class.assert_called_once_with(
-            mock_context.obj["config"], mock_auth_instance)
+            mock_context.obj["config"], mock_auth_instance
+        )
 
         # Verify guard was not called (requires_auth is False by default)
         mock_auth_instance.guard.assert_not_called()
@@ -102,14 +127,20 @@ class TestBaseCommand:
 
         # Verify output_result was called with the result
         mock_output.assert_called_once_with(
-            {"result": "success"}, mock_context.obj["config"])
+            {"result": "success"}, mock_context.obj["config"]
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.Config')
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    def test_execute_without_config_in_context(self, mock_client_class, mock_auth_class,
-                                               mock_config_class, mock_command_class):
+    @patch("deepctl_core.base_command.Config")
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_without_config_in_context(
+        self,
+        mock_client_class,
+        mock_auth_class,
+        mock_config_class,
+        mock_command_class,
+    ):
         """Test command execution when config is not in context."""
         # Setup mocks
         mock_config_instance = Mock()
@@ -125,7 +156,7 @@ class TestBaseCommand:
 
         # Create and execute command
         command = mock_command_class()
-        with patch.object(command, 'output_result') as mock_output:
+        with patch.object(command, "output_result") as mock_output:
             command.execute(ctx, test_arg="value")
 
         # Verify Config was created
@@ -133,15 +164,18 @@ class TestBaseCommand:
 
         # Verify AuthManager and DeepgramClient were created with new config
         mock_auth_class.assert_called_once_with(
-            mock_config_instance, None, None)
+            mock_config_instance, None, None
+        )
         mock_client_class.assert_called_once_with(
-            mock_config_instance, mock_auth_instance)
+            mock_config_instance, mock_auth_instance
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    def test_execute_with_auth_required_success(self, mock_client_class, mock_auth_class,
-                                                mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_with_auth_required_success(
+        self, mock_client_class, mock_auth_class, mock_context
+    ):
         """Test command execution with authentication required and successful auth."""
         # Setup mocks
         mock_auth_instance = Mock()
@@ -155,12 +189,17 @@ class TestBaseCommand:
             help = "Test auth command"
             requires_auth = True
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"authenticated": True}
 
         command = AuthCommand()
-        with patch.object(command, 'output_result') as mock_output:
+        with patch.object(command, "output_result") as mock_output:
             command.execute(mock_context)
 
         # Verify auth guard was called
@@ -168,19 +207,22 @@ class TestBaseCommand:
 
         # Verify output was called with result
         mock_output.assert_called_once_with(
-            {"authenticated": True}, mock_context.obj["config"])
+            {"authenticated": True}, mock_context.obj["config"]
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    @patch('deepctl_core.base_command.console')
-    def test_execute_with_auth_required_failure(self, mock_console, mock_client_class,
-                                                mock_auth_class, mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.console")
+    def test_execute_with_auth_required_failure(
+        self, mock_console, mock_client_class, mock_auth_class, mock_context
+    ):
         """Test command execution with authentication required and failed auth."""
         # Setup mocks
         mock_auth_instance = Mock()
         mock_auth_instance.guard.side_effect = Exception(
-            "Authentication failed")
+            "Authentication failed"
+        )
         mock_auth_class.return_value = mock_auth_instance
 
         # Create command that requires auth
@@ -189,25 +231,34 @@ class TestBaseCommand:
             help = "Test auth command"
             requires_auth = True
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"authenticated": True}
 
         command = AuthCommand()
 
         # Execute should raise ClickException
-        with pytest.raises(click.ClickException, match="Authentication failed"):
+        with pytest.raises(
+            click.ClickException, match="Authentication failed"
+        ):
             command.execute(mock_context)
 
         # Verify error was printed
         mock_console.print.assert_called_with(
-            "[red]Authentication required:[/red] Authentication failed")
+            "[red]Authentication required:[/red] Authentication failed"
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    def test_execute_with_project_required_success(self, mock_client_class, mock_auth_class,
-                                                   mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_with_project_required_success(
+        self, mock_client_class, mock_auth_class, mock_context
+    ):
         """Test command execution with project required and project ID available."""
         # Setup mocks
         mock_auth_instance = Mock()
@@ -222,12 +273,17 @@ class TestBaseCommand:
             help = "Test project command"
             requires_project = True
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"project": auth_manager.get_project_id()}
 
         command = ProjectCommand()
-        with patch.object(command, 'output_result') as mock_output:
+        with patch.object(command, "output_result") as mock_output:
             command.execute(mock_context)
 
         # Verify get_project_id was called twice (once in execute, once in handle)
@@ -235,14 +291,16 @@ class TestBaseCommand:
 
         # Verify output was called with result
         mock_output.assert_called_once_with(
-            {"project": "test-project-id"}, mock_context.obj["config"])
+            {"project": "test-project-id"}, mock_context.obj["config"]
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    @patch('deepctl_core.base_command.console')
-    def test_execute_with_project_required_failure(self, mock_console, mock_client_class,
-                                                   mock_auth_class, mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.console")
+    def test_execute_with_project_required_failure(
+        self, mock_console, mock_client_class, mock_auth_class, mock_context
+    ):
         """Test command execution with project required but no project ID."""
         # Setup mocks
         mock_auth_instance = Mock()
@@ -255,8 +313,13 @@ class TestBaseCommand:
             help = "Test project command"
             requires_project = True
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"project": "should not reach here"}
 
         command = ProjectCommand()
@@ -267,17 +330,31 @@ class TestBaseCommand:
 
         # Verify errors were printed
         expected_calls = [
-            (("[red]Error:[/red] Project ID is required for this command",), {}),
-            (("Set DEEPGRAM_PROJECT_ID environment variable or configure via profile",), {})
+            (
+                ("[red]Error:[/red] Project ID is required for this command",),
+                {},
+            ),
+            (
+                (
+                    "Set DEEPGRAM_PROJECT_ID environment variable or configure via profile",
+                ),
+                {},
+            ),
         ]
         assert mock_console.print.call_args_list == expected_calls
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    @patch('deepctl_core.base_command.console')
-    def test_execute_keyboard_interrupt(self, mock_console, mock_client_class,
-                                        mock_auth_class, mock_command_class, mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.console")
+    def test_execute_keyboard_interrupt(
+        self,
+        mock_console,
+        mock_client_class,
+        mock_auth_class,
+        mock_command_class,
+        mock_context,
+    ):
         """Test command execution when KeyboardInterrupt is raised."""
         # Setup mocks
         mock_auth_instance = Mock()
@@ -290,8 +367,13 @@ class TestBaseCommand:
             name = "interrupt_test"
             help = "Test interrupt command"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 raise KeyboardInterrupt()
 
         command = InterruptCommand()
@@ -302,14 +384,21 @@ class TestBaseCommand:
 
         # Verify cancellation message was printed
         mock_console.print.assert_called_once_with(
-            "\n[yellow]Command cancelled by user[/yellow]")
+            "\n[yellow]Command cancelled by user[/yellow]"
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    @patch('deepctl_core.base_command.console')
-    def test_execute_general_exception(self, mock_console, mock_client_class,
-                                       mock_auth_class, mock_command_class, mock_context):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.console")
+    def test_execute_general_exception(
+        self,
+        mock_console,
+        mock_client_class,
+        mock_auth_class,
+        mock_command_class,
+        mock_context,
+    ):
         """Test command execution when a general exception is raised."""
         # Setup mocks
         mock_auth_instance = Mock()
@@ -322,8 +411,13 @@ class TestBaseCommand:
             name = "error_test"
             help = "Test error command"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 raise RuntimeError("Something went wrong")
 
         command = ErrorCommand()
@@ -334,14 +428,20 @@ class TestBaseCommand:
 
         # Verify error was printed
         mock_console.print.assert_called_once_with(
-            "[red]Command failed:[/red] Something went wrong")
+            "[red]Command failed:[/red] Something went wrong"
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.AuthManager')
-    @patch('deepctl_core.base_command.DeepgramClient')
-    @patch('deepctl_core.base_command.console')
-    def test_execute_general_exception_verbose(self, mock_console, mock_client_class,
-                                               mock_auth_class, mock_command_class):
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.console")
+    def test_execute_general_exception_verbose(
+        self,
+        mock_console,
+        mock_client_class,
+        mock_auth_class,
+        mock_command_class,
+    ):
         """Test command execution with exception in verbose mode."""
         # Setup mocks with verbose config
         config = Mock(spec=Config)
@@ -359,8 +459,13 @@ class TestBaseCommand:
             name = "error_test"
             help = "Test error command"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 raise RuntimeError("Something went wrong")
 
         command = ErrorCommand()
@@ -371,7 +476,10 @@ class TestBaseCommand:
 
         # Verify error was printed and exception was printed
         assert mock_console.print.call_count == 1
-        assert mock_console.print.call_args[0][0] == "[red]Command failed:[/red] Something went wrong"
+        assert (
+            mock_console.print.call_args[0][0]
+            == "[red]Command failed:[/red] Something went wrong"
+        )
         mock_console.print_exception.assert_called_once()
 
     @pytest.mark.unit
@@ -386,7 +494,7 @@ class TestBaseCommand:
         # No assertions needed - just verify it doesn't crash
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
+    @patch("deepctl_core.base_command.console")
     def test_output_result_json_dict(self, mock_console, mock_command_class):
         """Test output_result with JSON format and dict result."""
         command = mock_command_class()
@@ -398,11 +506,13 @@ class TestBaseCommand:
 
         # Verify print_json was called with JSON string
         import json
+
         mock_console.print_json.assert_called_once_with(
-            json.dumps(result, indent=2))
+            json.dumps(result, indent=2)
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
+    @patch("deepctl_core.base_command.console")
     def test_output_result_json_list(self, mock_console, mock_command_class):
         """Test output_result with JSON format and list result."""
         command = mock_command_class()
@@ -413,11 +523,13 @@ class TestBaseCommand:
         command.output_result(result, config)
 
         import json
+
         mock_console.print_json.assert_called_once_with(
-            json.dumps(result, indent=2))
+            json.dumps(result, indent=2)
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
+    @patch("deepctl_core.base_command.console")
     def test_output_result_json_string(self, mock_console, mock_command_class):
         """Test output_result with JSON format and string result."""
         command = mock_command_class()
@@ -429,6 +541,7 @@ class TestBaseCommand:
 
         # String results should be wrapped in object
         import json
+
         mock_console.print.assert_called_once()
         actual_output = mock_console.print.call_args[0][0]
         expected_data = {"result": "simple string"}
@@ -449,12 +562,13 @@ class TestBaseCommand:
 
         result = TestModel(name="test", value=123)
 
-        with patch.object(command, '_output_json') as mock_output_json:
+        with patch.object(command, "_output_json") as mock_output_json:
             command.output_result(result, config)
 
             # Verify model was converted to dict
             mock_output_json.assert_called_once_with(
-                {"name": "test", "value": 123})
+                {"name": "test", "value": 123}
+            )
 
     @pytest.mark.unit
     def test_output_result_list_of_pydantic_models(self, mock_command_class):
@@ -469,20 +583,21 @@ class TestBaseCommand:
         config = Mock(spec=Config)
         config.get.return_value = "json"
 
-        result = [TestModel(name="test1", value=1),
-                  TestModel(name="test2", value=2)]
+        result = [
+            TestModel(name="test1", value=1),
+            TestModel(name="test2", value=2),
+        ]
 
-        with patch.object(command, '_output_json') as mock_output_json:
+        with patch.object(command, "_output_json") as mock_output_json:
             command.output_result(result, config)
 
             # Verify models were converted to dicts
-            mock_output_json.assert_called_once_with([
-                {"name": "test1", "value": 1},
-                {"name": "test2", "value": 2}
-            ])
+            mock_output_json.assert_called_once_with(
+                [{"name": "test1", "value": 1}, {"name": "test2", "value": 2}]
+            )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
+    @patch("deepctl_core.base_command.console")
     def test_output_result_yaml(self, mock_console, mock_command_class):
         """Test output_result with YAML format."""
         command = mock_command_class()
@@ -494,31 +609,32 @@ class TestBaseCommand:
 
         # Verify YAML output
         import yaml
+
         expected_yaml = yaml.dump(result, default_flow_style=False)
         mock_console.print.assert_called_once_with(expected_yaml)
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
-    def test_output_result_table_list_of_dicts(self, mock_console, mock_command_class):
+    @patch("deepctl_core.base_command.console")
+    def test_output_result_table_list_of_dicts(
+        self, mock_console, mock_command_class
+    ):
         """Test output_result with table format and list of dicts."""
         command = mock_command_class()
         config = Mock(spec=Config)
         config.get.return_value = "table"
 
-        result = [
-            {"name": "Alice", "age": 30},
-            {"name": "Bob", "age": 25}
-        ]
+        result = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
         command.output_result(result, config)
 
         # Verify table was created and printed
         mock_console.print.assert_called_once()
         # Check that Table was created
-        assert any("Table" in str(call)
-                   for call in mock_console.print.call_args_list)
+        assert any(
+            "Table" in str(call) for call in mock_console.print.call_args_list
+        )
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
+    @patch("deepctl_core.base_command.console")
     def test_output_result_table_dict(self, mock_console, mock_command_class):
         """Test output_result with table format and dict."""
         command = mock_command_class()
@@ -532,17 +648,16 @@ class TestBaseCommand:
         mock_console.print.assert_called_once()
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
-    def test_output_result_csv_list_of_dicts(self, mock_console, mock_command_class):
+    @patch("deepctl_core.base_command.console")
+    def test_output_result_csv_list_of_dicts(
+        self, mock_console, mock_command_class
+    ):
         """Test output_result with CSV format and list of dicts."""
         command = mock_command_class()
         config = Mock(spec=Config)
         config.get.return_value = "csv"
 
-        result = [
-            {"name": "Alice", "age": 30},
-            {"name": "Bob", "age": 25}
-        ]
+        result = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
         command.output_result(result, config)
 
         # Verify CSV output
@@ -553,7 +668,7 @@ class TestBaseCommand:
         assert "Bob,25" in output
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
+    @patch("deepctl_core.base_command.console")
     def test_output_result_csv_dict(self, mock_console, mock_command_class):
         """Test output_result with CSV format and dict."""
         command = mock_command_class()
@@ -571,8 +686,10 @@ class TestBaseCommand:
         assert "age,30" in output
 
     @pytest.mark.unit
-    @patch('deepctl_core.base_command.console')
-    def test_output_result_unknown_format(self, mock_console, mock_command_class):
+    @patch("deepctl_core.base_command.console")
+    def test_output_result_unknown_format(
+        self, mock_console, mock_command_class
+    ):
         """Test output_result with unknown format falls back to JSON."""
         command = mock_command_class()
         config = Mock(spec=Config)
@@ -580,25 +697,32 @@ class TestBaseCommand:
 
         result = {"key": "value"}
 
-        with patch.object(command, '_output_json') as mock_output_json:
+        with patch.object(command, "_output_json") as mock_output_json:
             command.output_result(result, config)
 
         # Verify error message and fallback to JSON
         mock_console.print.assert_called_once_with(
-            "[red]Unknown output format:[/red] unknown")
+            "[red]Unknown output format:[/red] unknown"
+        )
         mock_output_json.assert_called_once_with(result)
 
     @pytest.mark.unit
     def test_confirm_ci_mode_returns_default(self, mock_command_class):
         """Test confirm in CI mode returns default value."""
+
         # Create command with ci_friendly=False (CI mode)
         class CICommand(BaseCommand):
             name = "ci_test"
             help = "Test CI command"
             ci_friendly = False
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 pass
 
         command = CICommand()
@@ -610,8 +734,10 @@ class TestBaseCommand:
         assert command.confirm("Continue?", default=False) is False
 
     @pytest.mark.unit
-    @patch('click.confirm')
-    def test_confirm_interactive_mode_success(self, mock_click_confirm, mock_command_class):
+    @patch("click.confirm")
+    def test_confirm_interactive_mode_success(
+        self, mock_click_confirm, mock_command_class
+    ):
         """Test confirm in interactive mode when user confirms."""
         command = mock_command_class()
         mock_click_confirm.return_value = True
@@ -622,8 +748,10 @@ class TestBaseCommand:
         mock_click_confirm.assert_called_once_with("Continue?", default=False)
 
     @pytest.mark.unit
-    @patch('click.confirm')
-    def test_confirm_interactive_mode_declined(self, mock_click_confirm, mock_command_class):
+    @patch("click.confirm")
+    def test_confirm_interactive_mode_declined(
+        self, mock_click_confirm, mock_command_class
+    ):
         """Test confirm in interactive mode when user declines."""
         command = mock_command_class()
         mock_click_confirm.return_value = False
@@ -634,8 +762,10 @@ class TestBaseCommand:
         mock_click_confirm.assert_called_once_with("Continue?", default=True)
 
     @pytest.mark.unit
-    @patch('click.confirm')
-    def test_confirm_interactive_mode_abort(self, mock_click_confirm, mock_command_class):
+    @patch("click.confirm")
+    def test_confirm_interactive_mode_abort(
+        self, mock_click_confirm, mock_command_class
+    ):
         """Test confirm in interactive mode when user aborts (Ctrl+C)."""
         command = mock_command_class()
         mock_click_confirm.side_effect = click.Abort()
@@ -648,14 +778,20 @@ class TestBaseCommand:
     @pytest.mark.unit
     def test_prompt_ci_mode_with_default(self, mock_command_class):
         """Test prompt in CI mode returns default when provided."""
+
         # Create command with ci_friendly=False (CI mode)
         class CICommand(BaseCommand):
             name = "ci_test"
             help = "Test CI command"
             ci_friendly = False
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 pass
 
         command = CICommand()
@@ -665,17 +801,23 @@ class TestBaseCommand:
         assert result == "default_value"
 
     @pytest.mark.unit
-    @patch('click.prompt')
+    @patch("click.prompt")
     def test_prompt_ci_mode_without_default(self, mock_click_prompt):
         """Test prompt in CI mode still prompts when no default."""
+
         # Create command with ci_friendly=False (CI mode)
         class CICommand(BaseCommand):
             name = "ci_test"
             help = "Test CI command"
             ci_friendly = False
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 pass
 
         command = CICommand()
@@ -685,11 +827,14 @@ class TestBaseCommand:
         result = command.prompt("Enter value:")
         assert result == "user_input"
         mock_click_prompt.assert_called_once_with(
-            "Enter value:", default=None, hide_input=False)
+            "Enter value:", default=None, hide_input=False
+        )
 
     @pytest.mark.unit
-    @patch('click.prompt')
-    def test_prompt_interactive_mode(self, mock_click_prompt, mock_command_class):
+    @patch("click.prompt")
+    def test_prompt_interactive_mode(
+        self, mock_click_prompt, mock_command_class
+    ):
         """Test prompt in interactive mode."""
         command = mock_command_class()
         mock_click_prompt.return_value = "user_input"
@@ -698,11 +843,14 @@ class TestBaseCommand:
 
         assert result == "user_input"
         mock_click_prompt.assert_called_once_with(
-            "Enter value:", default="default", hide_input=False)
+            "Enter value:", default="default", hide_input=False
+        )
 
     @pytest.mark.unit
-    @patch('click.prompt')
-    def test_prompt_with_hidden_input(self, mock_click_prompt, mock_command_class):
+    @patch("click.prompt")
+    def test_prompt_with_hidden_input(
+        self, mock_click_prompt, mock_command_class
+    ):
         """Test prompt with hidden input (password mode)."""
         command = mock_command_class()
         mock_click_prompt.return_value = "secret_password"
@@ -711,11 +859,14 @@ class TestBaseCommand:
 
         assert result == "secret_password"
         mock_click_prompt.assert_called_once_with(
-            "Enter password:", default=None, hide_input=True)
+            "Enter password:", default=None, hide_input=True
+        )
 
     @pytest.mark.unit
-    @patch('click.prompt')
-    def test_prompt_abort_raises_exception(self, mock_click_prompt, mock_command_class):
+    @patch("click.prompt")
+    def test_prompt_abort_raises_exception(
+        self, mock_click_prompt, mock_command_class
+    ):
         """Test prompt raises ClickException when user aborts."""
         command = mock_command_class()
         mock_click_prompt.side_effect = click.Abort()
@@ -760,33 +911,36 @@ class TestBaseCommand:
         assert command.validate_file_path("") is False
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("url,expected", [
-        # Valid URLs
-        ("http://example.com", True),
-        ("https://example.com", True),
-        ("http://example.com/path", True),
-        ("https://example.com/path/to/resource", True),
-        ("http://example.com:8080", True),
-        ("https://example.com:443/path", True),
-        ("http://localhost", True),
-        ("http://localhost:8000", True),
-        ("http://192.168.1.1", True),
-        ("https://192.168.1.1:8443/api", True),
-        ("http://sub.domain.example.com", True),
-        ("https://sub.domain.example.co.uk", True),
-        # Invalid URLs
-        ("example.com", False),  # Missing protocol
-        ("ftp://example.com", False),  # Wrong protocol
-        ("http://", False),  # Missing domain
-        ("http:///path", False),  # Missing domain
-        ("http://example", False),  # Missing TLD
-        ("http://example..com", False),  # Double dot
-        # Port number (regex doesn't validate range)
-        ("http://example.com:999999", True),
-        ("", False),  # Empty string
-        ("not a url", False),  # Plain text
-        ("http://exam ple.com", False),  # Space in domain
-    ])
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            # Valid URLs
+            ("http://example.com", True),
+            ("https://example.com", True),
+            ("http://example.com/path", True),
+            ("https://example.com/path/to/resource", True),
+            ("http://example.com:8080", True),
+            ("https://example.com:443/path", True),
+            ("http://localhost", True),
+            ("http://localhost:8000", True),
+            ("http://192.168.1.1", True),
+            ("https://192.168.1.1:8443/api", True),
+            ("http://sub.domain.example.com", True),
+            ("https://sub.domain.example.co.uk", True),
+            # Invalid URLs
+            ("example.com", False),  # Missing protocol
+            ("ftp://example.com", False),  # Wrong protocol
+            ("http://", False),  # Missing domain
+            ("http:///path", False),  # Missing domain
+            ("http://example", False),  # Missing TLD
+            ("http://example..com", False),  # Double dot
+            # Port number (regex doesn't validate range)
+            ("http://example.com:999999", True),
+            ("", False),  # Empty string
+            ("not a url", False),  # Plain text
+            ("http://exam ple.com", False),  # Space in domain
+        ],
+    )
     def test_validate_url(self, mock_command_class, url, expected):
         """Test validate_url with various URL formats."""
         command = mock_command_class()
@@ -801,27 +955,29 @@ class TestBaseCommand:
     @pytest.mark.unit
     def test_get_arguments_override(self):
         """Test get_arguments can be overridden in subclasses."""
+
         class CommandWithArgs(BaseCommand):
             name = "args_test"
             help = "Test command with arguments"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 pass
 
             def get_arguments(self) -> List[Dict[str, Any]]:
                 return [
-                    {
-                        "name": "--option1",
-                        "type": str,
-                        "help": "First option"
-                    },
+                    {"name": "--option1", "type": str, "help": "First option"},
                     {
                         "name": "--option2",
                         "type": int,
                         "default": 42,
-                        "help": "Second option"
-                    }
+                        "help": "Second option",
+                    },
                 ]
 
         command = CommandWithArgs()

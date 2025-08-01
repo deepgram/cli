@@ -81,10 +81,7 @@ class TestOutputFormatter:
     def test_format_table_list_of_dicts(self):
         """Test formatting list of dicts as table."""
         formatter = OutputFormatter("table")
-        data = [
-            {"name": "Alice", "age": 30},
-            {"name": "Bob", "age": 25}
-        ]
+        data = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
         result = formatter.format(data)
 
         # Should contain headers and data (headers are capitalized)
@@ -133,15 +130,12 @@ class TestOutputFormatter:
     def test_format_csv_list_of_dicts(self):
         """Test formatting list of dicts as CSV."""
         formatter = OutputFormatter("csv")
-        data = [
-            {"name": "Alice", "age": 30},
-            {"name": "Bob", "age": 25}
-        ]
+        data = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
         result = formatter.format(data)
 
-        lines = result.strip().split('\n')
+        lines = result.strip().split("\n")
         # Remove carriage returns if present
-        lines = [line.rstrip('\r') for line in lines]
+        lines = [line.rstrip("\r") for line in lines]
         assert lines[0] == "name,age"
         assert lines[1] == "Alice,30"
         assert lines[2] == "Bob,25"
@@ -152,9 +146,9 @@ class TestOutputFormatter:
         data = {"name": "Alice", "age": 30}
         result = formatter.format(data)
 
-        lines = result.strip().split('\n')
+        lines = result.strip().split("\n")
         # Remove carriage returns if present
-        lines = [line.rstrip('\r') for line in lines]
+        lines = [line.rstrip("\r") for line in lines]
         # Single dict shows as Key,Value format
         assert lines[0] == "Key,Value"
         assert "name,Alice" in lines[1] or "Alice,name" in lines[1]
@@ -183,33 +177,29 @@ class TestOutputFormatter:
 class TestSetupOutput:
     """Test setup_output function."""
 
-    @patch('deepctl_core.output._output_config')
-    @patch('deepctl_core.output.console')
+    @patch("deepctl_core.output._output_config")
+    @patch("deepctl_core.output.console")
     def test_setup_output_default(self, mock_console, mock_config):
         """Test setup with default values."""
         setup_output()
 
         # Should update config
-        mock_config.update.assert_called_once_with({
-            'format': 'json',
-            'quiet': False,
-            'verbose': False
-        })
+        mock_config.update.assert_called_once_with(
+            {"format": "json", "quiet": False, "verbose": False}
+        )
 
         # Should update console
         assert mock_console.quiet == False
 
-    @patch('deepctl_core.output._output_config')
-    @patch('deepctl_core.output.console')
+    @patch("deepctl_core.output._output_config")
+    @patch("deepctl_core.output.console")
     def test_setup_output_with_params(self, mock_console, mock_config):
         """Test setup with custom parameters."""
-        setup_output(format_type='yaml', quiet=True, verbose=True)
+        setup_output(format_type="yaml", quiet=True, verbose=True)
 
-        mock_config.update.assert_called_once_with({
-            'format': 'yaml',
-            'quiet': True,
-            'verbose': True
-        })
+        mock_config.update.assert_called_once_with(
+            {"format": "yaml", "quiet": True, "verbose": True}
+        )
 
         assert mock_console.quiet == True
 
@@ -217,8 +207,8 @@ class TestSetupOutput:
 class TestPrintFunctions:
     """Test print utility functions."""
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False})
+    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output._output_config", {"quiet": False})
     def test_print_success(self, mock_console):
         """Test printing success message."""
         print_success("Operation completed")
@@ -227,8 +217,8 @@ class TestPrintFunctions:
             "[green]✓[/green] Operation completed"
         )
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': True})
+    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output._output_config", {"quiet": True})
     def test_print_success_quiet(self, mock_console):
         """Test printing success message in quiet mode."""
         print_success("Operation completed")
@@ -236,7 +226,7 @@ class TestPrintFunctions:
         # Should not print in quiet mode
         mock_console.print.assert_not_called()
 
-    @patch('deepctl_core.output.stderr_console')
+    @patch("deepctl_core.output.stderr_console")
     def test_print_error(self, mock_console):
         """Test printing error message."""
         print_error("Something went wrong")
@@ -245,8 +235,8 @@ class TestPrintFunctions:
             "[red]✗[/red] Something went wrong"
         )
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False})
+    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output._output_config", {"quiet": False})
     def test_print_warning(self, mock_console):
         """Test printing warning message."""
         print_warning("Be careful")
@@ -255,22 +245,23 @@ class TestPrintFunctions:
             "[yellow]⚠[/yellow] Be careful"
         )
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False})
+    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output._output_config", {"quiet": False})
     def test_print_info(self, mock_console):
         """Test printing info message."""
         print_info("FYI")
 
-        mock_console.print.assert_called_once_with(
-            "[blue]ℹ[/blue] FYI"
-        )
+        mock_console.print.assert_called_once_with("[blue]ℹ[/blue] FYI")
 
 
 class TestPrintOutput:
     """Test print_output function."""
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False, 'format': 'json'})
+    @patch("deepctl_core.output.console")
+    @patch(
+        "deepctl_core.output._output_config",
+        {"quiet": False, "format": "json"},
+    )
     def test_print_output_json_dict(self, mock_console):
         """Test printing dict as JSON."""
         data = {"test": "value"}
@@ -279,8 +270,10 @@ class TestPrintOutput:
         # Should use Rich's JSON display
         mock_console.print.assert_called_once()
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': True, 'format': 'json'})
+    @patch("deepctl_core.output.console")
+    @patch(
+        "deepctl_core.output._output_config", {"quiet": True, "format": "json"}
+    )
     def test_print_output_quiet(self, mock_console):
         """Test printing in quiet mode."""
         print_output({"test": "value"})
@@ -288,8 +281,11 @@ class TestPrintOutput:
         # Should not print in quiet mode
         mock_console.print.assert_not_called()
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False, 'format': 'yaml'})
+    @patch("deepctl_core.output.console")
+    @patch(
+        "deepctl_core.output._output_config",
+        {"quiet": False, "format": "yaml"},
+    )
     def test_print_output_yaml(self, mock_console):
         """Test printing as YAML with syntax highlighting."""
         data = {"test": "value"}
@@ -298,8 +294,11 @@ class TestPrintOutput:
         # Should use syntax highlighting
         mock_console.print.assert_called_once()
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False, 'format': 'table'})
+    @patch("deepctl_core.output.console")
+    @patch(
+        "deepctl_core.output._output_config",
+        {"quiet": False, "format": "table"},
+    )
     def test_print_output_table(self, mock_console):
         """Test printing as table."""
         data = [{"name": "Alice", "age": 30}]
@@ -308,8 +307,10 @@ class TestPrintOutput:
         # Table formatting uses capture which results in multiple print calls
         assert mock_console.print.call_count >= 1
 
-    @patch('deepctl_core.output.console')
-    @patch('deepctl_core.output._output_config', {'quiet': False, 'format': 'csv'})
+    @patch("deepctl_core.output.console")
+    @patch(
+        "deepctl_core.output._output_config", {"quiet": False, "format": "csv"}
+    )
     def test_print_output_csv(self, mock_console):
         """Test printing as CSV."""
         data = [{"name": "Alice", "age": 30}]
@@ -328,4 +329,4 @@ class TestGetConsole:
 
         # Should return Rich Console instance
         assert console is not None
-        assert hasattr(console, 'print')
+        assert hasattr(console, "print")

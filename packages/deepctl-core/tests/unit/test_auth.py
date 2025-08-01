@@ -56,8 +56,7 @@ class TestAuthManager:
         auth_manager.client.get.return_value = mock_response
 
         success, message, error_type = auth_manager.verify_credentials(
-            api_key="sk-test-key",
-            project_id="test-project"
+            api_key="sk-test-key", project_id="test-project"
         )
 
         assert success is True
@@ -69,8 +68,8 @@ class TestAuthManager:
             "https://api.deepgram.com/v1/projects/test-project",
             headers={
                 "Authorization": "Token sk-test-key",
-                "Content-Type": "application/json"
-            }
+                "Content-Type": "application/json",
+            },
         )
 
     def test_verify_credentials_invalid_api_key(self, auth_manager):
@@ -82,8 +81,7 @@ class TestAuthManager:
         auth_manager.client.get.return_value = mock_response
 
         success, message, error_type = auth_manager.verify_credentials(
-            api_key="sk-invalid-key",
-            project_id="test-project"
+            api_key="sk-invalid-key", project_id="test-project"
         )
 
         assert success is False
@@ -99,12 +97,13 @@ class TestAuthManager:
         auth_manager.client.get.return_value = mock_response
 
         success, message, error_type = auth_manager.verify_credentials(
-            api_key="sk-test-key",
-            project_id="test-project"
+            api_key="sk-test-key", project_id="test-project"
         )
 
         assert success is False
-        assert message == "API key is valid but lacks permission for this project"
+        assert (
+            message == "API key is valid but lacks permission for this project"
+        )
         assert error_type == "auth"
 
     def test_verify_credentials_project_not_found(self, auth_manager):
@@ -116,8 +115,7 @@ class TestAuthManager:
         auth_manager.client.get.return_value = mock_response
 
         success, message, error_type = auth_manager.verify_credentials(
-            api_key="sk-test-key",
-            project_id="non-existent-project"
+            api_key="sk-test-key", project_id="non-existent-project"
         )
 
         assert success is False
@@ -128,10 +126,9 @@ class TestAuthManager:
     def test_verify_credentials_no_api_key(self, auth_manager):
         """Test verification without API key."""
         # Mock get_api_key to return None
-        with patch.object(auth_manager, 'get_api_key', return_value=None):
+        with patch.object(auth_manager, "get_api_key", return_value=None):
             success, message, error_type = auth_manager.verify_credentials(
-                api_key=None,
-                project_id="test-project"
+                api_key=None, project_id="test-project"
             )
 
             assert success is False
@@ -142,10 +139,9 @@ class TestAuthManager:
     def test_verify_credentials_no_project_id(self, auth_manager):
         """Test verification without project ID."""
         # Mock get_project_id to return None
-        with patch.object(auth_manager, 'get_project_id', return_value=None):
+        with patch.object(auth_manager, "get_project_id", return_value=None):
             success, message, error_type = auth_manager.verify_credentials(
-                api_key="sk-test-key",
-                project_id=None
+                api_key="sk-test-key", project_id=None
             )
 
             assert success is False
@@ -156,28 +152,36 @@ class TestAuthManager:
         """Test verification with network error."""
         # Mock network error
         auth_manager.client.get.side_effect = httpx.RequestError(
-            "Connection failed")
+            "Connection failed"
+        )
 
         success, message, error_type = auth_manager.verify_credentials(
-            api_key="sk-test-key",
-            project_id="test-project"
+            api_key="sk-test-key", project_id="test-project"
         )
 
         assert success is False
         assert "Network error during verification" in message
         assert error_type == "network"
 
-    def test_verify_credentials_uses_stored_credentials(self, auth_manager, mock_config):
+    def test_verify_credentials_uses_stored_credentials(
+        self, auth_manager, mock_config
+    ):
         """Test verification uses stored credentials when not provided."""
         # Mock the get_api_key and get_project_id methods to return stored values
-        with patch.object(auth_manager, 'get_api_key', return_value='sk-stored-key'):
-            with patch.object(auth_manager, 'get_project_id', return_value='stored-project'):
+        with patch.object(
+            auth_manager, "get_api_key", return_value="sk-stored-key"
+        ):
+            with patch.object(
+                auth_manager, "get_project_id", return_value="stored-project"
+            ):
                 # Mock successful response
                 mock_response = Mock()
                 mock_response.status_code = 200
                 auth_manager.client.get.return_value = mock_response
 
-                success, message, error_type = auth_manager.verify_credentials()
+                success, message, error_type = (
+                    auth_manager.verify_credentials()
+                )
 
                 assert success is True
 
@@ -186,11 +190,17 @@ class TestAuthManager:
                     "https://api.deepgram.com/v1/projects/stored-project",
                     headers={
                         "Authorization": "Token sk-stored-key",
-                        "Content-Type": "application/json"
-                    }
+                        "Content-Type": "application/json",
+                    },
                 )
 
-    @patch.dict("os.environ", {"DEEPGRAM_API_KEY": "sk-env-key", "DEEPGRAM_PROJECT_ID": "env-project"})
+    @patch.dict(
+        "os.environ",
+        {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project",
+        },
+    )
     def test_verify_credentials_uses_env_vars(self, auth_manager):
         """Test verification uses environment variables."""
         # Mock successful response
@@ -207,47 +217,67 @@ class TestAuthManager:
             "https://api.deepgram.com/v1/projects/env-project",
             headers={
                 "Authorization": "Token sk-env-key",
-                "Content-Type": "application/json"
-            }
+                "Content-Type": "application/json",
+            },
         )
 
     def test_guard_with_valid_credentials(self, auth_manager):
         """Test guard method with valid credentials."""
         # Set up API key
-        with patch.object(auth_manager, 'get_api_key', return_value='sk-test-key'):
+        with patch.object(
+            auth_manager, "get_api_key", return_value="sk-test-key"
+        ):
             # Mock successful verification
-            with patch.object(auth_manager, 'verify_credentials', return_value=(True, "Success", None)):
+            with patch.object(
+                auth_manager,
+                "verify_credentials",
+                return_value=(True, "Success", None),
+            ):
                 # Should not raise
                 auth_manager.guard()
 
     def test_guard_with_no_api_key(self, auth_manager):
         """Test guard method with no API key."""
         # No API key
-        with patch.object(auth_manager, 'get_api_key', return_value=None):
-            with pytest.raises(AuthenticationError, match="DEEPGRAM_API_KEY is not set"):
+        with patch.object(auth_manager, "get_api_key", return_value=None):
+            with pytest.raises(
+                AuthenticationError, match="DEEPGRAM_API_KEY is not set"
+            ):
                 auth_manager.guard()
 
     def test_guard_with_invalid_credentials(self, auth_manager):
         """Test guard method with invalid credentials."""
         # Set up API key
-        with patch.object(auth_manager, 'get_api_key', return_value='sk-test-key'):
+        with patch.object(
+            auth_manager, "get_api_key", return_value="sk-test-key"
+        ):
             # Mock failed verification
-            with patch.object(auth_manager, 'verify_credentials',
-                              return_value=(False, "Invalid API key", "auth")):
-                with pytest.raises(AuthenticationError, match="Invalid API key"):
+            with patch.object(
+                auth_manager,
+                "verify_credentials",
+                return_value=(False, "Invalid API key", "auth"),
+            ):
+                with pytest.raises(
+                    AuthenticationError, match="Invalid API key"
+                ):
                     auth_manager.guard()
 
     def test_login_with_api_key_success(self, auth_manager, mock_config):
         """Test successful login with API key."""
         # Mock successful verification
-        with patch.object(auth_manager, 'verify_credentials', return_value=(True, "Success", None)):
+        with patch.object(
+            auth_manager,
+            "verify_credentials",
+            return_value=(True, "Success", None),
+        ):
             # Mock keyring
-            with patch('deepctl_core.auth.keyring') as mock_keyring:
+            with patch("deepctl_core.auth.keyring") as mock_keyring:
                 mock_keyring.get_password.return_value = None
 
                 # Test login with both api_key and project_id
                 auth_manager.login_with_api_key(
-                    "test_api_key", "test_project_id")
+                    "test_api_key", "test_project_id"
+                )
 
                 # Verify keyring was called to store both API key and project ID
                 assert mock_keyring.set_password.call_count >= 1
@@ -255,13 +285,25 @@ class TestAuthManager:
     def test_login_with_api_key_verification_fails(self, auth_manager):
         """Test login fails when verification fails."""
         # Mock failed verification
-        with patch.object(auth_manager, 'verify_credentials',
-                          return_value=(False, "Invalid API key", "auth")):
-            with pytest.raises(AuthenticationError, match="API key verification failed"):
+        with patch.object(
+            auth_manager,
+            "verify_credentials",
+            return_value=(False, "Invalid API key", "auth"),
+        ):
+            with pytest.raises(
+                AuthenticationError, match="API key verification failed"
+            ):
                 auth_manager.login_with_api_key(
-                    "sk-invalid-key", "test-project")
+                    "sk-invalid-key", "test-project"
+                )
 
-    @patch.dict("os.environ", {"DEEPGRAM_API_KEY": "sk-env-key", "DEEPGRAM_PROJECT_ID": "env-project"})
+    @patch.dict(
+        "os.environ",
+        {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project",
+        },
+    )
     def test_is_ci_mode_true(self, auth_manager):
         """Test CI mode detection when both env vars are set."""
         assert auth_manager.is_ci_mode() is True
@@ -283,10 +325,13 @@ class TestAuthPrecedence:
     def test_explicit_credentials_highest_priority(self, mock_config):
         """Test that explicit credentials have highest priority."""
         # Set up environment variables
-        with patch.dict("os.environ", {
-            "DEEPGRAM_API_KEY": "sk-env-key",
-            "DEEPGRAM_PROJECT_ID": "env-project"
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPGRAM_API_KEY": "sk-env-key",
+                "DEEPGRAM_PROJECT_ID": "env-project",
+            },
+        ):
             # Set up profile credentials
             mock_profile = Mock()
             mock_profile.api_key = "sk-profile-key"
@@ -297,7 +342,7 @@ class TestAuthPrecedence:
             auth_manager = AuthManager(
                 mock_config,
                 explicit_api_key="sk-explicit-key",
-                explicit_project_id="explicit-project"
+                explicit_project_id="explicit-project",
             )
 
             # Explicit credentials should take precedence
@@ -308,18 +353,24 @@ class TestAuthPrecedence:
     def test_profile_credentials_over_env(self, mock_config):
         """Test that profile credentials take precedence over environment."""
         # Set up environment variables
-        with patch.dict("os.environ", {
-            "DEEPGRAM_API_KEY": "sk-env-key",
-            "DEEPGRAM_PROJECT_ID": "env-project"
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPGRAM_API_KEY": "sk-env-key",
+                "DEEPGRAM_PROJECT_ID": "env-project",
+            },
+        ):
             # Set up profile credentials in keyring
             with patch("deepctl_core.auth.keyring") as mock_keyring:
+
                 def get_password_side_effect(service, key):
                     if key == "api-key.default":
                         return "sk-profile-key"
                     return None
 
-                mock_keyring.get_password.side_effect = get_password_side_effect
+                mock_keyring.get_password.side_effect = (
+                    get_password_side_effect
+                )
 
                 mock_profile = Mock()
                 mock_profile.api_key = None  # Not in config
@@ -331,12 +382,17 @@ class TestAuthPrecedence:
                 # Profile credentials should take precedence
                 assert auth_manager.get_api_key() == "sk-profile-key"
                 assert auth_manager.get_project_id() == "profile-project"
-                assert auth_manager.get_credential_source() == "profile 'default'"
+                assert (
+                    auth_manager.get_credential_source() == "profile 'default'"
+                )
 
-    @patch.dict("os.environ", {
-        "DEEPGRAM_API_KEY": "sk-env-key",
-        "DEEPGRAM_PROJECT_ID": "env-project"
-    })
+    @patch.dict(
+        "os.environ",
+        {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project",
+        },
+    )
     def test_env_credentials_fallback(self, mock_config):
         """Test that environment variables are used as fallback."""
         # No profile credentials
@@ -353,14 +409,19 @@ class TestAuthPrecedence:
             # Should fall back to environment variables
             assert auth_manager.get_api_key() == "sk-env-key"
             assert auth_manager.get_project_id() == "env-project"
-            assert auth_manager.get_credential_source() == "environment variables"
+            assert (
+                auth_manager.get_credential_source() == "environment variables"
+            )
 
     def test_ignore_env_parameter(self, mock_config):
         """Test that ignore_env parameter works correctly."""
-        with patch.dict("os.environ", {
-            "DEEPGRAM_API_KEY": "sk-env-key",
-            "DEEPGRAM_PROJECT_ID": "env-project"
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPGRAM_API_KEY": "sk-env-key",
+                "DEEPGRAM_PROJECT_ID": "env-project",
+            },
+        ):
             # No profile credentials
             mock_profile = Mock()
             mock_profile.api_key = None
@@ -377,19 +438,25 @@ class TestAuthPrecedence:
                 assert auth_manager.get_project_id(ignore_env=True) is None
 
                 # Without ignore_env, should return env values
-                assert auth_manager.get_api_key(
-                    ignore_env=False) == "sk-env-key"
-                assert auth_manager.get_project_id(
-                    ignore_env=False) == "env-project"
+                assert (
+                    auth_manager.get_api_key(ignore_env=False) == "sk-env-key"
+                )
+                assert (
+                    auth_manager.get_project_id(ignore_env=False)
+                    == "env-project"
+                )
 
 
 class TestCredentialDetection:
     """Test credential detection methods."""
 
-    @patch.dict("os.environ", {
-        "DEEPGRAM_API_KEY": "sk-env-key",
-        "DEEPGRAM_PROJECT_ID": "env-project"
-    })
+    @patch.dict(
+        "os.environ",
+        {
+            "DEEPGRAM_API_KEY": "sk-env-key",
+            "DEEPGRAM_PROJECT_ID": "env-project",
+        },
+    )
     def test_has_env_credentials_both(self, auth_manager):
         """Test detection when both env vars are set."""
         has_key, has_project = auth_manager.has_env_credentials()
@@ -425,7 +492,8 @@ class TestCredentialDetection:
 
             auth_manager = AuthManager(mock_config)
             has_key, has_project = auth_manager.has_profile_credentials(
-                "test-profile")
+                "test-profile"
+            )
 
             assert has_key is True
             assert has_project is True
@@ -442,7 +510,8 @@ class TestCredentialDetection:
 
             auth_manager = AuthManager(mock_config)
             has_key, has_project = auth_manager.has_profile_credentials(
-                "test-profile")
+                "test-profile"
+            )
 
             assert has_key is True
             assert has_project is True
@@ -459,7 +528,8 @@ class TestCredentialDetection:
 
             auth_manager = AuthManager(mock_config)
             has_key, has_project = auth_manager.has_profile_credentials(
-                "test-profile")
+                "test-profile"
+            )
 
             assert has_key is False
             assert has_project is False
@@ -483,9 +553,13 @@ class TestCredentialDetection:
                 auth_manager = AuthManager(mock_config)
 
                 # Should be False when checking profile only
-                assert auth_manager.is_authenticated(
-                    check_profile_only=True) is False
+                assert (
+                    auth_manager.is_authenticated(check_profile_only=True)
+                    is False
+                )
 
                 # Should be True when checking all sources
-                assert auth_manager.is_authenticated(
-                    check_profile_only=False) is True
+                assert (
+                    auth_manager.is_authenticated(check_profile_only=False)
+                    is True
+                )

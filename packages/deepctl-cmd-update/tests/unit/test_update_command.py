@@ -20,7 +20,14 @@ class TestUpdateCommand:
     @patch("deepctl_cmd_update.command.VersionChecker")
     @patch("deepctl_cmd_update.command.get_console")
     @patch("deepctl_cmd_update.command.format_version_message")
-    def test_check_only(self, mock_format_msg, mock_console, mock_checker_class, mock_asyncio_run, command):
+    def test_check_only(
+        self,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        command,
+    ):
         """Test check-only mode."""
         # Mock version info
         mock_version_info = VersionInfo(
@@ -43,7 +50,7 @@ class TestUpdateCommand:
             config=mock_config,
             auth_manager=mock_auth,
             client=mock_client,
-            check_only=True
+            check_only=True,
         )
 
         assert result["success"] is True
@@ -56,8 +63,15 @@ class TestUpdateCommand:
     @patch("deepctl_cmd_update.command.get_console")
     @patch("deepctl_cmd_update.command.format_version_message")
     @patch("deepctl_cmd_update.command.print_success")
-    def test_no_update_available(self, mock_print_success, mock_format_msg, mock_console,
-                                 mock_checker_class, mock_asyncio_run, command):
+    def test_no_update_available(
+        self,
+        mock_print_success,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        command,
+    ):
         """Test when no update is available."""
         # Mock version info
         mock_version_info = VersionInfo(
@@ -81,7 +95,7 @@ class TestUpdateCommand:
             auth_manager=mock_auth,
             client=mock_client,
             check_only=False,
-            force=False
+            force=False,
         )
 
         assert result["success"] is True
@@ -97,9 +111,19 @@ class TestUpdateCommand:
     @patch("deepctl_cmd_update.command.print_info")
     @patch("deepctl_cmd_update.command.print_success")
     @patch("deepctl_cmd_update.command.Confirm.ask")
-    def test_pip_update(self, mock_confirm, mock_print_success, mock_print_info, mock_format_msg,
-                        mock_console, mock_checker_class, mock_asyncio_run,
-                        mock_detector_class, mock_subprocess, command):
+    def test_pip_update(
+        self,
+        mock_confirm,
+        mock_print_success,
+        mock_print_info,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        mock_detector_class,
+        mock_subprocess,
+        command,
+    ):
         """Test update via pip."""
         # Mock version info
         mock_version_info = VersionInfo(
@@ -122,7 +146,9 @@ class TestUpdateCommand:
             python_executable="/usr/bin/python3",
         )
         mock_detector.detect.return_value = mock_install_info
-        mock_detector.get_update_command.return_value = "pip install --upgrade deepctl"
+        mock_detector.get_update_command.return_value = (
+            "pip install --upgrade deepctl"
+        )
 
         # Mock subprocess
         mock_process = MagicMock()
@@ -143,7 +169,7 @@ class TestUpdateCommand:
             config=mock_config,
             auth_manager=mock_auth,
             client=mock_client,
-            yes=False
+            yes=False,
         )
 
         assert result["success"] is True
@@ -157,9 +183,17 @@ class TestUpdateCommand:
     @patch("deepctl_cmd_update.command.format_version_message")
     @patch("deepctl_cmd_update.command.print_warning")
     @patch("deepctl_cmd_update.command.print_info")
-    def test_development_installation(self, mock_print_info, mock_print_warning, mock_format_msg,
-                                      mock_console, mock_checker_class, mock_asyncio_run,
-                                      mock_detector_class, command):
+    def test_development_installation(
+        self,
+        mock_print_info,
+        mock_print_warning,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        mock_detector_class,
+        command,
+    ):
         """Test development installation handling."""
         # Mock version info
         mock_version_info = VersionInfo(
@@ -196,9 +230,7 @@ class TestUpdateCommand:
 
         # Run command
         result = command.handle(
-            config=mock_config,
-            auth_manager=mock_auth,
-            client=mock_client
+            config=mock_config, auth_manager=mock_auth, client=mock_client
         )
 
         # Can't auto-update development installations

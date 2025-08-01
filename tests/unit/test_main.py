@@ -34,7 +34,10 @@ class TestMainCLI:
         """Test that --help displays help information."""
         result = runner.invoke(cli, ["--help"])
         assert result.exit_code == 0
-        assert "deepctl - Official Deepgram CLI for speech recognition and audio intelligence" in result.output
+        assert (
+            "deepctl - Official Deepgram CLI for speech recognition and audio intelligence"
+            in result.output
+        )
         assert "--config" in result.output
         assert "--profile" in result.output
         assert "--output" in result.output
@@ -46,15 +49,13 @@ class TestMainCLI:
         config_file = tmp_path / "custom.yaml"
         config_file.write_text("version: 1.0\n")
 
-        result = runner.invoke(
-            cli, ["--config", str(config_file), "--help"])
+        result = runner.invoke(cli, ["--config", str(config_file), "--help"])
         assert result.exit_code == 0
 
     def test_cli_with_output_format(self, runner):
         """Test CLI with different output formats."""
         for format_type in ["json", "yaml", "table", "csv"]:
-            result = runner.invoke(
-                cli, ["--output", format_type, "--help"])
+            result = runner.invoke(cli, ["--output", format_type, "--help"])
             assert result.exit_code == 0
 
     def test_cli_with_invalid_output_format(self, runner):
@@ -79,7 +80,9 @@ class TestMainCLI:
 
     @patch("deepctl_core.plugin_manager.console")
     @patch("deepctl_core.plugin_manager.metadata.entry_points")
-    def test_load_commands_error_handling(self, mock_entry_points, mock_console):
+    def test_load_commands_error_handling(
+        self, mock_entry_points, mock_console
+    ):
         """Test error handling during command loading."""
         # Mock entry point that raises error
         mock_entry_point = Mock()
@@ -97,10 +100,13 @@ class TestMainCLI:
         # Check that error message was printed
         error_calls = [str(call) for call in mock_console.print.call_args_list]
         assert any(
-            "Error loading plugin broken-command" in call for call in error_calls)
+            "Error loading plugin broken-command" in call
+            for call in error_calls
+        )
 
     def test_cli_context_setup(self, runner):
         """Test that CLI context is properly set up."""
+
         @cli.command()
         @click.pass_context
         def test_cmd(ctx):
@@ -117,9 +123,11 @@ class TestMainCLI:
         from deepctl.main import main
 
         # Mock sys.argv and the cli call to raise KeyboardInterrupt
-        with patch('sys.argv', ['deepctl']):
+        with patch("sys.argv", ["deepctl"]):
             # Patch the cli function that's already imported at module level
-            with patch.object(cli, '__call__', side_effect=KeyboardInterrupt()):
+            with patch.object(
+                cli, "__call__", side_effect=KeyboardInterrupt()
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
@@ -131,9 +139,11 @@ class TestMainCLI:
         from deepctl.main import main
 
         # Mock sys.argv and the cli call to raise an exception
-        with patch('sys.argv', ['deepctl']):
+        with patch("sys.argv", ["deepctl"]):
             # Patch the cli function that's already imported at module level
-            with patch.object(cli, '__call__', side_effect=Exception("Test error")):
+            with patch.object(
+                cli, "__call__", side_effect=Exception("Test error")
+            ):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 

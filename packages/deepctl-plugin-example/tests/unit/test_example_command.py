@@ -40,7 +40,10 @@ class TestExampleCommand:
     def test_command_metadata(self, example_command):
         """Test command has correct metadata."""
         assert example_command.name == "example"
-        assert example_command.help == "Example plugin command demonstrating the plugin system"
+        assert (
+            example_command.help
+            == "Example plugin command demonstrating the plugin system"
+        )
         assert example_command.short_help == "Example plugin command"
         assert example_command.requires_auth is False
         assert example_command.requires_project is False
@@ -52,7 +55,8 @@ class TestExampleCommand:
 
         # Check greeting argument
         greeting_arg = next(
-            arg for arg in args if "--greeting" in arg["names"])
+            arg for arg in args if "--greeting" in arg["names"]
+        )
         assert greeting_arg["help"] == "Custom greeting message"
         assert greeting_arg["type"] == str
         assert greeting_arg["default"] == "Hello"
@@ -68,12 +72,14 @@ class TestExampleCommand:
         assert info_arg["help"] == "Show plugin system information"
         assert info_arg["is_flag"] is True
 
-    def test_handle_default(self, example_command, mock_config, mock_auth_manager, mock_client):
+    def test_handle_default(
+        self, example_command, mock_config, mock_auth_manager, mock_client
+    ):
         """Test handle with default arguments."""
         result = example_command.handle(
             config=mock_config,
             auth_manager=mock_auth_manager,
-            client=mock_client
+            client=mock_client,
         )
 
         assert result.message == "Hello, World!"
@@ -82,14 +88,16 @@ class TestExampleCommand:
         assert result.greeting == "Hello"
         assert result.name == "World"
 
-    def test_handle_custom_greeting(self, example_command, mock_config, mock_auth_manager, mock_client):
+    def test_handle_custom_greeting(
+        self, example_command, mock_config, mock_auth_manager, mock_client
+    ):
         """Test handle with custom greeting and name."""
         result = example_command.handle(
             config=mock_config,
             auth_manager=mock_auth_manager,
             client=mock_client,
             greeting="Howdy",
-            name="Partner"
+            name="Partner",
         )
 
         assert result.message == "Howdy, Partner!"
@@ -98,7 +106,9 @@ class TestExampleCommand:
         assert result.greeting == "Howdy"
         assert result.name == "Partner"
 
-    def test_handle_show_info(self, example_command, mock_config, mock_auth_manager, mock_client):
+    def test_handle_show_info(
+        self, example_command, mock_config, mock_auth_manager, mock_client
+    ):
         """Test handle with show_info flag."""
         # This test ensures the method runs without error
         # show_info returns None to avoid additional output
@@ -106,7 +116,7 @@ class TestExampleCommand:
             config=mock_config,
             auth_manager=mock_auth_manager,
             client=mock_client,
-            show_info=True
+            show_info=True,
         )
 
         assert result is None  # show_info returns None

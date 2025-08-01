@@ -66,8 +66,7 @@ class TestErrorResult:
     def test_error_result_custom_status(self):
         """Test ErrorResult with custom status."""
         result = ErrorResult(
-            error="Connection failed",
-            status="critical_error"
+            error="Connection failed", status="critical_error"
         )
 
         assert result.status == "critical_error"
@@ -100,7 +99,7 @@ class TestPluginInfo:
             help="Test plugin for unit tests",
             short_help=None,
             type="external",
-            module="test_plugin"
+            module="test_plugin",
         )
 
         assert plugin.name == "test-plugin"
@@ -116,7 +115,7 @@ class TestPluginInfo:
             help="An awesome plugin for Deepgram CLI",
             short_help="Awesome plugin",
             type="builtin",
-            module="deepctl_cmd_awesome"
+            module="deepctl_cmd_awesome",
         )
 
         assert plugin.name == "awesome-plugin"
@@ -145,7 +144,7 @@ class TestPluginInfo:
             help="Builtin command",
             short_help="Builtin",
             type="builtin",
-            module="deepctl_cmd_builtin"
+            module="deepctl_cmd_builtin",
         )
         assert plugin1.type == "builtin"
 
@@ -155,7 +154,7 @@ class TestPluginInfo:
             help="External command",
             short_help="External",
             type="external",
-            module="external_cmd"
+            module="external_cmd",
         )
         assert plugin2.type == "external"
 
@@ -166,9 +165,7 @@ class TestProfileInfo:
     def test_profile_info_minimal(self):
         """Test ProfileInfo with minimal data."""
         profile = ProfileInfo(
-            api_key=None,
-            project_id=None,
-            base_url="https://api.deepgram.com"
+            api_key=None, project_id=None, base_url="https://api.deepgram.com"
         )
 
         assert profile.api_key is None
@@ -180,7 +177,7 @@ class TestProfileInfo:
         profile = ProfileInfo(
             api_key="sk-production",
             project_id="proj-123",
-            base_url="https://api.deepgram.com"
+            base_url="https://api.deepgram.com",
         )
 
         assert profile.api_key == "sk-production"
@@ -204,7 +201,7 @@ class TestProfileInfo:
         profile = ProfileInfo(
             api_key="sk-test",
             project_id="test-proj",
-            base_url="https://custom.deepgram.com"
+            base_url="https://custom.deepgram.com",
         )
 
         assert profile.base_url == "https://custom.deepgram.com"
@@ -227,24 +224,21 @@ class TestProfilesResult:
             "default": ProfileInfo(
                 api_key="sk-default",
                 project_id="proj-default",
-                base_url="https://api.deepgram.com"
+                base_url="https://api.deepgram.com",
             ),
             "staging": ProfileInfo(
                 api_key="sk-staging",
                 project_id="proj-staging",
-                base_url="https://staging.deepgram.com"
+                base_url="https://staging.deepgram.com",
             ),
             "production": ProfileInfo(
                 api_key="sk-prod",
                 project_id="proj-prod",
-                base_url="https://api.deepgram.com"
-            )
+                base_url="https://api.deepgram.com",
+            ),
         }
 
-        result = ProfilesResult(
-            profiles=profiles,
-            current_profile="default"
-        )
+        result = ProfilesResult(profiles=profiles, current_profile="default")
 
         assert result.status == "success"
         assert len(result.profiles) == 3
@@ -260,7 +254,7 @@ class TestProfilesResult:
         result1.profiles["test"] = ProfileInfo(
             api_key="key",
             project_id="proj",
-            base_url="https://api.deepgram.com"
+            base_url="https://api.deepgram.com",
         )
 
         assert "test" in result1.profiles
@@ -272,13 +266,13 @@ class TestProfilesResult:
             "default": ProfileInfo(
                 api_key="sk-default",
                 project_id="proj-default",
-                base_url="https://api.deepgram.com"
+                base_url="https://api.deepgram.com",
             ),
             "dev": ProfileInfo(
                 api_key=None,
                 project_id=None,
-                base_url="https://dev.deepgram.com"
-            )
+                base_url="https://dev.deepgram.com",
+            ),
         }
 
         result = ProfilesResult(profiles=profiles, current_profile="default")

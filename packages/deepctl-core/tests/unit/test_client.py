@@ -50,7 +50,9 @@ class TestDeepgramClient:
         assert client._project_id is None
 
     @patch("deepctl_core.client.DGClient")
-    def test_client_property_creates_client(self, mock_dg_client, client, mock_auth_manager):
+    def test_client_property_creates_client(
+        self, mock_dg_client, client, mock_auth_manager
+    ):
         """Test that accessing client property creates DG client."""
         mock_instance = Mock()
         mock_dg_client.return_value = mock_instance
@@ -70,7 +72,9 @@ class TestDeepgramClient:
         assert result == mock_instance
 
     @patch("deepctl_core.client.DGClient")
-    def test_client_property_reuses_existing(self, mock_dg_client, client, mock_auth_manager):
+    def test_client_property_reuses_existing(
+        self, mock_dg_client, client, mock_auth_manager
+    ):
         """Test that client property reuses existing client."""
         mock_instance = Mock()
         client._client = mock_instance
@@ -86,8 +90,9 @@ class TestDeepgramClient:
 
     @patch("deepctl_core.client.DGClient")
     @patch("deepctl_core.client.DeepgramClientOptions")
-    def test_create_client_with_custom_base_url(self, mock_options, mock_dg_client,
-                                                mock_config, mock_auth_manager):
+    def test_create_client_with_custom_base_url(
+        self, mock_options, mock_dg_client, mock_config, mock_auth_manager
+    ):
         """Test creating client with custom base URL."""
         # Set custom base URL
         mock_profile = Mock()
@@ -106,7 +111,8 @@ class TestDeepgramClient:
 
         # Verify DGClient was created with options
         mock_dg_client.assert_called_once_with(
-            "sk-test", mock_options.return_value)
+            "sk-test", mock_options.return_value
+        )
 
     def test_create_client_no_api_key(self, client, mock_auth_manager):
         """Test creating client without API key raises error."""
@@ -116,7 +122,9 @@ class TestDeepgramClient:
             client._create_client()
 
     @patch("deepctl_core.client.DGClient")
-    def test_create_client_error_handling(self, mock_dg_client, client, mock_auth_manager):
+    def test_create_client_error_handling(
+        self, mock_dg_client, client, mock_auth_manager
+    ):
         """Test error handling when creating client fails."""
         mock_dg_client.side_effect = Exception("Connection error")
 
@@ -126,7 +134,9 @@ class TestDeepgramClient:
     @patch("deepctl_core.client.DGClient")
     @patch("deepctl_core.client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"audio data")
-    def test_transcribe_file(self, mock_file, mock_exists, mock_dg_client, client):
+    def test_transcribe_file(
+        self, mock_file, mock_exists, mock_dg_client, client
+    ):
         """Test transcribing a file."""
         # Setup mocks
         mock_exists.return_value = True
@@ -140,8 +150,7 @@ class TestDeepgramClient:
 
         # Test transcription
         result = client.transcribe_file(
-            "/audio/test.mp3",
-            options={"model": "nova-2", "language": "en"}
+            "/audio/test.mp3", options={"model": "nova-2", "language": "en"}
         )
 
         assert result == {"transcript": "Hello world"}
@@ -164,7 +173,7 @@ class TestDeepgramClient:
         # Test transcription
         result = client.transcribe_url(
             "https://example.com/audio.mp3",
-            options={"model": "nova-2", "detect_language": True}
+            options={"model": "nova-2", "detect_language": True},
         )
 
         assert result == {"transcript": "Hello world"}
@@ -174,7 +183,9 @@ class TestDeepgramClient:
 
     @patch("deepctl_core.client.DGClient")
     @patch("deepctl_core.client.Path.exists")
-    def test_transcribe_file_not_found(self, mock_exists, mock_dg_client, client):
+    def test_transcribe_file_not_found(
+        self, mock_exists, mock_dg_client, client
+    ):
         """Test error when file not found."""
         mock_exists.return_value = False
 
@@ -188,10 +199,12 @@ class TestDeepgramClient:
         mock_instance = Mock()
         mock_manage = Mock()
         # Return a dict-like mock that can be converted to dict
-        mock_response = {"projects": [
-            {"project_id": "proj1", "name": "Project 1"},
-            {"project_id": "proj2", "name": "Project 2"}
-        ]}
+        mock_response = {
+            "projects": [
+                {"project_id": "proj1", "name": "Project 1"},
+                {"project_id": "proj2", "name": "Project 2"},
+            ]
+        }
         mock_manage.get_projects.return_value = mock_response
         mock_instance.manage.v.return_value = mock_manage
         mock_dg_client.return_value = mock_instance
@@ -232,10 +245,14 @@ class TestDeepgramClient:
 
         # Get usage with individual date parameters
         result = client.get_usage(
-            "test-project", start_date="2024-01-01", end_date="2024-01-31")
+            "test-project", start_date="2024-01-01", end_date="2024-01-31"
+        )
 
-        assert result == {"minutes": 1000,
-                          "cost": 25.00, "project_id": "test-project"}
+        assert result == {
+            "minutes": 1000,
+            "cost": 25.00,
+            "project_id": "test-project",
+        }
         mock_manage.get_usage_summary.assert_called_once()
 
         # Check call arguments

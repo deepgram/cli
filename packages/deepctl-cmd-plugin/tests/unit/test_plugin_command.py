@@ -7,7 +7,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 from deepctl_cmd_plugin.command import PluginCommand
-from deepctl_cmd_plugin.models import PluginInstallOptions, PluginOperationResult
+from deepctl_cmd_plugin.models import (
+    PluginInstallOptions,
+    PluginOperationResult,
+)
 from deepctl_cmd_update.installation import InstallMethod
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
@@ -29,20 +32,28 @@ class TestPluginCommand:
         assert self.command.name == "plugin"
         assert self.command.help == "Manage deepctl plugins"
         assert self.command._plugin_dir == Path.home() / ".deepctl" / "plugins"
-        assert self.command._plugin_venv == Path.home() / ".deepctl" / \
-            "plugins" / "venv"
-        assert self.command._plugin_state_file == Path.home() / ".deepctl" / \
-            "plugins" / "plugins.json"
+        assert (
+            self.command._plugin_venv
+            == Path.home() / ".deepctl" / "plugins" / "venv"
+        )
+        assert (
+            self.command._plugin_state_file
+            == Path.home() / ".deepctl" / "plugins" / "plugins.json"
+        )
 
     @patch("deepctl_cmd_plugin.command.subprocess.run")
-    def test_ensure_plugin_environment_creates_venv(self, mock_run: MagicMock) -> None:
+    def test_ensure_plugin_environment_creates_venv(
+        self, mock_run: MagicMock
+    ) -> None:
         """Test that plugin environment is created when it doesn't exist."""
         # Mock that venv doesn't exist
         with patch.object(Path, "exists", return_value=False):
             with patch.object(Path, "mkdir"):
                 mock_run.return_value.returncode = 0
 
-                success, python_path = self.command._ensure_plugin_environment()
+                success, python_path = (
+                    self.command._ensure_plugin_environment()
+                )
 
                 assert success is True
                 assert "python" in python_path
@@ -69,7 +80,9 @@ class TestPluginCommand:
         test_state = {"plugins": {"test-plugin": {"version": "1.0.0"}}}
 
         with patch.object(Path, "exists", return_value=True):
-            with patch.object(Path, "read_text", return_value=json.dumps(test_state)):
+            with patch.object(
+                Path, "read_text", return_value=json.dumps(test_state)
+            ):
                 state = self.command._get_plugin_state()
                 assert state == test_state
 
@@ -100,35 +113,51 @@ class TestPluginCommand:
             assert result.success is True
             assert "Successfully installed" in result.message
             # Should use system python for pip installs
-            assert mock_run.call_args[0][0][0] == self.command._python_executable
+            assert (
+                mock_run.call_args[0][0][0] == self.command._python_executable
+            )
 
     @patch("deepctl_cmd_plugin.command.subprocess.run")
-    def test_install_plugin_system_environment(self, mock_run: MagicMock) -> None:
+    def test_install_plugin_system_environment(
+        self, mock_run: MagicMock
+    ) -> None:
         """Test installing plugin in system environment (brew, apt, etc)."""
         # Mock system installation detection
         with patch.object(self.command.detector, "detect") as mock_detect:
             mock_detect.return_value.method = InstallMethod.SYSTEM
 
             # Mock plugin environment creation
-            with patch.object(self.command, "_ensure_plugin_environment") as mock_ensure:
+            with patch.object(
+                self.command, "_ensure_plugin_environment"
+            ) as mock_ensure:
                 mock_ensure.return_value = (True, "/path/to/plugin/python")
                 mock_run.return_value.returncode = 0
                 mock_run.return_value.stdout = "Successfully installed"
 
                 # Mock state operations
-                with patch.object(self.command, "_get_plugin_state") as mock_get_state:
-                    with patch.object(self.command, "_save_plugin_state") as mock_save_state:
+                with patch.object(
+                    self.command, "_get_plugin_state"
+                ) as mock_get_state:
+                    with patch.object(
+                        self.command, "_save_plugin_state"
+                    ) as mock_save_state:
                         mock_get_state.return_value = {"plugins": {}}
 
                         options = PluginInstallOptions(package="test-plugin")
                         result = self.command.install_plugin(
-                            self.config, self.auth_manager, self.client, options
+                            self.config,
+                            self.auth_manager,
+                            self.client,
+                            options,
                         )
 
                         assert result.success is True
                         assert "Successfully installed" in result.message
                         # Should use plugin environment python
-                        assert mock_run.call_args[0][0][0] == "/path/to/plugin/python"
+                        assert (
+                            mock_run.call_args[0][0][0]
+                            == "/path/to/plugin/python"
+                        )
                         # Should save plugin state
                         mock_save_state.assert_called_once()
 
@@ -137,14 +166,18 @@ class TestPluginCommand:
         with patch.object(self.command.detector, "detect") as mock_detect:
             mock_detect.return_value.method = InstallMethod.PIP
 
-            with patch("deepctl_cmd_plugin.command.subprocess.run") as mock_run:
+            with patch(
+                "deepctl_cmd_plugin.command.subprocess.run"
+            ) as mock_run:
                 mock_run.return_value.returncode = 0
 
                 # Mock _get_package_version to return a version string
-                with patch.object(self.command, "_get_package_version", return_value="1.0.0"):
+                with patch.object(
+                    self.command, "_get_package_version", return_value="1.0.0"
+                ):
                     options = PluginInstallOptions(
                         package="test-plugin",
-                        git_url="git+https://github.com/user/repo.git"
+                        git_url="git+https://github.com/user/repo.git",
                     )
                     result = self.command.install_plugin(
                         self.config, self.auth_manager, self.client, options
@@ -163,8 +196,9 @@ class TestPluginCommand:
             from deepctl_cmd_plugin.models import PluginPackage
 
             mock_discover.return_value = [
-                PluginPackage(name="test-plugin",
-                              version="1.0.0", is_builtin=False)
+                PluginPackage(
+                    name="test-plugin", version="1.0.0", is_builtin=False
+                )
             ]
 
             # Mock pip environment
@@ -194,14 +228,16 @@ class TestPluginCommand:
     @patch("deepctl_cmd_plugin.command.subprocess.run")
     def test_discover_from_environment(self, mock_run: MagicMock) -> None:
         """Test discovering plugins from a specific environment."""
-        mock_output = json.dumps([
-            {
-                "name": "test-plugin",
-                "version": "1.0.0",
-                "entry_point": "test=test_plugin:main",
-                "is_builtin": False
-            }
-        ])
+        mock_output = json.dumps(
+            [
+                {
+                    "name": "test-plugin",
+                    "version": "1.0.0",
+                    "entry_point": "test=test_plugin:main",
+                    "is_builtin": False,
+                }
+            ]
+        )
 
         mock_run.return_value.stdout = mock_output
         mock_run.return_value.returncode = 0
@@ -232,7 +268,7 @@ class TestPluginCommand:
                     success=True,
                     action="install",
                     package="test",
-                    message="Success"
+                    message="Success",
                 )
 
                 kwargs = {"package": package}
@@ -257,24 +293,35 @@ class TestPluginCommand:
                 name="test-plugin",
                 version="1.0.0",
                 entry_point="test=test_plugin:main",
-                is_builtin=False
+                is_builtin=False,
             ),
             PluginPackage(
                 name="deepctl-cmd-test",
                 version="1.0.0",
                 entry_point="test=deepctl_cmd_test:TestCommand",
-                is_builtin=True
-            )
+                is_builtin=True,
+            ),
         ]
 
-        with patch.object(self.command, "_discover_plugins", return_value=test_plugins):
-            with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
-                with patch("deepctl_cmd_plugin.command.print_info") as mock_print_info:
-                    with patch.object(self.command.detector, "detect") as mock_detect:
+        with patch.object(
+            self.command, "_discover_plugins", return_value=test_plugins
+        ):
+            with patch(
+                "deepctl_cmd_plugin.command.console.print"
+            ) as mock_print:
+                with patch(
+                    "deepctl_cmd_plugin.command.print_info"
+                ) as mock_print_info:
+                    with patch.object(
+                        self.command.detector, "detect"
+                    ) as mock_detect:
                         mock_detect.return_value.method = InstallMethod.SYSTEM
 
                         self.command.list_plugins(
-                            self.config, self.auth_manager, self.client, verbose=True
+                            self.config,
+                            self.auth_manager,
+                            self.client,
+                            verbose=True,
                         )
 
                         # Should print a table
@@ -300,7 +347,9 @@ class TestPluginCommand:
     def test_handle_search(self) -> None:
         """Test the search command functionality."""
         # Mock the registry
-        with patch.object(self.command, "_get_plugin_registry") as mock_registry:
+        with patch.object(
+            self.command, "_get_plugin_registry"
+        ) as mock_registry:
             from deepctl_cmd_plugin.models import PluginRegistryEntry
 
             mock_registry.return_value = [
@@ -309,29 +358,36 @@ class TestPluginCommand:
                     description="Test plugin",
                     version="1.0.0",
                     keywords=["test", "demo"],
-                    install_name="test-plugin"
+                    install_name="test-plugin",
                 ),
                 PluginRegistryEntry(
                     name="another-plugin",
                     description="Another test plugin",
                     version="2.0.0",
                     keywords=["other"],
-                    install_name="another-plugin"
-                )
+                    install_name="another-plugin",
+                ),
             ]
 
             # Mock discover_plugins to simulate one installed
-            with patch.object(self.command, "_discover_plugins") as mock_discover:
+            with patch.object(
+                self.command, "_discover_plugins"
+            ) as mock_discover:
                 from deepctl_cmd_plugin.models import PluginPackage
 
                 mock_discover.return_value = [
-                    PluginPackage(name="test-plugin",
-                                  version="1.0.0", is_builtin=False)
+                    PluginPackage(
+                        name="test-plugin", version="1.0.0", is_builtin=False
+                    )
                 ]
 
                 # Test search all
-                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
-                    with patch("deepctl_cmd_plugin.command.print_info") as mock_info:
+                with patch(
+                    "deepctl_cmd_plugin.command.console.print"
+                ) as mock_print:
+                    with patch(
+                        "deepctl_cmd_plugin.command.print_info"
+                    ) as mock_info:
                         self.command._handle_search(
                             self.config, self.auth_manager, self.client
                         )
@@ -339,24 +395,34 @@ class TestPluginCommand:
                         # Should print a table
                         mock_print.assert_called_once()
                         # Should show install hint
-                        assert any("install" in str(call)
-                                   for call in mock_info.call_args_list)
+                        assert any(
+                            "install" in str(call)
+                            for call in mock_info.call_args_list
+                        )
 
                 # Test search with query
-                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
+                with patch(
+                    "deepctl_cmd_plugin.command.console.print"
+                ) as mock_print:
                     self.command._handle_search(
-                        self.config, self.auth_manager, self.client,
-                        query="test"
+                        self.config,
+                        self.auth_manager,
+                        self.client,
+                        query="test",
                     )
 
                     # Should print a table with filtered results
                     mock_print.assert_called_once()
 
                 # Test search installed only
-                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
+                with patch(
+                    "deepctl_cmd_plugin.command.console.print"
+                ) as mock_print:
                     self.command._handle_search(
-                        self.config, self.auth_manager, self.client,
-                        installed=True
+                        self.config,
+                        self.auth_manager,
+                        self.client,
+                        installed=True,
                     )
 
                     # Should print a table with only installed plugins

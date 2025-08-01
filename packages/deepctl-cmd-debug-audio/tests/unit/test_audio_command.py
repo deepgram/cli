@@ -5,7 +5,12 @@ from unittest.mock import Mock, patch, MagicMock
 import json
 
 from deepctl_cmd_debug_audio.command import AudioCommand
-from deepctl_cmd_debug_audio.models import AudioDebugResult, AudioInfo, AudioFormat, AudioStream
+from deepctl_cmd_debug_audio.models import (
+    AudioDebugResult,
+    AudioInfo,
+    AudioFormat,
+    AudioStream,
+)
 from deepctl_core import Config, AuthManager, DeepgramClient
 
 
@@ -43,7 +48,7 @@ class TestAudioCommand:
                 "duration": "120.456",
                 "size": "2890752",
                 "bit_rate": "192000",
-                "nb_streams": 1
+                "nb_streams": 1,
             },
             "streams": [
                 {
@@ -53,9 +58,9 @@ class TestAudioCommand:
                     "sample_rate": "44100",
                     "channels": 2,
                     "channel_layout": "stereo",
-                    "bit_rate": "192000"
+                    "bit_rate": "192000",
                 }
-            ]
+            ],
         }
 
     def test_command_properties(self, command):
@@ -80,7 +85,7 @@ class TestAudioCommand:
         file_arg = next(arg for arg in args if "--file" in arg["names"])
         assert file_arg["required"] is True
 
-    @patch('shutil.which')
+    @patch("shutil.which")
     def test_check_ffmpeg_installed(self, mock_which, command):
         """Test ffmpeg installation check."""
         # Test when ffmpeg is installed
@@ -91,8 +96,10 @@ class TestAudioCommand:
         mock_which.return_value = None
         assert command.check_ffmpeg_installed() is False
 
-    @patch('ffmpeg.probe')
-    def test_run_ffprobe_standard(self, mock_probe, command, sample_probe_data):
+    @patch("ffmpeg.probe")
+    def test_run_ffprobe_standard(
+        self, mock_probe, command, sample_probe_data
+    ):
         """Test running ffprobe without custom arguments."""
         mock_probe.return_value = sample_probe_data
 
@@ -101,8 +108,10 @@ class TestAudioCommand:
         assert result == sample_probe_data
         mock_probe.assert_called_once_with("test.mp3")
 
-    @patch('subprocess.run')
-    def test_run_ffprobe_custom_args(self, mock_run, command, sample_probe_data):
+    @patch("subprocess.run")
+    def test_run_ffprobe_custom_args(
+        self, mock_run, command, sample_probe_data
+    ):
         """Test running ffprobe with custom arguments."""
         mock_result = Mock()
         mock_result.returncode = 0
@@ -112,8 +121,16 @@ class TestAudioCommand:
         result = command.run_ffprobe("test.mp3", "-show_streams -show_format")
 
         assert result == sample_probe_data
-        expected_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json",
-                        "-show_streams", "-show_format", "test.mp3"]
+        expected_cmd = [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_streams",
+            "-show_format",
+            "test.mp3",
+        ]
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == expected_cmd
 
@@ -137,9 +154,10 @@ class TestAudioCommand:
         assert stream.channels == 2
         assert stream.channel_layout == "stereo"
 
-    @patch('shutil.which')
-    def test_handle_ffmpeg_not_installed(self, mock_which, command, mock_config,
-                                         mock_auth_manager, mock_client):
+    @patch("shutil.which")
+    def test_handle_ffmpeg_not_installed(
+        self, mock_which, command, mock_config, mock_auth_manager, mock_client
+    ):
         """Test handling when ffmpeg is not installed."""
         mock_which.return_value = None
 
@@ -147,7 +165,7 @@ class TestAudioCommand:
             config=mock_config,
             auth_manager=mock_auth_manager,
             client=mock_client,
-            file="test.mp3"
+            file="test.mp3",
         )
 
         assert isinstance(result, AudioDebugResult)
@@ -155,10 +173,18 @@ class TestAudioCommand:
         assert result.message == "FFmpeg is not installed"
         assert result.ffmpeg_installed is False
 
-    @patch('shutil.which')
-    @patch('ffmpeg.probe')
-    def test_handle_success(self, mock_probe, mock_which, command, mock_config,
-                            mock_auth_manager, mock_client, sample_probe_data):
+    @patch("shutil.which")
+    @patch("ffmpeg.probe")
+    def test_handle_success(
+        self,
+        mock_probe,
+        mock_which,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        sample_probe_data,
+    ):
         """Test successful audio file analysis."""
         mock_which.return_value = "/usr/bin/ffprobe"
         mock_probe.return_value = sample_probe_data
@@ -167,7 +193,7 @@ class TestAudioCommand:
             config=mock_config,
             auth_manager=mock_auth_manager,
             client=mock_client,
-            file="test.mp3"
+            file="test.mp3",
         )
 
         assert isinstance(result, AudioDebugResult)
@@ -176,10 +202,17 @@ class TestAudioCommand:
         assert result.audio_info is not None
         assert result.audio_info.format.filename == "test.mp3"
 
-    @patch('shutil.which')
-    @patch('ffmpeg.probe')
-    def test_handle_probe_error(self, mock_probe, mock_which, command, mock_config,
-                                mock_auth_manager, mock_client):
+    @patch("shutil.which")
+    @patch("ffmpeg.probe")
+    def test_handle_probe_error(
+        self,
+        mock_probe,
+        mock_which,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+    ):
         """Test handling ffprobe errors."""
         mock_which.return_value = "/usr/bin/ffprobe"
         mock_probe.side_effect = Exception("Failed to probe file")
@@ -188,7 +221,7 @@ class TestAudioCommand:
             config=mock_config,
             auth_manager=mock_auth_manager,
             client=mock_client,
-            file="test.mp3"
+            file="test.mp3",
         )
 
         assert isinstance(result, AudioDebugResult)

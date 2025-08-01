@@ -22,8 +22,8 @@ class TestMcpCommand:
         assert command.requires_project is False
         assert command.ci_friendly is True
         # Test new attributes from __init__
-        assert hasattr(command, '_shutdown_requested')
-        assert hasattr(command, '_original_sigint_handler')
+        assert hasattr(command, "_shutdown_requested")
+        assert hasattr(command, "_original_sigint_handler")
 
     def test_get_arguments(self):
         """Test command arguments."""

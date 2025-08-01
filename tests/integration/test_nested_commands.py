@@ -31,11 +31,14 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_debug_audio_command_execution(self, runner):
         """Test executing debug audio subcommand."""
-        with patch('deepctl_cmd_debug_audio.command.AudioCommand.handle') as mock_handle:
+        with patch(
+            "deepctl_cmd_debug_audio.command.AudioCommand.handle"
+        ) as mock_handle:
             mock_handle.return_value = {"status": "audio debug complete"}
 
             result = runner.invoke(
-                deepctl_cli, ["debug", "audio", "--file", "test.mp3"])
+                deepctl_cli, ["debug", "audio", "--file", "test.mp3"]
+            )
 
             # Check command was executed
             assert result.exit_code == 0
@@ -44,7 +47,9 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_debug_browser_command_execution(self, runner):
         """Test executing debug browser subcommand."""
-        with patch('deepctl_cmd_debug_browser.command.BrowserCommand.handle') as mock_handle:
+        with patch(
+            "deepctl_cmd_debug_browser.command.BrowserCommand.handle"
+        ) as mock_handle:
             mock_handle.return_value = {"status": "browser debug complete"}
 
             result = runner.invoke(deepctl_cli, ["debug", "browser"])
@@ -56,7 +61,9 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_debug_network_command_execution(self, runner):
         """Test executing debug network subcommand."""
-        with patch('deepctl_cmd_debug_network.command.NetworkCommand.handle') as mock_handle:
+        with patch(
+            "deepctl_cmd_debug_network.command.NetworkCommand.handle"
+        ) as mock_handle:
             mock_handle.return_value = {"status": "network debug complete"}
 
             result = runner.invoke(deepctl_cli, ["debug", "network"])
@@ -88,12 +95,15 @@ class TestNestedCommandsIntegration:
     @pytest.mark.integration
     def test_nested_command_with_options(self, runner):
         """Test nested command with options passed correctly."""
-        with patch('deepctl_cmd_debug_network.command.NetworkCommand.handle') as mock_handle:
+        with patch(
+            "deepctl_cmd_debug_network.command.NetworkCommand.handle"
+        ) as mock_handle:
             mock_handle.return_value = {"verbose": True}
 
             # Assuming network debug has a --verbose flag
             result = runner.invoke(
-                deepctl_cli, ["debug", "network", "--verbose"])
+                deepctl_cli, ["debug", "network", "--verbose"]
+            )
 
             # Verify option was passed
             assert result.exit_code == 0
@@ -135,15 +145,23 @@ class TestNestedCommandsIntegration:
         assert result.exit_code == 0
 
         # Check that expected commands are present
-        expected_commands = ["login", "projects",
-                             "transcribe", "usage", "debug"]
+        expected_commands = [
+            "login",
+            "projects",
+            "transcribe",
+            "usage",
+            "debug",
+        ]
         for cmd in expected_commands:
             assert cmd in result.output
 
     @pytest.mark.integration
     def test_subcommand_inherits_parent_context(self, runner):
         """Test that subcommands inherit context from parent group."""
-        with patch('deepctl_cmd_debug_audio.command.AudioCommand.handle') as mock_handle:
+        with patch(
+            "deepctl_cmd_debug_audio.command.AudioCommand.handle"
+        ) as mock_handle:
+
             def check_context(config, auth_manager, client, **kwargs):
                 # Verify that config, auth_manager, and client are passed
                 assert config is not None
@@ -154,7 +172,8 @@ class TestNestedCommandsIntegration:
             mock_handle.side_effect = check_context
 
             result = runner.invoke(
-                deepctl_cli, ["debug", "audio", "--file", "test.mp3"])
+                deepctl_cli, ["debug", "audio", "--file", "test.mp3"]
+            )
             assert result.exit_code == 0
 
     @pytest.mark.integration

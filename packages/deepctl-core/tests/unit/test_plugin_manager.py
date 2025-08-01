@@ -7,7 +7,14 @@ from importlib.metadata import EntryPoint
 import click
 import pytest
 
-from deepctl_core import BaseCommand, BaseGroupCommand, PluginManager, Config, AuthManager, DeepgramClient
+from deepctl_core import (
+    BaseCommand,
+    BaseGroupCommand,
+    PluginManager,
+    Config,
+    AuthManager,
+    DeepgramClient,
+)
 
 
 class TestPluginManager:
@@ -21,12 +28,18 @@ class TestPluginManager:
     @pytest.fixture
     def mock_command_class(self):
         """Create a mock command class for testing."""
+
         class MockCommand(BaseCommand):
             name = "test-command"
             help = "Test command"
 
-            def handle(self, config: Config, auth_manager: AuthManager,
-                       client: DeepgramClient, **kwargs) -> Any:
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"result": "success"}
 
         return MockCommand
@@ -34,12 +47,18 @@ class TestPluginManager:
     @pytest.fixture
     def mock_group_command_class(self):
         """Create a mock group command class for testing."""
+
         class MockGroupCommand(BaseGroupCommand):
             name = "test-group"
             help = "Test group command"
 
-            def handle_group(self, config: Config, auth_manager: AuthManager,
-                             client: DeepgramClient, **kwargs) -> Any:
+            def handle_group(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
                 return {"group": "success"}
 
         return MockGroupCommand
@@ -66,7 +85,9 @@ class TestPluginManager:
         mock_entry_point.load.return_value = mock_command_class
 
         # Mock metadata.entry_points
-        with patch('deepctl_core.plugin_manager.metadata.entry_points') as mock_entry_points:
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
             mock_ep_group = Mock()
             mock_ep_group.select.return_value = [mock_entry_point]
             mock_entry_points.return_value = mock_ep_group
@@ -97,14 +118,17 @@ class TestPluginManager:
         mock_entry_point.load.return_value = mock_command_class
 
         # Mock metadata.entry_points
-        with patch('deepctl_core.plugin_manager.metadata.entry_points') as mock_entry_points:
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
             mock_ep_group = Mock()
             mock_ep_group.select.return_value = [mock_entry_point]
             mock_entry_points.return_value = mock_ep_group
 
             # Load subcommands
             plugin_manager._load_subcommands_for_group(
-                mock_click_group, group_instance)
+                mock_click_group, group_instance
+            )
 
             # Verify subcommand was added twice (once for each entry point group checked)
             assert mock_click_group.add_command.call_count == 2
@@ -114,7 +138,9 @@ class TestPluginManager:
                 assert click_command.name == "test-command"
 
     @pytest.mark.unit
-    def test_function_name_conversion_for_hyphens(self, plugin_manager, mock_command_class):
+    def test_function_name_conversion_for_hyphens(
+        self, plugin_manager, mock_command_class
+    ):
         """Test that hyphenated command names are converted to underscores for function names."""
         # Create command instance with hyphenated name
         command_instance = mock_command_class()
@@ -157,7 +183,9 @@ class TestPluginManager:
         mock_entry_point.name = "audio"
         mock_entry_point.load.return_value = mock_command_class
 
-        with patch('deepctl_core.plugin_manager.metadata.entry_points') as mock_entry_points:
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
             mock_ep_group = Mock()
 
             # Should query for "deepctl.subcommands.debug"
@@ -171,7 +199,8 @@ class TestPluginManager:
 
             # Load subcommands
             plugin_manager._load_subcommands_for_group(
-                mock_click_group, group_instance)
+                mock_click_group, group_instance
+            )
 
             # Verify it loaded the subcommand
             mock_click_group.add_command.assert_called_once()
@@ -179,6 +208,7 @@ class TestPluginManager:
     @pytest.mark.unit
     def test_nested_hyphenated_commands(self, plugin_manager):
         """Test that nested commands with hyphens work correctly."""
+
         # Create a group with hyphenated name
         class DebugNetworkGroup(BaseGroupCommand):
             name = "debug-network"
@@ -197,10 +227,14 @@ class TestPluginManager:
 
         # Create mock entry point
         mock_entry_point = Mock(spec=EntryPoint)
-        mock_entry_point.name = "test_connection"  # Entry point with underscore
+        mock_entry_point.name = (
+            "test_connection"  # Entry point with underscore
+        )
         mock_entry_point.load.return_value = TestConnectionCommand
 
-        with patch('deepctl_core.plugin_manager.metadata.entry_points') as mock_entry_points:
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
             mock_ep_group = Mock()
 
             def mock_select(group):
@@ -213,7 +247,8 @@ class TestPluginManager:
 
             # Load subcommands
             plugin_manager._load_subcommands_for_group(
-                mock_click_group, group_instance)
+                mock_click_group, group_instance
+            )
 
             # Verify the command was added with correct hyphenated name
             mock_click_group.add_command.assert_called_once()
@@ -236,14 +271,18 @@ class TestPluginManager:
         assert len(command_list) == 2
 
     @pytest.mark.unit
-    def test_error_handling_for_invalid_plugin(self, plugin_manager, mock_cli_group):
+    def test_error_handling_for_invalid_plugin(
+        self, plugin_manager, mock_cli_group
+    ):
         """Test that invalid plugins are handled gracefully."""
         # Create mock entry point that raises exception
         mock_entry_point = Mock(spec=EntryPoint)
         mock_entry_point.name = "bad_plugin"
         mock_entry_point.load.side_effect = ImportError("Cannot import plugin")
 
-        with patch('deepctl_core.plugin_manager.metadata.entry_points') as mock_entry_points:
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
             mock_ep_group = Mock()
             mock_ep_group.select.return_value = [mock_entry_point]
             mock_entry_points.return_value = mock_ep_group

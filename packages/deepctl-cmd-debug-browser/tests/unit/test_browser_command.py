@@ -42,35 +42,58 @@ class TestBrowserCommand:
         assert port >= 3000
         assert port < 3100  # Should find within 100 ports
 
-    @patch('webbrowser.open')
-    @patch('builtins.input', return_value='')
+    @patch("webbrowser.open")
+    @patch("builtins.input", return_value="")
     def test_handle_with_browser(self, mock_input, mock_browser_open):
         """Test command execution with browser opening."""
         cmd = BrowserCommand()
 
         # Mock the async run_servers method
-        with patch.object(cmd, 'run_servers', new_callable=AsyncMock) as mock_run_servers:
+        with patch.object(
+            cmd, "run_servers", new_callable=AsyncMock
+        ) as mock_run_servers:
             mock_run_servers.return_value = {
-                'completed': True,
-                'timed_out': False,
-                'duration': 5.0
+                "completed": True,
+                "timed_out": False,
+                "duration": 5.0,
             }
 
             # Set up capabilities data with proper BrowserCapability instances
             from deepctl_cmd_debug_browser.models import BrowserCapability
+
             cmd.capabilities_data = {
-                'web_audio_api': BrowserCapability(name='Web Audio API', supported=True, details='Supported'),
-                'audio_context': BrowserCapability(name='AudioContext', supported=True, details='Supported'),
-                'audio_worklet': BrowserCapability(name='AudioWorklet', supported=True, details='Supported'),
-                'websocket_api': BrowserCapability(name='WebSocket API', supported=True, details='Supported'),
-                'fetch_api': BrowserCapability(name='Fetch API', supported=True, details='Supported'),
-                'es6_features': BrowserCapability(name='ES6+ Features', supported=True, details='Supported'),
-                'dom_apis': BrowserCapability(name='DOM APIs', supported=True, details='Supported'),
-                'console_api': BrowserCapability(name='Console API', supported=True, details='Supported'),
-                'timer_apis': BrowserCapability(name='Timer APIs', supported=True, details='Supported'),
-                'secure_context': BrowserCapability(name='Secure Context', supported=True, details='Supported'),
-                'user_agent': 'Test Browser',
-                'overall_compatible': True
+                "web_audio_api": BrowserCapability(
+                    name="Web Audio API", supported=True, details="Supported"
+                ),
+                "audio_context": BrowserCapability(
+                    name="AudioContext", supported=True, details="Supported"
+                ),
+                "audio_worklet": BrowserCapability(
+                    name="AudioWorklet", supported=True, details="Supported"
+                ),
+                "websocket_api": BrowserCapability(
+                    name="WebSocket API", supported=True, details="Supported"
+                ),
+                "fetch_api": BrowserCapability(
+                    name="Fetch API", supported=True, details="Supported"
+                ),
+                "es6_features": BrowserCapability(
+                    name="ES6+ Features", supported=True, details="Supported"
+                ),
+                "dom_apis": BrowserCapability(
+                    name="DOM APIs", supported=True, details="Supported"
+                ),
+                "console_api": BrowserCapability(
+                    name="Console API", supported=True, details="Supported"
+                ),
+                "timer_apis": BrowserCapability(
+                    name="Timer APIs", supported=True, details="Supported"
+                ),
+                "secure_context": BrowserCapability(
+                    name="Secure Context", supported=True, details="Supported"
+                ),
+                "user_agent": "Test Browser",
+                "overall_compatible": True,
             }
 
             result = cmd.handle(
@@ -79,7 +102,7 @@ class TestBrowserCommand:
                 client=Mock(),
                 port=None,
                 no_browser=False,
-                timeout=60
+                timeout=60,
             )
 
         # Verify browser was opened
@@ -95,11 +118,13 @@ class TestBrowserCommand:
         cmd = BrowserCommand()
 
         # Mock the async run_servers method
-        with patch.object(cmd, 'run_servers', new_callable=AsyncMock) as mock_run_servers:
+        with patch.object(
+            cmd, "run_servers", new_callable=AsyncMock
+        ) as mock_run_servers:
             mock_run_servers.return_value = {
-                'completed': False,
-                'timed_out': True,
-                'duration': 60.0
+                "completed": False,
+                "timed_out": True,
+                "duration": 60.0,
             }
 
             result = cmd.handle(
@@ -108,7 +133,7 @@ class TestBrowserCommand:
                 client=Mock(),
                 port=3005,
                 no_browser=True,
-                timeout=60
+                timeout=60,
             )
 
         # Verify result
@@ -125,7 +150,9 @@ class TestBrowserCommand:
         # Create mock messages
         mock_msg1 = Mock()
         mock_msg1.type = WSMsgType.TEXT
-        mock_msg1.data = '{"type": "info", "message": "Test message", "data": {}}'
+        mock_msg1.data = (
+            '{"type": "info", "message": "Test message", "data": {}}'
+        )
 
         mock_msg2 = Mock()
         mock_msg2.type = WSMsgType.TEXT
@@ -141,7 +168,7 @@ class TestBrowserCommand:
         mock_request = Mock()
 
         # Patch WebSocketResponse creation
-        with patch('aiohttp.web.WebSocketResponse', return_value=mock_ws):
+        with patch("aiohttp.web.WebSocketResponse", return_value=mock_ws):
             result = await cmd.websocket_handler(mock_request)
 
         # Check messages were processed

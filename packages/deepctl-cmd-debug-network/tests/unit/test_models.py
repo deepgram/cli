@@ -11,7 +11,7 @@ from deepctl_cmd_debug_network.models import (
     PythonRequestsTest,
     CommandExecutionResult,
     NetworkDebugResult,
-    DeepgramEndpoint
+    DeepgramEndpoint,
 )
 
 
@@ -26,7 +26,7 @@ class TestEndpointTestResult:
             reachable=True,
             status_code=200,
             response_time_ms=123.45,
-            ssl_valid=True
+            ssl_valid=True,
         )
 
         assert result.name == "HTTPS"
@@ -44,7 +44,7 @@ class TestEndpointTestResult:
             url="https://api.deepgram.com",
             reachable=False,
             error="Connection timeout",
-            ssl_valid=False
+            ssl_valid=False,
         )
 
         assert result.reachable is False
@@ -62,7 +62,7 @@ class TestDNSResult:
             hostname="api.deepgram.com",
             resolved=True,
             ip_addresses=["1.2.3.4", "5.6.7.8"],
-            resolution_time_ms=50.25
+            resolution_time_ms=50.25,
         )
 
         assert result.hostname == "api.deepgram.com"
@@ -77,7 +77,7 @@ class TestDNSResult:
         result = DNSResult(
             hostname="invalid.example.com",
             resolved=False,
-            error="Name resolution failed"
+            error="Name resolution failed",
         )
 
         assert result.resolved is False
@@ -100,7 +100,7 @@ class TestCertificateInfo:
             is_self_signed=False,
             ocsp_urls=["http://r11.o.lencr.org"],
             ca_issuer_urls=["http://r11.i.lencr.org/"],
-            crl_distribution_points=["http://r11.c.lencr.org/31.crl"]
+            crl_distribution_points=["http://r11.c.lencr.org/31.crl"],
         )
 
         assert cert.subject == "CN=api.deepgram.com"
@@ -112,10 +112,7 @@ class TestCertificateInfo:
 
     def test_certificate_info_defaults(self):
         """Test CertificateInfo with default values."""
-        cert = CertificateInfo(
-            subject="CN=test",
-            issuer="CN=test"
-        )
+        cert = CertificateInfo(subject="CN=test", issuer="CN=test")
 
         assert cert.subject == "CN=test"
         assert cert.issuer == "CN=test"
@@ -135,7 +132,7 @@ class TestRevocationEndpointTest:
             endpoint_type="ocsp",
             accessible=True,
             status_code=200,
-            response_time_ms=100.5
+            response_time_ms=100.5,
         )
 
         assert endpoint.url == "http://r11.o.lencr.org"
@@ -151,7 +148,7 @@ class TestRevocationEndpointTest:
             url="http://r11.c.lencr.org/31.crl",
             endpoint_type="crl",
             accessible=False,
-            error="Connection timeout"
+            error="Connection timeout",
         )
 
         assert endpoint.endpoint_type == "crl"
@@ -171,7 +168,7 @@ class TestTLSTestResult:
             connected=True,
             tls_version="TLSv1.3",
             cipher_suite="TLS_AES_256_GCM_SHA384",
-            chain_valid=True
+            chain_valid=True,
         )
 
         assert result.hostname == "api.deepgram.com"
@@ -187,19 +184,13 @@ class TestTLSTestResult:
     def test_tls_test_result_with_certificates(self):
         """Test TLSTestResult with certificate chain."""
         result = TLSTestResult(
-            hostname="api.deepgram.com",
-            port=443,
-            connected=True
+            hostname="api.deepgram.com", port=443, connected=True
         )
 
         cert1 = CertificateInfo(
-            subject="CN=api.deepgram.com",
-            issuer="CN=Intermediate"
+            subject="CN=api.deepgram.com", issuer="CN=Intermediate"
         )
-        cert2 = CertificateInfo(
-            subject="CN=Intermediate",
-            issuer="CN=Root"
-        )
+        cert2 = CertificateInfo(subject="CN=Intermediate", issuer="CN=Root")
 
         result.certificate_chain.append(cert1)
         result.certificate_chain.append(cert2)
@@ -219,7 +210,7 @@ class TestPythonRequestsTest:
             success=True,
             status_code=404,
             response_time_ms=250.75,
-            ssl_verify_enabled=True
+            ssl_verify_enabled=True,
         )
 
         assert test.url == "https://api.deepgram.com/"
@@ -235,7 +226,7 @@ class TestPythonRequestsTest:
             url="https://api.deepgram.com/",
             success=False,
             ssl_verify_enabled=True,
-            error="SSL certificate verification failed"
+            error="SSL certificate verification failed",
         )
 
         assert test.success is False
@@ -254,7 +245,7 @@ class TestCommandExecutionResult:
             exit_code=0,
             stdout="3 packets transmitted, 3 received",
             stderr="",
-            execution_time_ms=2150.5
+            execution_time_ms=2150.5,
         )
 
         assert result.command == "ping -c 3 api.deepgram.com"
@@ -271,7 +262,7 @@ class TestCommandExecutionResult:
             success=False,
             exit_code=127,
             stdout="",
-            stderr="command not found"
+            stderr="command not found",
         )
 
         assert result.success is False
@@ -306,15 +297,13 @@ class TestNetworkDebugResult:
         dns_result = DNSResult(
             hostname="api.deepgram.com",
             resolved=True,
-            ip_addresses=["1.2.3.4"]
+            ip_addresses=["1.2.3.4"],
         )
         result.dns_results["api.deepgram.com"] = dns_result
 
         # Add endpoint result
         endpoint_result = EndpointTestResult(
-            name="HTTPS",
-            url="https://api.deepgram.com",
-            reachable=True
+            name="HTTPS", url="https://api.deepgram.com", reachable=True
         )
         result.endpoint_results.append(endpoint_result)
 
@@ -335,9 +324,7 @@ class TestNetworkDebugResult:
         """Test NetworkDebugResult can be serialized."""
         result = NetworkDebugResult(status="success")
         result.dns_results["test.com"] = DNSResult(
-            hostname="test.com",
-            resolved=True,
-            ip_addresses=["1.2.3.4"]
+            hostname="test.com", resolved=True, ip_addresses=["1.2.3.4"]
         )
 
         # Should be able to convert to dict
@@ -358,7 +345,7 @@ class TestDeepgramEndpoint:
             url="https://api.deepgram.com",
             description="Main API endpoint",
             protocol="https",
-            region="us-east-1"
+            region="us-east-1",
         )
 
         assert endpoint.name == "api"
@@ -372,7 +359,7 @@ class TestDeepgramEndpoint:
         endpoint = DeepgramEndpoint(
             name="websocket",
             url="wss://api.deepgram.com",
-            description="WebSocket endpoint"
+            description="WebSocket endpoint",
         )
 
         assert endpoint.name == "websocket"

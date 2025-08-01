@@ -53,9 +53,7 @@ class TestGnosisClient:
         # Mock the HTTP response
         mock_response = Mock()
         mock_response.json.return_value = {
-            "choices": [
-                {"message": {"content": "Test response"}}
-            ]
+            "choices": [{"message": {"content": "Test response"}}]
         }
         mock_response.raise_for_status = Mock()
 
@@ -109,8 +107,10 @@ class TestGnosisClient:
             mock_call.assert_called_once()
             messages = mock_call.call_args[0][0]
             assert len(messages) == 1
-            assert messages[0] == {"role": "user",
-                                   "content": "What is Deepgram?"}
+            assert messages[0] == {
+                "role": "user",
+                "content": "What is Deepgram?",
+            }
 
     @pytest.mark.asyncio
     async def test_ask_question_with_system_prompt(self):
@@ -119,16 +119,17 @@ class TestGnosisClient:
 
         with patch.object(client, "call", return_value="Answer") as mock_call:
             result = await client.ask_question(
-                "Explain API",
-                system_prompt="You are a technical expert"
+                "Explain API", system_prompt="You are a technical expert"
             )
             assert result == "Answer"
 
             # Check messages include system prompt
             messages = mock_call.call_args[0][0]
             assert len(messages) == 2
-            assert messages[0] == {"role": "system",
-                                   "content": "You are a technical expert"}
+            assert messages[0] == {
+                "role": "system",
+                "content": "You are a technical expert",
+            }
             assert messages[1] == {"role": "user", "content": "Explain API"}
 
     @pytest.mark.asyncio
@@ -139,10 +140,12 @@ class TestGnosisClient:
         messages = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
-            {"role": "user", "content": "How are you?"}
+            {"role": "user", "content": "How are you?"},
         ]
 
-        with patch.object(client, "call", return_value="I'm doing well!") as mock_call:
+        with patch.object(
+            client, "call", return_value="I'm doing well!"
+        ) as mock_call:
             result = await client.chat(messages)
             assert result == "I'm doing well!"
 
@@ -157,7 +160,9 @@ class TestGnosisClient:
 
         messages = [{"role": "user", "content": "Hello"}]
 
-        with patch.object(client, "call", return_value="Response") as mock_call:
+        with patch.object(
+            client, "call", return_value="Response"
+        ) as mock_call:
             result = await client.chat(messages, system_prompt="Be friendly")
             assert result == "Response"
 
@@ -165,7 +170,9 @@ class TestGnosisClient:
             called_messages = mock_call.call_args[0][0]
             assert len(called_messages) == 2
             assert called_messages[0] == {
-                "role": "system", "content": "Be friendly"}
+                "role": "system",
+                "content": "Be friendly",
+            }
             assert called_messages[1] == {"role": "user", "content": "Hello"}
 
 
@@ -185,7 +192,7 @@ class TestGnosisModels:
             messages=[{"role": "user", "content": "Test"}],
             model="custom-model",
             temperature=0.9,
-            max_tokens=100
+            max_tokens=100,
         )
         assert request.model == "custom-model"
         assert request.temperature == 0.9
@@ -194,13 +201,11 @@ class TestGnosisModels:
     def test_gnosis_response_parsing(self):
         """Test GnosisResponse parsing."""
         response_data = {
-            "choices": [
-                {"message": {"content": "Response text"}}
-            ],
+            "choices": [{"message": {"content": "Response text"}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20},
             "model": "deepgram",
             "id": "response-123",
-            "created": 1234567890
+            "created": 1234567890,
         }
         response = GnosisResponse(**response_data)
         assert len(response.choices) == 1
@@ -221,6 +226,7 @@ class TestGnosisMain:
             with patch("sys.exit", side_effect=SystemExit(1)) as mock_exit:
                 with pytest.raises(SystemExit):
                     from deepctl_cmd_mcp.gnosis import main
+
                     await main()
                 # Verify sys.exit was called (at least once)
                 assert mock_exit.called
@@ -231,11 +237,16 @@ class TestGnosisMain:
             with patch.dict("os.environ", {"DEEPGRAM_API_KEY": "test-key"}):
                 mock_client = Mock()
                 mock_client.ask_question = AsyncMock(
-                    return_value="Deepgram is...")
+                    return_value="Deepgram is..."
+                )
 
-                with patch("deepctl_cmd_mcp.gnosis.GnosisClient", return_value=mock_client):
+                with patch(
+                    "deepctl_cmd_mcp.gnosis.GnosisClient",
+                    return_value=mock_client,
+                ):
                     with patch("builtins.print") as mock_print:
                         from deepctl_cmd_mcp.gnosis import main
+
                         await main()
                         mock_print.assert_called_with("Deepgram is...")
 
@@ -246,9 +257,13 @@ class TestGnosisMain:
                 mock_client = Mock()
                 mock_client.ask_question = AsyncMock(return_value="Response")
 
-                with patch("deepctl_cmd_mcp.gnosis.GnosisClient", return_value=mock_client):
+                with patch(
+                    "deepctl_cmd_mcp.gnosis.GnosisClient",
+                    return_value=mock_client,
+                ):
                     with patch("builtins.print") as mock_print:
                         from deepctl_cmd_mcp.gnosis import main
+
                         await main()
 
                         # Check that JSON was printed

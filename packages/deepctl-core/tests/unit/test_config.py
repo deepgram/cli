@@ -20,16 +20,16 @@ class TestConfig:
                 "default": {
                     "api_key": None,
                     "project_id": None,
-                    "base_url": "https://api.deepgram.com"
+                    "base_url": "https://api.deepgram.com",
                 },
                 "test": {
                     "api_key": "sk-test",
                     "project_id": "test-project",
-                    "base_url": "https://test.deepgram.com"
-                }
+                    "base_url": "https://test.deepgram.com",
+                },
             },
             "active_profile": "default",
-            "default_profile": "default"
+            "default_profile": "default",
         }
 
     @pytest.fixture
@@ -38,7 +38,7 @@ class TestConfig:
         return {
             "DEEPGRAM_API_KEY": "sk-env",
             "DEEPGRAM_PROJECT_ID": "env-project",
-            "DEEPGRAM_BASE_URL": "https://env.deepgram.com"
+            "DEEPGRAM_BASE_URL": "https://env.deepgram.com",
         }
 
     @patch("deepctl_core.config.platformdirs.user_config_dir")
@@ -73,12 +73,16 @@ class TestConfig:
 
     @patch("deepctl_core.config.Path.exists")
     @patch("builtins.open", new_callable=mock_open)
-    def test_load_config_from_file(self, mock_file, mock_exists, mock_config_data):
+    def test_load_config_from_file(
+        self, mock_file, mock_exists, mock_config_data
+    ):
         """Test loading configuration from file."""
         mock_exists.return_value = True
         mock_file.return_value.read.return_value = yaml.dump(mock_config_data)
 
-        with patch("deepctl_core.config.yaml.safe_load", return_value=mock_config_data):
+        with patch(
+            "deepctl_core.config.yaml.safe_load", return_value=mock_config_data
+        ):
             config = Config()
 
         assert config._config.profiles["test"].api_key == "sk-test"
@@ -193,9 +197,10 @@ class TestConfig:
         config = Config()
 
         # Create new profile
-        with patch.object(config, 'save'):
-            config.create_profile("test", api_key="new-key",
-                                  project_id="new-project")
+        with patch.object(config, "save"):
+            config.create_profile(
+                "test", api_key="new-key", project_id="new-project"
+            )
 
         profile = config.get_profile("test")
         assert profile.api_key == "new-key"
@@ -207,7 +212,7 @@ class TestConfig:
         config = Config()
 
         # Create a profile
-        with patch.object(config, 'save'):
+        with patch.object(config, "save"):
             config.create_profile("test", api_key="key")
             assert "test" in config._config.profiles
 
@@ -221,7 +226,7 @@ class TestConfig:
         config = Config()
 
         # Add some profiles
-        with patch.object(config, 'save'):
+        with patch.object(config, "save"):
             config.create_profile("profile1", api_key="key1")
             config.create_profile("profile2", api_key="key2")
 
@@ -244,11 +249,14 @@ class TestConfig:
                 expected_path = Path("/mock/config") / "config.yaml"
                 assert config.config_path == expected_path
 
-    @patch.dict(os.environ, {
-        "DEEPGRAM_OUTPUT_FORMAT": "json",
-        "DEEPGRAM_OUTPUT_QUIET": "true",
-        "DEEPGRAM_UPDATE_CHECK_ENABLED": "false"
-    })
+    @patch.dict(
+        os.environ,
+        {
+            "DEEPGRAM_OUTPUT_FORMAT": "json",
+            "DEEPGRAM_OUTPUT_QUIET": "true",
+            "DEEPGRAM_UPDATE_CHECK_ENABLED": "false",
+        },
+    )
     @patch("deepctl_core.config.Path.exists", return_value=False)
     def test_env_config_overrides(self, mock_exists):
         """Test environment variable configuration overrides."""
