@@ -10,6 +10,7 @@ from rich.console import Console
 from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
 from .models import ErrorResult, PluginInfo
+from .timing import TimingContext
 
 console = Console()
 
@@ -29,46 +30,53 @@ class PluginManager:
             cli_group: Main CLI group to add commands to
         """
         # Load built-in commands
-        self._load_builtin_commands(cli_group)
+        with TimingContext("builtin_commands_loading"):
+            self._load_builtin_commands(cli_group)
 
         # Load external plugins
-        self._load_external_plugins(cli_group)
+        with TimingContext("external_plugins_loading"):
+            self._load_external_plugins(cli_group)
 
     def _load_builtin_commands(self, cli_group: click.Group) -> None:
         """Load built-in commands from the commands entry point group."""
         try:
             # Load built-in commands from entry points
-            entry_points = metadata.entry_points()
-            for entry_point in entry_points.select(group="deepctl.commands"):
-                try:
-                    # Load the command class
-                    command_class = entry_point.load()
+            with TimingContext("discover_entry_points"):
+                entry_points = metadata.entry_points()
+                command_entry_points = list(
+                    entry_points.select(group="deepctl.commands"))
 
-                    # Create instance
-                    command_instance = command_class()
+            for entry_point in command_entry_points:
+                with TimingContext(f"load_command_{entry_point.name}"):
+                    try:
+                        # Load the command class
+                        command_class = entry_point.load()
 
-                    # Create Click command
-                    click_command = self._create_click_command(
-                        command_instance
-                    )
+                        # Create instance
+                        command_instance = command_class()
 
-                    # Add to CLI group
-                    cli_group.add_command(click_command)
+                        # Create Click command
+                        click_command = self._create_click_command(
+                            command_instance
+                        )
 
-                    # Store reference
-                    self.command_classes[entry_point.name] = command_class
+                        # Add to CLI group
+                        cli_group.add_command(click_command)
 
-                    # Debug: Loaded built-in command
-                    # console.print(
-                    #     f"[dim]Loaded built-in command:[/dim] "
-                    #     f"{entry_point.name}"
-                    # )
+                        # Store reference
+                        self.command_classes[entry_point.name] = command_class
 
-                except Exception as e:
-                    console.print(
-                        f"[red]Error loading command "
-                        f"{entry_point.name}:[/red] {e}"
-                    )
+                        # Debug: Loaded built-in command
+                        # console.print(
+                        #     f"[dim]Loaded built-in command:[/dim] "
+                        #     f"{entry_point.name}"
+                        # )
+
+                    except Exception as e:
+                        console.print(
+                            f"[red]Error loading command "
+                            f"{entry_point.name}:[/red] {e}"
+                        )
 
         except Exception as e:
             console.print(f"[red]Error loading built-in commands:[/red] {e}")

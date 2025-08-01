@@ -3,7 +3,7 @@
 import sys
 
 import click
-from deepctl_core import Config, setup_output
+from deepctl_core import Config, setup_output, TimingContext, enable_timing, print_timing_summary
 from rich.console import Console
 from rich.traceback import install
 
@@ -119,6 +119,16 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     is_flag=True,
     help="Enable verbose output",
 )
+@click.option(
+    "--timing",
+    is_flag=True,
+    help="Show performance timing information",
+)
+@click.option(
+    "--timing-detailed",
+    is_flag=True,
+    help="Show detailed performance timing information",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -127,20 +137,30 @@ def cli(
     output: str | None,
     quiet: bool,
     verbose: bool,
+    timing: bool,
+    timing_detailed: bool,
 ) -> None:
     """deepctl - Official Deepgram CLI for speech recognition and audio
     intelligence."""
 
-    # Initialize configuration
-    ctx.ensure_object(dict)
-    ctx.obj["config"] = Config(config_path=config, profile=profile)
+    # Enable timing if requested
+    if timing or timing_detailed:
+        enable_timing()
 
-    # Setup output formatting
-    setup_output(
-        format_type=output or ctx.obj["config"].get("output.format", "json"),
-        quiet=quiet,
-        verbose=verbose,
-    )
+    with TimingContext("cli_initialization"):
+        # Initialize configuration
+        ctx.ensure_object(dict)
+        ctx.obj["config"] = Config(config_path=config, profile=profile)
+        ctx.obj["timing"] = timing or timing_detailed
+        ctx.obj["timing_detailed"] = timing_detailed
+
+        # Setup output formatting
+        setup_output(
+            format_type=output or ctx.obj["config"].get(
+                "output.format", "json"),
+            quiet=quiet,
+            verbose=verbose,
+        )
 
 
 # Load commands from entry points
@@ -149,8 +169,9 @@ def load_commands() -> None:
     # Use the plugin manager to load all commands
     from deepctl_core import PluginManager
 
-    plugin_manager = PluginManager()
-    plugin_manager.load_plugins(cli)
+    with TimingContext("plugin_loading"):
+        plugin_manager = PluginManager()
+        plugin_manager.load_plugins(cli)
 
 
 # Load commands when module is imported
@@ -160,12 +181,31 @@ load_commands()
 def main() -> None:
     """Main entry point for the CLI."""
     try:
-        # Preprocess arguments to handle hyphenated commands
+        # Check if timing was requested and enable it early
         args = sys.argv[1:]  # Skip the program name
-        processed_args = preprocess_hyphenated_commands(args)
+        timing_requested = "--timing" in args or "--timing-detailed" in args
+        detailed_timing = "--timing-detailed" in args
 
-        # Call CLI with processed arguments
-        cli(args=processed_args, standalone_mode=True)
+        if timing_requested:
+            enable_timing()
+
+        with TimingContext("total_execution"):
+            with TimingContext("argument_preprocessing"):
+                # Preprocess arguments to handle hyphenated commands
+                processed_args = preprocess_hyphenated_commands(args)
+
+            with TimingContext("cli_execution"):
+                # Call CLI with processed arguments
+                try:
+                    cli(args=processed_args, standalone_mode=False)
+                except SystemExit:
+                    # Click calls sys.exit() even in non-standalone mode sometimes
+                    pass
+
+        # Print timing summary if timing was enabled
+        if timing_requested:
+            print_timing_summary(detailed_timing)
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(1)

@@ -9,6 +9,7 @@ from rich.console import Console
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config
+from .timing import TimingContext
 
 console = Console()
 
@@ -40,81 +41,89 @@ class BaseCommand(ABC):
             ctx: Click context
             **kwargs: Command arguments and options
         """
-        # Get configuration from context
-        config = ctx.obj.get("config")
-        if not config:
-            config = Config()
+        with TimingContext(f"command_{self.name}_total"):
+            with TimingContext("command_setup"):
+                # Get configuration from context
+                config = ctx.obj.get("config")
+                if not config:
+                    config = Config()
 
-        # Extract explicit credentials from kwargs if provided
-        explicit_api_key = kwargs.get("api_key")
-        explicit_project_id = kwargs.get("project_id")
+                # Extract explicit credentials from kwargs if provided
+                explicit_api_key = kwargs.get("api_key")
+                explicit_project_id = kwargs.get("project_id")
 
-        # Create auth manager with explicit credentials
-        auth_manager = AuthManager(
-            config, explicit_api_key, explicit_project_id
-        )
+                # Create auth manager with explicit credentials
+                auth_manager = AuthManager(
+                    config, explicit_api_key, explicit_project_id
+                )
 
-        # Create Deepgram client
-        client = DeepgramClient(config, auth_manager)
+                # Create Deepgram client
+                client = DeepgramClient(config, auth_manager)
 
-        # Check authentication if required
-        if self.requires_auth:
-            try:
-                auth_manager.guard()
+            # Check authentication if required
+            if self.requires_auth:
+                with TimingContext("authentication_check"):
+                    try:
+                        auth_manager.guard()
 
-                # Log credential source and project ID for transparency
-                if not config.get("output.quiet", False):
-                    source = auth_manager.get_credential_source()
-                    project_id = auth_manager.get_project_id()
+                        # Log credential source and project ID for transparency
+                        if not config.get("output.quiet", False):
+                            source = auth_manager.get_credential_source()
+                            project_id = auth_manager.get_project_id()
 
-                    # Only log if not using a profile (i.e., using env vars or flags)
-                    if source in ["explicit flags", "environment variables"]:
+                            # Only log if not using a profile (i.e., using env vars or flags)
+                            if source in ["explicit flags", "environment variables"]:
+                                console.print(
+                                    f"[dim]Using credentials from {source}[/dim]"
+                                )
+                                if project_id:
+                                    console.print(
+                                        f"[dim]Affecting project: {project_id}[/dim]"
+                                    )
+                                else:
+                                    console.print(
+                                        "[yellow]Warning: No project ID specified[/yellow]"
+                                    )
+
+                    except Exception as e:
                         console.print(
-                            f"[dim]Using credentials from {source}[/dim]"
+                            f"[red]Authentication required:[/red] {e}")
+                        raise click.ClickException(str(e))
+
+            # Check project ID if required
+            if self.requires_project:
+                with TimingContext("project_validation"):
+                    project_id = auth_manager.get_project_id()
+                    if not project_id:
+                        console.print(
+                            "[red]Error:[/red] Project ID is required for this command"
                         )
-                        if project_id:
-                            console.print(
-                                f"[dim]Affecting project: {project_id}[/dim]"
-                            )
-                        else:
-                            console.print(
-                                "[yellow]Warning: No project ID specified[/yellow]"
-                            )
+                        console.print(
+                            "Set DEEPGRAM_PROJECT_ID environment variable or "
+                            "configure via profile"
+                        )
+                        raise click.ClickException("Project ID required")
+
+            # Execute the command
+            try:
+                with TimingContext(f"command_{self.name}_handler"):
+                    result = self.handle(
+                        config, auth_manager, client, **kwargs)
+
+                # Handle command result
+                if result is not None:
+                    with TimingContext("output_processing"):
+                        self.output_result(result, config)
+
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Command cancelled by user[/yellow]")
+                raise click.Abort()
 
             except Exception as e:
-                console.print(f"[red]Authentication required:[/red] {e}")
+                console.print(f"[red]Command failed:[/red] {e}")
+                if config.get("output.verbose", False):
+                    console.print_exception()
                 raise click.ClickException(str(e))
-
-        # Check project ID if required
-        if self.requires_project:
-            project_id = auth_manager.get_project_id()
-            if not project_id:
-                console.print(
-                    "[red]Error:[/red] Project ID is required for this command"
-                )
-                console.print(
-                    "Set DEEPGRAM_PROJECT_ID environment variable or "
-                    "configure via profile"
-                )
-                raise click.ClickException("Project ID required")
-
-        # Execute the command
-        try:
-            result = self.handle(config, auth_manager, client, **kwargs)
-
-            # Handle command result
-            if result is not None:
-                self.output_result(result, config)
-
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Command cancelled by user[/yellow]")
-            raise click.Abort()
-
-        except Exception as e:
-            console.print(f"[red]Command failed:[/red] {e}")
-            if config.get("output.verbose", False):
-                console.print_exception()
-            raise click.ClickException(str(e))
 
     @abstractmethod
     def handle(
@@ -155,32 +164,35 @@ class BaseCommand(ABC):
         if result is None:
             return
 
-        output_format = config.get("output.format", "json")
+        with TimingContext("result_formatting"):
+            output_format = config.get("output.format", "json")
 
-        # Unwrap Pydantic models for serialisation
-        # local import to avoid circulars
-        from pydantic import BaseModel as _PydanticBaseModel
+            # Unwrap Pydantic models for serialisation
+            # local import to avoid circulars
+            from pydantic import BaseModel as _PydanticBaseModel
 
-        if isinstance(result, _PydanticBaseModel):
-            result = result.model_dump()
-        elif (
-            isinstance(result, list)
-            and result
-            and isinstance(result[0], _PydanticBaseModel)
-        ):
-            result = [item.model_dump() for item in result]
+            if isinstance(result, _PydanticBaseModel):
+                result = result.model_dump()
+            elif (
+                isinstance(result, list)
+                and result
+                and isinstance(result[0], _PydanticBaseModel)
+            ):
+                result = [item.model_dump() for item in result]
 
-        if output_format == "json":
-            self._output_json(result)
-        elif output_format == "yaml":
-            self._output_yaml(result)
-        elif output_format == "table":
-            self._output_table(result)
-        elif output_format == "csv":
-            self._output_csv(result)
-        else:
-            console.print(f"[red]Unknown output format:[/red] {output_format}")
-            self._output_json(result)
+        with TimingContext(f"output_{output_format}"):
+            if output_format == "json":
+                self._output_json(result)
+            elif output_format == "yaml":
+                self._output_yaml(result)
+            elif output_format == "table":
+                self._output_table(result)
+            elif output_format == "csv":
+                self._output_csv(result)
+            else:
+                console.print(
+                    f"[red]Unknown output format:[/red] {output_format}")
+                self._output_json(result)
 
     def _output_json(self, result: Any) -> None:
         """Output result as JSON."""
