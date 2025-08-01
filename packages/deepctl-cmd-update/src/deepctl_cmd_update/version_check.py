@@ -3,10 +3,9 @@
 from datetime import datetime, timedelta
 
 import httpx
+from deepctl_core import Config
 from packaging import version
 from pydantic import BaseModel, Field
-
-from deepctl_core import Config
 
 
 class VersionInfo(BaseModel):

@@ -3,7 +3,6 @@
 import json
 import subprocess
 import sys
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +13,6 @@ from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
 from deepctl_core.output import print_error, print_info, print_success
-from packaging import version
 from rich.console import Console
 from rich.table import Table
 
@@ -79,9 +77,11 @@ class PluginCommand(BaseGroupCommand):
         Returns:
             List of subcommands
         """
+
         # Create a wrapper for subcommands to handle context
         def context_wrapper(func: Any) -> Any:
             """Wrap subcommand to provide config and auth."""
+
             @click.pass_context
             def wrapper(ctx: click.Context, **kwargs: Any) -> Any:
                 # Try to get from parent context first
@@ -140,7 +140,7 @@ class PluginCommand(BaseGroupCommand):
                     [sys.executable, "-m", "venv", str(self._plugin_venv)],
                     check=True,
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
 
                 # Get the python executable in the venv
@@ -151,11 +151,17 @@ class PluginCommand(BaseGroupCommand):
 
                 # Ensure pip is installed and up to date
                 subprocess.run(
-                    [str(venv_python), "-m", "pip",
-                     "install", "--upgrade", "pip"],
+                    [
+                        str(venv_python),
+                        "-m",
+                        "pip",
+                        "install",
+                        "--upgrade",
+                        "pip",
+                    ],
                     check=True,
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
 
                 print_success("Plugin environment created successfully")
@@ -264,9 +270,13 @@ class PluginCommand(BaseGroupCommand):
         package = kwargs.pop("package", "")
 
         # Check if package is a git URL
-        if package.startswith("git+") or (
-            package.startswith("http://") or package.startswith("https://")
-        ) and ".git" in package:
+        if (
+            package.startswith("git+")
+            or ((
+                package.startswith("http://") or package.startswith("https://")
+            )
+            and ".git" in package)
+        ):
             # This is a git URL
             kwargs["git_url"] = package
             # Extract package name from URL for tracking
@@ -393,7 +403,9 @@ class PluginCommand(BaseGroupCommand):
         yes = kwargs.get("yes", False)
 
         if not yes:
-            if not click.confirm(f"Are you sure you want to remove {package}?"):
+            if not click.confirm(
+                f"Are you sure you want to remove {package}?"
+            ):
                 return
 
         result = self.remove_plugin(config, auth_manager, client, package)
@@ -459,16 +471,22 @@ class PluginCommand(BaseGroupCommand):
                 if (
                     query_lower not in plugin.name.lower()
                     and query_lower not in plugin.description.lower()
-                    and not any(query_lower in kw.lower() for kw in plugin.keywords)
+                    and not any(
+                        query_lower in kw.lower() for kw in plugin.keywords
+                    )
                 ):
                     continue
 
             # Check installed status
-            is_installed = plugin.install_name in installed_plugins or plugin.name in installed_plugins
+            is_installed = (
+                plugin.install_name in installed_plugins
+                or plugin.name in installed_plugins
+            )
             installed_version = None
             if is_installed:
                 installed_plugin = installed_plugins.get(
-                    plugin.install_name) or installed_plugins.get(plugin.name)
+                    plugin.install_name
+                ) or installed_plugins.get(plugin.name)
                 if installed_plugin:
                     installed_version = installed_plugin.version
 
@@ -519,7 +537,8 @@ class PluginCommand(BaseGroupCommand):
         available_count = sum(1 for r in search_results if not r.installed)
         if available_count > 0:
             print_info(
-                f"\nTo install a plugin, use: deepctl plugin install <name>")
+                "\nTo install a plugin, use: deepctl plugin install <name>"
+            )
 
     def _get_plugin_registry(self) -> list[PluginRegistryEntry]:
         """Get the plugin registry.
@@ -619,10 +638,14 @@ class PluginCommand(BaseGroupCommand):
         install_info = self.detector.detect()
 
         # Determine which Python executable to use
-        if install_info.method in [InstallMethod.SYSTEM, InstallMethod.UNKNOWN]:
+        if install_info.method in [
+            InstallMethod.SYSTEM,
+            InstallMethod.UNKNOWN,
+        ]:
             # For system installations, use isolated plugin environment
             print_info(
-                "System installation detected, using isolated plugin environment...")
+                "System installation detected, using isolated plugin environment..."
+            )
             success, python_exe = self._ensure_plugin_environment()
             if not success:
                 return PluginOperationResult(
@@ -675,7 +698,8 @@ class PluginCommand(BaseGroupCommand):
 
             # Get installed version
             installed_version = self._get_package_version(
-                options.package, target_python)
+                options.package, target_python
+            )
 
             # Update plugin state if using plugin environment
             if using_plugin_env:
@@ -749,8 +773,11 @@ class PluginCommand(BaseGroupCommand):
 
                 # Check if this is from plugin environment
                 state = self._get_plugin_state()
-                env = "Plugin Env" if plugin.name in state.get(
-                    "plugins", {}) else "Main Env"
+                env = (
+                    "Plugin Env"
+                    if plugin.name in state.get("plugins", {})
+                    else "Main Env"
+                )
 
                 row.extend([plugin_type, commands, env])
 
@@ -764,7 +791,8 @@ class PluginCommand(BaseGroupCommand):
             print_info(f"\nInstallation method: {install_info.method.value}")
             if install_info.method == InstallMethod.SYSTEM:
                 print_info(
-                    "Using isolated plugin environment at: ~/.deepctl/plugins/venv")
+                    "Using isolated plugin environment at: ~/.deepctl/plugins/venv"
+                )
 
     def update_plugin(
         self,
@@ -814,7 +842,8 @@ class PluginCommand(BaseGroupCommand):
         # Check if plugin is installed
         plugins = self._discover_plugins()
         plugin_found = any(
-            p.name == package for p in plugins if not p.is_builtin)
+            p.name == package for p in plugins if not p.is_builtin
+        )
 
         if not plugin_found:
             return PluginOperationResult(
@@ -834,7 +863,10 @@ class PluginCommand(BaseGroupCommand):
             _, python_exe = self._ensure_plugin_environment()
             target_python = python_exe
             using_plugin_env = True
-        elif install_info.method in [InstallMethod.SYSTEM, InstallMethod.UNKNOWN]:
+        elif install_info.method in [
+            InstallMethod.SYSTEM,
+            InstallMethod.UNKNOWN,
+        ]:
             # System installation but plugin not in plugin env - shouldn't happen
             return PluginOperationResult(
                 success=False,
@@ -912,7 +944,9 @@ class PluginCommand(BaseGroupCommand):
 
         return plugins
 
-    def _discover_from_environment(self, python_exe: str) -> list[PluginPackage]:
+    def _discover_from_environment(
+        self, python_exe: str
+    ) -> list[PluginPackage]:
         """Discover plugins from a specific Python environment.
 
         Args:
@@ -936,41 +970,51 @@ class PluginCommand(BaseGroupCommand):
                         if hasattr(eps, "select"):
                             # Newer versions
                             for ep in eps.select(group="deepctl.commands"):
-                                plugins.append(PluginPackage(
-                                    name=dist.name,
-                                    version=dist.version,
-                                    entry_point=f"{ep.name}={ep.value}",
-                                    is_builtin=dist.name.startswith(
-                                        "deepctl-cmd-")
-                                ))
-                            # Also check for external plugins
-                            for ep in eps.select(group="deepctl.plugins"):
-                                plugins.append(PluginPackage(
-                                    name=dist.name,
-                                    version=dist.version,
-                                    entry_point=f"{ep.name}={ep.value}",
-                                    is_builtin=False
-                                ))
-                        else:
-                            # Older versions
-                            if "deepctl.commands" in eps:
-                                for ep in eps["deepctl.commands"]:
-                                    plugins.append(PluginPackage(
+                                plugins.append(
+                                    PluginPackage(
                                         name=dist.name,
                                         version=dist.version,
                                         entry_point=f"{ep.name}={ep.value}",
                                         is_builtin=dist.name.startswith(
-                                            "deepctl-cmd-")
-                                    ))
+                                            "deepctl-cmd-"
+                                        ),
+                                    )
+                                )
                             # Also check for external plugins
-                            if "deepctl.plugins" in eps:
-                                for ep in eps["deepctl.plugins"]:
-                                    plugins.append(PluginPackage(
+                            for ep in eps.select(group="deepctl.plugins"):
+                                plugins.append(
+                                    PluginPackage(
                                         name=dist.name,
                                         version=dist.version,
                                         entry_point=f"{ep.name}={ep.value}",
-                                        is_builtin=False
-                                    ))
+                                        is_builtin=False,
+                                    )
+                                )
+                        else:
+                            # Older versions
+                            if "deepctl.commands" in eps:
+                                for ep in eps["deepctl.commands"]:
+                                    plugins.append(
+                                        PluginPackage(
+                                            name=dist.name,
+                                            version=dist.version,
+                                            entry_point=f"{ep.name}={ep.value}",
+                                            is_builtin=dist.name.startswith(
+                                                "deepctl-cmd-"
+                                            ),
+                                        )
+                                    )
+                            # Also check for external plugins
+                            if "deepctl.plugins" in eps:
+                                for ep in eps["deepctl.plugins"]:
+                                    plugins.append(
+                                        PluginPackage(
+                                            name=dist.name,
+                                            version=dist.version,
+                                            entry_point=f"{ep.name}={ep.value}",
+                                            is_builtin=False,
+                                        )
+                                    )
             else:
                 # For other environments, try subprocess
                 code = """import json;from importlib import metadata;plugins=[];
@@ -1002,7 +1046,7 @@ print(json.dumps(plugins))"""
                     [python_exe, "-c", code],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
                 )
 
                 plugin_data = json.loads(result.stdout)
@@ -1018,7 +1062,9 @@ print(json.dumps(plugins))"""
 
         return plugins
 
-    def _get_package_version(self, package: str, python_exe: str | None = None) -> str | None:
+    def _get_package_version(
+        self, package: str, python_exe: str | None = None
+    ) -> str | None:
         """Get installed package version.
 
         Args:
@@ -1043,7 +1089,7 @@ except:
                 [python_exe, "-c", code],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             version = result.stdout.strip()
             return version if version else None

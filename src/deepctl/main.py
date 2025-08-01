@@ -3,7 +3,13 @@
 import sys
 
 import click
-from deepctl_core import Config, setup_output, TimingContext, enable_timing, print_timing_summary
+from deepctl_core import (
+    Config,
+    TimingContext,
+    enable_timing,
+    print_timing_summary,
+    setup_output,
+)
 from rich.console import Console
 from rich.traceback import install
 
@@ -156,8 +162,8 @@ def cli(
 
         # Setup output formatting
         setup_output(
-            format_type=output or ctx.obj["config"].get(
-                "output.format", "json"),
+            format_type=output
+            or ctx.obj["config"].get("output.format", "json"),
             quiet=quiet,
             verbose=verbose,
         )

@@ -6,11 +6,11 @@ from .models import UpdateResult
 from .version_check import VersionChecker, VersionInfo, format_version_message
 
 __all__ = [
-    "UpdateCommand",
-    "UpdateResult",
+    "InstallMethod",
     "InstallationDetector",
     "InstallationInfo",
-    "InstallMethod",
+    "UpdateCommand",
+    "UpdateResult",
     "VersionChecker",
     "VersionInfo",
     "format_version_message",
