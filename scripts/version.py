@@ -68,6 +68,7 @@ def update_version(package_path: str, new_version: str):
         "deepctl-cmd-debug-network",
         "deepctl-cmd-mcp",
         "deepctl-cmd-update",
+        "deepctl-cmd-plugin",
     ]:
         # Update simple dependency format: "package-name"
         content = re.sub(

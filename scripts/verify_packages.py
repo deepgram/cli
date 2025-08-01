@@ -21,7 +21,8 @@ def get_all_packages() -> Dict[str, Set[str]]:
     for item in packages_dir.iterdir():
         if item.is_dir() and not item.name.startswith("."):
             packages["all"].add(item.name)
-            if "plugin" in item.name:
+            # Only treat as plugin if it's actually a plugin, not the plugin management command
+            if "plugin" in item.name and item.name != "deepctl-cmd-plugin":
                 packages["plugins"].add(item.name)
             elif "cmd" in item.name:
                 packages["commands"].add(item.name)
