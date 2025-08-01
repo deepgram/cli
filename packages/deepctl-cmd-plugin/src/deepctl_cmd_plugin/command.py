@@ -83,7 +83,7 @@ class PluginCommand(BaseGroupCommand):
             """Wrap subcommand to provide config and auth."""
 
             @click.pass_context
-            def wrapper(ctx: click.Context, **kwargs: Any) -> Any:
+            def wrapper(ctx: click.Context, /, **kwargs: Any) -> Any:
                 # Try to get from parent context first
                 if ctx.parent and ctx.parent.obj:
                     config = ctx.parent.obj.get("config")
@@ -93,7 +93,7 @@ class PluginCommand(BaseGroupCommand):
                         return func(config, auth_manager, client, **kwargs)
 
                 # Fallback - look for deepctl_context
-                current_ctx = ctx
+                current_ctx: click.Context | None = ctx
                 while current_ctx:
                     if hasattr(current_ctx, "deepctl_context"):
                         config = current_ctx.deepctl_context.get("config")
@@ -187,7 +187,10 @@ class PluginCommand(BaseGroupCommand):
         """
         if self._plugin_state_file.exists():
             try:
-                return json.loads(self._plugin_state_file.read_text())
+                result: dict[str, Any] = json.loads(
+                    self._plugin_state_file.read_text()
+                )
+                return result
             except Exception:
                 return {"plugins": {}}
         return {"plugins": {}}
@@ -399,11 +402,10 @@ class PluginCommand(BaseGroupCommand):
         package = kwargs["package"]
         yes = kwargs.get("yes", False)
 
-        if not yes:
-            if not click.confirm(
-                f"Are you sure you want to remove {package}?"
-            ):
-                return
+        if not yes and not click.confirm(
+            f"Are you sure you want to remove {package}?"
+        ):
+            return
 
         result = self.remove_plugin(config, auth_manager, client, package)
 
@@ -476,13 +478,15 @@ class PluginCommand(BaseGroupCommand):
 
             # Check installed status
             is_installed = (
-                plugin.install_name in installed_plugins
-                or plugin.name in installed_plugins
-            )
+                plugin.install_name is not None
+                and plugin.install_name in installed_plugins
+            ) or plugin.name in installed_plugins
             installed_version = None
             if is_installed:
-                installed_plugin = installed_plugins.get(
-                    plugin.install_name
+                installed_plugin = (
+                    installed_plugins.get(plugin.install_name)
+                    if plugin.install_name
+                    else None
                 ) or installed_plugins.get(plugin.name)
                 if installed_plugin:
                     installed_version = installed_plugin.version
@@ -689,9 +693,7 @@ class PluginCommand(BaseGroupCommand):
         # Execute installation
         try:
             print_info(f"Installing {options.package}...")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, check=True
-            )
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
 
             # Get installed version
             installed_version = self._get_package_version(
@@ -883,9 +885,7 @@ class PluginCommand(BaseGroupCommand):
         # Execute removal
         try:
             print_info(f"Removing {package}...")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, check=True
-            )
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
 
             # Update plugin state if using plugin environment
             if using_plugin_env:

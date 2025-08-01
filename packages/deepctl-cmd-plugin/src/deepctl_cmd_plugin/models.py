@@ -3,6 +3,7 @@
 from enum import Enum
 
 from deepctl_core.models import BaseModel
+from pydantic import Field
 
 
 class PluginAction(str, Enum):
@@ -35,7 +36,7 @@ class PluginRegistryEntry(BaseModel):
     version: str
     author: str | None = None
     url: str | None = None
-    keywords: list[str] = []
+    keywords: list[str] = Field(default_factory=list)
     # Package name for installation if different from name
     install_name: str | None = None
 

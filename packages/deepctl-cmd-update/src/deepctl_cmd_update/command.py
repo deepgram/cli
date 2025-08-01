@@ -158,19 +158,20 @@ class UpdateCommand(BaseCommand):
         console.print(f"\nUpdate command: [green]{update_command}[/green]")
 
         # Confirm update
-        if not yes:
-            if not Confirm.ask("\nDo you want to proceed with the update?"):
-                print_info("Update cancelled")
-                return UpdateResult(
-                    success=False,
-                    message="Update cancelled by user",
-                    current_version=version_info.current_version,
-                    latest_version=version_info.latest_version,
-                    update_available=version_info.update_available,
-                    installation_method=install_info.method,
-                ).model_dump()
+        if not yes and not Confirm.ask(
+            "\nDo you want to proceed with the update?"
+        ):
+            print_info("Update cancelled")
+            return UpdateResult(
+                success=False,
+                message="Update cancelled by user",
+                current_version=version_info.current_version,
+                latest_version=version_info.latest_version,
+                update_available=version_info.update_available,
+                installation_method=install_info.method,
+            ).model_dump()
 
-                # Execute update
+            # Execute update
         print_info("Updating deepctl...")
         try:
             # Run the update command synchronously
