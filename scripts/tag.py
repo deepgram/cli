@@ -9,6 +9,7 @@ from pathlib import Path
 def get_current_version() -> str:
     """Get current version from root pyproject.toml."""
     import re
+
     pyproject = Path("pyproject.toml").read_text()
     match = re.search(r'^version = "(.+?)"', pyproject, re.MULTILINE)
     if match:
@@ -23,7 +24,7 @@ def tag_exists(tag_name: str) -> bool:
             ["git", "rev-parse", tag_name],
             check=True,
             capture_output=True,
-            text=True
+            text=True,
         )
         return True
     except subprocess.CalledProcessError:
@@ -44,8 +45,7 @@ def create_tag(version: str, message: str = None) -> None:
     try:
         # Create annotated tag
         subprocess.run(
-            ["git", "tag", "-a", tag_name, "-m", message],
-            check=True
+            ["git", "tag", "-a", tag_name, "-m", message], check=True
         )
         print(f"✅ Created tag {tag_name}")
         print(f"\nNext steps:")

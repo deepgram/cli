@@ -50,26 +50,32 @@ def update_version(package_path: str, new_version: str):
         r'^version = ".+?"',
         f'version = "{new_version}"',
         content,
-        flags=re.MULTILINE
+        flags=re.MULTILINE,
     )
 
     # Update internal dependencies to use >= current version
     # Handle various dependency formats
-    for pkg in ["deepctl-core", "deepctl-shared-utils", "deepctl-cmd-debug",
-                "deepctl-cmd-login", "deepctl-cmd-projects", "deepctl-cmd-transcribe",
-                "deepctl-cmd-usage", "deepctl-cmd-debug-audio", "deepctl-cmd-debug-browser",
-                "deepctl-cmd-debug-network", "deepctl-cmd-mcp", "deepctl-cmd-update"]:
+    for pkg in [
+        "deepctl-core",
+        "deepctl-shared-utils",
+        "deepctl-cmd-debug",
+        "deepctl-cmd-login",
+        "deepctl-cmd-projects",
+        "deepctl-cmd-transcribe",
+        "deepctl-cmd-usage",
+        "deepctl-cmd-debug-audio",
+        "deepctl-cmd-debug-browser",
+        "deepctl-cmd-debug-network",
+        "deepctl-cmd-mcp",
+        "deepctl-cmd-update",
+    ]:
         # Update simple dependency format: "package-name"
         content = re.sub(
-            rf'"{pkg}"(?=,|\s*\])',
-            f'"{pkg}>={new_version}"',
-            content
+            rf'"{pkg}"(?=,|\s*\])', f'"{pkg}>={new_version}"', content
         )
         # Update existing version constraints: "package-name>=X.X.X"
         content = re.sub(
-            rf'"{pkg}>=[\d.]+"',
-            f'"{pkg}>={new_version}"',
-            content
+            rf'"{pkg}>=[\d.]+"', f'"{pkg}>={new_version}"', content
         )
 
     path.write_text(content)
@@ -85,7 +91,7 @@ def update_init_version(new_version: str):
             r'^__version__ = ".+?"',
             f'__version__ = "{new_version}"',
             content,
-            flags=re.MULTILINE
+            flags=re.MULTILINE,
         )
         init_file.write_text(content)
         print(f"Updated {init_file} to version {new_version}")
@@ -94,13 +100,13 @@ def update_init_version(new_version: str):
 def validate_version(version: str) -> bool:
     """Validate semantic version format."""
     # Basic semver: MAJOR.MINOR.PATCH
-    if re.match(r'^\d+\.\d+\.\d+$', version):
+    if re.match(r"^\d+\.\d+\.\d+$", version):
         return True
     # With pre-release: MAJOR.MINOR.PATCH-PRERELEASE
-    if re.match(r'^\d+\.\d+\.\d+-\w+(\.\w+)*$', version):
+    if re.match(r"^\d+\.\d+\.\d+-\w+(\.\w+)*$", version):
         return True
     # With build metadata: MAJOR.MINOR.PATCH+BUILD
-    if re.match(r'^\d+\.\d+\.\d+\+\w+(\.\w+)*$', version):
+    if re.match(r"^\d+\.\d+\.\d+\+\w+(\.\w+)*$", version):
         return True
     return False
 
@@ -119,7 +125,9 @@ def main():
     if not validate_version(new_version):
         print(f"Invalid version format: {new_version}")
         print("Use semantic versioning: MAJOR.MINOR.PATCH")
-        print("Optional: MAJOR.MINOR.PATCH-PRERELEASE or MAJOR.MINOR.PATCH+BUILD")
+        print(
+            "Optional: MAJOR.MINOR.PATCH-PRERELEASE or MAJOR.MINOR.PATCH+BUILD"
+        )
         sys.exit(1)
 
     current = get_current_version()
@@ -133,7 +141,8 @@ def main():
     update_init_version(new_version)
 
     print(
-        f"\n✅ Successfully updated {len(SYNCHRONIZED_PACKAGES)} packages to v{new_version}")
+        f"\n✅ Successfully updated {len(SYNCHRONIZED_PACKAGES)} packages to v{new_version}"
+    )
     print("\n📋 Next steps:")
     print("1. Review changes: git diff")
     print(f"2. Commit: git commit -am 'chore: bump version to v{new_version}'")

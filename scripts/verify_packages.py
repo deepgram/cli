@@ -15,11 +15,11 @@ def get_all_packages() -> Dict[str, Set[str]]:
         "all": set(),
         "commands": set(),
         "core": set(),
-        "plugins": set()
+        "plugins": set(),
     }
 
     for item in packages_dir.iterdir():
-        if item.is_dir() and not item.name.startswith('.'):
+        if item.is_dir() and not item.name.startswith("."):
             packages["all"].add(item.name)
             if "plugin" in item.name:
                 packages["plugins"].add(item.name)
@@ -37,13 +37,14 @@ def get_packages_from_build_script() -> Set[str]:
 
     # Find PACKAGES_TO_BUILD list
     match = re.search(
-        r'PACKAGES_TO_BUILD = \[(.*?)\]', build_script, re.DOTALL)
+        r"PACKAGES_TO_BUILD = \[(.*?)\]", build_script, re.DOTALL
+    )
     if not match:
         return set()
 
     packages = set()
-    for line in match.group(1).split('\n'):
-        if 'packages/' in line:
+    for line in match.group(1).split("\n"):
+        if "packages/" in line:
             # Extract package name from path
             pkg_match = re.search(r'"packages/([\w-]+)"', line)
             if pkg_match:
@@ -56,23 +57,21 @@ def get_packages_from_version_script() -> Dict[str, Set[str]]:
     """Extract package lists from version.py."""
     version_script = Path("scripts/version.py").read_text()
 
-    result = {
-        "synchronized": set(),
-        "dependency_updates": set()
-    }
+    result = {"synchronized": set(), "dependency_updates": set()}
 
     # Find SYNCHRONIZED_PACKAGES list
     match = re.search(
-        r'SYNCHRONIZED_PACKAGES = \[(.*?)\]', version_script, re.DOTALL)
+        r"SYNCHRONIZED_PACKAGES = \[(.*?)\]", version_script, re.DOTALL
+    )
     if match:
-        for line in match.group(1).split('\n'):
-            if 'packages/' in line:
+        for line in match.group(1).split("\n"):
+            if "packages/" in line:
                 pkg_match = re.search(r'"packages/([\w-]+)"', line)
                 if pkg_match:
                     result["synchronized"].add(pkg_match.group(1))
 
     # Find packages in update_version function
-    match = re.search(r'for pkg in \[(.*?)\]:', version_script, re.DOTALL)
+    match = re.search(r"for pkg in \[(.*?)\]:", version_script, re.DOTALL)
     if match:
         for pkg in re.findall(r'"([\w-]+)"', match.group(1)):
             result["dependency_updates"].add(pkg)
@@ -85,12 +84,12 @@ def get_packages_from_dependencies() -> Set[str]:
     pyproject = Path("pyproject.toml").read_text()
 
     # Find dependencies section
-    match = re.search(r'dependencies = \[(.*?)\]', pyproject, re.DOTALL)
+    match = re.search(r"dependencies = \[(.*?)\]", pyproject, re.DOTALL)
     if not match:
         return set()
 
     packages = set()
-    for line in match.group(1).split('\n'):
+    for line in match.group(1).split("\n"):
         # Look for deepctl-* packages
         pkg_match = re.search(r'"(deepctl-[\w-]+)', line)
         if pkg_match:
@@ -160,7 +159,8 @@ def verify_consistency():
 
     if missing_from_updates:
         errors.append(
-            f"Missing from dependency updates: {missing_from_updates}")
+            f"Missing from dependency updates: {missing_from_updates}"
+        )
         print(f"  ❌ Missing: {missing_from_updates}")
     if extra_in_updates:
         warnings.append(f"Extra in dependency updates: {extra_in_updates}")
@@ -198,11 +198,12 @@ def verify_consistency():
         print(f"  ✅ Found {len(dist_files)} built packages in dist/")
     else:
         warnings.append(
-            "No built packages found in dist/ - run 'make build' first")
+            "No built packages found in dist/ - run 'make build' first"
+        )
         print("  ⚠️  No built packages found - run 'make build' first")
 
     # Summary
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("📊 Summary:")
     print(f"  Total packages: {len(all_packages['all'])}")
     print(f"  Command packages: {len(all_packages['commands'])}")

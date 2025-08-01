@@ -49,8 +49,9 @@ def build_package(package_path: str, use_uv: bool = True):
     if use_uv:
         subprocess.run(["uv", "build"], cwd=package_dir, check=True)
     else:
-        subprocess.run([sys.executable, "-m", "build"],
-                       cwd=package_dir, check=True)
+        subprocess.run(
+            [sys.executable, "-m", "build"], cwd=package_dir, check=True
+        )
 
     # Move artifacts to central dist directory (skip if building root)
     if package_path != ".":
@@ -99,11 +100,12 @@ def main():
             failed_packages.append(package)
 
     # Summary
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     if failed_packages:
         print(f"⚠️  Build completed with errors!")
         print(
-            f"✅ Successfully built: {success_count}/{len(PACKAGES_TO_BUILD)} packages")
+            f"✅ Successfully built: {success_count}/{len(PACKAGES_TO_BUILD)} packages"
+        )
         print(f"❌ Failed packages:")
         for pkg in failed_packages:
             print(f"   - {pkg}")
@@ -127,16 +129,23 @@ def main():
         print("\n🧪 To test locally:")
         print("  # Option 1: Install with pipx (recommended for CLI tools)")
         print(
-            f"  pipx install --python python3.12 --pip-args=\"--find-links {abs_dist_path}\" dist/deepctl-0.1.0-py3-none-any.whl")
+            f'  pipx install --python python3.12 --pip-args="--find-links {abs_dist_path}" dist/deepctl-0.1.0-py3-none-any.whl'
+        )
         print("  # To reinstall/update: add --force flag")
         print(
-            f"  pipx install --python python3.12 --pip-args=\"--find-links {abs_dist_path}\" dist/deepctl-0.1.0-py3-none-any.whl --force")
+            f'  pipx install --python python3.12 --pip-args="--find-links {abs_dist_path}" dist/deepctl-0.1.0-py3-none-any.whl --force'
+        )
         print("\n  # Option 2: Install with pip in a virtual environment")
         print("  python3.12 -m venv test-env")
-        print("  source test-env/bin/activate  # On Windows: test-env\\Scripts\\activate")
         print(
-            f"  pip install --find-links {abs_dist_path} dist/deepctl-0.1.0-py3-none-any.whl")
-        print("\n  Note: Python 3.13+ may not be supported by all dependencies yet")
+            "  source test-env/bin/activate  # On Windows: test-env\\Scripts\\activate"
+        )
+        print(
+            f"  pip install --find-links {abs_dist_path} dist/deepctl-0.1.0-py3-none-any.whl"
+        )
+        print(
+            "\n  Note: Python 3.13+ may not be supported by all dependencies yet"
+        )
 
 
 if __name__ == "__main__":

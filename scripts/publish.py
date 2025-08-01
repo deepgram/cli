@@ -24,7 +24,9 @@ def check_dist_files():
     dist_dir = Path("dist")
 
     if not dist_dir.exists():
-        print("❌ No dist directory found. Run 'python scripts/build.py' first.")
+        print(
+            "❌ No dist directory found. Run 'python scripts/build.py' first."
+        )
         return None
 
     files = list(dist_dir.glob("*.whl")) + list(dist_dir.glob("*.tar.gz"))
@@ -76,13 +78,15 @@ def main():
     print(f"\n⚠️  This will upload {len(files)} files to {repository}")
 
     # Check if we're in CI or non-interactive mode
-    is_ci = any(os.environ.get(var, '').lower() == 'true' for var in [
-                'CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'CIRCLECI'])
+    is_ci = any(
+        os.environ.get(var, "").lower() == "true"
+        for var in ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI"]
+    )
     is_non_interactive = "--non-interactive" in sys.argv or is_ci
 
     if not is_non_interactive:
         response = input("Continue? [y/N] ")
-        if response.lower() != 'y':
+        if response.lower() != "y":
             print("Cancelled.")
             sys.exit(0)
     else:
@@ -116,7 +120,9 @@ def main():
 
         if "--test" in sys.argv:
             print("\n📦 Install from TestPyPI with:")
-            print("  pip install --index-url https://test.pypi.org/simple/ deepctl")
+            print(
+                "  pip install --index-url https://test.pypi.org/simple/ deepctl"
+            )
         else:
             print("\n📦 Install from PyPI with:")
             print("  pip install deepctl")
@@ -127,7 +133,9 @@ def main():
         print("1. Check your PyPI credentials")
         print("2. Ensure packages don't already exist with this version")
         print("3. For test uploads, use: python scripts/publish.py --test")
-        print("4. To skip existing packages: python scripts/publish.py --skip-existing")
+        print(
+            "4. To skip existing packages: python scripts/publish.py --skip-existing"
+        )
         sys.exit(1)
 
 

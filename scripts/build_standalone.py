@@ -22,8 +22,9 @@ def build_standalone():
         import PyInstaller
     except ImportError:
         print("📦 Installing PyInstaller...")
-        subprocess.run([sys.executable, "-m", "pip",
-                       "install", "pyinstaller"], check=True)
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "pyinstaller"], check=True
+        )
 
     # First, build the package to ensure everything is up to date
     print("📦 Building deepctl package...")
@@ -107,10 +108,14 @@ exe = EXE(
             "PyInstaller",
             "--clean",
             "--onefile",
-            "--name", "deepctl",
-            "--distpath", "dist_standalone",
-            "--workpath", str(build_dir / "work"),
-            "--specpath", str(build_dir),
+            "--name",
+            "deepctl",
+            "--distpath",
+            "dist_standalone",
+            "--workpath",
+            str(build_dir / "work"),
+            "--specpath",
+            str(build_dir),
             str(spec_file),
         ],
         check=True,
@@ -127,7 +132,9 @@ exe = EXE(
     print("   ./dist_standalone/deepctl plugin search")
     print("   ./dist_standalone/deepctl plugin install deepctl-plugin-example")
     print("\n💡 The standalone binary should detect as 'system' installation")
-    print("   and create an isolated plugin environment at ~/.deepctl/plugins/")
+    print(
+        "   and create an isolated plugin environment at ~/.deepctl/plugins/"
+    )
 
 
 if __name__ == "__main__":
