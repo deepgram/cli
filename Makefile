@@ -1,5 +1,14 @@
 # ===================================================================
-# deepctl Makefile
+# deepctl Makefile - Development Tools
+# ===================================================================
+# 
+# Quick Start:
+#   make dev-setup    # First time setup
+#   make dev          # Daily development (format + lint + test)
+#   make build        # Build packages
+#   make help         # Show organized help
+#
+# For new contributors: see docs/Quick Start For Contributors.md
 # ===================================================================
 
 .PHONY: help
@@ -14,8 +23,44 @@ help: ## Show this help message
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
-	@echo "Main Targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v '^\.' | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "🚀 \033[1mQuick Start:\033[0m"
+	@echo "  \033[36mdev-setup\033[0m            Set up development environment"
+	@echo "  \033[36mdev\033[0m                  Format, lint, and test (full dev cycle)"
+	@echo "  \033[36mbuild\033[0m                Build all packages for PyPI"
+	@echo "  \033[36mtest\033[0m                 Run tests"
+	@echo ""
+	@echo "📦 \033[1mBuilding & Release:\033[0m"
+	@echo "  \033[36mbuild\033[0m                Build all packages"
+	@echo "  \033[36mrelease\033[0m              Full release process (version → build → tag)"
+	@echo "  \033[36mpublish\033[0m              Publish to PyPI"
+	@echo "  \033[36mverify-packages\033[0m      Verify package configuration"
+	@echo ""
+	@echo "🍺 \033[1mHomebrew:\033[0m"
+	@echo "  \033[36mbuild-homebrew\033[0m       Build both Homebrew formulas (wheel + binary)"
+	@echo "  \033[36mbuild-homebrew-wheels\033[0m Build wheel-based formula (recommended)"
+	@echo "  \033[36mbuild-homebrew-binary\033[0m Build standalone binary formula"
+	@echo ""
+	@echo "🧪 \033[1mTesting:\033[0m"
+	@echo "  \033[36mtest\033[0m                 Run tests (development)"
+	@echo "  \033[36mtest-full\033[0m            Run tests on all Python versions"
+	@echo "  \033[36mci\033[0m                   Run full CI pipeline"
+	@echo ""
+	@echo "🔧 \033[1mCode Quality:\033[0m"
+	@echo "  \033[36mformat\033[0m               Auto-format code"
+	@echo "  \033[36mlint\033[0m                 Run all linters"
+	@echo "  \033[36mcheck\033[0m                Quick quality check (no tests)"
+	@echo ""
+	@echo "🧹 \033[1mUtilities:\033[0m"
+	@echo "  \033[36mclean\033[0m                Clean build artifacts"
+	@echo "  \033[36minfo\033[0m                 Show project information"
+	@echo "  \033[36mhelp-all\033[0m             Show all available targets"
+	@echo ""
+	@echo "For more targets, run: \033[36mmake help-all\033[0m"
+
+help-all: ## Show all available targets
+	@echo "🔧 deepctl - All Available Targets"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v '^\.' | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-25s\033[0m %s\n", $$1, $$2}'
 
 info: ## Show project information
 	@echo "🔧 deepctl - Deepgram CLI"
@@ -262,18 +307,34 @@ docs-serve: ## Serve documentation (placeholder)
 # HOMEBREW TESTING
 # ===================================================================
 
-.PHONY: build-binary tap tap-install tap-uninstall
+.PHONY: build-binary build-homebrew-wheels build-homebrew-binary build-homebrew
+.PHONY: tap-wheels tap-binary tap tap-install tap-uninstall
 
-build-binary: ## Build standalone binary for Homebrew testing
-	@./homebrew/scripts/build-binary.sh
+# Main Homebrew targets (user-facing)
+build-homebrew: build-homebrew-wheels build-homebrew-binary ## Build both Homebrew formulas (wheel + binary)
 
-tap: ## Generate Homebrew formula (requires build-binary first)
+build-homebrew-wheels: build ## Build wheel-based Homebrew formula (recommended)
+	@./homebrew/scripts/generate-wheel-tap.sh
+
+build-homebrew-binary: build-binary ## Build standalone binary Homebrew formula
 	@./homebrew/scripts/generate-tap.sh
 
-tap-install: ## Install deepctl via local Homebrew formula
+# Advanced/internal Homebrew targets
+build-binary: ## Build standalone binary for Homebrew
+	@./homebrew/scripts/build-binary.sh
+
+tap-wheels: build-homebrew-wheels ## Generate wheel formula only (no building)
+	@echo "✅ Wheel-based formula ready: homebrew/dist/deepctl.rb"
+
+tap-binary: build-homebrew-binary ## Generate binary formula only (no building)
+	@echo "✅ Binary-based formula ready: homebrew/dist/deepctl-standalone.rb"
+
+tap: tap-binary ## Generate binary formula (legacy, use build-homebrew-binary instead)
+
+tap-install: ## Test: Install deepctl via local Homebrew formula
 	@./homebrew/scripts/tap-install.sh
 
-tap-uninstall: ## Uninstall deepctl from Homebrew
+tap-uninstall: ## Test: Uninstall deepctl from Homebrew
 	@./homebrew/scripts/tap-uninstall.sh
 
 # ===================================================================
