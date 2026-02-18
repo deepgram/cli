@@ -58,9 +58,7 @@ class DeepgramConfig(BaseModel):
 class Config:
     """Cross-platform configuration manager."""
 
-    def __init__(
-        self, config_path: str | None = None, profile: str | None = None
-    ):
+    def __init__(self, config_path: str | None = None, profile: str | None = None):
         """Initialize configuration manager.
 
         Args:
@@ -68,9 +66,7 @@ class Config:
             profile: Optional profile name to use
         """
         self.config_path = (
-            Path(config_path)
-            if config_path
-            else self._get_default_config_path()
+            Path(config_path) if config_path else self._get_default_config_path()
         )
         self._explicit_profile = profile  # Store explicitly set profile
         self._config: DeepgramConfig
@@ -108,9 +104,7 @@ class Config:
         """Migrate config from old deepgram directory to new deepctl
         directory."""
         # Check for old config location
-        old_config_dir = Path(
-            platformdirs.user_config_dir("deepgram", "deepgram")
-        )
+        old_config_dir = Path(platformdirs.user_config_dir("deepgram", "deepgram"))
         old_config_path = old_config_dir / "config.yaml"
         new_config_path = new_config_dir / "config.yaml"
 
@@ -119,10 +113,7 @@ class Config:
             try:
                 import shutil
 
-                print(
-                    f"Migrating config from {old_config_path} to "
-                    f"{new_config_path}"
-                )
+                print(f"Migrating config from {old_config_path} to {new_config_path}")
                 shutil.copy2(old_config_path, new_config_path)
                 print("✓ Config migrated successfully")
             except Exception as e:
@@ -146,10 +137,7 @@ class Config:
                         self._merge_config(user_config)
             except Exception as e:
                 # Don't fail on config load errors, just warn
-                print(
-                    f"Warning: Could not load config from "
-                    f"{self.config_path}: {e}"
-                )
+                print(f"Warning: Could not load config from {self.config_path}: {e}")
 
         # Load from project config file
         project_config_path = self._get_project_config_path()
@@ -172,18 +160,14 @@ class Config:
         """Merge configuration dictionary into current config."""
         # Deep merge configuration
         if "profiles" in config_dict:
-            for profile_name, profile_config in config_dict[
-                "profiles"
-            ].items():
+            for profile_name, profile_config in config_dict["profiles"].items():
                 if profile_name not in self._config.profiles:
                     self._config.profiles[profile_name] = ProfileConfig()
 
                 # Update profile config
                 for key, value in profile_config.items():
                     if hasattr(self._config.profiles[profile_name], key):
-                        setattr(
-                            self._config.profiles[profile_name], key, value
-                        )
+                        setattr(self._config.profiles[profile_name], key, value)
 
         # Update other top-level config
         for key, value in config_dict.items():
@@ -271,9 +255,7 @@ class Config:
 
     def get_profile(self, profile_name: str | None = None) -> ProfileConfig:
         """Get configuration for a specific profile."""
-        profile_name = (
-            profile_name or self.profile or self._config.default_profile
-        )
+        profile_name = profile_name or self.profile or self._config.default_profile
 
         if profile_name not in self._config.profiles:
             self._config.profiles[profile_name] = ProfileConfig()
@@ -292,15 +274,14 @@ class Config:
             },
             "output": self._config.output.model_dump(exclude_none=True),
             "plugins": self._config.plugins.model_dump(exclude_none=True),
+            "update": self._config.update.model_dump(exclude_none=True),
         }
 
         # Ensure config directory exists
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(self.config_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(
-                config_dict, f, default_flow_style=False, sort_keys=False
-            )
+            yaml.safe_dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
     def list_profiles(self) -> list[str]:
         """List all available profiles."""

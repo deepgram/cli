@@ -1,11 +1,12 @@
 """Unit tests for update command."""
 
-import pytest
-from unittest.mock import MagicMock, patch
 import subprocess
+from unittest.mock import MagicMock, patch
+
+import pytest
 from deepctl_cmd_update.command import UpdateCommand
-from deepctl_cmd_update.version_check import VersionInfo
 from deepctl_cmd_update.installation import InstallationInfo, InstallMethod
+from deepctl_cmd_update.version_check import VersionInfo
 
 
 class TestUpdateCommand:
@@ -15,6 +16,10 @@ class TestUpdateCommand:
     def command(self):
         """Create update command instance."""
         return UpdateCommand()
+
+    # ------------------------------------------------------------------
+    # check-only mode
+    # ------------------------------------------------------------------
 
     @patch("deepctl_cmd_update.command.asyncio.run")
     @patch("deepctl_cmd_update.command.VersionChecker")
@@ -29,23 +34,18 @@ class TestUpdateCommand:
         command,
     ):
         """Test check-only mode."""
-        # Mock version info
         mock_version_info = VersionInfo(
             current_version="0.1.0",
             latest_version="0.2.0",
             update_available=True,
         )
-
-        # Configure asyncio.run to return the version info
         mock_asyncio_run.return_value = mock_version_info
         mock_format_msg.return_value = "Update available!"
 
-        # Mock config
         mock_config = MagicMock()
         mock_auth = MagicMock()
         mock_client = MagicMock()
 
-        # Run command
         result = command.handle(
             config=mock_config,
             auth_manager=mock_auth,
@@ -57,6 +57,22 @@ class TestUpdateCommand:
         assert result["update_available"] is True
         assert result["current_version"] == "0.1.0"
         assert result["latest_version"] == "0.2.0"
+
+    # ------------------------------------------------------------------
+    # --check alias
+    # ------------------------------------------------------------------
+
+    def test_check_alias_defined(self, command):
+        """Test that --check is an alias for --check-only."""
+        args = command.get_arguments()
+        check_arg = next(
+            a for a in args if "--check-only" in a["names"]
+        )
+        assert "--check" in check_arg["names"]
+
+    # ------------------------------------------------------------------
+    # no update available
+    # ------------------------------------------------------------------
 
     @patch("deepctl_cmd_update.command.asyncio.run")
     @patch("deepctl_cmd_update.command.VersionChecker")
@@ -73,23 +89,18 @@ class TestUpdateCommand:
         command,
     ):
         """Test when no update is available."""
-        # Mock version info
         mock_version_info = VersionInfo(
             current_version="0.2.0",
             latest_version="0.2.0",
             update_available=False,
         )
-
-        # Configure asyncio.run to return the version info
         mock_asyncio_run.return_value = mock_version_info
         mock_format_msg.return_value = "Already up to date!"
 
-        # Mock config
         mock_config = MagicMock()
         mock_auth = MagicMock()
         mock_client = MagicMock()
 
-        # Run command
         result = command.handle(
             config=mock_config,
             auth_manager=mock_auth,
@@ -101,6 +112,10 @@ class TestUpdateCommand:
         assert result["success"] is True
         assert result["update_available"] is False
         mock_print_success.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # pip update (verifies list[str] command and no shell=True)
+    # ------------------------------------------------------------------
 
     @patch("deepctl_cmd_update.command.subprocess.run")
     @patch("deepctl_cmd_update.command.InstallationDetector")
@@ -124,19 +139,15 @@ class TestUpdateCommand:
         mock_subprocess,
         command,
     ):
-        """Test update via pip."""
-        # Mock version info
+        """Test update via pip — command is a list, shell=True absent."""
         mock_version_info = VersionInfo(
             current_version="0.1.0",
             latest_version="0.2.0",
             update_available=True,
         )
-
-        # Configure asyncio.run to return the version info
         mock_asyncio_run.return_value = mock_version_info
         mock_format_msg.return_value = "Update available!"
 
-        # Mock installation detection
         mock_detector = mock_detector_class.return_value
         mock_install_info = InstallationInfo(
             method=InstallMethod.PIP,
@@ -146,25 +157,21 @@ class TestUpdateCommand:
             python_executable="/usr/bin/python3",
         )
         mock_detector.detect.return_value = mock_install_info
-        mock_detector.get_update_command.return_value = (
-            "pip install --upgrade deepctl"
-        )
+        mock_detector.get_update_command.return_value = [
+            "pip", "install", "--upgrade", "deepctl",
+        ]
 
-        # Mock subprocess
         mock_process = MagicMock()
         mock_process.returncode = 0
         mock_process.stderr = ""
         mock_subprocess.return_value = mock_process
 
-        # Mock user confirmation
         mock_confirm.return_value = True
 
-        # Mock config
         mock_config = MagicMock()
         mock_auth = MagicMock()
         mock_client = MagicMock()
 
-        # Run command
         result = command.handle(
             config=mock_config,
             auth_manager=mock_auth,
@@ -175,6 +182,85 @@ class TestUpdateCommand:
         assert result["success"] is True
         assert result["installation_method"] == "pip"
         mock_subprocess.assert_called_once()
+
+        # Verify shell=True is NOT passed
+        call_kwargs = mock_subprocess.call_args
+        assert call_kwargs.kwargs.get("shell") is not True
+        # Verify command is a list
+        cmd_arg = call_kwargs.args[0] if call_kwargs.args else call_kwargs.kwargs.get("args")
+        assert isinstance(cmd_arg, list)
+
+    # ------------------------------------------------------------------
+    # Homebrew update
+    # ------------------------------------------------------------------
+
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector")
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    @patch("deepctl_cmd_update.command.get_console")
+    @patch("deepctl_cmd_update.command.format_version_message")
+    @patch("deepctl_cmd_update.command.print_info")
+    @patch("deepctl_cmd_update.command.print_success")
+    @patch("deepctl_cmd_update.command.Confirm.ask")
+    def test_homebrew_update(
+        self,
+        mock_confirm,
+        mock_print_success,
+        mock_print_info,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        mock_detector_class,
+        mock_subprocess,
+        command,
+    ):
+        """Test update via Homebrew."""
+        mock_version_info = VersionInfo(
+            current_version="0.1.0",
+            latest_version="0.2.0",
+            update_available=True,
+        )
+        mock_asyncio_run.return_value = mock_version_info
+        mock_format_msg.return_value = "Update available!"
+
+        mock_detector = mock_detector_class.return_value
+        mock_install_info = InstallationInfo(
+            method=InstallMethod.HOMEBREW,
+            path="/opt/homebrew/Cellar/deepctl/0.1.0",
+            virtual_env=False,
+            editable=False,
+            python_executable="/opt/homebrew/bin/python3",
+        )
+        mock_detector.detect.return_value = mock_install_info
+        mock_detector.get_update_command.return_value = [
+            "brew", "upgrade", "deepctl",
+        ]
+
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stderr = ""
+        mock_subprocess.return_value = mock_process
+        mock_confirm.return_value = True
+
+        mock_config = MagicMock()
+        mock_auth = MagicMock()
+        mock_client = MagicMock()
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth,
+            client=mock_client,
+            yes=True,
+        )
+
+        assert result["success"] is True
+        assert result["installation_method"] == "homebrew"
+
+    # ------------------------------------------------------------------
+    # development installation
+    # ------------------------------------------------------------------
 
     @patch("deepctl_cmd_update.command.InstallationDetector")
     @patch("deepctl_cmd_update.command.asyncio.run")
@@ -195,18 +281,14 @@ class TestUpdateCommand:
         command,
     ):
         """Test development installation handling."""
-        # Mock version info
         mock_version_info = VersionInfo(
             current_version="0.1.0",
             latest_version="0.2.0",
             update_available=True,
         )
-
-        # Configure asyncio.run to return the version info
         mock_asyncio_run.return_value = mock_version_info
         mock_format_msg.return_value = "Update available!"
 
-        # Mock installation detection
         mock_detector = mock_detector_class.return_value
         mock_install_info = InstallationInfo(
             method=InstallMethod.DEVELOPMENT,
@@ -223,17 +305,14 @@ class TestUpdateCommand:
             "git pull origin main"
         )
 
-        # Mock config
         mock_config = MagicMock()
         mock_auth = MagicMock()
         mock_client = MagicMock()
 
-        # Run command
         result = command.handle(
             config=mock_config, auth_manager=mock_auth, client=mock_client
         )
 
-        # Can't auto-update development installations
         assert result["success"] is False
         assert result["installation_method"] == "development"
         mock_print_warning.assert_called_once()

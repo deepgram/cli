@@ -1,5 +1,6 @@
 """Main entry point for deepctl."""
 
+import importlib.metadata
 import sys
 
 import click
@@ -47,9 +48,7 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
             # heuristic
             subcommand_group = f"deepctl.subcommands.{entry_point.name}"
             try:
-                subcommand_eps = list(
-                    entry_points.select(group=subcommand_group)
-                )
+                subcommand_eps = list(entry_points.select(group=subcommand_group))
                 if subcommand_eps:
                     group_commands.add(entry_point.name)
             except Exception:
@@ -95,7 +94,9 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
 
 # Create CLI group
 @click.group(name="deepctl")
-@click.version_option(version="0.1.0", prog_name="deepctl")
+@click.version_option(
+    version=importlib.metadata.version("deepctl"), prog_name="deepctl"
+)
 @click.option(
     "--config",
     "-c",
@@ -162,8 +163,7 @@ def cli(
 
         # Setup output formatting
         setup_output(
-            format_type=output
-            or ctx.obj["config"].get("output.format", "json"),
+            format_type=output or ctx.obj["config"].get("output.format", "json"),
             quiet=quiet,
             verbose=verbose,
         )
@@ -191,9 +191,22 @@ def main() -> None:
         args = sys.argv[1:]  # Skip the program name
         timing_requested = "--timing" in args or "--timing-detailed" in args
         detailed_timing = "--timing-detailed" in args
+        quiet_requested = "--quiet" in args or "-q" in args
 
         if timing_requested:
             enable_timing()
+
+        # Start background update check (non-blocking)
+        try:
+            from deepctl_cmd_update.startup_check import (
+                check_and_notify,
+                print_pending_notification,
+            )
+
+            check_and_notify(quiet=quiet_requested)
+        except ImportError:
+            check_and_notify = None  # type: ignore[assignment]
+            print_pending_notification = None  # type: ignore[assignment]
 
         with TimingContext("total_execution"):
             with TimingContext("argument_preprocessing"):
@@ -205,8 +218,12 @@ def main() -> None:
                 try:
                     cli(args=processed_args, standalone_mode=False)
                 except SystemExit:
-                    # Click calls sys.exit() even in non-standalone mode sometimes
+                    # Click calls sys.exit() even in non-standalone mode
                     pass
+
+        # Print update notification if available (before timing summary)
+        if print_pending_notification is not None:
+            print_pending_notification()
 
         # Print timing summary if timing was enabled
         if timing_requested:

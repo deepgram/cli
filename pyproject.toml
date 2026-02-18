@@ -32,7 +32,7 @@ keywords = [
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
-    "deepgram-sdk>=3.0.0",
+    "deepgram-sdk>=6.0.0rc2",
     "deepctl-core>=0.1.10",              # Core components moved to separate package
     "deepctl-cmd-login>=0.1.10",         # Login command package
     "deepctl-cmd-projects>=0.1.10",      # Projects command package
@@ -384,7 +384,26 @@ deepctl-shared-utils = { workspace = true }
 members = ["packages/*"]
 
 [dependency-groups]
-dev = ["types-pyyaml>=6.0.12.20250516", "types-requests>=2.32.4.20250611"]
+dev = [
+    # Testing
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "responses>=0.23.0",
+    # Code Quality
+    "ruff>=0.8.0",
+    "mypy>=1.0.0",
+    # Type Stubs
+    "types-pyyaml>=6.0.12.20250516",
+    "types-requests>=2.32.4.20250611",
+    # Development Tools
+    "pre-commit>=3.0.0",
+    "tox>=4.0.0",
+    # Publishing
+    "twine>=4.0.0",
+    "build>=0.10.0",
+]
 
 [tool.ruff]
 # Exclude common directories

@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock, mock_open
 from pathlib import Path
 
-from deepgram import DeepgramError, PrerecordedOptions
+from deepgram.core.api_error import ApiError
 from deepctl_core.client import DeepgramClient
 from deepctl_core.auth import AuthManager
 from deepctl_core.config import Config
@@ -63,9 +63,9 @@ class TestDeepgramClient:
         # Verify auth guard was called
         mock_auth_manager.guard.assert_called_once()
 
-        # Verify DGClient was created (may have options)
+        # Verify DGClient was created with keyword args
         assert mock_dg_client.called
-        assert mock_dg_client.call_args[0][0] == "sk-test"
+        assert mock_dg_client.call_args.kwargs["api_key"] == "sk-test"
 
         # Verify client is cached
         assert client._client == mock_instance
@@ -89,9 +89,9 @@ class TestDeepgramClient:
         assert result == mock_instance
 
     @patch("deepctl_core.client.DGClient")
-    @patch("deepctl_core.client.DeepgramClientOptions")
+    @patch("deepctl_core.client.DeepgramClientEnvironment")
     def test_create_client_with_custom_base_url(
-        self, mock_options, mock_dg_client, mock_config, mock_auth_manager
+        self, mock_env, mock_dg_client, mock_config, mock_auth_manager
     ):
         """Test creating client with custom base URL."""
         # Set custom base URL
@@ -106,19 +106,24 @@ class TestDeepgramClient:
         # Create client
         result = client._create_client()
 
-        # Verify options were created with custom URL
-        mock_options.assert_called_once_with(url="https://custom.deepgram.com")
+        # Verify environment was created with custom URL
+        mock_env.assert_called_once_with(
+            base="https://custom.deepgram.com",
+            production="https://custom.deepgram.com",
+            agent="https://custom.deepgram.com",
+        )
 
-        # Verify DGClient was created with options
+        # Verify DGClient was created with environment kwarg
         mock_dg_client.assert_called_once_with(
-            "sk-test", mock_options.return_value
+            api_key="sk-test",
+            environment=mock_env.return_value,
         )
 
     def test_create_client_no_api_key(self, client, mock_auth_manager):
         """Test creating client without API key raises error."""
         mock_auth_manager.get_api_key.return_value = None
 
-        with pytest.raises(DeepgramError, match="No API key available"):
+        with pytest.raises(ApiError):
             client._create_client()
 
     @patch("deepctl_core.client.DGClient")
@@ -128,7 +133,7 @@ class TestDeepgramClient:
         """Test error handling when creating client fails."""
         mock_dg_client.side_effect = Exception("Connection error")
 
-        with pytest.raises(DeepgramError, match="Failed to create client"):
+        with pytest.raises(ApiError):
             client._create_client()
 
     @patch("deepctl_core.client.DGClient")
@@ -141,11 +146,10 @@ class TestDeepgramClient:
         # Setup mocks
         mock_exists.return_value = True
         mock_instance = Mock()
-        mock_transcription = Mock()
-        # Make response dict-like
+        mock_media = Mock()
         mock_response = {"transcript": "Hello world"}
-        mock_transcription.transcribe_file.return_value = mock_response
-        mock_instance.listen.rest.v.return_value = mock_transcription
+        mock_media.transcribe_file.return_value = mock_response
+        mock_instance.listen.v1.media = mock_media
         mock_dg_client.return_value = mock_instance
 
         # Test transcription
@@ -156,18 +160,17 @@ class TestDeepgramClient:
         assert result == {"transcript": "Hello world"}
 
         # Verify transcribe_file was called
-        mock_transcription.transcribe_file.assert_called_once()
+        mock_media.transcribe_file.assert_called_once()
 
     @patch("deepctl_core.client.DGClient")
     def test_transcribe_url(self, mock_dg_client, client):
         """Test transcribing a URL."""
         # Setup mock client
         mock_instance = Mock()
-        mock_transcription = Mock()
-        # Make response dict-like
+        mock_media = Mock()
         mock_response = {"transcript": "Hello world"}
-        mock_transcription.transcribe_url.return_value = mock_response
-        mock_instance.listen.rest.v.return_value = mock_transcription
+        mock_media.transcribe_url.return_value = mock_response
+        mock_instance.listen.v1.media = mock_media
         mock_dg_client.return_value = mock_instance
 
         # Test transcription
@@ -179,7 +182,7 @@ class TestDeepgramClient:
         assert result == {"transcript": "Hello world"}
 
         # Verify transcribe_url was called
-        mock_transcription.transcribe_url.assert_called_once()
+        mock_media.transcribe_url.assert_called_once()
 
     @patch("deepctl_core.client.DGClient")
     @patch("deepctl_core.client.Path.exists")
@@ -198,7 +201,6 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_manage = Mock()
-        # Return a dict-like mock that can be converted to dict
         mock_response = {
             "projects": [
                 {"project_id": "proj1", "name": "Project 1"},

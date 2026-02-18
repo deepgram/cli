@@ -16,6 +16,10 @@ class InstallMethod(str, Enum):
     PIP = "pip"
     PIPX = "pipx"
     UV = "uv"
+    HOMEBREW = "homebrew"
+    UV_TOOL = "uv_tool"
+    UVX = "uvx"
+    PIPX_RUN = "pipx_run"
     SYSTEM = "system"
     DEVELOPMENT = "development"
     UNKNOWN = "unknown"
@@ -65,24 +69,42 @@ class InstallationDetector:
             virtual_env=in_venv,
             editable=is_editable,
             python_executable=self.executable_path,
-            package_location=(
-                str(package_location) if package_location else None
-            ),
+            package_location=(str(package_location) if package_location else None),
         )
 
-    def get_update_command(self, method: InstallMethod) -> str | None:
+    def get_update_command(self, method: InstallMethod) -> list[str] | None:
         """Get appropriate update command for installation method.
 
         Args:
             method: The installation method
 
         Returns:
-            Update command or None if not applicable
+            Update command as a list for subprocess, or None
         """
-        commands = {
-            InstallMethod.PIP: "pip install --upgrade deepctl",
-            InstallMethod.PIPX: "pipx upgrade deepctl",
-            InstallMethod.UV: "uv pip install --upgrade deepctl",
+        commands: dict[InstallMethod, list[str] | None] = {
+            InstallMethod.PIP: [
+                "pip",
+                "install",
+                "--upgrade",
+                "deepctl",
+            ],
+            InstallMethod.PIPX: ["pipx", "upgrade", "deepctl"],
+            InstallMethod.UV: [
+                "uv",
+                "pip",
+                "install",
+                "--upgrade",
+                "deepctl",
+            ],
+            InstallMethod.HOMEBREW: ["brew", "upgrade", "deepctl"],
+            InstallMethod.UV_TOOL: [
+                "uv",
+                "tool",
+                "upgrade",
+                "deepctl",
+            ],
+            InstallMethod.UVX: None,  # Ephemeral, no update needed
+            InstallMethod.PIPX_RUN: None,  # Ephemeral, no update needed
             InstallMethod.SYSTEM: None,  # Handled separately
             InstallMethod.DEVELOPMENT: None,  # Can't auto-update
             InstallMethod.UNKNOWN: None,
@@ -98,6 +120,21 @@ class InstallationDetector:
         Returns:
             Human-readable update instructions
         """
+        if info.method == InstallMethod.HOMEBREW:
+            return "Please update using Homebrew: brew upgrade deepctl"
+
+        if info.method == InstallMethod.UVX:
+            return (
+                "You are running deepctl via uvx (one-shot execution). "
+                "The latest version will be used automatically on next run."
+            )
+
+        if info.method == InstallMethod.PIPX_RUN:
+            return (
+                "You are running deepctl via pipx run (one-shot execution). "
+                "The latest version will be used automatically on next run."
+            )
+
         if info.method == InstallMethod.SYSTEM:
             # Try to detect the system package manager
             if sys.platform.startswith("darwin"):
@@ -105,11 +142,12 @@ class InstallationDetector:
             elif sys.platform.startswith("linux"):
                 # Check for common package managers
                 if Path("/etc/debian_version").exists():
-                    return "Please update using apt: sudo apt update && sudo apt upgrade deepctl"
-                elif Path("/etc/redhat-release").exists():
                     return (
-                        "Please update using yum/dnf: sudo dnf upgrade deepctl"
+                        "Please update using apt: "
+                        "sudo apt update && sudo apt upgrade deepctl"
                     )
+                elif Path("/etc/redhat-release").exists():
+                    return "Please update using yum/dnf: sudo dnf upgrade deepctl"
             return "Please use your system package manager to update deepctl"
 
         elif info.method == InstallMethod.DEVELOPMENT:
@@ -122,18 +160,22 @@ class InstallationDetector:
         elif info.method == InstallMethod.UNKNOWN:
             return (
                 "Unable to detect installation method. "
-                "Please update deepctl using the same method you used to install it."
+                "Please update deepctl using the same method "
+                "you used to install it."
             )
 
-        # For pip, pipx, uv - get the command
+        # For pip, pipx, uv, uv_tool - get the command
         command = self.get_update_command(info.method)
         if command:
+            import shlex
+
+            cmd_str = shlex.join(command)
             if info.virtual_env and info.method == InstallMethod.PIP:
                 return (
                     f"You are in a virtual environment. "
-                    f"Make sure it's activated and run:\n{command}"
+                    f"Make sure it's activated and run:\n{cmd_str}"
                 )
-            return f"Run: {command}"
+            return f"Run: {cmd_str}"
 
         return "Update method not available for this installation type"
 
@@ -146,9 +188,7 @@ class InstallationDetector:
         # Check multiple indicators
         return (
             hasattr(sys, "real_prefix")  # virtualenv
-            or (
-                hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix
-            )  # venv
+            or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix)  # venv
             or os.environ.get("VIRTUAL_ENV") is not None  # Both
             or os.environ.get("CONDA_DEFAULT_ENV") is not None  # Conda
         )
@@ -203,9 +243,7 @@ class InstallationDetector:
 
         # Check if package location is outside site-packages (likely dev)
         site_packages_paths = [Path(p) for p in site.getsitepackages()]
-        if not any(
-            package_location.is_relative_to(p) for p in site_packages_paths
-        ):
+        if not any(package_location.is_relative_to(p) for p in site_packages_paths):
             # Check if it's in a git repository
             git_dir = package_location
             while git_dir.parent != git_dir:
@@ -223,6 +261,9 @@ class InstallationDetector:
     ) -> InstallMethod:
         """Detect the installation method.
 
+        Priority: development > oneshot > homebrew > uv_tool > pipx >
+                  uv > system > pip > unknown
+
         Args:
             package_location: Path to package
             in_venv: Whether in virtual environment
@@ -234,6 +275,19 @@ class InstallationDetector:
         # Development installation
         if is_editable:
             return InstallMethod.DEVELOPMENT
+
+        # One-shot execution (uvx / pipx run)
+        oneshot = self._detect_oneshot_execution()
+        if oneshot is not None:
+            return oneshot
+
+        # Homebrew
+        if self._is_homebrew_install():
+            return InstallMethod.HOMEBREW
+
+        # uv tool
+        if self._is_uv_tool_install():
+            return InstallMethod.UV_TOOL
 
         # Check for pipx
         if self._is_pipx_install():
@@ -256,6 +310,63 @@ class InstallationDetector:
 
         return InstallMethod.UNKNOWN
 
+    def _is_homebrew_install(self) -> bool:
+        """Check if installed via Homebrew.
+
+        Detects Apple Silicon (/opt/homebrew), Intel Mac
+        (/usr/local/Cellar), and Linux Homebrew paths.
+
+        Returns:
+            True if Homebrew installation
+        """
+        exe_path = Path(sys.executable).resolve()
+        exe_str = str(exe_path)
+
+        homebrew_prefixes = [
+            "/opt/homebrew",  # Apple Silicon
+            "/usr/local/Cellar",  # Intel Mac
+            "/home/linuxbrew/.linuxbrew",  # Linux
+        ]
+
+        return any(exe_str.startswith(prefix) for prefix in homebrew_prefixes)
+
+    def _is_uv_tool_install(self) -> bool:
+        """Check if installed via ``uv tool install``.
+
+        Returns:
+            True if uv tool installation
+        """
+        exe_path = Path(sys.executable).resolve()
+        exe_str = str(exe_path)
+
+        # Check custom UV_TOOL_DIR env var first
+        uv_tool_dir = os.environ.get("UV_TOOL_DIR")
+        if uv_tool_dir and exe_str.startswith(uv_tool_dir):
+            return True
+
+        # Default uv tool location
+        default_uv_tools = str(Path.home() / ".local" / "share" / "uv" / "tools")
+        return exe_str.startswith(default_uv_tools)
+
+    def _detect_oneshot_execution(self) -> InstallMethod | None:
+        """Detect ephemeral one-shot execution (uvx / pipx run).
+
+        Returns:
+            UVX or PIPX_RUN if detected, None otherwise
+        """
+        # uvx sets UV_INTERNAL__PARENT_INTERPRETER
+        if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
+            return InstallMethod.UVX
+
+        # pipx run uses a cache directory
+        exe_path = str(Path(sys.executable).resolve())
+        pipx_home = os.environ.get("PIPX_HOME", str(Path.home() / ".local" / "pipx"))
+        pipx_cache = str(Path(pipx_home) / ".cache")
+        if exe_path.startswith(pipx_cache):
+            return InstallMethod.PIPX_RUN
+
+        return None
+
     def _is_pipx_install(self) -> bool:
         """Check if installed via pipx.
 
@@ -268,10 +379,7 @@ class InstallationDetector:
 
         # Check if executable is in a pipx-managed location
         exe_path = Path(sys.executable)
-        return (
-            "pipx" in str(exe_path)
-            or (exe_path.parent.parent / ".pipx").exists()
-        )
+        return "pipx" in str(exe_path) or (exe_path.parent.parent / ".pipx").exists()
 
     def _is_uv_install(self) -> bool:
         """Check if installed via uv.
@@ -322,7 +430,5 @@ class InstallationDetector:
         ]
 
         return any(
-            package_location.is_relative_to(p)
-            for p in system_paths
-            if p.exists()
+            package_location.is_relative_to(p) for p in system_paths if p.exists()
         )

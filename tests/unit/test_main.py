@@ -28,7 +28,7 @@ class TestMainCLI:
         """Test that --version displays version information."""
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "deepctl, version 0.1.0" in result.output
+        assert "deepctl, version" in result.output
 
     def test_cli_help(self, runner):
         """Test that --help displays help information."""

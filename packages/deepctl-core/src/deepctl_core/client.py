@@ -3,16 +3,9 @@
 from pathlib import Path
 from typing import Any
 
-from deepgram import (  # type: ignore[import-untyped]
-    DeepgramClient as DGClient,
-)
-from deepgram import (
-    DeepgramClientOptions,
-    DeepgramError,
-)
-from deepgram.clients.prerecorded import (  # type: ignore[import-untyped]
-    PrerecordedOptions,
-)
+from deepgram import DeepgramClient as DGClient
+from deepgram import DeepgramClientEnvironment
+from deepgram.core.api_error import ApiError
 from rich.console import Console
 
 from .auth import AuthManager
@@ -53,21 +46,27 @@ class DeepgramClient:
         project_id = self.auth_manager.get_project_id()
 
         if not api_key:
-            raise DeepgramError("No API key available")
+            raise ApiError(body="No API key available")
 
         # Create client with configuration
         current_profile = self.config.get_profile()
 
         try:
-            # Create options if we have a custom base URL
-            options = None
-            if current_profile.base_url:
-                options = DeepgramClientOptions(url=current_profile.base_url)
+            kwargs: dict[str, Any] = {"api_key": api_key}
 
-            # Create client with API key and options
-            client = (
-                DGClient(api_key, options) if options else DGClient(api_key)
-            )
+            # Use a custom environment when a non-default base URL is
+            # configured.
+            if (
+                current_profile.base_url
+                and current_profile.base_url != "https://api.deepgram.com"
+            ):
+                kwargs["environment"] = DeepgramClientEnvironment(
+                    base=current_profile.base_url,
+                    production=current_profile.base_url,
+                    agent=current_profile.base_url,
+                )
+
+            client = DGClient(**kwargs)
 
             # Store project ID for later use
             self._project_id = project_id
@@ -76,7 +75,7 @@ class DeepgramClient:
 
         except Exception as e:
             console.print(f"[red]Error creating Deepgram client:[/red] {e}")
-            raise DeepgramError(f"Failed to create client: {e}")
+            raise ApiError(body=f"Failed to create client: {e}")
 
     def transcribe_file(
         self,
@@ -98,8 +97,8 @@ class DeepgramClient:
             raise FileNotFoundError(f"Audio file not found: {file_path}")
 
         # Default options
-        default_options = {
-            "model": "nova-2",
+        default_options: dict[str, Any] = {
+            "model": "nova-3",
             "smart_format": True,
             "language": "en-US",
         }
@@ -108,23 +107,18 @@ class DeepgramClient:
             default_options.update(options)
 
         try:
-            # Read file
             with open(file_path, "rb") as audio_file:
-                payload = {"buffer": audio_file}
+                audio_data = audio_file.read()
 
-                # Create options object
-                prerecorded_options = PrerecordedOptions(**default_options)
+            response = self.client.listen.v1.media.transcribe_file(
+                request=audio_data, **default_options
+            )
 
-                # Make request using the new SDK API
-                response = self.client.listen.rest.v("1").transcribe_file(
-                    payload, prerecorded_options
-                )
-
-                return dict(response)
+            return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error transcribing file:[/red] {e}")
-            raise DeepgramError(f"Transcription failed: {e}")
+            raise ApiError(body=f"Transcription failed: {e}")
 
     def transcribe_url(
         self, url: str, options: dict[str, Any] | None = None
@@ -139,8 +133,8 @@ class DeepgramClient:
             Transcription results
         """
         # Default options
-        default_options = {
-            "model": "nova-2",
+        default_options: dict[str, Any] = {
+            "model": "nova-3",
             "smart_format": True,
             "language": "en-US",
         }
@@ -149,22 +143,15 @@ class DeepgramClient:
             default_options.update(options)
 
         try:
-            # Create payload
-            payload = {"url": url}
-
-            # Create options object
-            prerecorded_options = PrerecordedOptions(**default_options)
-
-            # Make request using the new SDK API
-            response = self.client.listen.rest.v("1").transcribe_url(
-                payload, prerecorded_options
+            response = self.client.listen.v1.media.transcribe_url(
+                url=url, **default_options
             )
 
             return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error transcribing URL:[/red] {e}")
-            raise DeepgramError(f"Transcription failed: {e}")
+            raise ApiError(body=f"Transcription failed: {e}")
 
     def get_projects(self) -> dict[str, Any]:
         """Get user's projects.
@@ -178,13 +165,14 @@ class DeepgramClient:
 
         except Exception as e:
             console.print(f"[red]Error getting projects:[/red] {e}")
-            raise DeepgramError(f"Failed to get projects: {e}")
+            raise ApiError(body=f"Failed to get projects: {e}")
 
     def get_project(self, project_id: str | None = None) -> dict[str, Any]:
         """Get specific project.
 
         Args:
-            project_id: Project ID (uses configured project if not provided)
+            project_id: Project ID (uses configured project if not
+                provided)
 
         Returns:
             Project data
@@ -195,7 +183,7 @@ class DeepgramClient:
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         if not project_id:
-            raise DeepgramError("No project ID available")
+            raise ApiError(body="No project ID available")
 
         try:
             response = self.client.manage.v("1").get_project(project_id)
@@ -203,11 +191,9 @@ class DeepgramClient:
 
         except Exception as e:
             console.print(f"[red]Error getting project:[/red] {e}")
-            raise DeepgramError(f"Failed to get project: {e}")
+            raise ApiError(body=f"Failed to get project: {e}")
 
-    def create_project(
-        self, name: str, company: str | None = None
-    ) -> dict[str, Any]:
+    def create_project(self, name: str, company: str | None = None) -> dict[str, Any]:
         """Create a new project.
 
         Args:
@@ -227,7 +213,7 @@ class DeepgramClient:
 
         except Exception as e:
             console.print(f"[red]Error creating project:[/red] {e}")
-            raise DeepgramError(f"Failed to create project: {e}")
+            raise ApiError(body=f"Failed to create project: {e}")
 
     def get_usage(
         self,
@@ -238,7 +224,8 @@ class DeepgramClient:
         """Get usage statistics.
 
         Args:
-            project_id: Project ID (uses configured project if not provided)
+            project_id: Project ID (uses configured project if not
+                provided)
             start_date: Start date (ISO format)
             end_date: End date (ISO format)
 
@@ -246,67 +233,60 @@ class DeepgramClient:
             Usage data
         """
         if not project_id:
-            # Ensure client is initialized which sets _project_id
             _ = self.client
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         if not project_id:
-            raise DeepgramError("No project ID available")
+            raise ApiError(body="No project ID available")
 
         try:
-            # Build query parameters
-            params = {}
+            params: dict[str, str] = {}
             if start_date:
                 params["start"] = start_date
             if end_date:
                 params["end"] = end_date
 
-            response = self.client.manage.v("1").get_usage_summary(
-                project_id, params
-            )
-            # Add project_id to response for consistency
+            response = self.client.manage.v("1").get_usage_summary(project_id, params)
             if isinstance(response, dict):
                 response["project_id"] = project_id
             return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error getting usage:[/red] {e}")
-            raise DeepgramError(f"Failed to get usage: {e}")
+            raise ApiError(body=f"Failed to get usage: {e}")
 
     def get_models(self, project_id: str | None = None) -> dict[str, Any]:
         """Get available models.
 
         Args:
-            project_id: Project ID (uses configured project if not provided)
+            project_id: Project ID (uses configured project if not
+                provided)
 
         Returns:
             Models data
         """
         if not project_id:
-            # Ensure client is initialized which sets _project_id
             _ = self.client
             project_id = self._project_id or self.auth_manager.get_project_id()
 
         try:
-            # The new SDK doesn't have get_models, this is likely part of
-            # get_project
             response = self.client.manage.v("1").get_project(project_id)
             return dict(response)
 
         except Exception as e:
             console.print(f"[red]Error getting models:[/red] {e}")
-            raise DeepgramError(f"Failed to get models: {e}")
+            raise ApiError(body=f"Failed to get models: {e}")
 
     def validate_api_key(self, api_key: str | None = None) -> bool:
         """Validate API key by making a simple API call.
 
         Args:
-            api_key: API key to validate (uses configured key if not provided)
+            api_key: API key to validate (uses configured key if not
+                provided)
 
         Returns:
             True if valid, False otherwise
         """
-        # Use the auth manager's verification method
         project_id = self.auth_manager.get_project_id()
         success, _, _ = self.auth_manager.verify_credentials(
             api_key=api_key, project_id=project_id

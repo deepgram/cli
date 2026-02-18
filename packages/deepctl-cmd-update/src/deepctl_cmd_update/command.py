@@ -1,6 +1,8 @@
 """Update command implementation."""
 
 import asyncio
+import importlib.metadata
+import shlex
 import subprocess
 from typing import Any
 
@@ -32,7 +34,7 @@ class UpdateCommand(BaseCommand):
         """Get command arguments and options."""
         return [
             {
-                "names": ["--check-only"],
+                "names": ["--check-only", "--check"],
                 "help": "Only check for updates without installing",
                 "is_flag": True,
                 "is_option": True,
@@ -69,20 +71,16 @@ class UpdateCommand(BaseCommand):
         # Initialize version checker
         # Get current version from package metadata if possible
         try:
-            import deepctl
-
-            current_version = getattr(deepctl, "__version__", "0.1.5")
-        except ImportError:
-            current_version = "0.1.5"
+            current_version = importlib.metadata.version("deepctl")
+        except importlib.metadata.PackageNotFoundError:
+            current_version = "0.0.0"
 
         version_checker = VersionChecker(config, current_version)
 
         # Check for updates
         with console.status("Checking for updates..."):
             try:
-                version_info = asyncio.run(
-                    version_checker.check_version(force=True)
-                )
+                version_info = asyncio.run(version_checker.check_version(force=True))
             except Exception as e:
                 print_error(f"Failed to check for updates: {e}")
                 return UpdateResult(
@@ -124,16 +122,12 @@ class UpdateCommand(BaseCommand):
         install_info = detector.detect()
 
         # Store installation info for future use
-        config._set_config_value(
-            "update.installation_method", install_info.method
-        )
+        config._set_config_value("update.installation_method", install_info.method)
         config._set_config_value("update.installation_path", install_info.path)
         config.save()
 
         # Display installation info
-        console.print(
-            f"Installation method: [cyan]{install_info.method}[/cyan]"
-        )
+        console.print(f"Installation method: [cyan]{install_info.method}[/cyan]")
         console.print(f"Installation path: [dim]{install_info.path}[/dim]")
         if install_info.virtual_env:
             console.print("[yellow]Virtual environment detected[/yellow]")
@@ -155,12 +149,11 @@ class UpdateCommand(BaseCommand):
             ).model_dump()
 
         # Show update command
-        console.print(f"\nUpdate command: [green]{update_command}[/green]")
+        update_display = shlex.join(update_command)
+        console.print(f"\nUpdate command: [green]{update_display}[/green]")
 
         # Confirm update
-        if not yes and not Confirm.ask(
-            "\nDo you want to proceed with the update?"
-        ):
+        if not yes and not Confirm.ask("\nDo you want to proceed with the update?"):
             print_info("Update cancelled")
             return UpdateResult(
                 success=False,
@@ -177,7 +170,6 @@ class UpdateCommand(BaseCommand):
             # Run the update command synchronously
             result = subprocess.run(
                 update_command,
-                shell=True,
                 capture_output=True,
                 text=True,
             )
@@ -205,7 +197,7 @@ class UpdateCommand(BaseCommand):
 
                 # Provide fallback instructions
                 print_info("\nYou can try updating manually:")
-                console.print(f"[yellow]{update_command}[/yellow]")
+                console.print(f"[yellow]{shlex.join(update_command)}[/yellow]")
 
                 return UpdateResult(
                     success=False,
