@@ -38,13 +38,29 @@ uv run tox                 # Test all Python versions
 
 ### Architecture
 
+<!-- BEGIN:architecture -->
 ```
 cli/
-├── src/deepctl/           # Main CLI
-├── packages/              # Command packages
-├── tests/                 # Integration tests
-└── Makefile               # Development tasks
+├── src/deepctl/                      # Main CLI entry point
+├── packages/
+│   ├── deepctl-cmd-debug/            # Debug command group for deepctl
+│   ├── deepctl-cmd-debug-audio/      # Audio debug subcommand for deepctl
+│   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
+│   ├── deepctl-cmd-debug-network/    # Network debug subcommand for deepctl
+│   ├── deepctl-cmd-login/            # Login command for deepctl
+│   ├── deepctl-cmd-mcp/              # MCP server command for deepctl to interact with Deepgram's AI assistant service
+│   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
+│   ├── deepctl-cmd-projects/         # Projects command for deepctl
+│   ├── deepctl-cmd-transcribe/       # Transcribe command for deepctl
+│   ├── deepctl-cmd-update/           # Update command for deepctl
+│   ├── deepctl-cmd-usage/            # Usage command for deepctl
+│   ├── deepctl-core/                 # Core components for deepctl
+│   ├── deepctl-plugin-example/       # Example plugin for deepctl
+│   └── deepctl-shared-utils/         # Shared utilities for deepctl
+├── tests/                            # Integration tests
+└── Makefile                          # Development tasks
 ```
+<!-- END:architecture -->
 
 ### Plugin Development
 
@@ -67,43 +83,9 @@ See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
 - `packages/*/tests/unit/` - Unit tests
 - Runs on Python 3.10-3.12, Linux/Windows/macOS
 
-### Documentation
-
-- [`docs/Quick Start For Contributors.md`](docs/Quick%20Start%20For%20Contributors.md)
-- [`docs/Architecture and Design.md`](docs/Architecture%20and%20Design.md)
-- [`docs/Testing and Test Strategy.md`](docs/Testing%20and%20Test%20Strategy.md)
-
 ## Release
 
-Semi-automated release (recommended)
-
-```bash
-# 1. Update versions
-make version VERSION=0.2.0
-
-# 2. Commit changes
-make commit
-
-# 3. Build packages
-make build
-
-# 4. Verify everything
-make verify-packages
-
-# 5. Create tag
-make tag
-
-# 6. Push to trigger PyPI publish
-git push origin main --tags
-```
-
-Full automated release
-
-```bash
-make release
-# Enter version when prompted (e.g., 0.2.0)
-git push origin main --tags
-```
+Merging conventional commits to `main` triggers [release-please](https://github.com/googleapis/release-please) to open a release PR. Merging that PR creates a `v*` tag, which triggers the PyPI publish workflow. All 15 packages are version-locked.
 
 ## Installation
 
@@ -126,12 +108,23 @@ brew install deepctl
 
 ### Commands
 
-```bash
-deepctl login
-deepctl transcribe audio.wav
-deepctl projects list
-deepctl usage --month 2024-01
-```
+<!-- BEGIN:commands -->
+| Command | Description |
+|---------|-------------|
+| `deepctl debug audio` | Audio debug subcommand for deepctl |
+| `deepctl debug browser` | Browser debug subcommand for deepctl |
+| `deepctl debug network` | Network debug subcommand for deepctl |
+| `deepctl debug` | Debug command group for deepctl |
+| `deepctl login` | Login command for deepctl |
+| `deepctl logout` | Login command for deepctl |
+| `deepctl mcp` | MCP server command for deepctl to interact with Deepgram's AI assistant service |
+| `deepctl plugin` | Plugin management command for deepctl |
+| `deepctl profiles` | Login command for deepctl |
+| `deepctl projects` | Projects command for deepctl |
+| `deepctl transcribe` | Transcribe command for deepctl |
+| `deepctl update` | Update command for deepctl |
+| `deepctl usage` | Usage command for deepctl |
+<!-- END:commands -->
 
 ### Aliases
 
@@ -156,6 +149,27 @@ Priority: CLI args > env vars > `~/.deepgram/config.yaml` > `./deepgram.yaml`
 ```bash
 deepctl transcribe audio.wav --output json|yaml|table|csv
 ```
+
+## Packages
+
+<!-- BEGIN:packages -->
+| Package | Description |
+|---------|-------------|
+| [`deepctl-cmd-debug`](packages/deepctl-cmd-debug) | Debug command group for deepctl |
+| [`deepctl-cmd-debug-audio`](packages/deepctl-cmd-debug-audio) | Audio debug subcommand for deepctl |
+| [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
+| [`deepctl-cmd-debug-network`](packages/deepctl-cmd-debug-network) | Network debug subcommand for deepctl |
+| [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
+| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server command for deepctl to interact with Deepgram's AI assistant service |
+| [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
+| [`deepctl-cmd-projects`](packages/deepctl-cmd-projects) | Projects command for deepctl |
+| [`deepctl-cmd-transcribe`](packages/deepctl-cmd-transcribe) | Transcribe command for deepctl |
+| [`deepctl-cmd-update`](packages/deepctl-cmd-update) | Update command for deepctl |
+| [`deepctl-cmd-usage`](packages/deepctl-cmd-usage) | Usage command for deepctl |
+| [`deepctl-core`](packages/deepctl-core) | Core components for deepctl |
+| [`deepctl-plugin-example`](packages/deepctl-plugin-example) | Example plugin for deepctl |
+| [`deepctl-shared-utils`](packages/deepctl-shared-utils) | Shared utilities for deepctl |
+<!-- END:packages -->
 
 ## Contributing
 
