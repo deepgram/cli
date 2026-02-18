@@ -75,6 +75,13 @@ class MyCommand(BaseCommand):
         pass
 ```
 
+Register your command in `pyproject.toml` under the `deepctl.plugins` entry point group:
+
+```toml
+[project.entry-points."deepctl.plugins"]
+mycommand = "my_plugin.command:MyCommand"
+```
+
 See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
 
 ### Testing
@@ -135,10 +142,25 @@ brew install deepctl
 ### Plugins
 
 ```bash
-deepctl plugin search
-deepctl plugin install <package>
-deepctl plugin list
+deepctl plugin search                    # Browse available plugins
+deepctl plugin install <package>         # Install a plugin
+deepctl plugin list -v                   # List installed plugins (verbose)
+deepctl plugin remove <package>          # Remove a plugin
+deepctl plugin update <package>          # Update a plugin
 ```
+
+Plugin installation adapts to how deepctl was installed:
+
+| Install method | Plugin strategy |
+|---|---|
+| `pip` / `uv` (venv) | Installs into current environment |
+| `pipx` | `pipx inject deepctl <plugin>` |
+| `uv tool` | `uv tool install deepctl --with <plugin>` |
+| Homebrew / system / binary | Isolated venv at `~/.deepctl/plugins/venv/` |
+| Development (editable) | Installs into current environment |
+| `uvx` / `pipx run` | Not supported (ephemeral) |
+
+Plugins installed into the isolated venv are automatically discovered and loaded on every CLI invocation.
 
 ### Configuration
 
