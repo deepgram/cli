@@ -1,10 +1,15 @@
 """Plugin management command implementation."""
 
+from __future__ import annotations
+
 import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .strategies import PluginInstallStrategy
 
 import click
 from deepctl_cmd_update.installation import InstallationDetector, InstallMethod
@@ -12,7 +17,17 @@ from deepctl_core.auth import AuthManager
 from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
-from deepctl_core.output import print_error, print_info, print_success
+from deepctl_core.output import print_error, print_info, print_success, print_warning
+from deepctl_core.plugin_env import (
+    PLUGIN_DIR,
+    PLUGIN_STATE_FILE,
+    PLUGIN_VENV,
+    find_system_python,
+    get_plugin_state,
+    get_venv_python,
+    is_frozen,
+    save_plugin_state,
+)
 from rich.console import Console
 from rich.table import Table
 
@@ -40,10 +55,10 @@ class PluginCommand(BaseGroupCommand):
         self.detector = InstallationDetector()
         self._python_executable = sys.executable
 
-        # Plugin environment paths
-        self._plugin_dir = Path.home() / ".deepctl" / "plugins"
-        self._plugin_venv = self._plugin_dir / "venv"
-        self._plugin_state_file = self._plugin_dir / "plugins.json"
+        # Use shared plugin environment paths
+        self._plugin_dir = PLUGIN_DIR
+        self._plugin_venv = PLUGIN_VENV
+        self._plugin_state_file = PLUGIN_STATE_FILE
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
         """Execute plugin group command.
@@ -125,6 +140,11 @@ class PluginCommand(BaseGroupCommand):
     def _ensure_plugin_environment(self) -> tuple[bool, str]:
         """Ensure plugin environment exists.
 
+        In frozen (PyInstaller) builds, ``sys.executable`` is the binary
+        itself and cannot create venvs.  We detect this via
+        :func:`is_frozen` and fall back to a real system Python found
+        on PATH.
+
         Returns:
             Tuple of (success, python_executable_path)
         """
@@ -134,50 +154,99 @@ class PluginCommand(BaseGroupCommand):
         # Check if venv exists
         if not self._plugin_venv.exists():
             print_info("Creating plugin environment...")
+
+            # Determine which Python to use for venv creation
+            if is_frozen():
+                creator_python = find_system_python()
+                if creator_python is None:
+                    print_error(
+                        "Cannot create plugin environment: no suitable "
+                        "Python >= 3.10 found on your system.  "
+                        "Please install Python 3.10+ and try again."
+                    )
+                    return False, ""
+                print_info(f"Using system Python: {creator_python}")
+            else:
+                creator_python = sys.executable
+
             try:
                 # Create virtual environment
                 subprocess.run(
-                    [sys.executable, "-m", "venv", str(self._plugin_venv)],
+                    [creator_python, "-m", "venv", str(self._plugin_venv)],
                     check=True,
                     capture_output=True,
                     text=True,
                 )
 
                 # Get the python executable in the venv
-                if sys.platform == "win32":
-                    venv_python = self._plugin_venv / "Scripts" / "python.exe"
-                else:
-                    venv_python = self._plugin_venv / "bin" / "python"
+                venv_python = get_venv_python()
+                if venv_python is None:
+                    if sys.platform == "win32":
+                        venv_python_path = (
+                            self._plugin_venv / "Scripts" / "python.exe"
+                        )
+                    else:
+                        venv_python_path = self._plugin_venv / "bin" / "python"
+                    venv_python = str(venv_python_path)
 
                 # Ensure pip is installed and up to date
                 subprocess.run(
-                    [
-                        str(venv_python),
-                        "-m",
-                        "pip",
-                        "install",
-                        "--upgrade",
-                        "pip",
-                    ],
+                    [venv_python, "-m", "pip", "install", "--upgrade", "pip"],
                     check=True,
                     capture_output=True,
                     text=True,
                 )
 
+                # Install deepctl-core so plugins can import BaseCommand etc.
+                self._install_core_into_venv(venv_python)
+
                 print_success("Plugin environment created successfully")
-                return True, str(venv_python)
+                return True, venv_python
 
             except subprocess.CalledProcessError as e:
                 print_error(f"Failed to create plugin environment: {e}")
                 return False, ""
 
-        # Venv exists, return python executable
-        if sys.platform == "win32":
-            venv_python = self._plugin_venv / "Scripts" / "python.exe"
-        else:
-            venv_python = self._plugin_venv / "bin" / "python"
+        # Venv exists — return its python executable
+        venv_python = get_venv_python()
+        if venv_python is None:
+            if sys.platform == "win32":
+                venv_python = str(
+                    self._plugin_venv / "Scripts" / "python.exe"
+                )
+            else:
+                venv_python = str(self._plugin_venv / "bin" / "python")
 
-        return True, str(venv_python)
+        return True, venv_python
+
+    def _install_core_into_venv(self, venv_python: str) -> None:
+        """Install the current version of deepctl-core into the plugin venv.
+
+        This ensures plugins can ``from deepctl_core import BaseCommand``
+        even when running from an isolated environment.
+        """
+        try:
+            from importlib.metadata import version as pkg_version
+
+            core_version = pkg_version("deepctl-core")
+            package_spec = f"deepctl-core=={core_version}"
+        except Exception:
+            package_spec = "deepctl-core"
+
+        try:
+            subprocess.run(
+                [venv_python, "-m", "pip", "install", package_spec],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError:
+            # Non-fatal — plugins may still work if they don't import
+            # from deepctl_core directly.
+            print_warning(
+                "Could not install deepctl-core into plugin environment. "
+                "Some plugins may not load correctly."
+            )
 
     def _get_plugin_state(self) -> dict[str, Any]:
         """Get plugin state from file.
@@ -185,15 +254,7 @@ class PluginCommand(BaseGroupCommand):
         Returns:
             Plugin state dictionary
         """
-        if self._plugin_state_file.exists():
-            try:
-                result: dict[str, Any] = json.loads(
-                    self._plugin_state_file.read_text()
-                )
-                return result
-            except Exception:
-                return {"plugins": {}}
-        return {"plugins": {}}
+        return get_plugin_state()
 
     def _save_plugin_state(self, state: dict[str, Any]) -> None:
         """Save plugin state to file.
@@ -201,7 +262,7 @@ class PluginCommand(BaseGroupCommand):
         Args:
             state: Plugin state to save
         """
-        self._plugin_state_file.write_text(json.dumps(state, indent=2))
+        save_plugin_state(state)
 
     def _create_install_command(self, context_wrapper: Any) -> click.Command:
         """Create the install subcommand."""
@@ -617,6 +678,38 @@ class PluginCommand(BaseGroupCommand):
             ),
         ]
 
+    def _needs_isolated_venv(self, method: InstallMethod) -> bool:
+        """Check if this installation method needs the isolated plugin venv."""
+        return method in (
+            InstallMethod.HOMEBREW,
+            InstallMethod.SYSTEM,
+            InstallMethod.UNKNOWN,
+        )
+
+    def _get_strategy(
+        self, method: InstallMethod
+    ) -> tuple["PluginInstallStrategy", bool]:
+        """Get the correct installation strategy and whether it uses the plugin venv.
+
+        Returns:
+            Tuple of (strategy, uses_plugin_venv).
+        """
+        from .strategies import get_strategy
+
+        if self._needs_isolated_venv(method):
+            print_info(
+                f"{method.value.title()} installation detected, "
+                "using isolated plugin environment..."
+            )
+            success, python_exe = self._ensure_plugin_environment()
+            if not success:
+                raise RuntimeError(
+                    "Could not create isolated environment for plugins"
+                )
+            return get_strategy(method, venv_python=python_exe), True
+
+        return get_strategy(method), False
+
     def install_plugin(
         self,
         config: Config,
@@ -625,6 +718,9 @@ class PluginCommand(BaseGroupCommand):
         options: PluginInstallOptions,
     ) -> PluginOperationResult:
         """Install a plugin.
+
+        Detects the installation method and delegates to the appropriate
+        strategy (pip, pipx inject, uv tool --with, isolated venv, etc.).
 
         Args:
             config: CLI configuration
@@ -635,96 +731,57 @@ class PluginCommand(BaseGroupCommand):
         Returns:
             Operation result
         """
-        # Detect installation method
         install_info = self.detector.detect()
 
-        # Determine which Python executable to use
-        if install_info.method in [
-            InstallMethod.SYSTEM,
-            InstallMethod.UNKNOWN,
-        ]:
-            # For system installations, use isolated plugin environment
-            print_info(
-                "System installation detected, using isolated plugin environment..."
-            )
-            success, python_exe = self._ensure_plugin_environment()
-            if not success:
-                return PluginOperationResult(
-                    success=False,
-                    action=PluginAction.INSTALL,
-                    package=options.package,
-                    message="Failed to create plugin environment",
-                    error="Could not create isolated environment for plugins",
-                )
-            target_python = python_exe
-            using_plugin_env = True
-        else:
-            # For other installations, use the same environment
-            target_python = self._python_executable
-            using_plugin_env = False
-
-        # Build pip command
-        cmd = [target_python, "-m", "pip", "install"]
-
-        # Add options
-        if options.upgrade:
-            cmd.append("--upgrade")
-        if options.pre:
-            cmd.append("--pre")
-        if options.force_reinstall:
-            cmd.append("--force-reinstall")
-        if options.index_url:
-            cmd.extend(["--index-url", options.index_url])
-        if options.extra_index_url:
-            cmd.extend(["--extra-index-url", options.extra_index_url])
-        if options.editable:
-            cmd.append("--editable")
-
-        # Add package
-        if options.git_url:
-            package_spec = options.git_url
-        elif options.version:
-            package_spec = f"{options.package}=={options.version}"
-        else:
-            package_spec = options.package
-
-        cmd.append(package_spec)
-
-        # Execute installation
         try:
-            print_info(f"Installing {options.package}...")
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
-
-            # Get installed version
-            installed_version = self._get_package_version(
-                options.package, target_python
+            strategy, using_plugin_env = self._get_strategy(
+                install_info.method
             )
-
-            # Update plugin state if using plugin environment
-            if using_plugin_env:
-                state = self._get_plugin_state()
-                state["plugins"][options.package] = {
-                    "version": installed_version,
-                    "source": "plugin_env",
-                }
-                self._save_plugin_state(state)
-
+        except RuntimeError as exc:
             return PluginOperationResult(
-                success=True,
+                success=False,
                 action=PluginAction.INSTALL,
                 package=options.package,
-                message=f"Successfully installed {options.package}",
-                installed_version=installed_version,
+                message="Failed to create plugin environment",
+                error=str(exc),
             )
 
-        except subprocess.CalledProcessError as e:
+        print_info(f"Installing {options.package}...")
+        ok, output = strategy.install(options)
+
+        if not ok:
             return PluginOperationResult(
                 success=False,
                 action=PluginAction.INSTALL,
                 package=options.package,
                 message=f"Failed to install {options.package}",
-                error=e.stderr or str(e),
+                error=output,
             )
+
+        # Get installed version
+        target_python = (
+            get_venv_python() if using_plugin_env else self._python_executable
+        )
+        installed_version = self._get_package_version(
+            options.package, target_python
+        )
+
+        # Track state for isolated venv installs
+        if using_plugin_env:
+            state = self._get_plugin_state()
+            state["plugins"][options.package] = {
+                "version": installed_version,
+                "source": "plugin_env",
+            }
+            self._save_plugin_state(state)
+
+        return PluginOperationResult(
+            success=True,
+            action=PluginAction.INSTALL,
+            package=options.package,
+            message=f"Successfully installed {options.package}",
+            installed_version=installed_version,
+        )
 
     def list_plugins(
         self,
@@ -829,6 +886,9 @@ class PluginCommand(BaseGroupCommand):
     ) -> PluginOperationResult:
         """Remove a plugin.
 
+        Detects the installation method and delegates to the appropriate
+        strategy for uninstallation.
+
         Args:
             config: CLI configuration
             auth_manager: Authentication manager
@@ -855,18 +915,17 @@ class PluginCommand(BaseGroupCommand):
         # Detect installation method
         install_info = self.detector.detect()
 
-        # Determine which Python executable to use
+        # Check if the plugin lives in the isolated venv
         state = self._get_plugin_state()
-        if package in state.get("plugins", {}):
-            # Plugin is in isolated environment
+        using_plugin_env = package in state.get("plugins", {})
+
+        if using_plugin_env:
+            # Force isolated-venv strategy for this plugin
+            from .strategies import IsolatedVenvStrategy
+
             _, python_exe = self._ensure_plugin_environment()
-            target_python = python_exe
-            using_plugin_env = True
-        elif install_info.method in [
-            InstallMethod.SYSTEM,
-            InstallMethod.UNKNOWN,
-        ]:
-            # System installation but plugin not in plugin env - shouldn't happen
+            strategy: PluginInstallStrategy = IsolatedVenvStrategy(python_exe)
+        elif self._needs_isolated_venv(install_info.method):
             return PluginOperationResult(
                 success=False,
                 action=PluginAction.REMOVE,
@@ -875,39 +934,41 @@ class PluginCommand(BaseGroupCommand):
                 error="This plugin was not installed via deepctl",
             )
         else:
-            # Use same environment
-            target_python = self._python_executable
-            using_plugin_env = False
+            try:
+                strategy, _ = self._get_strategy(install_info.method)
+            except RuntimeError as exc:
+                return PluginOperationResult(
+                    success=False,
+                    action=PluginAction.REMOVE,
+                    package=package,
+                    message=f"Failed to remove {package}",
+                    error=str(exc),
+                )
 
-        # Build pip command
-        cmd = [target_python, "-m", "pip", "uninstall", "-y", package]
+        print_info(f"Removing {package}...")
+        ok, output = strategy.uninstall(package)
 
-        # Execute removal
-        try:
-            print_info(f"Removing {package}...")
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
-
-            # Update plugin state if using plugin environment
-            if using_plugin_env:
-                state = self._get_plugin_state()
-                state["plugins"].pop(package, None)
-                self._save_plugin_state(state)
-
-            return PluginOperationResult(
-                success=True,
-                action=PluginAction.REMOVE,
-                package=package,
-                message=f"Successfully removed {package}",
-            )
-
-        except subprocess.CalledProcessError as e:
+        if not ok:
             return PluginOperationResult(
                 success=False,
                 action=PluginAction.REMOVE,
                 package=package,
                 message=f"Failed to remove {package}",
-                error=e.stderr or str(e),
+                error=output,
             )
+
+        # Clean up plugin state for isolated venv installs
+        if using_plugin_env:
+            state = self._get_plugin_state()
+            state["plugins"].pop(package, None)
+            self._save_plugin_state(state)
+
+        return PluginOperationResult(
+            success=True,
+            action=PluginAction.REMOVE,
+            package=package,
+            message=f"Successfully removed {package}",
+        )
 
     def _discover_plugins(self) -> list[PluginPackage]:
         """Discover all installed plugins.

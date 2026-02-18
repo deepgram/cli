@@ -1,5 +1,6 @@
 """Plugin manager for deepctl command discovery and loading."""
 
+import sys
 from importlib import metadata
 from pathlib import Path
 from typing import Any, cast
@@ -10,6 +11,7 @@ from rich.console import Console
 from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
 from .models import ErrorResult, PluginInfo
+from .plugin_env import PLUGIN_VENV, get_plugin_state, get_venv_site_packages
 from .timing import TimingContext
 
 console = Console()
@@ -22,6 +24,7 @@ class PluginManager:
         """Initialize plugin manager."""
         self.loaded_plugins: dict[str, Any] = {}
         self.command_classes: dict[str, type[Any]] = {}
+        self._loaded_entry_point_values: set[str] = set()
 
     def load_plugins(self, cli_group: click.Group) -> None:
         """Load all plugins into the CLI group.
@@ -33,9 +36,13 @@ class PluginManager:
         with TimingContext("builtin_commands_loading"):
             self._load_builtin_commands(cli_group)
 
-        # Load external plugins
+        # Load external plugins from the current environment
         with TimingContext("external_plugins_loading"):
             self._load_external_plugins(cli_group)
+
+        # Bridge plugins installed in the isolated plugin venv
+        with TimingContext("plugin_venv_loading"):
+            self._load_plugin_venv_entries(cli_group)
 
     def _load_builtin_commands(self, cli_group: click.Group) -> None:
         """Load built-in commands from the commands entry point group."""
@@ -64,14 +71,9 @@ class PluginManager:
                         # Add to CLI group
                         cli_group.add_command(click_command)
 
-                        # Store reference
+                        # Store reference and track for dedup
                         self.command_classes[entry_point.name] = command_class
-
-                        # Debug: Loaded built-in command
-                        # console.print(
-                        #     f"[dim]Loaded built-in command:[/dim] "
-                        #     f"{entry_point.name}"
-                        # )
+                        self._loaded_entry_point_values.add(entry_point.value)
 
                     except Exception as e:
                         console.print(
@@ -101,14 +103,9 @@ class PluginManager:
                     # Add to CLI group
                     cli_group.add_command(click_command)
 
-                    # Store reference
+                    # Store reference and track for dedup
                     self.loaded_plugins[entry_point.name] = plugin_instance
-
-                    # Debug: Loaded external plugin
-                    # console.print(
-                    #     f"[dim]Loaded external plugin:[/dim] "
-                    #     f"{entry_point.name}"
-                    # )
+                    self._loaded_entry_point_values.add(entry_point.value)
 
                 except Exception as e:
                     console.print(
@@ -118,6 +115,80 @@ class PluginManager:
 
         except Exception as e:
             console.print(f"[red]Error loading external plugins:[/red] {e}")
+
+    def _load_plugin_venv_entries(self, cli_group: click.Group) -> None:
+        """Load plugins from the isolated plugin venv (``~/.deepctl/plugins/venv``).
+
+        This bridges plugins that were installed via ``deepctl plugin install``
+        into the CLI.  It only activates when:
+          1. The plugin venv directory exists.
+          2. ``plugins.json`` lists at least one plugin.
+          3. A valid ``site-packages`` path can be resolved.
+
+        The venv's ``site-packages`` is **appended** (not prepended) to
+        ``sys.path`` so that core packages always resolve from the main
+        environment first.
+        """
+        # Fast bail — nothing to do if the venv doesn't exist
+        if not PLUGIN_VENV.exists():
+            return
+
+        # Check if there are any plugins tracked in state
+        state = get_plugin_state()
+        if not state.get("plugins"):
+            return
+
+        site_packages = get_venv_site_packages()
+        if site_packages is None:
+            return
+
+        site_packages_str = str(site_packages)
+
+        # Append to sys.path so modules inside the plugin venv can be imported.
+        # Using append (not insert) guarantees core deps resolve from main env.
+        if site_packages_str not in sys.path:
+            sys.path.append(site_packages_str)
+
+        try:
+            # Scan only the plugin venv for distributions
+            for dist in metadata.distributions(path=[site_packages_str]):
+                ep_groups_to_check = ["deepctl.plugins"]
+
+                # Also check for subplugin groups
+                for ep in dist.entry_points:
+                    if ep.group and ep.group.startswith("deepctl.subplugins."):
+                        if ep.group not in ep_groups_to_check:
+                            ep_groups_to_check.append(ep.group)
+
+                for group_name in ep_groups_to_check:
+                    for ep in dist.entry_points:
+                        if ep.group != group_name:
+                            continue
+
+                        # Dedup: skip if already loaded from main environment
+                        if ep.value in self._loaded_entry_point_values:
+                            continue
+
+                        try:
+                            plugin_class = ep.load()
+                            plugin_instance = plugin_class()
+                            click_command = self._create_click_command(
+                                plugin_instance
+                            )
+                            cli_group.add_command(click_command)
+
+                            self.loaded_plugins[ep.name] = plugin_instance
+                            self._loaded_entry_point_values.add(ep.value)
+                        except Exception as e:
+                            console.print(
+                                f"[red]Error loading plugin venv entry "
+                                f"{ep.name}:[/red] {e}"
+                            )
+
+        except Exception as e:
+            console.print(
+                f"[red]Error loading plugins from plugin venv:[/red] {e}"
+            )
 
     def _create_click_command(self, command_instance: Any) -> click.Command:
         """Create a Click command from a BaseCommand instance.

@@ -311,3 +311,208 @@ class TestPluginManager:
             help = "Not a command"
 
         assert plugin_manager.validate_plugin(NotACommand) is False
+
+    @pytest.mark.unit
+    def test_constructor_initializes_dedup_set(self, plugin_manager):
+        """Test that constructor initializes the dedup tracking set."""
+        assert plugin_manager._loaded_entry_point_values == set()
+
+    @pytest.mark.unit
+    def test_builtin_commands_track_entry_point_values(
+        self, plugin_manager, mock_command_class, mock_cli_group
+    ):
+        """Test that loading builtin commands populates the dedup set."""
+        mock_entry_point = Mock(spec=EntryPoint)
+        mock_entry_point.name = "test_cmd"
+        mock_entry_point.value = "my_module:TestCommand"
+        mock_entry_point.load.return_value = mock_command_class
+
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
+            mock_ep_group = Mock()
+            mock_ep_group.select.return_value = [mock_entry_point]
+            mock_entry_points.return_value = mock_ep_group
+
+            plugin_manager._load_builtin_commands(mock_cli_group)
+
+            assert "my_module:TestCommand" in plugin_manager._loaded_entry_point_values
+
+    @pytest.mark.unit
+    def test_external_plugins_track_entry_point_values(
+        self, plugin_manager, mock_command_class, mock_cli_group
+    ):
+        """Test that loading external plugins populates the dedup set."""
+        mock_entry_point = Mock(spec=EntryPoint)
+        mock_entry_point.name = "ext_plugin"
+        mock_entry_point.value = "ext_module:ExtPlugin"
+        mock_entry_point.load.return_value = mock_command_class
+
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_entry_points:
+            mock_ep_group = Mock()
+            mock_ep_group.select.return_value = [mock_entry_point]
+            mock_entry_points.return_value = mock_ep_group
+
+            plugin_manager._load_external_plugins(mock_cli_group)
+
+            assert "ext_module:ExtPlugin" in plugin_manager._loaded_entry_point_values
+
+    @pytest.mark.unit
+    def test_plugin_venv_skips_when_no_venv(
+        self, plugin_manager, mock_cli_group
+    ):
+        """Test that _load_plugin_venv_entries bails when venv doesn't exist."""
+        with patch(
+            "deepctl_core.plugin_manager.PLUGIN_VENV"
+        ) as mock_venv:
+            mock_venv.exists.return_value = False
+
+            # Should not raise
+            plugin_manager._load_plugin_venv_entries(mock_cli_group)
+
+            # No commands should be added
+            mock_cli_group.add_command.assert_not_called()
+
+    @pytest.mark.unit
+    def test_plugin_venv_skips_when_state_empty(
+        self, plugin_manager, mock_cli_group
+    ):
+        """Test that _load_plugin_venv_entries bails when plugins.json is empty."""
+        with patch(
+            "deepctl_core.plugin_manager.PLUGIN_VENV"
+        ) as mock_venv:
+            mock_venv.exists.return_value = True
+
+            with patch(
+                "deepctl_core.plugin_manager.get_plugin_state",
+                return_value={"plugins": {}},
+            ):
+                plugin_manager._load_plugin_venv_entries(mock_cli_group)
+                mock_cli_group.add_command.assert_not_called()
+
+    @pytest.mark.unit
+    def test_plugin_venv_skips_when_no_site_packages(
+        self, plugin_manager, mock_cli_group
+    ):
+        """Test that _load_plugin_venv_entries bails when site-packages can't be found."""
+        with patch(
+            "deepctl_core.plugin_manager.PLUGIN_VENV"
+        ) as mock_venv:
+            mock_venv.exists.return_value = True
+
+            with patch(
+                "deepctl_core.plugin_manager.get_plugin_state",
+                return_value={"plugins": {"some-plugin": {}}},
+            ):
+                with patch(
+                    "deepctl_core.plugin_manager.get_venv_site_packages",
+                    return_value=None,
+                ):
+                    plugin_manager._load_plugin_venv_entries(mock_cli_group)
+                    mock_cli_group.add_command.assert_not_called()
+
+    @pytest.mark.unit
+    def test_plugin_venv_deduplicates_already_loaded(
+        self, plugin_manager, mock_command_class, mock_cli_group
+    ):
+        """Test that plugins already loaded from main env are skipped."""
+        # Pre-populate the dedup set
+        plugin_manager._loaded_entry_point_values.add(
+            "my_plugin.command:MyPlugin"
+        )
+
+        # Create a mock distribution with the same entry point value
+        mock_ep = Mock()
+        mock_ep.name = "my-plugin"
+        mock_ep.group = "deepctl.plugins"
+        mock_ep.value = "my_plugin.command:MyPlugin"
+
+        mock_dist = Mock()
+        mock_dist.entry_points = [mock_ep]
+
+        from pathlib import Path as RealPath
+        fake_sp = RealPath("/fake/site-packages")
+
+        with patch(
+            "deepctl_core.plugin_manager.PLUGIN_VENV"
+        ) as mock_venv:
+            mock_venv.exists.return_value = True
+
+            with patch(
+                "deepctl_core.plugin_manager.get_plugin_state",
+                return_value={"plugins": {"my-plugin": {}}},
+            ):
+                with patch(
+                    "deepctl_core.plugin_manager.get_venv_site_packages",
+                    return_value=fake_sp,
+                ):
+                    with patch(
+                        "deepctl_core.plugin_manager.metadata.distributions",
+                        return_value=[mock_dist],
+                    ):
+                        with patch(
+                            "deepctl_core.plugin_manager.sys"
+                        ) as mock_sys:
+                            mock_sys.path = []
+
+                            plugin_manager._load_plugin_venv_entries(
+                                mock_cli_group
+                            )
+
+                            # Should NOT add the command (it's a duplicate)
+                            mock_cli_group.add_command.assert_not_called()
+
+    @pytest.mark.unit
+    def test_plugin_venv_loads_new_plugins(
+        self, plugin_manager, mock_command_class, mock_cli_group
+    ):
+        """Test that new plugins from the venv are loaded."""
+        mock_ep = Mock()
+        mock_ep.name = "venv-plugin"
+        mock_ep.group = "deepctl.plugins"
+        mock_ep.value = "venv_plugin.command:VenvPlugin"
+        mock_ep.load.return_value = mock_command_class
+
+        mock_dist = Mock()
+        mock_dist.entry_points = [mock_ep]
+
+        from pathlib import Path as RealPath
+        fake_sp = RealPath("/fake/site-packages")
+
+        with patch(
+            "deepctl_core.plugin_manager.PLUGIN_VENV"
+        ) as mock_venv:
+            mock_venv.exists.return_value = True
+
+            with patch(
+                "deepctl_core.plugin_manager.get_plugin_state",
+                return_value={"plugins": {"venv-plugin": {}}},
+            ):
+                with patch(
+                    "deepctl_core.plugin_manager.get_venv_site_packages",
+                    return_value=fake_sp,
+                ):
+                    with patch(
+                        "deepctl_core.plugin_manager.metadata.distributions",
+                        return_value=[mock_dist],
+                    ):
+                        with patch(
+                            "deepctl_core.plugin_manager.sys"
+                        ) as mock_sys:
+                            mock_sys.path = []
+
+                            plugin_manager._load_plugin_venv_entries(
+                                mock_cli_group
+                            )
+
+                            # Should add the command
+                            mock_cli_group.add_command.assert_called_once()
+                            # Should track in dedup set
+                            assert (
+                                "venv_plugin.command:VenvPlugin"
+                                in plugin_manager._loaded_entry_point_values
+                            )
+                            # Should be in loaded_plugins
+                            assert "venv-plugin" in plugin_manager.loaded_plugins

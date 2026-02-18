@@ -57,8 +57,8 @@ class TestPluginCommand:
 
                 assert success is True
                 assert "python" in python_path
-                # Should call venv creation and pip upgrade
-                assert mock_run.call_count == 2
+                # Should call: venv creation, pip upgrade, deepctl-core install
+                assert mock_run.call_count == 3
 
     def test_ensure_plugin_environment_existing(self) -> None:
         """Test that existing plugin environment is used."""
@@ -96,14 +96,17 @@ class TestPluginCommand:
             written_data = json.loads(mock_write.call_args[0][0])
             assert written_data == test_state
 
-    @patch("deepctl_cmd_plugin.command.subprocess.run")
-    def test_install_plugin_pip_environment(self, mock_run: MagicMock) -> None:
+    @patch("deepctl_cmd_plugin.strategies.subprocess.run")
+    def test_install_plugin_pip_environment(
+        self, mock_strategy_run: MagicMock
+    ) -> None:
         """Test installing plugin in pip environment."""
         # Mock pip installation detection
         with patch.object(self.command.detector, "detect") as mock_detect:
             mock_detect.return_value.method = InstallMethod.PIP
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "Successfully installed"
+            mock_strategy_run.return_value = MagicMock(
+                returncode=0, stdout="Successfully installed"
+            )
 
             options = PluginInstallOptions(package="test-plugin")
             result = self.command.install_plugin(
@@ -112,14 +115,13 @@ class TestPluginCommand:
 
             assert result.success is True
             assert "Successfully installed" in result.message
-            # Should use system python for pip installs
-            assert (
-                mock_run.call_args[0][0][0] == self.command._python_executable
-            )
+            # PipStrategy uses sys.executable
+            cmd = mock_strategy_run.call_args[0][0]
+            assert cmd[0] == self.command._python_executable
 
-    @patch("deepctl_cmd_plugin.command.subprocess.run")
+    @patch("deepctl_cmd_plugin.strategies.subprocess.run")
     def test_install_plugin_system_environment(
-        self, mock_run: MagicMock
+        self, mock_strategy_run: MagicMock
     ) -> None:
         """Test installing plugin in system environment (brew, apt, etc)."""
         # Mock system installation detection
@@ -131,35 +133,41 @@ class TestPluginCommand:
                 self.command, "_ensure_plugin_environment"
             ) as mock_ensure:
                 mock_ensure.return_value = (True, "/path/to/plugin/python")
-                mock_run.return_value.returncode = 0
-                mock_run.return_value.stdout = "Successfully installed"
+                mock_strategy_run.return_value = MagicMock(
+                    returncode=0, stdout="Successfully installed"
+                )
 
-                # Mock state operations
+                # Mock state and version operations
                 with patch.object(
                     self.command, "_get_plugin_state"
                 ) as mock_get_state:
                     with patch.object(
                         self.command, "_save_plugin_state"
                     ) as mock_save_state:
-                        mock_get_state.return_value = {"plugins": {}}
+                        with patch.object(
+                            self.command,
+                            "_get_package_version",
+                            return_value="1.0.0",
+                        ):
+                            mock_get_state.return_value = {"plugins": {}}
 
-                        options = PluginInstallOptions(package="test-plugin")
-                        result = self.command.install_plugin(
-                            self.config,
-                            self.auth_manager,
-                            self.client,
-                            options,
-                        )
+                            options = PluginInstallOptions(
+                                package="test-plugin"
+                            )
+                            result = self.command.install_plugin(
+                                self.config,
+                                self.auth_manager,
+                                self.client,
+                                options,
+                            )
 
-                        assert result.success is True
-                        assert "Successfully installed" in result.message
-                        # Should use plugin environment python
-                        assert (
-                            mock_run.call_args[0][0][0]
-                            == "/path/to/plugin/python"
-                        )
-                        # Should save plugin state
-                        mock_save_state.assert_called_once()
+                            assert result.success is True
+                            assert "Successfully installed" in result.message
+                            # Strategy should use the plugin env python
+                            cmd = mock_strategy_run.call_args[0][0]
+                            assert cmd[0] == "/path/to/plugin/python"
+                            # Should save plugin state
+                            mock_save_state.assert_called_once()
 
     def test_install_plugin_git_url(self) -> None:
         """Test handling git URL in install options."""
@@ -167,9 +175,11 @@ class TestPluginCommand:
             mock_detect.return_value.method = InstallMethod.PIP
 
             with patch(
-                "deepctl_cmd_plugin.command.subprocess.run"
-            ) as mock_run:
-                mock_run.return_value.returncode = 0
+                "deepctl_cmd_plugin.strategies.subprocess.run"
+            ) as mock_strategy_run:
+                mock_strategy_run.return_value = MagicMock(
+                    returncode=0, stdout="OK"
+                )
 
                 # Mock _get_package_version to return a version string
                 with patch.object(
@@ -184,12 +194,12 @@ class TestPluginCommand:
                     )
 
                     # Should include git URL in pip command
-                    pip_cmd = mock_run.call_args[0][0]
+                    pip_cmd = mock_strategy_run.call_args[0][0]
                     assert "git+https://github.com/user/repo.git" in pip_cmd
                     assert result.success is True
 
-    @patch("deepctl_cmd_plugin.command.subprocess.run")
-    def test_remove_plugin_success(self, mock_run: MagicMock) -> None:
+    @patch("deepctl_cmd_plugin.strategies.subprocess.run")
+    def test_remove_plugin_success(self, mock_strategy_run: MagicMock) -> None:
         """Test successful plugin removal."""
         # Mock plugin discovery
         with patch.object(self.command, "_discover_plugins") as mock_discover:
@@ -204,7 +214,9 @@ class TestPluginCommand:
             # Mock pip environment
             with patch.object(self.command.detector, "detect") as mock_detect:
                 mock_detect.return_value.method = InstallMethod.PIP
-                mock_run.return_value.returncode = 0
+                mock_strategy_run.return_value = MagicMock(
+                    returncode=0, stdout="Removed"
+                )
 
                 result = self.command.remove_plugin(
                     self.config, self.auth_manager, self.client, "test-plugin"
@@ -436,3 +448,120 @@ class TestPluginCommand:
         assert any(p.name == "deepctl-plugin-example" for p in registry)
         assert all(hasattr(p, "description") for p in registry)
         assert all(hasattr(p, "version") for p in registry)
+
+    def test_uses_shared_plugin_env_constants(self) -> None:
+        """Test that PluginCommand uses shared constants from plugin_env."""
+        from deepctl_core.plugin_env import PLUGIN_DIR, PLUGIN_STATE_FILE, PLUGIN_VENV
+
+        assert self.command._plugin_dir == PLUGIN_DIR
+        assert self.command._plugin_venv == PLUGIN_VENV
+        assert self.command._plugin_state_file == PLUGIN_STATE_FILE
+
+    @patch("deepctl_cmd_plugin.command.is_frozen", return_value=True)
+    @patch("deepctl_cmd_plugin.command.find_system_python")
+    @patch("deepctl_cmd_plugin.command.subprocess.run")
+    def test_ensure_plugin_env_frozen_uses_system_python(
+        self,
+        mock_run: MagicMock,
+        mock_find: MagicMock,
+        mock_frozen: MagicMock,
+    ) -> None:
+        """Test that frozen binary uses find_system_python for venv creation."""
+        mock_find.return_value = "/usr/bin/python3.11"
+        mock_run.return_value.returncode = 0
+
+        with patch.object(Path, "exists", return_value=False):
+            with patch.object(Path, "mkdir"):
+                with patch(
+                    "deepctl_cmd_plugin.command.get_venv_python",
+                    return_value="/fake/venv/bin/python",
+                ):
+                    success, python_path = (
+                        self.command._ensure_plugin_environment()
+                    )
+
+                    assert success is True
+                    # Should use system python to create the venv
+                    venv_create_cmd = mock_run.call_args_list[0][0][0]
+                    assert venv_create_cmd[0] == "/usr/bin/python3.11"
+                    assert "-m" in venv_create_cmd
+                    assert "venv" in venv_create_cmd
+
+    @patch("deepctl_cmd_plugin.command.is_frozen", return_value=True)
+    @patch("deepctl_cmd_plugin.command.find_system_python", return_value=None)
+    def test_ensure_plugin_env_frozen_no_python_fails(
+        self,
+        mock_find: MagicMock,
+        mock_frozen: MagicMock,
+    ) -> None:
+        """Test that frozen binary fails gracefully when no system Python found."""
+        with patch.object(Path, "exists", return_value=False):
+            with patch.object(Path, "mkdir"):
+                success, python_path = (
+                    self.command._ensure_plugin_environment()
+                )
+
+                assert success is False
+                assert python_path == ""
+
+    @patch("deepctl_cmd_plugin.command.subprocess.run")
+    def test_install_core_into_venv(self, mock_run: MagicMock) -> None:
+        """Test that _install_core_into_venv installs deepctl-core."""
+        mock_run.return_value.returncode = 0
+
+        self.command._install_core_into_venv("/path/to/venv/python")
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "/path/to/venv/python"
+        assert "pip" in " ".join(cmd)
+        assert any("deepctl-core" in arg for arg in cmd)
+
+    @patch("deepctl_cmd_plugin.command.subprocess.run")
+    def test_install_plugin_uses_strategy(self, mock_run: MagicMock) -> None:
+        """Test that install_plugin delegates to strategy."""
+        with patch.object(self.command.detector, "detect") as mock_detect:
+            mock_detect.return_value.method = InstallMethod.PIP
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="Installed"
+            )
+
+            options = PluginInstallOptions(package="test-plugin")
+            result = self.command.install_plugin(
+                self.config, self.auth_manager, self.client, options
+            )
+
+            assert result.success is True
+
+    @patch("deepctl_cmd_plugin.command.subprocess.run")
+    def test_remove_plugin_uses_strategy(self, mock_run: MagicMock) -> None:
+        """Test that remove_plugin delegates to strategy."""
+        from deepctl_cmd_plugin.models import PluginPackage
+
+        with patch.object(self.command, "_discover_plugins") as mock_discover:
+            mock_discover.return_value = [
+                PluginPackage(
+                    name="test-plugin", version="1.0.0", is_builtin=False
+                )
+            ]
+
+            with patch.object(self.command.detector, "detect") as mock_detect:
+                mock_detect.return_value.method = InstallMethod.PIP
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout="Removed"
+                )
+
+                result = self.command.remove_plugin(
+                    self.config, self.auth_manager, self.client, "test-plugin"
+                )
+
+                assert result.success is True
+                assert "Successfully removed" in result.message
+
+    def test_needs_isolated_venv(self) -> None:
+        """Test _needs_isolated_venv for various methods."""
+        assert self.command._needs_isolated_venv(InstallMethod.HOMEBREW) is True
+        assert self.command._needs_isolated_venv(InstallMethod.SYSTEM) is True
+        assert self.command._needs_isolated_venv(InstallMethod.UNKNOWN) is True
+        assert self.command._needs_isolated_venv(InstallMethod.PIP) is False
+        assert self.command._needs_isolated_venv(InstallMethod.PIPX) is False
+        assert self.command._needs_isolated_venv(InstallMethod.UV) is False
