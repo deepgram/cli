@@ -147,16 +147,18 @@ def collect_command_metadata() -> list[CommandMetadata]:
             pass
 
     # Subcommands (deepctl.subcommands.*)
-    for ep in eps:
-        if ep.group and ep.group.startswith("deepctl.subcommands."):
-            parent = ep.group.rsplit(".", 1)[-1]
+    # Discover subcommand groups by checking known group commands
+    group_names = [c.name for c in commands if c.is_group and c.parent_group is None]
+    for group_name in group_names:
+        sub_group = f"deepctl.subcommands.{group_name}"
+        for ep in eps.select(group=sub_group):
             try:
                 cmd_class = ep.load()
                 instance = cmd_class()
                 commands.append(
                     CommandMetadata(
                         name=instance.name,
-                        full_command=f"deepctl {parent} {instance.name}",
+                        full_command=f"deepctl {group_name} {instance.name}",
                         help=instance.help,
                         agent_help=getattr(instance, "agent_help", ""),
                         requires_auth=getattr(instance, "requires_auth", False),
@@ -164,7 +166,7 @@ def collect_command_metadata() -> list[CommandMetadata]:
                         examples=list(getattr(instance, "examples", [])),
                         arguments=_safe_get_arguments(instance),
                         is_group=False,
-                        parent_group=parent,
+                        parent_group=group_name,
                         source="builtin",
                     )
                 )
