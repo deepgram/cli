@@ -210,7 +210,7 @@ class LoginCommand(BaseCommand):
         try:
             # Store credentials (verification happens inside
             # login_with_api_key)
-            auth_manager.login_with_api_key(api_key, project_id or "", force_write)
+            auth_manager.login_with_api_key(api_key, project_id or None, force_write)
 
             profile_name = config.profile or "default"
 
@@ -228,7 +228,7 @@ class LoginCommand(BaseCommand):
             )
 
         except AuthenticationError as e:
-            console.print(f"[red]Authentication failed:[/red] {e}")
+            console.print(f"[red]Login failed:[/red] {e}")
             return LoginResult(
                 status="error",
                 message=str(e),
@@ -237,7 +237,7 @@ class LoginCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Error during CLI authentication:[/red] {e}")
+            console.print(f"[red]Error:[/red] {e}")
             return LoginResult(
                 status="error",
                 message=str(e),

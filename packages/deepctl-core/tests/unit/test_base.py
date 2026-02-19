@@ -242,16 +242,9 @@ class TestBaseCommand:
 
         command = AuthCommand()
 
-        # Execute should raise ClickException
-        with pytest.raises(
-            click.ClickException, match="Authentication failed"
-        ):
+        # Execute should raise SystemExit (guard already printed the error)
+        with pytest.raises(SystemExit):
             command.execute(mock_context)
-
-        # Verify error was printed
-        mock_console.print.assert_called_with(
-            "[red]Authentication required:[/red] Authentication failed"
-        )
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")

@@ -137,16 +137,30 @@ class TestAuthManager:
 
     @patch.dict("os.environ", {}, clear=True)  # Clear environment variables
     def test_verify_credentials_no_project_id(self, auth_manager):
-        """Test verification without project ID."""
-        # Mock get_project_id to return None
+        """Test verification without project ID falls back to key-only check."""
+        # Mock successful API response for /v1/projects
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"projects": []}
+        auth_manager.client.get.return_value = mock_response
+
         with patch.object(auth_manager, "get_project_id", return_value=None):
             success, message, error_type = auth_manager.verify_credentials(
                 api_key="sk-test-key", project_id=None
             )
 
-            assert success is False
-            assert message == "No project ID provided or stored"
-            assert error_type == "project"
+            assert success is True
+            assert message == "API key verified successfully"
+            assert error_type is None
+
+            # Should have called /v1/projects (key-only verification)
+            auth_manager.client.get.assert_called_once_with(
+                "https://api.deepgram.com/v1/projects",
+                headers={
+                    "Authorization": "Token sk-test-key",
+                    "Content-Type": "application/json",
+                },
+            )
 
     def test_verify_credentials_network_error(self, auth_manager):
         """Test verification with network error."""
@@ -227,10 +241,10 @@ class TestAuthManager:
         with patch.object(
             auth_manager, "get_api_key", return_value="sk-test-key"
         ):
-            # Mock successful verification
+            # Mock successful key verification
             with patch.object(
                 auth_manager,
-                "verify_credentials",
+                "verify_api_key",
                 return_value=(True, "Success", None),
             ):
                 # Should not raise
@@ -251,15 +265,31 @@ class TestAuthManager:
         with patch.object(
             auth_manager, "get_api_key", return_value="sk-test-key"
         ):
-            # Mock failed verification
+            # Mock failed key verification
             with patch.object(
                 auth_manager,
-                "verify_credentials",
+                "verify_api_key",
                 return_value=(False, "Invalid API key", "auth"),
             ):
                 with pytest.raises(
                     AuthenticationError, match="Invalid API key"
                 ):
+                    auth_manager.guard()
+
+    def test_guard_does_not_require_project_id(self, auth_manager):
+        """Test that guard() only checks API key, not project_id."""
+        with patch.object(
+            auth_manager, "get_api_key", return_value="sk-test-key"
+        ):
+            with patch.object(
+                auth_manager,
+                "verify_api_key",
+                return_value=(True, "API key verified", None),
+            ):
+                with patch.object(
+                    auth_manager, "get_project_id", return_value=None
+                ):
+                    # Should NOT raise even without project_id
                     auth_manager.guard()
 
     def test_login_with_api_key_success(self, auth_manager, mock_config):
@@ -291,7 +321,7 @@ class TestAuthManager:
             return_value=(False, "Invalid API key", "auth"),
         ):
             with pytest.raises(
-                AuthenticationError, match="API key verification failed"
+                AuthenticationError, match="Invalid API key"
             ):
                 auth_manager.login_with_api_key(
                     "sk-invalid-key", "test-project"

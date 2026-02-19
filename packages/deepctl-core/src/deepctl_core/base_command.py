@@ -92,9 +92,10 @@ class BaseCommand(ABC):
                                         "[yellow]Warning: No project ID specified[/yellow]"
                                     )
 
-                    except Exception as e:
-                        console.print(f"[red]Authentication required:[/red] {e}")
-                        raise click.ClickException(str(e))
+                    except Exception:
+                        # guard() already printed helpful error messages;
+                        # exit without duplicating them.
+                        raise SystemExit(1)
 
             # Check project ID if required
             if self.requires_project:

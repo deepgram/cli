@@ -235,11 +235,63 @@ class AuthManager:
 
         return "no credentials"
 
+    def verify_api_key(
+        self, api_key: str | None = None
+    ) -> tuple[bool, str, str | None]:
+        """Verify that an API key is valid by listing projects.
+
+        Args:
+            api_key: API key to verify (uses stored key if not provided)
+
+        Returns:
+            Tuple of (success, message, error_type)
+        """
+        if not api_key:
+            api_key = self.get_api_key()
+
+        if not api_key:
+            return False, "No API key provided or stored", "auth"
+
+        try:
+            headers = {
+                "Authorization": f"Token {api_key}",
+                "Content-Type": "application/json",
+            }
+
+            response = self.client.get(
+                "https://api.deepgram.com/v1/projects",
+                headers=headers,
+            )
+
+            if response.status_code == 200:
+                return True, "API key verified successfully", None
+            elif response.status_code == 401:
+                return False, "Invalid API key - authentication failed", "auth"
+            elif response.status_code == 403:
+                return False, "API key lacks required permissions", "auth"
+            else:
+                return (
+                    False,
+                    f"Unexpected error: HTTP {response.status_code}",
+                    "unknown",
+                )
+
+        except httpx.RequestError as e:
+            return False, f"Network error during verification: {e}", "network"
+        except Exception as e:
+            return (
+                False,
+                f"Unexpected error during verification: {e}",
+                "unknown",
+            )
+
     def verify_credentials(
         self, api_key: str | None = None, project_id: str | None = None
     ) -> tuple[bool, str, str | None]:
-        """Verify API key and project ID by making a request to the
-        Deepgram API.
+        """Verify API key and optionally project ID.
+
+        If project_id is provided, verifies both the key and project access.
+        If only api_key is provided, verifies just the key.
 
         Args:
             api_key: API key to verify (uses stored key if not provided)
@@ -255,17 +307,18 @@ class AuthManager:
         # Use provided credentials or get from storage
         if not api_key:
             api_key = self.get_api_key()
-        if not project_id:
+        if project_id is None:
             project_id = self.get_project_id()
 
-        # Check if we have required credentials
+        # Check if we have an API key
         if not api_key:
             return False, "No API key provided or stored", "auth"
 
+        # If no project_id, just verify the API key alone
         if not project_id:
-            return False, "No project ID provided or stored", "project"
+            return self.verify_api_key(api_key)
 
-        # Make API request to verify credentials
+        # Make API request to verify both credentials
         try:
             headers = {
                 "Authorization": f"Token {api_key}",
@@ -307,8 +360,11 @@ class AuthManager:
             )
 
     def guard(self) -> None:
-        """Guard function to ensure authentication (replicated from Go
-        implementation)."""
+        """Guard function to ensure a valid API key is available.
+
+        Only validates that the API key works. Project ID validation
+        is handled separately by requires_project on BaseCommand.
+        """
         api_key = self.get_api_key()
 
         if not api_key:
@@ -324,8 +380,8 @@ class AuthManager:
             )
             raise AuthenticationError("DEEPGRAM_API_KEY is not set")
 
-        # Verify credentials before proceeding
-        success, message, error_type = self.verify_credentials()
+        # Verify the API key is valid (does NOT require project_id)
+        success, message, error_type = self.verify_api_key(api_key)
         if not success:
             console.print(f"[red]Error:[/red] {message}")
 
@@ -336,27 +392,16 @@ class AuthManager:
                     "[yellow]Run[/yellow] [bold]deepctl login[/bold] "
                     "[yellow]to re-authenticate.[/yellow]"
                 )
-                raise AuthenticationError(message)
-            elif error_type == "project":
-                console.print(
-                    "[yellow]The project may have been deleted or you may "
-                    "need to specify a different project.[/yellow]\n"
-                    "[yellow]Run[/yellow] [bold]deepctl login --project-id "
-                    "<project_id>[/bold] [yellow]to set a valid project "
-                    "ID.[/yellow]"
-                )
-                raise AuthenticationError(message)
-            else:
-                raise AuthenticationError(message)
+            raise AuthenticationError(message)
 
     def login_with_api_key(
-        self, api_key: str, project_id: str, _force_write: bool = False
+        self, api_key: str, project_id: str | None = None, _force_write: bool = False
     ) -> None:
         """Login with API key directly (CI-friendly method).
 
         Args:
             api_key: Deepgram API key
-            project_id: Deepgram project ID
+            project_id: Deepgram project ID (optional — can be set later)
             force_write: Skip confirmation prompts
         """
         # Validate API key format (basic check)
@@ -365,20 +410,32 @@ class AuthManager:
                 "[red]Warning:[/red] API key format doesn't match expected pattern"
             )
 
-        # Verify credentials before storing
+        # Verify API key (and project if provided)
         console.print("[dim]Verifying credentials...[/dim]")
-        success, message, error_type = self.verify_credentials(api_key, project_id)
+        success, message, error_type = self.verify_credentials(
+            api_key, project_id or None
+        )
 
         if not success:
-            console.print(f"[red]Error:[/red] {message}")
             if error_type == "auth":
-                raise AuthenticationError(f"API key verification failed: {message}")
+                raise AuthenticationError(message)
             elif error_type == "project":
-                raise AuthenticationError(f"Project ID verification failed: {message}")
+                # Project ID is invalid, but the key might be fine — warn but
+                # still store the key so the user isn't locked out.
+                console.print(
+                    f"[yellow]Warning:[/yellow] {message}. "
+                    "API key will still be stored."
+                )
+                console.print(
+                    "[dim]You can update the project ID later with: "
+                    "deepctl login --project-id <id>[/dim]"
+                )
+                # Clear the bad project_id so we don't store it
+                project_id = None
             else:
-                raise AuthenticationError(f"Credential verification failed: {message}")
-
-        console.print(f"[green]✓[/green] {message}")
+                raise AuthenticationError(message)
+        else:
+            console.print(f"[green]✓[/green] {message}")
 
         # Store API key in keyring for security
         profile_name = self.config.profile or "default"
@@ -453,8 +510,14 @@ class AuthManager:
                 f"open:[/dim] [dim]{verification_uri}[/dim]\n"
             )
 
-            # Wait for Enter key
-            console.input()
+            # Wait for Enter key (skip if stdin is not a TTY)
+            try:
+                if hasattr(console, "is_terminal") and not console.is_terminal:
+                    console.print("[dim]Non-interactive terminal — opening browser automatically[/dim]")
+                else:
+                    console.input()
+            except EOFError:
+                console.print("[dim]Opening browser automatically...[/dim]")
 
             # Open browser
             try:
