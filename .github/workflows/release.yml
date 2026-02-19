@@ -1,8 +1,6 @@
 name: Release to PyPI
 
-# This workflow mirrors the local release process using the same Makefile commands
-# It runs when a version tag is pushed (e.g., v0.2.0)
-
+# Triggered by release-please creating a v* tag
 on:
   push:
     tags:
@@ -10,31 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  # The workflow follows the same steps as our local release process:
-  # 1. Verify configuration (pre-build check)
-  # 2. Build packages
-  # 3. Verify built packages (post-build check)
-  # 4. Test installation
-  # 5. Publish to PyPI
-  verify:
-    name: Verify package configuration
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-
-      - name: Verify packages
-        run: make verify-packages
-
   build:
     name: Build all packages
-    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,20 +21,20 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Install dependencies
-        run: |
-          uv pip install --system build twine
+      - name: Install build dependencies
+        run: pip install build
 
       - name: Build all packages
-        run: make build
+        run: |
+          for pkg in . packages/*; do
+            if [ -f "$pkg/pyproject.toml" ]; then
+              echo "📦 Building $pkg..."
+              python -m build "$pkg" --outdir dist/
+            fi
+          done
 
-      - name: Verify built packages
-        run: make verify-packages
+      - name: List built artifacts
+        run: ls -lh dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -99,22 +74,19 @@ jobs:
     name: Publish to PyPI
     needs: [build, test]
     runs-on: ubuntu-latest
-    environment: pypi # Must be configured in GitHub repository settings
+    environment: pypi
     permissions:
       contents: read
       id-token: write # Required for PyPI trusted publishing
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Install publishing dependencies
-        run: |
-          pip install twine
+      - name: Install twine
+        run: pip install twine
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -122,19 +94,8 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish to PyPI using publish.py
+      - name: Publish to PyPI
         env:
-          # For token-based auth (legacy)
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          # Try token auth first, then fall back to trusted publishing
-          if [ -n "$TWINE_PASSWORD" ]; then
-            echo "Using PyPI token authentication"
-            python scripts/publish.py --non-interactive --skip-existing
-          else
-            echo "Using PyPI trusted publishing"
-            # For trusted publishing, we need to use the action
-            # But we'll keep the script for local use
-            python -m twine upload --non-interactive --skip-existing dist/*
-          fi
+        run: twine upload --skip-existing dist/*

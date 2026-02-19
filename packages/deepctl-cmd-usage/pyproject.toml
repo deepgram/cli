@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-usage"
-version = "0.1.10"
+version = "0.1.10" # x-release-please-version
 description = "Usage command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,8 +21,8 @@ classifiers = [
 keywords = ["deepgram", "cli", "usage", "statistics"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10",
-    "deepctl-shared-utils>=0.1.10",
+    "deepctl-core>=0.1.10", # x-release-please-version
+    "deepctl-shared-utils>=0.1.10", # x-release-please-version
     "click>=8.0.0",
     "rich>=13.0.0",
     "deepgram-sdk>=6.0.0rc2",

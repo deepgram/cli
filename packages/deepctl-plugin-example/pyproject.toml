@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-plugin-example"
-version = "0.1.10"
+version = "0.1.10" # x-release-please-version
 description = "Example plugin for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,11 @@ classifiers = [
 ]
 keywords = ["deepgram", "cli", "plugin", "example"]
 requires-python = ">=3.10"
-dependencies = ["deepctl-core>=0.1.10", "click>=8.0.0", "rich>=13.0.0"]
+dependencies = [
+    "deepctl-core>=0.1.10", # x-release-please-version
+    "click>=8.0.0",
+    "rich>=13.0.0",
+]
 
 [project.entry-points."deepctl.plugins"]
 example = "deepctl_plugin_example.command:ExampleCommand"

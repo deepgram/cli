@@ -1,74 +1,28 @@
 # deepctl-cmd-plugin
 
-Plugin management command for deepctl CLI.
+> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-## Description
+Plugin management command for deepctl
 
-This command provides plugin management functionality for deepctl, allowing users to:
+## Installation
 
-- Search for available plugins in the registry
-- Install plugins from PyPI, GitHub, or local paths
-- List installed plugins
-- Update plugins to newer versions
-- Remove plugins
+Installed automatically with deepctl:
 
-This solves the environment isolation issue that occurs when deepctl is installed via pipx, uv, brew, or other package managers that create isolated environments.
+```bash
+pip install deepctl
+```
 
 ## Commands
 
-- `deepctl plugin search [query]` - Search for available plugins
-- `deepctl plugin install <package>` - Install a plugin
-- `deepctl plugin list` - List installed plugins
-- `deepctl plugin update <package>` - Update a plugin
-- `deepctl plugin remove <package>` - Remove a plugin
+| Command | Entry Point |
+|---------|-------------|
+| `deepctl plugin` | `deepctl_cmd_plugin.command:PluginCommand` |
 
-## Examples
+## Dependencies
 
-### Search for plugins
+- `packaging>=21.0`
+- `toml>=0.10.2`
 
-```bash
-# Show all available plugins
-deepctl plugin search
+## License
 
-# Search for plugins by keyword
-deepctl plugin search audio
-
-# Show only installed plugins
-deepctl plugin search --installed
-
-# Show only available (not installed) plugins
-deepctl plugin search --available
-```
-
-### Install plugins
-
-```bash
-# Install from PyPI
-deepctl plugin install deepctl-plugin-example
-
-# Install from GitHub
-deepctl plugin install git+https://github.com/deepgram/deepctl-plugin-custom.git
-
-# Install specific version
-deepctl plugin install deepctl-plugin-example==1.0.0
-
-# Install from local directory
-deepctl plugin install -e /path/to/plugin
-```
-
-## How it works
-
-The plugin command automatically detects how deepctl was installed:
-
-- **pip/pipx/uv**: Plugins install directly into the same environment
-- **System installations (brew, apt, etc.)**: Plugins install into an isolated environment at `~/.deepctl/plugins/venv`
-
-This approach ensures all installation methods support plugins while maintaining system package manager integrity.
-
-## Plugin Registry
-
-The `plugin search` command shows plugins from a curated registry. Currently, the registry is hardcoded but will eventually fetch from a `.well-known` URL or plugin registry service.
-
-## Development
-
-This is a built-in command that is part of the deepctl core distribution.
+MIT — see [LICENSE](../../LICENSE)

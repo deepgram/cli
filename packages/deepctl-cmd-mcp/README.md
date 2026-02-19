@@ -1,55 +1,31 @@
 # deepctl-cmd-mcp
 
-MCP (Model Context Protocol) server command for deepctl, enabling LLM clients to interact with Deepgram's AI assistant service.
+> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-## Features
-
-- 🤖 Connect to Deepgram's Gnosis AI service via MCP
-- 🔧 Multiple transport modes (stdio, SSE, streamable-http)
-- 🔍 Intelligent question answering about Deepgram
-- 📚 API specification lookup
-- 💻 Code example generation
-- 📖 Documentation search
+MCP server command for deepctl to interact with Deepgram's AI assistant service
 
 ## Installation
 
-This package is installed as part of the deepctl CLI:
+Installed automatically with deepctl:
 
 ```bash
-pip install deepgram-cli
+pip install deepctl
 ```
 
-Or install directly:
+## Commands
 
-```bash
-pip install deepctl-cmd-mcp
-```
+| Command | Entry Point |
+|---------|-------------|
+| `deepctl mcp` | `deepctl_cmd_mcp.command:McpCommand` |
 
-## Usage
+## Dependencies
 
-Run the MCP server:
+- `mcp>=1.0.0`
+- `rich>=13.9.4`
+- `click>=8.1.7`
+- `pydantic>=2.10.1`
+- `httpx>=0.28.1`
 
-```bash
-deepctl mcp
-```
+## License
 
-With options:
-
-```bash
-# Use SSE transport on custom port
-deepctl mcp --transport sse --port 8080
-
-# Enable debug logging
-deepctl mcp --debug
-
-# Use custom API key
-deepctl mcp --api-key YOUR_API_KEY
-```
-
-## Known Limitations
-
-### Signal Handling in STDIO Mode
-
-When running in STDIO mode (default), you may need to press Ctrl+C twice to stop the server. This is a known limitation of the FastMCP framework. For production deployments, consider using SSE or HTTP transport modes which handle signals more gracefully.
-
-## Transport Modes
+MIT — see [LICENSE](../../LICENSE)

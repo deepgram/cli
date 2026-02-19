@@ -1,45 +1,31 @@
 # deepctl-cmd-update
 
-Update command for deepctl CLI - provides self-update functionality.
+> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-## Features
-
-- Check for newer versions on PyPI
-- Detect installation method (pip, pipx, uv, system, development)
-- Remember installation method for future updates
-- Provide appropriate update commands
-- Support for various installation scenarios
+Update command for deepctl
 
 ## Installation
 
-This package is included with deepctl and doesn't need separate installation.
-
-## Usage
-
-Check for updates:
+Installed automatically with deepctl:
 
 ```bash
-deepctl update --check-only
+pip install deepctl
 ```
 
-Update deepctl:
+## Commands
 
-```bash
-deepctl update
-```
+| Command | Entry Point |
+|---------|-------------|
+| `deepctl update` | `deepctl_cmd_update.command:UpdateCommand` |
 
-Force update (even if already up to date):
+## Dependencies
 
-```bash
-deepctl update --force
-```
+- `click>=8.0.0`
+- `pydantic>=2.0.0`
+- `rich>=13.0.0`
+- `packaging>=21.0`
+- `httpx>=0.24.0`
 
-Skip confirmation:
+## License
 
-```bash
-deepctl update --yes
-```
-
-## Development
-
-This package is part of the deepctl monorepo. See the main repository for development instructions.
+MIT — see [LICENSE](../../LICENSE)
