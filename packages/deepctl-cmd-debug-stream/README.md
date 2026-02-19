@@ -2,7 +2,7 @@
 
 > Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-Stream debug subcommand for deepctl — WebSocket proxy for diagnosing audio streaming issues.
+Stream debug subcommand for deepctl
 
 This is a subcommand of `deepctl debug`.
 
@@ -19,22 +19,6 @@ pip install deepctl
 | Command | Entry Point |
 |---------|-------------|
 | `deepctl debug stream` | `deepctl_cmd_debug_stream.command:StreamCommand` |
-
-## Usage
-
-```bash
-# Start proxy with auto-selected port
-deepctl debug stream
-
-# Specify port
-deepctl debug stream --port 8080
-
-# Custom upstream host
-deepctl debug stream --upstream staging-api.deepgram.com
-
-# Increase audio sample size for analysis
-deepctl debug stream --sample-size 131072
-```
 
 ## Dependencies
 

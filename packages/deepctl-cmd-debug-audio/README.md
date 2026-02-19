@@ -1,5 +1,33 @@
 # deepctl-cmd-debug-audio
 
-Audio debug subcommand for the Deepgram CLI (deepctl). This package provides the `audio` subcommand under the `debug` command group, allowing users to debug audio-related issues using ffprobe presets.
+> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-`ffmpeg` is required.
+Audio debug subcommand for deepctl
+
+This is a subcommand of `deepctl debug`.
+
+## Installation
+
+Installed automatically with deepctl:
+
+```bash
+pip install deepctl
+```
+
+## Commands
+
+| Command | Entry Point |
+|---------|-------------|
+| `deepctl debug audio` | `deepctl_cmd_debug_audio.command:AudioCommand` |
+
+## Dependencies
+
+- `click>=8.0.0`
+- `rich>=13.0.0`
+- `pydantic>=2.0.0`
+- `ffmpeg-python>=0.2.0`
+- `httpx>=0.24.0`
+
+## License
+
+MIT — see [LICENSE](../../LICENSE)

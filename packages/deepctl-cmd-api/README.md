@@ -2,7 +2,7 @@
 
 > Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-API command for deepctl — make authenticated REST requests to any Deepgram API endpoint.
+API command for deepctl
 
 ## Installation
 
@@ -17,22 +17,6 @@ pip install deepctl
 | Command | Entry Point |
 |---------|-------------|
 | `deepctl api` | `deepctl_cmd_api.command:ApiCommand` |
-
-## Usage
-
-```bash
-# List projects
-deepctl api /v1/projects
-
-# POST with fields
-deepctl api -X POST /v1/projects -f name="My Project"
-
-# Filter with jq
-deepctl api /v1/projects --jq '.projects[] | .name'
-
-# Body from stdin
-echo '{"text":"hello"}' | deepctl api -X POST /v1/speak --input -
-```
 
 ## Dependencies
 

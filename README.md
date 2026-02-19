@@ -43,10 +43,12 @@ uv run tox                 # Test all Python versions
 cli/
 ├── src/deepctl/                      # Main CLI entry point
 ├── packages/
+│   ├── deepctl-cmd-api/              # API command for deepctl
 │   ├── deepctl-cmd-debug/            # Debug command group for deepctl
 │   ├── deepctl-cmd-debug-audio/      # Audio debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-network/    # Network debug subcommand for deepctl
+│   ├── deepctl-cmd-debug-stream/     # Stream debug subcommand for deepctl
 │   ├── deepctl-cmd-login/            # Login command for deepctl
 │   ├── deepctl-cmd-mcp/              # MCP server command for deepctl to interact with Deepgram's AI assistant service
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
@@ -92,7 +94,7 @@ See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
 
 ## Release
 
-Merging conventional commits to `main` triggers [release-please](https://github.com/googleapis/release-please) to open a release PR. Merging that PR creates a `v*` tag, which triggers the PyPI publish workflow. All 15 packages are version-locked.
+Merging conventional commits to `main` triggers [release-please](https://github.com/googleapis/release-please) to open a release PR. Merging that PR creates a `v*` tag, which triggers the PyPI publish workflow. All 16 packages are version-locked.
 
 ## Installation
 
@@ -118,9 +120,11 @@ brew install deepctl
 <!-- BEGIN:commands -->
 | Command | Description |
 |---------|-------------|
+| `deepctl api` | API command for deepctl |
 | `deepctl debug audio` | Audio debug subcommand for deepctl |
 | `deepctl debug browser` | Browser debug subcommand for deepctl |
 | `deepctl debug network` | Network debug subcommand for deepctl |
+| `deepctl debug stream` | Stream debug subcommand for deepctl |
 | `deepctl debug` | Debug command group for deepctl |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
@@ -177,10 +181,12 @@ deepctl transcribe audio.wav --output json|yaml|table|csv
 <!-- BEGIN:packages -->
 | Package | Description |
 |---------|-------------|
+| [`deepctl-cmd-api`](packages/deepctl-cmd-api) | API command for deepctl |
 | [`deepctl-cmd-debug`](packages/deepctl-cmd-debug) | Debug command group for deepctl |
 | [`deepctl-cmd-debug-audio`](packages/deepctl-cmd-debug-audio) | Audio debug subcommand for deepctl |
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
 | [`deepctl-cmd-debug-network`](packages/deepctl-cmd-debug-network) | Network debug subcommand for deepctl |
+| [`deepctl-cmd-debug-stream`](packages/deepctl-cmd-debug-stream) | Stream debug subcommand for deepctl |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
 | [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server command for deepctl to interact with Deepgram's AI assistant service |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
