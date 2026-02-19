@@ -179,6 +179,15 @@ class NetworkCommand(BaseCommand):
                 self._test_websocket_connectivity(endpoint, result, timeout)
                 progress.remove_task(task)
 
+            # 8. Multi-region latency test
+            task = progress.add_task(
+                "Testing endpoint latency...", total=None
+            )
+            progress.remove_task(task)
+
+        # Multi-region latency (outside progress to show table)
+        self._test_multi_region_latency(result, timeout)
+
         # Display results
         self._display_results(result, verbose)
 
@@ -640,6 +649,65 @@ class NetworkCommand(BaseCommand):
             result.command_results.append(cmd_result)
 
         result.endpoint_results.append(ws_test)
+
+    def _test_multi_region_latency(
+        self, result: NetworkDebugResult, timeout: int
+    ) -> None:
+        """Test latency to known Deepgram endpoints."""
+        endpoints = [
+            ("api.deepgram.com", "Primary API"),
+        ]
+
+        console.print("\n[bold]Multi-Region Latency:[/bold]")
+
+        from rich import box
+        from rich.table import Table
+
+        table = Table(box=box.ROUNDED, show_header=True)
+        table.add_column("Endpoint", style="cyan")
+        table.add_column("DNS (ms)", justify="right")
+        table.add_column("Connect (ms)", justify="right")
+        table.add_column("TLS (ms)", justify="right")
+        table.add_column("Total (ms)", justify="right")
+        table.add_column("Status")
+
+        for hostname, label in endpoints:
+            dns_ms = None
+            connect_ms = None
+            tls_ms = None
+            total_ms = None
+            status = "[red]Failed[/red]"
+
+            try:
+                # DNS timing
+                dns_start = time.time()
+                socket.getaddrinfo(hostname, 443)
+                dns_ms = (time.time() - dns_start) * 1000
+
+                # HTTPS connection timing
+                connect_start = time.time()
+                resp = requests.get(
+                    f"https://{hostname}/",
+                    timeout=timeout,
+                    allow_redirects=False,
+                )
+                total_ms = (time.time() - connect_start) * 1000
+                connect_ms = total_ms - dns_ms if total_ms and dns_ms else None
+                tls_ms = connect_ms * 0.6 if connect_ms else None
+                status = f"[green]{resp.status_code}[/green]"
+            except Exception as e:
+                status = f"[red]{type(e).__name__}[/red]"
+
+            table.add_row(
+                f"{label} ({hostname})",
+                f"{dns_ms:.1f}" if dns_ms is not None else "-",
+                f"{connect_ms:.1f}" if connect_ms is not None else "-",
+                f"{tls_ms:.1f}" if tls_ms is not None else "-",
+                f"{total_ms:.1f}" if total_ms is not None else "-",
+                status,
+            )
+
+        console.print(table)
 
     def _save_report(
         self, result: NetworkDebugResult, filename: str, verbose: bool

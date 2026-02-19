@@ -41,10 +41,12 @@ dependencies = [
     "deepctl-cmd-transcribe>=0.1.10",    # x-release-please-version
     "deepctl-cmd-usage>=0.1.10",         # x-release-please-version
     "deepctl-cmd-mcp>=0.1.10",           # x-release-please-version
+    "deepctl-cmd-api>=0.1.10",           # x-release-please-version
     "deepctl-cmd-debug>=0.1.10",         # x-release-please-version
     "deepctl-cmd-debug-browser>=0.1.10", # x-release-please-version
     "deepctl-cmd-debug-network>=0.1.10", # x-release-please-version
     "deepctl-cmd-debug-audio>=0.1.10",   # x-release-please-version
+    "deepctl-cmd-debug-stream>=0.1.10",  # x-release-please-version
     "deepctl-cmd-update>=0.1.10",        # x-release-please-version
     "deepctl-cmd-plugin>=0.1.10",        # x-release-please-version
     "deepctl-shared-utils>=0.1.10",      # x-release-please-version
@@ -158,6 +160,7 @@ markers = [
 [tool.uv.sources]
 # Workspace dependencies
 deepctl-core = { workspace = true }
+deepctl-cmd-api = { workspace = true }
 deepctl-cmd-login = { workspace = true }
 deepctl-cmd-projects = { workspace = true }
 deepctl-cmd-transcribe = { workspace = true }
@@ -167,6 +170,7 @@ deepctl-cmd-debug = { workspace = true }
 deepctl-cmd-debug-browser = { workspace = true }
 deepctl-cmd-debug-network = { workspace = true }
 deepctl-cmd-debug-audio = { workspace = true }
+deepctl-cmd-debug-stream = { workspace = true }
 deepctl-cmd-update = { workspace = true }
 deepctl-cmd-plugin = { workspace = true }
 deepctl-shared-utils = { workspace = true }

@@ -64,6 +64,7 @@ class DebugCommand(BaseGroupCommand):
             console.print("  • browser - Debug browser-related issues")
             console.print("  • network - Debug network connectivity")
             console.print("  • audio   - Debug audio file issues")
+            console.print("  • stream  - WebSocket proxy for stream diagnosis")
             console.print(
                 "\n[dim]Use 'deepctl debug <subcommand> --help' for "
                 "more information[/dim]"
@@ -76,6 +77,7 @@ class DebugCommand(BaseGroupCommand):
                     "browser": "Debug browser-related issues",
                     "network": "Debug network connectivity",
                     "audio": "Debug audio file issues",
+                    "stream": "WebSocket proxy for stream diagnosis",
                 },
             )
 

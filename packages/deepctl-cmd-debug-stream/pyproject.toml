@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepctl-cmd-debug-audio"
+name = "deepctl-cmd-debug-stream"
 version = "0.1.10" # x-release-please-version
-description = "Audio debug subcommand for deepctl"
+description = "Stream debug subcommand for deepctl"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
@@ -18,26 +18,25 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-keywords = ["deepgram", "cli", "debug", "audio", "diagnostics"]
+keywords = ["deepgram", "cli", "debug", "stream", "websocket", "proxy"]
 requires-python = ">=3.10"
 dependencies = [
     "deepctl-core>=0.1.10", # x-release-please-version
     "click>=8.0.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
-    "ffmpeg-python>=0.2.0",
-    "httpx>=0.24.0",
+    "aiohttp>=3.8.0",
 ]
 
 [project.scripts]
 # Internal commands not meant to be called directly
 
 [project.entry-points."deepctl.subcommands.debug"]
-audio = "deepctl_cmd_debug_audio.command:AudioCommand"
+stream = "deepctl_cmd_debug_stream.command:StreamCommand"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepctl_cmd_debug_audio*"]
+include = ["deepctl_cmd_debug_stream*"]

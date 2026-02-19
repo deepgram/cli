@@ -41,6 +41,8 @@ class BrowserCapabilities(BaseModel):
     console_api: BrowserCapability
     timer_apis: BrowserCapability
     secure_context: BrowserCapability
+    microphone_access: BrowserCapability | None = None
+    websocket_deepgram: BrowserCapability | None = None
     user_agent: str
     overall_compatible: bool
 

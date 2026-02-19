@@ -1,11 +1,15 @@
 """Audio debug command for deepctl."""
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from typing import Any
+from urllib.parse import urlparse
 
 import ffmpeg  # type: ignore[import-untyped]
+import httpx
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 from rich import box
 from rich.console import Console
@@ -64,6 +68,119 @@ class AudioCommand(BaseCommand):
     def check_ffmpeg_installed(self) -> bool:
         """Check if ffmpeg/ffprobe is installed."""
         return shutil.which("ffprobe") is not None
+
+    def _is_url(self, path: str) -> bool:
+        """Check if the path is a URL."""
+        parsed = urlparse(path)
+        return parsed.scheme in ("http", "https")
+
+    def _download_url(self, url: str) -> str:
+        """Download a URL to a temporary file and return the path."""
+        console.print(f"[blue]Downloading:[/blue] {url}")
+
+        parsed = urlparse(url)
+        ext = os.path.splitext(parsed.path)[1] or ".audio"
+
+        with tempfile.NamedTemporaryFile(
+            suffix=ext, prefix="deepctl_audio_", delete=False
+        ) as tmp:
+            tmp_name = tmp.name
+            try:
+                with httpx.Client(
+                    timeout=60.0, follow_redirects=True
+                ) as client, client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    total = 0
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        tmp.write(chunk)
+                        total += len(chunk)
+                size_mb = total / (1024 * 1024)
+                console.print(
+                    f"[green]Downloaded[/green] {size_mb:.2f} MB → {tmp_name}"
+                )
+                return tmp_name
+            except Exception:
+                os.unlink(tmp_name)
+                raise
+
+    def _suggest_encoding(self, audio_info: AudioInfo) -> None:
+        """Suggest optimal Deepgram settings based on audio analysis."""
+        if not audio_info.streams:
+            return
+
+        console.print("\n[bold]Encoding Suggestions:[/bold]")
+
+        stream = audio_info.streams[0]
+        suggestions = []
+
+        # Sample rate suggestions
+        if stream.sample_rate:
+            rate = int(stream.sample_rate)
+            if rate == 8000:
+                suggestions.append(
+                    "Telephony audio detected (8kHz) — "
+                    "use `encoding=mulaw` or `encoding=linear16` "
+                    "with `sample_rate=8000`"
+                )
+            elif rate <= 16000:
+                suggestions.append(
+                    f"Sample rate {rate}Hz — suitable for speech. "
+                    f"Consider `encoding=linear16` with "
+                    f"`sample_rate={rate}`"
+                )
+            elif rate >= 44100:
+                suggestions.append(
+                    f"High sample rate ({rate}Hz) — "
+                    f"downsampling to 16kHz is recommended for "
+                    f"faster processing without quality loss"
+                )
+
+        # Codec suggestions
+        if stream.codec_name:
+            codec = stream.codec_name.lower()
+            if codec == "opus":
+                suggestions.append(
+                    "Opus codec detected — ideal for web streaming. "
+                    "Use `encoding=opus`"
+                )
+            elif codec in ("pcm_s16le", "pcm_s16be"):
+                suggestions.append(
+                    "Linear PCM detected — use `encoding=linear16`"
+                )
+            elif codec in ("pcm_mulaw", "pcm_alaw"):
+                enc = "mulaw" if "mulaw" in codec else "alaw"
+                suggestions.append(
+                    f"{codec} detected — use `encoding={enc}`"
+                )
+            elif codec == "mp3":
+                suggestions.append(
+                    "MP3 detected — Deepgram handles MP3 natively. "
+                    "No encoding parameter needed for pre-recorded."
+                )
+            elif codec in ("flac", "vorbis", "aac"):
+                suggestions.append(
+                    f"{codec.upper()} detected — Deepgram handles "
+                    f"this natively for pre-recorded. For streaming, "
+                    f"consider converting to linear16 or opus."
+                )
+
+        # Channel suggestions
+        if stream.channels and stream.channels > 1:
+            suggestions.append(
+                f"Multi-channel ({stream.channels}ch) — use "
+                f"`channels={stream.channels}` and consider "
+                f"`multichannel=true` for speaker separation"
+            )
+        elif stream.channels == 1:
+            suggestions.append(
+                "Mono audio — optimal for single-speaker transcription"
+            )
+
+        if suggestions:
+            for suggestion in suggestions:
+                console.print(f"  [dim]→[/dim] {suggestion}")
+        else:
+            console.print("  [green]No specific encoding changes needed[/green]")
 
     def run_ffprobe(
         self, file_path: str, custom_args: str | None = None
@@ -307,12 +424,36 @@ class AudioCommand(BaseCommand):
                 ffmpeg_installed=False,
             )
 
+        # Handle URL downloads
+        downloaded_file = None
+        file_to_analyze = str(audio_file)
+
+        if self._is_url(audio_file):
+            try:
+                downloaded_file = self._download_url(audio_file)
+                file_to_analyze = downloaded_file
+            except Exception as e:
+                console.print(
+                    Panel(
+                        f"[red]✗ Failed to download URL[/red]\n\n"
+                        f"[dim]{e!s}[/dim]",
+                        title="Download Failed",
+                        border_style="red",
+                    )
+                )
+                return AudioDebugResult(
+                    status="error",
+                    message="Failed to download audio URL",
+                    audio_file=audio_file,
+                    error_details=str(e),
+                )
+
         # Process the audio file
         try:
-            console.print(f"[blue]Analyzing audio file:[/blue] {audio_file}")
+            console.print(f"[blue]Analyzing audio file:[/blue] {file_to_analyze}")
 
             # Run ffprobe
-            probe_data = self.run_ffprobe(str(audio_file), ffprobe_args)
+            probe_data = self.run_ffprobe(file_to_analyze, ffprobe_args)
 
             # Parse the data
             audio_info = self.parse_audio_info(probe_data)
@@ -354,6 +495,9 @@ class AudioCommand(BaseCommand):
                     "  [green]✓[/green] Audio appears to be compatible with Deepgram"
                 )
 
+            # Encoding suggestions
+            self._suggest_encoding(audio_info)
+
             return AudioDebugResult(
                 status="success",
                 message="Audio file analyzed successfully",
@@ -376,3 +520,10 @@ class AudioCommand(BaseCommand):
                 audio_file=audio_file,
                 error_details=str(e),
             )
+        finally:
+            # Clean up downloaded file
+            if downloaded_file:
+                try:
+                    os.unlink(downloaded_file)
+                except OSError:
+                    pass

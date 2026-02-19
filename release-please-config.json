@@ -1,0 +1,108 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "include-v-in-tag": true,
+  "packages": {
+    ".": {
+      "component": "deepctl",
+      "include-component-in-tag": false,
+      "extra-files": [
+        "src/deepctl/__init__.py"
+      ]
+    },
+    "packages/deepctl-core": {
+      "component": "deepctl-core",
+      "skip-github-release": true
+    },
+    "packages/deepctl-shared-utils": {
+      "component": "deepctl-shared-utils",
+      "skip-github-release": true,
+      "extra-files": [
+        "src/deepctl_shared_utils/__init__.py"
+      ]
+    },
+    "packages/deepctl-cmd-api": {
+      "component": "deepctl-cmd-api",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-login": {
+      "component": "deepctl-cmd-login",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-projects": {
+      "component": "deepctl-cmd-projects",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-transcribe": {
+      "component": "deepctl-cmd-transcribe",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-usage": {
+      "component": "deepctl-cmd-usage",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-debug": {
+      "component": "deepctl-cmd-debug",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-debug-audio": {
+      "component": "deepctl-cmd-debug-audio",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-debug-browser": {
+      "component": "deepctl-cmd-debug-browser",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-debug-network": {
+      "component": "deepctl-cmd-debug-network",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-debug-stream": {
+      "component": "deepctl-cmd-debug-stream",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-mcp": {
+      "component": "deepctl-cmd-mcp",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-update": {
+      "component": "deepctl-cmd-update",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-plugin": {
+      "component": "deepctl-cmd-plugin",
+      "skip-github-release": true
+    },
+    "packages/deepctl-plugin-example": {
+      "component": "deepctl-plugin-example",
+      "skip-github-release": true
+    }
+  },
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "deepctl",
+      "components": [
+        "deepctl",
+        "deepctl-core",
+        "deepctl-shared-utils",
+        "deepctl-cmd-api",
+        "deepctl-cmd-login",
+        "deepctl-cmd-projects",
+        "deepctl-cmd-transcribe",
+        "deepctl-cmd-usage",
+        "deepctl-cmd-debug",
+        "deepctl-cmd-debug-audio",
+        "deepctl-cmd-debug-browser",
+        "deepctl-cmd-debug-network",
+        "deepctl-cmd-debug-stream",
+        "deepctl-cmd-mcp",
+        "deepctl-cmd-update",
+        "deepctl-cmd-plugin",
+        "deepctl-plugin-example"
+      ]
+    }
+  ]
+}

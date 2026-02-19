@@ -390,6 +390,54 @@
                     name: 'Secure Context (HTTPS/localhost)',
                     key: 'secure_context',
                     check: () => window.isSecureContext === true
+                },
+                {
+                    name: 'Microphone Access',
+                    key: 'microphone_access',
+                    check: async () => {
+                        try {
+                            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                                return false;
+                            }
+                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            stream.getTracks().forEach(t => t.stop());
+                            return true;
+                        } catch (e) {
+                            return false;
+                        }
+                    }
+                },
+                {
+                    name: 'WebSocket to Deepgram',
+                    key: 'websocket_deepgram',
+                    check: async () => {
+                        return new Promise((resolve) => {
+                            try {
+                                const testWs = new WebSocket('wss://api.deepgram.com/v1/listen');
+                                const timer = setTimeout(() => {
+                                    testWs.close();
+                                    resolve(false);
+                                }, 5000);
+                                testWs.onopen = () => {
+                                    clearTimeout(timer);
+                                    testWs.close();
+                                    resolve(true);
+                                };
+                                testWs.onerror = () => {
+                                    clearTimeout(timer);
+                                    resolve(true); // 401 still means reachable
+                                };
+                                testWs.onclose = (e) => {
+                                    clearTimeout(timer);
+                                    // Code 1006 with no open = network blocked
+                                    // Code 1008/4xx = auth error = reachable
+                                    resolve(e.code !== 1006 || testWs.readyState !== WebSocket.CONNECTING);
+                                };
+                            } catch (e) {
+                                resolve(false);
+                            }
+                        });
+                    }
                 }
             ];
 

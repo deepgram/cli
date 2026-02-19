@@ -74,6 +74,12 @@ class BrowserCommand(BaseCommand):
                 "default": 60,
                 "is_option": True,
             },
+            {
+                "names": ["--save-report"],
+                "help": "Save debug report to a JSON file",
+                "type": str,
+                "is_option": True,
+            },
         ]
 
     def find_available_port(self, start_port: int = 3000) -> int:
@@ -131,6 +137,8 @@ class BrowserCommand(BaseCommand):
                                 "console_api",
                                 "timer_apis",
                                 "secure_context",
+                                "microphone_access",
+                                "websocket_deepgram",
                             ]:
                                 if key in caps:
                                     cap_dict[key] = BrowserCapability(**caps[key])
@@ -261,6 +269,8 @@ class BrowserCommand(BaseCommand):
                 ("console_api", "Console API"),
                 ("timer_apis", "Timer APIs"),
                 ("secure_context", "Secure Context"),
+                ("microphone_access", "Microphone Access"),
+                ("websocket_deepgram", "WebSocket to Deepgram"),
             ]
 
             for field, display_name in capability_fields:
@@ -289,6 +299,24 @@ class BrowserCommand(BaseCommand):
                     "with some Deepgram features[/bold red]"
                 )
 
+    def _save_report(
+        self, result: BrowserDebugResult, filename: str
+    ) -> None:
+        """Save debug report to a JSON file."""
+        import json
+        from datetime import datetime
+
+        try:
+            report = {
+                "timestamp": datetime.now().isoformat(),
+                "result": result.model_dump(),
+            }
+            with open(filename, "w") as f:
+                json.dump(report, f, indent=2, default=str)
+            console.print(f"\n[green]Report saved to: {filename}[/green]")
+        except Exception as e:
+            console.print(f"\n[red]Failed to save report: {e!s}[/red]")
+
     def handle(
         self,
         config: Config,
@@ -300,6 +328,7 @@ class BrowserCommand(BaseCommand):
         port = kwargs.get("port")
         no_browser = kwargs.get("no_browser", False)
         timeout = kwargs.get("timeout", 60)
+        save_report = kwargs.get("save_report")
 
         self.start_time = time.time()
 
@@ -407,7 +436,7 @@ class BrowserCommand(BaseCommand):
             if msg.type == MessageType.WARNING and msg.message
         ]
 
-        return BrowserDebugResult(
+        debug_result = BrowserDebugResult(
             status="success" if result["completed"] else "timeout",
             port=port,
             capabilities=capabilities,
@@ -417,3 +446,9 @@ class BrowserCommand(BaseCommand):
             duration_seconds=result["duration"],
             browser_opened=browser_opened,
         )
+
+        # Save report if requested
+        if save_report:
+            self._save_report(debug_result, save_report)
+
+        return debug_result

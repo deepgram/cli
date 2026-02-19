@@ -1,0 +1,19 @@
+{
+  ".": "0.1.10",
+  "packages/deepctl-core": "0.1.10",
+  "packages/deepctl-shared-utils": "0.1.10",
+  "packages/deepctl-cmd-api": "0.1.10",
+  "packages/deepctl-cmd-login": "0.1.10",
+  "packages/deepctl-cmd-projects": "0.1.10",
+  "packages/deepctl-cmd-transcribe": "0.1.10",
+  "packages/deepctl-cmd-usage": "0.1.10",
+  "packages/deepctl-cmd-debug": "0.1.10",
+  "packages/deepctl-cmd-debug-audio": "0.1.10",
+  "packages/deepctl-cmd-debug-browser": "0.1.10",
+  "packages/deepctl-cmd-debug-network": "0.1.10",
+  "packages/deepctl-cmd-debug-stream": "0.1.10",
+  "packages/deepctl-cmd-mcp": "0.1.10",
+  "packages/deepctl-cmd-update": "0.1.10",
+  "packages/deepctl-cmd-plugin": "0.1.10",
+  "packages/deepctl-plugin-example": "0.1.10"
+}
