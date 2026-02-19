@@ -85,25 +85,17 @@ class WebSocketProxy:
                     timeout=aiohttp.ClientWSTimeout(ws_close=30.0),
                 ) as ws_upstream,
             ):
-                    # Run bidirectional forwarding
-                    await asyncio.gather(
-                        self._forward_client_to_upstream(
-                            ws_client, ws_upstream, stats
-                        ),
-                        self._forward_upstream_to_client(
-                            ws_upstream, ws_client, stats
-                        ),
-                        return_exceptions=True,
-                    )
+                # Run bidirectional forwarding
+                await asyncio.gather(
+                    self._forward_client_to_upstream(ws_client, ws_upstream, stats),
+                    self._forward_upstream_to_client(ws_upstream, ws_client, stats),
+                    return_exceptions=True,
+                )
 
         except aiohttp.ClientError as e:
-            console.print(
-                f"[red]Upstream connection failed[/red] [{conn_id}]: {e}"
-            )
+            console.print(f"[red]Upstream connection failed[/red] [{conn_id}]: {e}")
         except Exception as e:
-            console.print(
-                f"[red]Connection error[/red] [{conn_id}]: {e}"
-            )
+            console.print(f"[red]Connection error[/red] [{conn_id}]: {e}")
         finally:
             stats.duration_seconds = time.time() - start_time
             self._print_connection_summary(stats)
@@ -136,9 +128,7 @@ class WebSocketProxy:
                 await ws_upstream.send_bytes(msg.data)
 
                 if self.verbose:
-                    console.print(
-                        f"  [dim]→ binary {len(msg.data)} bytes[/dim]"
-                    )
+                    console.print(f"  [dim]→ binary {len(msg.data)} bytes[/dim]")
 
             elif msg.type == aiohttp.WSMsgType.TEXT:
                 stats.text_frames_sent += 1
@@ -170,17 +160,13 @@ class WebSocketProxy:
 
                 # Sample audio
                 if len(stats.received_audio_buffer) < self.sample_size:
-                    remaining = self.sample_size - len(
-                        stats.received_audio_buffer
-                    )
+                    remaining = self.sample_size - len(stats.received_audio_buffer)
                     stats.received_audio_buffer += msg.data[:remaining]
 
                 await ws_client.send_bytes(msg.data)
 
                 if self.verbose:
-                    console.print(
-                        f"  [dim]← binary {len(msg.data)} bytes[/dim]"
-                    )
+                    console.print(f"  [dim]← binary {len(msg.data)} bytes[/dim]")
 
             elif msg.type == aiohttp.WSMsgType.TEXT:
                 stats.text_frames_received += 1
@@ -197,9 +183,7 @@ class WebSocketProxy:
 
     def _print_connection_summary(self, stats: ConnectionStats) -> None:
         """Print summary for a completed connection."""
-        console.print(
-            f"\n[blue]Connection closed[/blue] [{stats.connection_id}]"
-        )
+        console.print(f"\n[blue]Connection closed[/blue] [{stats.connection_id}]")
         console.print(f"  Type: {stats.stream_type}")
         console.print(
             f"  Duration: {stats.duration_seconds:.1f}s"
@@ -231,9 +215,7 @@ class WebSocketProxy:
 
         if stats.sent_audio_buffer:
             console.print("\n[bold]Sent audio analysis:[/bold]")
-            report = AudioAnalyzer.analyze_buffer(
-                stats.sent_audio_buffer, "sent"
-            )
+            report = AudioAnalyzer.analyze_buffer(stats.sent_audio_buffer, "sent")
             if report:
                 stats.sent_audio_format = report
                 self._print_audio_report(report)

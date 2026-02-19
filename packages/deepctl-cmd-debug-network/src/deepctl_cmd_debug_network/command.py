@@ -190,9 +190,7 @@ class NetworkCommand(BaseCommand):
                 progress.remove_task(task)
 
             # 8. Multi-region latency test
-            task = progress.add_task(
-                "Testing endpoint latency...", total=None
-            )
+            task = progress.add_task("Testing endpoint latency...", total=None)
             progress.remove_task(task)
 
         # Multi-region latency (outside progress to show table)

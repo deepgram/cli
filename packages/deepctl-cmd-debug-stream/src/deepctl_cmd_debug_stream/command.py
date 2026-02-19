@@ -74,10 +74,7 @@ class StreamCommand(BaseCommand):
             },
             {
                 "names": ["--sample-size"],
-                "help": (
-                    "Bytes of audio to sample for analysis "
-                    "(default: 65536)"
-                ),
+                "help": ("Bytes of audio to sample for analysis (default: 65536)"),
                 "type": int,
                 "default": 65536,
                 "is_option": True,
@@ -114,9 +111,7 @@ class StreamCommand(BaseCommand):
         # Get API key
         api_key = auth_manager.get_api_key()
         if not api_key:
-            console.print(
-                "[red]No API key found. Run 'deepctl login' first.[/red]"
-            )
+            console.print("[red]No API key found. Run 'deepctl login' first.[/red]")
             return StreamDebugResult(
                 status="error",
                 message="No API key found",
@@ -127,9 +122,7 @@ class StreamCommand(BaseCommand):
         if port is None:
             port = _find_available_port()
             if port is None:
-                console.print(
-                    "[red]No available ports in range 3000-3099[/red]"
-                )
+                console.print("[red]No available ports in range 3000-3099[/red]")
                 return StreamDebugResult(
                     status="error",
                     message="No available ports",
@@ -201,12 +194,8 @@ class StreamCommand(BaseCommand):
 
         duration = time.time() - start_time
 
-        console.print(
-            f"\n[green]Proxy stopped after {duration:.1f}s[/green]"
-        )
-        console.print(
-            f"Total connections: {len(proxy.connections)}"
-        )
+        console.print(f"\n[green]Proxy stopped after {duration:.1f}s[/green]")
+        console.print(f"Total connections: {len(proxy.connections)}")
 
         return StreamDebugResult(
             status="success",

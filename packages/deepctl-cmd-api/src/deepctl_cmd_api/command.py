@@ -60,8 +60,7 @@ class ApiCommand(BaseCommand):
             {
                 "names": ["-f", "--field"],
                 "help": (
-                    "Request body field as key=value (string) "
-                    "or key:=value (raw JSON)"
+                    "Request body field as key=value (string) or key:=value (raw JSON)"
                 ),
                 "type": str,
                 "multiple": True,
@@ -125,9 +124,7 @@ class ApiCommand(BaseCommand):
     ) -> Any | None:
         """Build request body from fields or input source."""
         if fields and input_source:
-            raise ValueError(
-                "Cannot use both --field and --input. Choose one."
-            )
+            raise ValueError("Cannot use both --field and --input. Choose one.")
 
         if fields:
             body: dict[str, Any] = {}
@@ -269,9 +266,7 @@ class ApiCommand(BaseCommand):
 
         # Check for errors
         if response.status_code >= 400:
-            console.print(
-                f"[red]{method} {url} → {response.status_code}[/red]"
-            )
+            console.print(f"[red]{method} {url} → {response.status_code}[/red]")
             if isinstance(response_body, dict):
                 console.print_json(data=response_body)
             elif response_text:

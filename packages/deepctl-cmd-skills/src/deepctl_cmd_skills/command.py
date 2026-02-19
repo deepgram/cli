@@ -126,9 +126,7 @@ class SkillsCommand(BaseGroupCommand):
             pass
 
         install_cmd.callback = context_wrapper(
-            lambda config, auth_manager, client, **kw: self._handle_install(
-                **kw
-            )
+            lambda config, auth_manager, client, **kw: self._handle_install(**kw)
         )
         return install_cmd
 
@@ -169,9 +167,7 @@ class SkillsCommand(BaseGroupCommand):
             pass
 
         remove_cmd.callback = context_wrapper(
-            lambda config, auth_manager, client, **kw: self._handle_remove(
-                **kw
-            )
+            lambda config, auth_manager, client, **kw: self._handle_remove(**kw)
         )
         return remove_cmd
 
@@ -241,9 +237,7 @@ class SkillsCommand(BaseGroupCommand):
 
         # If a specific CLI was requested, filter
         if cli_name:
-            generators = [
-                g for g in get_all_generators() if g.cli_name == cli_name
-            ]
+            generators = [g for g in get_all_generators() if g.cli_name == cli_name]
             if not generators:
                 print_error(
                     f"Unknown AI CLI: {cli_name}. "
@@ -277,9 +271,13 @@ class SkillsCommand(BaseGroupCommand):
         total_written: list[str] = []
 
         for gen in generators:
-            if not install_all and not cli_name and not click.confirm(
-                f"Install deepctl skills for {gen.display_name}?",
-                default=True,
+            if (
+                not install_all
+                and not cli_name
+                and not click.confirm(
+                    f"Install deepctl skills for {gen.display_name}?",
+                    default=True,
+                )
             ):
                 continue
 
@@ -319,9 +317,7 @@ class SkillsCommand(BaseGroupCommand):
         installed = state.get("installed_skills", {})
 
         if not installed:
-            print_info(
-                "No skills installed. Run 'deepctl skills install' first."
-            )
+            print_info("No skills installed. Run 'deepctl skills install' first.")
             return
 
         commands = collect_command_metadata()
@@ -353,9 +349,7 @@ class SkillsCommand(BaseGroupCommand):
                 print_success(f"  Updated {p}")
 
         save_skills_state(state)
-        print_success(
-            f"Updated {updated_count} skill(s) ({len(commands)} commands)"
-        )
+        print_success(f"Updated {updated_count} skill(s) ({len(commands)} commands)")
 
     def _handle_remove(
         self,

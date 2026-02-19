@@ -214,7 +214,9 @@ class BaseCommand(ABC):
         if isinstance(result, dict | list):
             console.print_json(json.dumps(result, indent=2, default=_default))
         else:
-            console.print(json.dumps({"result": str(result)}, indent=2, default=_default))
+            console.print(
+                json.dumps({"result": str(result)}, indent=2, default=_default)
+            )
 
     def _output_yaml(self, result: Any) -> None:
         """Output result as YAML."""

@@ -309,9 +309,7 @@ class BrowserCommand(BaseCommand):
                     "with some Deepgram features[/bold red]"
                 )
 
-    def _save_report(
-        self, result: BrowserDebugResult, filename: str
-    ) -> None:
+    def _save_report(self, result: BrowserDebugResult, filename: str) -> None:
         """Save debug report to a JSON file."""
         import json
         from datetime import datetime

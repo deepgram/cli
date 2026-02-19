@@ -84,7 +84,6 @@ def _discover_community_plugins() -> dict[str, str]:
     try:
         for dist in importlib.metadata.distributions():
             # Check if this distribution provides deepctl.plugins entry points
-            eps = dist.metadata.get_all("Provides-Extra") or []
             dist_name = dist.metadata["Name"]
             if dist_name is None:
                 continue
@@ -95,9 +94,7 @@ def _discover_community_plugins() -> dict[str, str]:
             # Check for deepctl.plugins entry points via the distribution
             try:
                 dist_eps = dist.entry_points
-                has_plugin_ep = any(
-                    ep.group == "deepctl.plugins" for ep in dist_eps
-                )
+                has_plugin_ep = any(ep.group == "deepctl.plugins" for ep in dist_eps)
             except Exception:
                 has_plugin_ep = False
 
@@ -151,7 +148,7 @@ def _check_pypi_versions(
         from packaging import version as pkg_version
 
         with httpx.Client(timeout=5.0) as client:
-            for name, current_ver in list(plugins.items())[: _MAX_PLUGINS_TO_CHECK]:
+            for name, current_ver in list(plugins.items())[:_MAX_PLUGINS_TO_CHECK]:
                 try:
                     resp = client.get(f"https://pypi.org/pypi/{name}/json")
                     resp.raise_for_status()

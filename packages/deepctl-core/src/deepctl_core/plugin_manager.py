@@ -236,7 +236,7 @@ class PluginManager:
         Returns:
             Help text string, optionally with examples section
         """
-        help_text = instance.help
+        help_text: str = instance.help
         examples = getattr(instance, "examples", [])
         if examples:
             help_text += "\n\nExamples:\n"

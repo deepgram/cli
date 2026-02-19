@@ -91,13 +91,13 @@ check: format-check lint-check typecheck ## Quick quality check (no tests)
 # ===================================================================
 
 test: ## Run tests with pytest
-	uv run pytest --all
+	uv run pytest
 
 test-quick: ## Run tests quickly (no coverage)
 	uv run pytest -x
 
 test-verbose: ## Run tests with verbose output
-	uv run pytest -xvs --all
+	uv run pytest -xvs
 
 test-watch: ## Run tests in watch mode (requires pytest-watch)
 	uv run ptw

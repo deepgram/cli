@@ -41,16 +41,16 @@ class AudioAnalyzer:
 
             cmd = [
                 "ffprobe",
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
                 tmp_name,
             ]
 
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=10
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
 
             if result.returncode != 0:
                 return None
@@ -84,6 +84,7 @@ class AudioAnalyzer:
         finally:
             if tmp_name:
                 import os
+
                 try:
                     os.unlink(tmp_name)
                 except OSError:

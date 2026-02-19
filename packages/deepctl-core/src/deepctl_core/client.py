@@ -1,7 +1,7 @@
 """Deepgram SDK wrapper for deepctl with authentication integration."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from deepgram import DeepgramClient as DGClient
 from deepgram import DeepgramClientEnvironment
@@ -114,7 +114,7 @@ class DeepgramClient:
                 request=audio_data, **default_options
             )
 
-            return response.model_dump()
+            return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
             console.print(f"[red]Error transcribing file:[/red] {e}")
@@ -147,7 +147,7 @@ class DeepgramClient:
                 url=url, **default_options
             )
 
-            return response.model_dump()
+            return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
             console.print(f"[red]Error transcribing URL:[/red] {e}")
@@ -161,7 +161,7 @@ class DeepgramClient:
         """
         try:
             response = self.client.manage.v("1").get_projects()
-            return response.model_dump()
+            return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
             console.print(f"[red]Error getting projects:[/red] {e}")
@@ -187,7 +187,7 @@ class DeepgramClient:
 
         try:
             response = self.client.manage.v("1").get_project(project_id)
-            return response.model_dump()
+            return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
             console.print(f"[red]Error getting project:[/red] {e}")
@@ -209,7 +209,7 @@ class DeepgramClient:
                 project_data["company"] = company
 
             response = self.client.manage.v("1").create_project(project_data)
-            return response.model_dump()
+            return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
             console.print(f"[red]Error creating project:[/red] {e}")
@@ -247,7 +247,7 @@ class DeepgramClient:
                 params["end"] = end_date
 
             response = self.client.manage.v("1").get_usage_summary(project_id, params)
-            result = response.model_dump()
+            result = cast("dict[str, Any]", response.model_dump())
             result["project_id"] = project_id
             return result
 
@@ -271,7 +271,7 @@ class DeepgramClient:
 
         try:
             response = self.client.manage.v("1").get_project(project_id)
-            return response.model_dump()
+            return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
             console.print(f"[red]Error getting models:[/red] {e}")

@@ -48,7 +48,8 @@ _STATE_FILE = _SKILLS_DIR / "skills.json"
 def get_skills_state() -> dict[str, Any]:
     """Read the skills state file."""
     try:
-        return json.loads(_STATE_FILE.read_text())
+        result: dict[str, Any] = json.loads(_STATE_FILE.read_text())
+        return result
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {"installed_skills": {}, "auto_update": True}
 
@@ -337,9 +338,7 @@ class SkillGenerator(ABC):
             Mapping of file path -> content string
         """
 
-    def install(
-        self, commands: list[CommandMetadata], version: str
-    ) -> list[Path]:
+    def install(self, commands: list[CommandMetadata], version: str) -> list[Path]:
         """Generate and write skill files. Returns paths written."""
         files = self.generate(commands, version)
         written: list[Path] = []
@@ -386,9 +385,7 @@ class ClaudeCodeGenerator(SkillGenerator):
     def generate(
         self, commands: list[CommandMetadata], version: str
     ) -> dict[Path, str]:
-        content = render_skill_content(
-            commands, version, include_frontmatter=True
-        )
+        content = render_skill_content(commands, version, include_frontmatter=True)
         return {self.get_skill_paths()[0]: content}
 
 
@@ -403,8 +400,7 @@ class CodexGenerator(SkillGenerator):
 
     def detect(self) -> bool:
         return (
-            Path.home().joinpath(".codex").is_dir()
-            or shutil.which("codex") is not None
+            Path.home().joinpath(".codex").is_dir() or shutil.which("codex") is not None
         )
 
     def get_skill_paths(self) -> list[Path]:
@@ -426,11 +422,7 @@ class CodexGenerator(SkillGenerator):
         if self._BEGIN in existing:
             before = existing[: existing.index(self._BEGIN)]
             after_end = existing.find(self._END)
-            after = (
-                existing[after_end + len(self._END) :]
-                if after_end != -1
-                else ""
-            )
+            after = existing[after_end + len(self._END) :] if after_end != -1 else ""
             return before + section + after.lstrip("\n")
         return existing.rstrip("\n") + "\n\n" + section
 
@@ -443,11 +435,7 @@ class CodexGenerator(SkillGenerator):
             return []
         before = content[: content.index(self._BEGIN)]
         after_end = content.find(self._END)
-        after = (
-            content[after_end + len(self._END) :]
-            if after_end != -1
-            else ""
-        )
+        after = content[after_end + len(self._END) :] if after_end != -1 else ""
         remaining = (before + after).strip()
         if remaining:
             path.write_text(remaining + "\n")
@@ -489,11 +477,7 @@ class GeminiGenerator(SkillGenerator):
         if self._BEGIN in existing:
             before = existing[: existing.index(self._BEGIN)]
             after_end = existing.find(self._END)
-            after = (
-                existing[after_end + len(self._END) :]
-                if after_end != -1
-                else ""
-            )
+            after = existing[after_end + len(self._END) :] if after_end != -1 else ""
             return before + section + after.lstrip("\n")
         return existing.rstrip("\n") + "\n\n" + section
 
@@ -506,11 +490,7 @@ class GeminiGenerator(SkillGenerator):
             return []
         before = content[: content.index(self._BEGIN)]
         after_end = content.find(self._END)
-        after = (
-            content[after_end + len(self._END) :]
-            if after_end != -1
-            else ""
-        )
+        after = content[after_end + len(self._END) :] if after_end != -1 else ""
         remaining = (before + after).strip()
         if remaining:
             path.write_text(remaining + "\n")
@@ -558,9 +538,7 @@ class AiderGenerator(SkillGenerator):
         content = render_skill_content(commands, version)
         return {self._SKILL_FILE: content}
 
-    def install(
-        self, commands: list[CommandMetadata], version: str
-    ) -> list[Path]:
+    def install(self, commands: list[CommandMetadata], version: str) -> list[Path]:
         written = super().install(commands, version)
         # Add read reference to aider config if not already present
         self._ensure_config_ref()
@@ -601,9 +579,7 @@ class AiderGenerator(SkillGenerator):
                 if isinstance(read_list, list) and ref in read_list:
                     read_list.remove(ref)
                     data["read"] = read_list
-                    conf_path.write_text(
-                        yaml.dump(data, default_flow_style=False)
-                    )
+                    conf_path.write_text(yaml.dump(data, default_flow_style=False))
         except Exception:
             pass
         return removed
@@ -642,11 +618,7 @@ class OpenCodeGenerator(SkillGenerator):
         if self._BEGIN in existing:
             before = existing[: existing.index(self._BEGIN)]
             after_end = existing.find(self._END)
-            after = (
-                existing[after_end + len(self._END) :]
-                if after_end != -1
-                else ""
-            )
+            after = existing[after_end + len(self._END) :] if after_end != -1 else ""
             return before + section + after.lstrip("\n")
         return existing.rstrip("\n") + "\n\n" + section
 
@@ -659,11 +631,7 @@ class OpenCodeGenerator(SkillGenerator):
             return []
         before = content[: content.index(self._BEGIN)]
         after_end = content.find(self._END)
-        after = (
-            content[after_end + len(self._END) :]
-            if after_end != -1
-            else ""
-        )
+        after = content[after_end + len(self._END) :] if after_end != -1 else ""
         remaining = (before + after).strip()
         if remaining:
             path.write_text(remaining + "\n")

@@ -513,7 +513,9 @@ class AuthManager:
             # Wait for Enter key (skip if stdin is not a TTY)
             try:
                 if hasattr(console, "is_terminal") and not console.is_terminal:
-                    console.print("[dim]Non-interactive terminal — opening browser automatically[/dim]")
+                    console.print(
+                        "[dim]Non-interactive terminal — opening browser automatically[/dim]"
+                    )
                 else:
                     console.input()
             except EOFError:

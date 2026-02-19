@@ -1173,9 +1173,7 @@ except:
             )
 
             state = get_skills_state()
-            if not state.get("installed_skills") or not state.get(
-                "auto_update", True
-            ):
+            if not state.get("installed_skills") or not state.get("auto_update", True):
                 return
 
             commands = collect_command_metadata()

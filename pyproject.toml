@@ -261,5 +261,6 @@ fixable = ["ALL"]
 # Ignore unused arguments in command handler methods
 "**/command.py" = ["ARG002", "ARG005", "RUF012"]
 "**/commands.py" = ["ARG002", "ARG005", "RUF012"]
+"**/base_command.py" = ["ARG002"]
 "**/strategies.py" = ["ARG002"]
 # The root project (deepctl) is implicitly a member since it contains [project]

@@ -97,9 +97,10 @@ class AudioCommand(BaseCommand):
         ) as tmp:
             tmp_name = tmp.name
             try:
-                with httpx.Client(
-                    timeout=60.0, follow_redirects=True
-                ) as client, client.stream("GET", url) as response:
+                with (
+                    httpx.Client(timeout=60.0, follow_redirects=True) as client,
+                    client.stream("GET", url) as response,
+                ):
                     response.raise_for_status()
                     total = 0
                     for chunk in response.iter_bytes(chunk_size=8192):
@@ -151,18 +152,13 @@ class AudioCommand(BaseCommand):
             codec = stream.codec_name.lower()
             if codec == "opus":
                 suggestions.append(
-                    "Opus codec detected — ideal for web streaming. "
-                    "Use `encoding=opus`"
+                    "Opus codec detected — ideal for web streaming. Use `encoding=opus`"
                 )
             elif codec in ("pcm_s16le", "pcm_s16be"):
-                suggestions.append(
-                    "Linear PCM detected — use `encoding=linear16`"
-                )
+                suggestions.append("Linear PCM detected — use `encoding=linear16`")
             elif codec in ("pcm_mulaw", "pcm_alaw"):
                 enc = "mulaw" if "mulaw" in codec else "alaw"
-                suggestions.append(
-                    f"{codec} detected — use `encoding={enc}`"
-                )
+                suggestions.append(f"{codec} detected — use `encoding={enc}`")
             elif codec == "mp3":
                 suggestions.append(
                     "MP3 detected — Deepgram handles MP3 natively. "
@@ -183,9 +179,7 @@ class AudioCommand(BaseCommand):
                 f"`multichannel=true` for speaker separation"
             )
         elif stream.channels == 1:
-            suggestions.append(
-                "Mono audio — optimal for single-speaker transcription"
-            )
+            suggestions.append("Mono audio — optimal for single-speaker transcription")
 
         if suggestions:
             for suggestion in suggestions:
@@ -446,8 +440,7 @@ class AudioCommand(BaseCommand):
             except Exception as e:
                 console.print(
                     Panel(
-                        f"[red]✗ Failed to download URL[/red]\n\n"
-                        f"[dim]{e!s}[/dim]",
+                        f"[red]✗ Failed to download URL[/red]\n\n[dim]{e!s}[/dim]",
                         title="Download Failed",
                         border_style="red",
                     )
