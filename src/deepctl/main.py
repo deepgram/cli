@@ -196,7 +196,7 @@ def main() -> None:
         if timing_requested:
             enable_timing()
 
-        # Start background update check (non-blocking)
+        # Start background update checks (non-blocking)
         try:
             from deepctl_cmd_update.startup_check import (
                 check_and_notify,
@@ -207,6 +207,16 @@ def main() -> None:
         except ImportError:
             check_and_notify = None  # type: ignore[assignment]
             print_pending_notification = None  # type: ignore[assignment]
+
+        try:
+            from deepctl_cmd_update.plugin_update_check import (
+                check_plugins_and_notify,
+                print_pending_plugin_notifications,
+            )
+
+            check_plugins_and_notify(quiet=quiet_requested)
+        except ImportError:
+            print_pending_plugin_notifications = None  # type: ignore[assignment]
 
         with TimingContext("total_execution"):
             with TimingContext("argument_preprocessing"):
@@ -221,9 +231,11 @@ def main() -> None:
                     # Click calls sys.exit() even in non-standalone mode
                     pass
 
-        # Print update notification if available (before timing summary)
+        # Print update notifications if available (before timing summary)
         if print_pending_notification is not None:
             print_pending_notification()
+        if print_pending_plugin_notifications is not None:
+            print_pending_plugin_notifications()
 
         # Print timing summary if timing was enabled
         if timing_requested:
