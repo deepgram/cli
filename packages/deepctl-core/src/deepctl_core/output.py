@@ -41,9 +41,7 @@ def setup_output(
         quiet: Suppress non-essential output
         verbose: Enable verbose output
     """
-    _output_config.update(
-        {"format": format_type, "quiet": quiet, "verbose": verbose}
-    )
+    _output_config.update({"format": format_type, "quiet": quiet, "verbose": verbose})
 
     # Update console settings
     console.quiet = quiet
@@ -90,17 +88,11 @@ class OutputFormatter:
                     return json.dumps(parsed, indent=2, ensure_ascii=False)
                 except json.JSONDecodeError:
                     # If not JSON, wrap in object
-                    return json.dumps(
-                        {"result": data}, indent=2, ensure_ascii=False
-                    )
+                    return json.dumps({"result": data}, indent=2, ensure_ascii=False)
             else:
-                return json.dumps(
-                    data, indent=2, ensure_ascii=False, default=str
-                )
+                return json.dumps(data, indent=2, ensure_ascii=False, default=str)
         except Exception as e:
-            return json.dumps(
-                {"error": f"JSON formatting failed: {e}"}, indent=2
-            )
+            return json.dumps({"error": f"JSON formatting failed: {e}"}, indent=2)
 
     def _format_yaml(self, data: Any) -> str:
         """Format as YAML."""
@@ -127,9 +119,7 @@ class OutputFormatter:
                     )
             else:
                 return str(
-                    yaml.dump(
-                        data, default_flow_style=False, allow_unicode=True
-                    )
+                    yaml.dump(data, default_flow_style=False, allow_unicode=True)
                 )
         except Exception as e:
             return str(
@@ -163,9 +153,7 @@ class OutputFormatter:
         try:
             if isinstance(data, list) and len(data) > 0:
                 if isinstance(data[0], dict):
-                    dict_writer = csv.DictWriter(
-                        output, fieldnames=data[0].keys()
-                    )
+                    dict_writer = csv.DictWriter(output, fieldnames=data[0].keys())
                     dict_writer.writeheader()
                     dict_writer.writerows(data)
                 else:
@@ -369,9 +357,7 @@ def create_spinner(description: str = "Processing...") -> Progress:
     )
 
 
-def print_panel(
-    content: str, title: str = "", border_style: str = "blue"
-) -> None:
+def print_panel(content: str, title: str = "", border_style: str = "blue") -> None:
     """Print content in a panel.
 
     Args:
@@ -414,11 +400,7 @@ def confirm_action(message: str, default: bool = False) -> bool:
         return click.confirm(message, default=default)
     except ImportError:
         # Fallback implementation
-        response = (
-            input(f"{message} [{'Y/n' if default else 'y/N'}]: ")
-            .strip()
-            .lower()
-        )
+        response = input(f"{message} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
         if not response:
             return default
         return response in ("y", "yes")

@@ -58,9 +58,7 @@ class PluginInstallStrategy(ABC):
     def _run(cmd: list[str]) -> tuple[bool, str]:
         """Run a subprocess, returning (success, stderr_or_stdout)."""
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             return True, result.stdout
         except subprocess.CalledProcessError as e:
             return False, e.stderr or str(e)
@@ -84,9 +82,7 @@ class PipStrategy(PluginInstallStrategy):
         return self._run(cmd)
 
     def uninstall(self, package: str) -> tuple[bool, str]:
-        return self._run(
-            [sys.executable, "-m", "pip", "uninstall", "-y", package]
-        )
+        return self._run([sys.executable, "-m", "pip", "uninstall", "-y", package])
 
     @staticmethod
     def _extra_flags(options: PluginInstallOptions) -> list[str]:
@@ -121,14 +117,10 @@ class PipxStrategy(PluginInstallStrategy):
             return ok, out
         # Fallback for older pipx: runpip
         print_info("Falling back to pipx runpip...")
-        return self._run(
-            ["pipx", "runpip", "deepctl", "install", spec]
-        )
+        return self._run(["pipx", "runpip", "deepctl", "install", spec])
 
     def uninstall(self, package: str) -> tuple[bool, str]:
-        ok, out = self._run(
-            ["pipx", "runpip", "deepctl", "uninstall", "-y", package]
-        )
+        ok, out = self._run(["pipx", "runpip", "deepctl", "uninstall", "-y", package])
         if ok:
             return ok, out
         # Try uninject (pipx >= 1.2)
@@ -143,15 +135,23 @@ class UvToolStrategy(PluginInstallStrategy):
 
     def install(self, options: PluginInstallOptions) -> tuple[bool, str]:
         spec = self._build_package_spec(options)
-        return self._run(
-            ["uv", "tool", "install", "deepctl", "--with", spec]
-        )
+        return self._run(["uv", "tool", "install", "deepctl", "--with", spec])
 
     def uninstall(self, package: str) -> tuple[bool, str]:
         # uv tool doesn't have a direct "remove dependency" — reinstall
         # without the plugin.  For now, use pip inside uv's managed venv.
         return self._run(
-            ["uv", "tool", "run", "--from", "deepctl", "pip", "uninstall", "-y", package]
+            [
+                "uv",
+                "tool",
+                "run",
+                "--from",
+                "deepctl",
+                "pip",
+                "uninstall",
+                "-y",
+                package,
+            ]
         )
 
 
@@ -182,9 +182,7 @@ class IsolatedVenvStrategy(PluginInstallStrategy):
         return self._run(cmd)
 
     def uninstall(self, package: str) -> tuple[bool, str]:
-        return self._run(
-            [self._venv_python, "-m", "pip", "uninstall", "-y", package]
-        )
+        return self._run([self._venv_python, "-m", "pip", "uninstall", "-y", package])
 
 
 class DevelopmentStrategy(PluginInstallStrategy):
@@ -202,9 +200,7 @@ class DevelopmentStrategy(PluginInstallStrategy):
         return self._run(cmd)
 
     def uninstall(self, package: str) -> tuple[bool, str]:
-        return self._run(
-            [sys.executable, "-m", "pip", "uninstall", "-y", package]
-        )
+        return self._run([sys.executable, "-m", "pip", "uninstall", "-y", package])
 
 
 class EphemeralStrategy(PluginInstallStrategy):
@@ -279,7 +275,6 @@ def get_strategy(
     # HOMEBREW, SYSTEM, UNKNOWN → isolated venv
     if venv_python is None:
         raise ValueError(
-            "venv_python is required for IsolatedVenvStrategy "
-            f"(method={method.value})"
+            f"venv_python is required for IsolatedVenvStrategy (method={method.value})"
         )
     return IsolatedVenvStrategy(venv_python)

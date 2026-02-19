@@ -64,9 +64,7 @@ class PluginManager:
                         command_instance = command_class()
 
                         # Create Click command
-                        click_command = self._create_click_command(
-                            command_instance
-                        )
+                        click_command = self._create_click_command(command_instance)
 
                         # Add to CLI group
                         cli_group.add_command(click_command)
@@ -77,8 +75,7 @@ class PluginManager:
 
                     except Exception as e:
                         console.print(
-                            f"[red]Error loading command "
-                            f"{entry_point.name}:[/red] {e}"
+                            f"[red]Error loading command {entry_point.name}:[/red] {e}"
                         )
 
         except Exception as e:
@@ -109,8 +106,7 @@ class PluginManager:
 
                 except Exception as e:
                     console.print(
-                        f"[red]Error loading plugin {entry_point.name}:[/red] "
-                        f"{e}"
+                        f"[red]Error loading plugin {entry_point.name}:[/red] {e}"
                     )
 
         except Exception as e:
@@ -156,9 +152,12 @@ class PluginManager:
 
                 # Also check for subplugin groups
                 for ep in dist.entry_points:
-                    if ep.group and ep.group.startswith("deepctl.subplugins."):
-                        if ep.group not in ep_groups_to_check:
-                            ep_groups_to_check.append(ep.group)
+                    if (
+                        ep.group
+                        and ep.group.startswith("deepctl.subplugins.")
+                        and ep.group not in ep_groups_to_check
+                    ):
+                        ep_groups_to_check.append(ep.group)
 
                 for group_name in ep_groups_to_check:
                     for ep in dist.entry_points:
@@ -172,9 +171,7 @@ class PluginManager:
                         try:
                             plugin_class = ep.load()
                             plugin_instance = plugin_class()
-                            click_command = self._create_click_command(
-                                plugin_instance
-                            )
+                            click_command = self._create_click_command(plugin_instance)
                             cli_group.add_command(click_command)
 
                             self.loaded_plugins[ep.name] = plugin_instance
@@ -186,9 +183,7 @@ class PluginManager:
                             )
 
         except Exception as e:
-            console.print(
-                f"[red]Error loading plugins from plugin venv:[/red] {e}"
-            )
+            console.print(f"[red]Error loading plugins from plugin venv:[/red] {e}")
 
     def _create_click_command(self, command_instance: Any) -> click.Command:
         """Create a Click command from a BaseCommand instance.
@@ -229,9 +224,7 @@ class PluginManager:
 
         return cmd
 
-    def _create_click_group(
-        self, group_instance: BaseGroupCommand
-    ) -> click.Group:
+    def _create_click_group(self, group_instance: BaseGroupCommand) -> click.Group:
         """Create a Click group from a BaseGroupCommand instance.
 
         Args:
@@ -323,8 +316,7 @@ class PluginManager:
 
             except Exception as e:
                 console.print(
-                    f"[red]Error loading subcommands from "
-                    f"{subcommand_group}:[/red] {e}"
+                    f"[red]Error loading subcommands from {subcommand_group}:[/red] {e}"
                 )
 
     def _add_command_arguments(
@@ -374,9 +366,7 @@ class PluginManager:
         Returns:
             List of command names
         """
-        return list(self.command_classes.keys()) + list(
-            self.loaded_plugins.keys()
-        )
+        return list(self.command_classes.keys()) + list(self.loaded_plugins.keys())
 
     def get_command_info(self, command_name: str) -> PluginInfo | ErrorResult:
         """Get information about a specific command.

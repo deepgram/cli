@@ -50,10 +50,7 @@ class LoginCommand(BaseCommand):
             },
             {
                 "names": ["--force-write", "-f"],
-                "help": (
-                    "Don't prompt for confirmation when providing "
-                    "credentials"
-                ),
+                "help": ("Don't prompt for confirmation when providing credentials"),
                 "is_flag": True,
                 "is_option": True,
             },
@@ -119,8 +116,8 @@ class LoginCommand(BaseCommand):
                 )
 
         # Check if already logged into this profile
-        has_profile_key, has_profile_project = (
-            auth_manager.has_profile_credentials(current_profile)
+        has_profile_key, _has_profile_project = auth_manager.has_profile_credentials(
+            current_profile
         )
 
         if has_profile_key and not force_write:
@@ -179,9 +176,7 @@ class LoginCommand(BaseCommand):
                 "[yellow]Warning:[/yellow] API key format doesn't match "
                 "expected pattern"
             )
-            if not force_write and not self.confirm(
-                "Continue anyway?", default=False
-            ):
+            if not force_write and not self.confirm("Continue anyway?", default=False):
                 return LoginResult(
                     status="cancelled",
                     message="Login cancelled by user",
@@ -193,8 +188,7 @@ class LoginCommand(BaseCommand):
         if not project_id:
             console.print("[yellow]Warning:[/yellow] Project ID not provided")
             console.print(
-                "You can set it later with: "
-                "deepctl login --project-id <project_id>"
+                "You can set it later with: deepctl login --project-id <project_id>"
             )
             console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
 
@@ -203,9 +197,7 @@ class LoginCommand(BaseCommand):
         try:
             # Store credentials (verification happens inside
             # login_with_api_key)
-            auth_manager.login_with_api_key(
-                api_key, project_id or "", force_write
-            )
+            auth_manager.login_with_api_key(api_key, project_id or "", force_write)
 
             profile_name = config.profile or "default"
 
@@ -286,9 +278,7 @@ class LoginCommand(BaseCommand):
             )
 
         except KeyboardInterrupt:
-            console.print(
-                "\n[yellow]Authentication cancelled by user[/yellow]"
-            )
+            console.print("\n[yellow]Authentication cancelled by user[/yellow]")
             return LoginResult(
                 status="cancelled",
                 message="Login cancelled by user",
@@ -403,9 +393,7 @@ class LogoutCommand(BaseCommand):
 
                 return LogoutResult(
                     status="success",
-                    message=(
-                        f"Successfully logged out from profile: {profile_name}"
-                    ),
+                    message=(f"Successfully logged out from profile: {profile_name}"),
                     profile=profile_name,
                 )
 
@@ -474,15 +462,11 @@ class ProfilesCommand(BaseCommand):
             console.print("[blue]Available profiles:[/blue]")
             for name, info in profiles.items():
                 current_marker = (
-                    " (current)"
-                    if name == (config.profile or "default")
-                    else ""
+                    " (current)" if name == (config.profile or "default") else ""
                 )
                 console.print(f"  • {name}{current_marker}")
                 console.print(f"    API Key: {info.api_key or 'Not set'}")
-                console.print(
-                    f"    Project ID: {info.project_id or 'Not set'}"
-                )
+                console.print(f"    Project ID: {info.project_id or 'Not set'}")
                 console.print(f"    Base URL: {info.base_url}")
                 console.print()
             return profiles_result
@@ -495,16 +479,11 @@ class ProfilesCommand(BaseCommand):
             )
 
             console.print(f"[blue]Current profile:[/blue] {current_profile}")
+            console.print(f"[dim]API Key:[/dim] {profile_info.api_key or 'Not set'}")
             console.print(
-                f"[dim]API Key:[/dim] {profile_info.api_key or 'Not set'}"
+                f"[dim]Project ID:[/dim] {profile_info.project_id or 'Not set'}"
             )
-            console.print(
-                f"[dim]Project ID:[/dim] "
-                f"{profile_info.project_id or 'Not set'}"
-            )
-            console.print(
-                f"[dim]Base URL:[/dim] {profile_info.base_url or 'Not set'}"
-            )
+            console.print(f"[dim]Base URL:[/dim] {profile_info.base_url or 'Not set'}")
 
             return ProfilesResult(
                 status="success",
@@ -516,18 +495,14 @@ class ProfilesCommand(BaseCommand):
             profile_names = config.list_profiles()
 
             if switch_profile not in profile_names:
-                console.print(
-                    f"[red]Profile '{switch_profile}' not found[/red]"
-                )
+                console.print(f"[red]Profile '{switch_profile}' not found[/red]")
                 return ProfilesResult(
                     status="error",
                     message=f"Profile '{switch_profile}' not found",
                 )
 
             # Require re-authentication when switching profiles
-            console.print(
-                f"[blue]Switching to profile:[/blue] {switch_profile}"
-            )
+            console.print(f"[blue]Switching to profile:[/blue] {switch_profile}")
             console.print(
                 "[dim]Re-authentication required to confirm access to credentials[/dim]"
             )
@@ -561,9 +536,7 @@ class ProfilesCommand(BaseCommand):
                 config._config.active_profile = switch_profile
                 config.save()
 
-                console.print(
-                    f"[green]✓[/green] Switched to profile: {switch_profile}"
-                )
+                console.print(f"[green]✓[/green] Switched to profile: {switch_profile}")
 
                 # Log the project ID being used
                 project_id = config.get_profile(switch_profile).project_id

@@ -1,14 +1,13 @@
 # ===================================================================
 # deepctl Makefile - Development Tools
 # ===================================================================
-# 
+#
 # Quick Start:
 #   make dev-setup    # First time setup
 #   make dev          # Daily development (format + lint + test)
-#   make build        # Build packages
 #   make help         # Show organized help
 #
-# For new contributors: see docs/Quick Start For Contributors.md
+# For new contributors: see README.md
 # ===================================================================
 
 .PHONY: help
@@ -26,14 +25,7 @@ help: ## Show this help message
 	@echo "🚀 \033[1mQuick Start:\033[0m"
 	@echo "  \033[36mdev-setup\033[0m            Set up development environment"
 	@echo "  \033[36mdev\033[0m                  Format, lint, and test (full dev cycle)"
-	@echo "  \033[36mbuild\033[0m                Build all packages for PyPI"
 	@echo "  \033[36mtest\033[0m                 Run tests"
-	@echo ""
-	@echo "📦 \033[1mBuilding & Release:\033[0m"
-	@echo "  \033[36mbuild\033[0m                Build all packages"
-	@echo "  \033[36mrelease\033[0m              Full release process (version → build → tag)"
-	@echo "  \033[36mpublish\033[0m              Publish to PyPI"
-	@echo "  \033[36mverify-packages\033[0m      Verify package configuration"
 	@echo ""
 	@echo "🍺 \033[1mHomebrew:\033[0m"
 	@echo "  \033[36mbuild-homebrew\033[0m       Build both Homebrew formulas (wheel + binary)"
@@ -42,13 +34,12 @@ help: ## Show this help message
 	@echo ""
 	@echo "🧪 \033[1mTesting:\033[0m"
 	@echo "  \033[36mtest\033[0m                 Run tests (development)"
-	@echo "  \033[36mtest-full\033[0m            Run tests on all Python versions"
-	@echo "  \033[36mci\033[0m                   Run full CI pipeline"
+	@echo "  \033[36mcheck\033[0m                Quick quality check (no tests)"
 	@echo ""
 	@echo "🔧 \033[1mCode Quality:\033[0m"
 	@echo "  \033[36mformat\033[0m               Auto-format code"
 	@echo "  \033[36mlint\033[0m                 Run all linters"
-	@echo "  \033[36mcheck\033[0m                Quick quality check (no tests)"
+	@echo "  \033[36mtypecheck\033[0m            Run mypy type checker"
 	@echo ""
 	@echo "🧹 \033[1mUtilities:\033[0m"
 	@echo "  \033[36mclean\033[0m                Clean build artifacts"
@@ -92,17 +83,14 @@ install-dev: ## Install all development dependencies (includes testing)
 dev: format lint-fix test ## Run full development cycle: format, fix lints, test
 	@echo "✅ Development cycle complete!"
 
-check: format-check lint typecheck ## Quick quality check (no tests)
+check: format-check lint-check typecheck ## Quick quality check (no tests)
 	@echo "✅ Quick check complete!"
-
-ci: ## Run full CI pipeline (all Python versions + lint)
-	uv run tox -p auto
 
 # ===================================================================
 # TESTING
 # ===================================================================
 
-test: ## Run tests with pytest (development mode)
+test: ## Run tests with pytest
 	uv run pytest --all
 
 test-quick: ## Run tests quickly (no coverage)
@@ -114,35 +102,20 @@ test-verbose: ## Run tests with verbose output
 test-watch: ## Run tests in watch mode (requires pytest-watch)
 	uv run ptw
 
-test-full: ## Run tests on all Python versions using tox
-	uv run tox
-
-test-py310: ## Test with Python 3.10
-	uv run tox -e py310
-
-test-py311: ## Test with Python 3.11
-	uv run tox -e py311
-
-test-py312: ## Test with Python 3.12
-	uv run tox -e py312
-
-test-parallel: ## Run all tox environments in parallel
-	uv run tox -p auto
-
 # ===================================================================
 # CODE QUALITY
 # ===================================================================
 
 ## Formatting
-format: ## Auto-format code with black
-	uv run black src/ packages/**/src
+format: ## Auto-format code with ruff
+	uv run ruff format src/ packages/**/src
 
 format-check: ## Check code formatting (no changes)
-	uv run black --check src/ packages/**/src
+	uv run ruff format --check src/ packages/**/src
 
 ## Linting
-lint: ## Run all linters via tox
-	uv run tox -e lint
+lint: format-check lint-check typecheck ## Run all linters
+	@echo "✅ All linters passed!"
 
 lint-fix: ## Run ruff with auto-fix
 	uv run ruff check --fix src/ packages/**/src
@@ -158,97 +131,14 @@ typecheck: ## Run mypy type checker
 quality: format-check lint-check typecheck ## Run all quality checks
 
 # ===================================================================
-# BUILD & DISTRIBUTION  
-# ===================================================================
-
-build: clean ## Build the package
-	uv run scripts/build.py
-
-publish-test: build ## Publish to TestPyPI
-	uv run scripts/publish.py --test
-
-publish: build ## Publish to PyPI (use with caution!)
-	uv run scripts/publish.py
-
-# ===================================================================
 # RELEASE MANAGEMENT
 # ===================================================================
 
-verify-packages: ## Verify all packages are properly configured
-	@echo "🔍 Verifying package configuration..."
-	@python3 scripts/verify_packages.py
+readmes: ## Generate sub-package READMEs from pyproject.toml metadata
+	python3 scripts/generate_readmes.py
 
-# Version management with optional VERSION parameter
-version: ## Update version in all packages (usage: make version VERSION=0.2.0)
-ifdef VERSION
-	@python3 scripts/version.py $(VERSION)
-else
-	@read -p "Enter new version: " VERSION && \
-	python3 scripts/version.py $$VERSION
-endif
-
-# Commit with optional [no-ci] flag
-commit: ## Commit changes (usage: make commit or make commit NOCI=1)
-ifdef NOCI
-	@echo "💾 Committing with [no-ci]..."
-	@git add -A && \
-	git commit -m "chore: bump version to v$$(python3 -c "import re; content=open('pyproject.toml').read(); print(re.search(r'version = \"(.+?)\"', content).group(1))") [no-ci]"
-else
-	@echo "💾 Committing..."
-	@git add -A && \
-	git commit -m "chore: bump version to v$$(python3 -c "import re; content=open('pyproject.toml').read(); print(re.search(r'version = \"(.+?)\"', content).group(1))")"
-endif
-
-tag: ## Create git tag for current version
-	@python3 scripts/tag.py
-
-# Modular release steps that use the base targets
-release-step-1: ## Step 1: Update versions (usage: make release-step-1 VERSION=0.2.0)
-	@echo "📝 Step 1: Updating versions..."
-	@$(MAKE) version VERSION=$(VERSION)
-	@echo "✅ Step 1 complete: Versions updated to $(VERSION)"
-
-release-step-2: ## Step 2: Commit changes (usage: make release-step-2 NOCI=1)
-	@echo "💾 Step 2: Committing changes..."
-	@$(MAKE) commit NOCI=$(NOCI)
-	@echo "✅ Step 2 complete: Changes committed"
-
-release-step-3: ## Step 3: Build packages
-	@echo "🔨 Step 3: Building packages..."
-	@$(MAKE) build
-	@echo "✅ Step 3 complete: Packages built"
-
-release-step-4: ## Step 4: Verify configuration
-	@echo "🔍 Step 4: Verifying configuration..."
-	@$(MAKE) verify-packages
-	@echo "✅ Step 4 complete: Configuration verified"
-
-release-step-5: ## Step 5: Create tag
-	@echo "🏷️  Step 5: Creating tag..."
-	@$(MAKE) tag
-	@echo "✅ Step 5 complete: Tag created"
-
-# Full automated release (with [no-ci])
-release: ## Run complete release process (version -> commit -> build -> verify -> tag)
-	@echo "🚀 Starting automated release process..."
-	@read -p "Enter version (e.g., 0.2.0): " VERSION && \
-	$(MAKE) release-step-1 VERSION=$$VERSION && \
-	$(MAKE) release-step-2 NOCI=1 && \
-	$(MAKE) release-step-3 && \
-	$(MAKE) release-step-4 && \
-	$(MAKE) release-step-5 && \
-	echo "✅ Release complete! Now run: git push origin main --tags"
-
-# Manual release process (without [no-ci])
-release-manual: ## Run release process with manual commit (no [no-ci])
-	@echo "🚀 Starting manual release process..."
-	@read -p "Enter version (e.g., 0.2.0): " VERSION && \
-	$(MAKE) release-step-1 VERSION=$$VERSION && \
-	$(MAKE) release-step-2 && \
-	$(MAKE) release-step-3 && \
-	$(MAKE) release-step-4 && \
-	$(MAKE) release-step-5 && \
-	echo "✅ Release complete! Now run: git push origin main --tags"
+readmes-check: ## Check sub-package READMEs are up to date
+	python3 scripts/generate_readmes.py --check
 
 # ===================================================================
 # RUNNING THE CLI
@@ -276,7 +166,6 @@ clean: ## Clean all build artifacts and caches
 	rm -rf htmlcov/
 	rm -rf .mypy_cache/
 	rm -rf .ruff_cache/
-	rm -rf .tox/
 
 clean-env: ## Remove virtual environment
 	rm -rf .venv/
@@ -292,18 +181,6 @@ pre-commit-run: ## Run pre-commit on all files
 	uv run pre-commit run --all-files
 
 # ===================================================================
-# DOCUMENTATION
-# ===================================================================
-
-docs-list: ## List documentation files
-	@echo "📚 Documentation files:"
-	@ls -la docs/
-
-docs-serve: ## Serve documentation (placeholder)
-	@echo "📚 Documentation is in docs/ directory"
-	@echo "📝 See README.md for usage instructions"
-
-# ===================================================================
 # HOMEBREW TESTING
 # ===================================================================
 
@@ -313,7 +190,15 @@ docs-serve: ## Serve documentation (placeholder)
 # Main Homebrew targets (user-facing)
 build-homebrew: build-homebrew-wheels build-homebrew-binary ## Build both Homebrew formulas (wheel + binary)
 
-build-homebrew-wheels: build ## Build wheel-based Homebrew formula (recommended)
+build-homebrew-wheels: clean ## Build wheel-based Homebrew formula (recommended)
+	@echo "📦 Building all packages..."
+	@pip install build
+	@for pkg in . packages/*; do \
+		if [ -f "$$pkg/pyproject.toml" ]; then \
+			echo "  Building $$pkg..."; \
+			python -m build "$$pkg" --outdir dist/; \
+		fi; \
+	done
 	@./homebrew/scripts/generate-wheel-tap.sh
 
 build-homebrew-binary: build-binary ## Build standalone binary Homebrew formula
@@ -341,12 +226,10 @@ tap-uninstall: ## Test: Uninstall deepctl from Homebrew
 # ALIASES (for convenience)
 # ===================================================================
 
-.PHONY: t tc tl tf q f l
+.PHONY: t tl q f l
 
 t: test              ## Alias for test
-tc: test-full        ## Alias for test-full (tox complete)
 tl: lint             ## Alias for lint
-tf: test-parallel    ## Alias for test-parallel (tox fast)
 q: check             ## Alias for check (quick)
 f: format            ## Alias for format
-l: lint-fix          ## Alias for lint-fix 
+l: lint-fix          ## Alias for lint-fix

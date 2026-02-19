@@ -10,4 +10,4 @@ __all__ = [
     "validate_url",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.10"  # x-release-please-version

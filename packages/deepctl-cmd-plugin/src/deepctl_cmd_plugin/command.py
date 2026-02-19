@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -182,9 +181,7 @@ class PluginCommand(BaseGroupCommand):
                 venv_python = get_venv_python()
                 if venv_python is None:
                     if sys.platform == "win32":
-                        venv_python_path = (
-                            self._plugin_venv / "Scripts" / "python.exe"
-                        )
+                        venv_python_path = self._plugin_venv / "Scripts" / "python.exe"
                     else:
                         venv_python_path = self._plugin_venv / "bin" / "python"
                     venv_python = str(venv_python_path)
@@ -211,9 +208,7 @@ class PluginCommand(BaseGroupCommand):
         venv_python = get_venv_python()
         if venv_python is None:
             if sys.platform == "win32":
-                venv_python = str(
-                    self._plugin_venv / "Scripts" / "python.exe"
-                )
+                venv_python = str(self._plugin_venv / "Scripts" / "python.exe")
             else:
                 venv_python = str(self._plugin_venv / "bin" / "python")
 
@@ -463,9 +458,7 @@ class PluginCommand(BaseGroupCommand):
         package = kwargs["package"]
         yes = kwargs.get("yes", False)
 
-        if not yes and not click.confirm(
-            f"Are you sure you want to remove {package}?"
-        ):
+        if not yes and not click.confirm(f"Are you sure you want to remove {package}?"):
             return
 
         result = self.remove_plugin(config, auth_manager, client, package)
@@ -531,9 +524,7 @@ class PluginCommand(BaseGroupCommand):
                 if (
                     query_lower not in plugin.name.lower()
                     and query_lower not in plugin.description.lower()
-                    and not any(
-                        query_lower in kw.lower() for kw in plugin.keywords
-                    )
+                    and not any(query_lower in kw.lower() for kw in plugin.keywords)
                 ):
                     continue
 
@@ -598,9 +589,7 @@ class PluginCommand(BaseGroupCommand):
         # Show install hint
         available_count = sum(1 for r in search_results if not r.installed)
         if available_count > 0:
-            print_info(
-                "\nTo install a plugin, use: deepctl plugin install <name>"
-            )
+            print_info("\nTo install a plugin, use: deepctl plugin install <name>")
 
     def _get_plugin_registry(self) -> list[PluginRegistryEntry]:
         """Get the plugin registry.
@@ -688,7 +677,7 @@ class PluginCommand(BaseGroupCommand):
 
     def _get_strategy(
         self, method: InstallMethod
-    ) -> tuple["PluginInstallStrategy", bool]:
+    ) -> tuple[PluginInstallStrategy, bool]:
         """Get the correct installation strategy and whether it uses the plugin venv.
 
         Returns:
@@ -703,9 +692,7 @@ class PluginCommand(BaseGroupCommand):
             )
             success, python_exe = self._ensure_plugin_environment()
             if not success:
-                raise RuntimeError(
-                    "Could not create isolated environment for plugins"
-                )
+                raise RuntimeError("Could not create isolated environment for plugins")
             return get_strategy(method, venv_python=python_exe), True
 
         return get_strategy(method), False
@@ -734,9 +721,7 @@ class PluginCommand(BaseGroupCommand):
         install_info = self.detector.detect()
 
         try:
-            strategy, using_plugin_env = self._get_strategy(
-                install_info.method
-            )
+            strategy, using_plugin_env = self._get_strategy(install_info.method)
         except RuntimeError as exc:
             return PluginOperationResult(
                 success=False,
@@ -762,9 +747,7 @@ class PluginCommand(BaseGroupCommand):
         target_python = (
             get_venv_python() if using_plugin_env else self._python_executable
         )
-        installed_version = self._get_package_version(
-            options.package, target_python
-        )
+        installed_version = self._get_package_version(options.package, target_python)
 
         # Track state for isolated venv installs
         if using_plugin_env:
@@ -900,9 +883,7 @@ class PluginCommand(BaseGroupCommand):
         """
         # Check if plugin is installed
         plugins = self._discover_plugins()
-        plugin_found = any(
-            p.name == package for p in plugins if not p.is_builtin
-        )
+        plugin_found = any(p.name == package for p in plugins if not p.is_builtin)
 
         if not plugin_found:
             return PluginOperationResult(
@@ -1002,9 +983,7 @@ class PluginCommand(BaseGroupCommand):
 
         return plugins
 
-    def _discover_from_environment(
-        self, python_exe: str
-    ) -> list[PluginPackage]:
+    def _discover_from_environment(self, python_exe: str) -> list[PluginPackage]:
         """Discover plugins from a specific Python environment.
 
         Args:
@@ -1033,9 +1012,7 @@ class PluginCommand(BaseGroupCommand):
                                         name=dist.name,
                                         version=dist.version,
                                         entry_point=f"{ep.name}={ep.value}",
-                                        is_builtin=dist.name.startswith(
-                                            "deepctl-cmd-"
-                                        ),
+                                        is_builtin=dist.name.startswith("deepctl-cmd-"),
                                     )
                                 )
                             # Also check for external plugins
@@ -1050,7 +1027,7 @@ class PluginCommand(BaseGroupCommand):
                                 )
                         else:
                             # Older versions
-                            if "deepctl.commands" in eps:
+                            if "deepctl.commands" in eps:  # type: ignore[comparison-overlap]
                                 for ep in eps["deepctl.commands"]:
                                     plugins.append(
                                         PluginPackage(
@@ -1063,7 +1040,7 @@ class PluginCommand(BaseGroupCommand):
                                         )
                                     )
                             # Also check for external plugins
-                            if "deepctl.plugins" in eps:
+                            if "deepctl.plugins" in eps:  # type: ignore[comparison-overlap]
                                 for ep in eps["deepctl.plugins"]:
                                     plugins.append(
                                         PluginPackage(

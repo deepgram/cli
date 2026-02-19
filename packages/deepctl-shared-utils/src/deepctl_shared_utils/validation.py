@@ -88,17 +88,14 @@ def validate_audio_file(file_path: str | Path) -> bool:
 
         # Check if file is readable
         if not os.access(path, os.R_OK):
-            console.print(
-                f"[red]Error:[/red] File is not readable: {file_path}"
-            )
+            console.print(f"[red]Error:[/red] File is not readable: {file_path}")
             return False
 
         # Check file size (warn if very large)
         size_mb = path.stat().st_size / (1024 * 1024)
         if size_mb > 500:  # 500 MB
             console.print(
-                f"[yellow]Warning:[/yellow] Large file detected "
-                f"({size_mb:.1f} MB)"
+                f"[yellow]Warning:[/yellow] Large file detected ({size_mb:.1f} MB)"
             )
             console.print("[dim]Large files may take longer to process[/dim]")
 
@@ -264,13 +261,10 @@ def validate_project_id(project_id: str) -> bool:
         return False
 
     # Check if it's a valid UUID format
-    uuid_pattern = (
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-    )
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     if not re.match(uuid_pattern, project_id, re.IGNORECASE):
         console.print(
-            "[yellow]Warning:[/yellow] Project ID doesn't match expected "
-            "UUID format"
+            "[yellow]Warning:[/yellow] Project ID doesn't match expected UUID format"
         )
         return False
 
@@ -336,8 +330,7 @@ def validate_language_code(language: str) -> bool:
 
     if language not in supported_languages:
         console.print(
-            f"[yellow]Warning:[/yellow] Language '{language}' may not be "
-            f"supported"
+            f"[yellow]Warning:[/yellow] Language '{language}' may not be supported"
         )
         console.print(
             "[dim]Common supported languages: en-US, es-ES, fr-FR, de-DE, "
@@ -387,9 +380,7 @@ def validate_model_name(model: str) -> bool:
     }
 
     if model not in supported_models:
-        console.print(
-            f"[yellow]Warning:[/yellow] Model '{model}' may not be supported"
-        )
+        console.print(f"[yellow]Warning:[/yellow] Model '{model}' may not be supported")
         console.print(
             "[dim]Common supported models: nova-2, nova, enhanced, base, "
             "meeting, phonecall[/dim]"
@@ -446,9 +437,7 @@ def validate_file_permissions(file_path: str | Path) -> bool:
 
         # Check read permission
         if not os.access(path, os.R_OK):
-            console.print(
-                f"[red]Error:[/red] No read permission for file: {file_path}"
-            )
+            console.print(f"[red]Error:[/red] No read permission for file: {file_path}")
             return False
 
         # Check if file is not empty
@@ -501,12 +490,9 @@ def validate_output_format(format_type: str) -> bool:
     supported_formats = {"json", "yaml", "table", "csv"}
 
     if format_type not in supported_formats:
+        console.print(f"[red]Error:[/red] Unsupported output format: {format_type}")
         console.print(
-            f"[red]Error:[/red] Unsupported output format: {format_type}"
-        )
-        console.print(
-            f"[dim]Supported formats: "
-            f"{', '.join(sorted(supported_formats))}[/dim]"
+            f"[dim]Supported formats: {', '.join(sorted(supported_formats))}[/dim]"
         )
         return False
 

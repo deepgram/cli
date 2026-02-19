@@ -31,12 +31,8 @@ def main() -> None:
     parser.add_argument(
         "--port", type=int, default=8000, help="Port for HTTP transports"
     )
-    parser.add_argument(
-        "--host", default="127.0.0.1", help="Host for HTTP transports"
-    )
-    parser.add_argument(
-        "--debug", action="store_true", help="Enable debug logging"
-    )
+    parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
 
@@ -49,9 +45,7 @@ def main() -> None:
         elif args.transport == "sse":
             server.run(transport="sse", host=args.host, port=args.port)
         elif args.transport == "streamable-http":
-            server.run(
-                transport="streamable-http", host=args.host, port=args.port
-            )
+            server.run(transport="streamable-http", host=args.host, port=args.port)
     except KeyboardInterrupt:
         print("\nMCP server stopped by user", file=sys.stderr)
         sys.exit(0)

@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 # --- Path constants ---
 PLUGIN_DIR = Path.home() / ".deepctl" / "plugins"
 PLUGIN_VENV = PLUGIN_DIR / "venv"
@@ -47,7 +46,6 @@ def find_system_python(min_version: tuple[int, int] = (3, 10)) -> str | None:
 
     search_paths: list[str] = []
     # PATH entries first
-    env_path = shutil.which("python3")  # warm-up — not used directly
     for candidate in candidates:
         full = shutil.which(candidate)
         if full and full not in search_paths:

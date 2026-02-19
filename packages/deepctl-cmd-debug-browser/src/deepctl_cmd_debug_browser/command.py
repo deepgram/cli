@@ -68,8 +68,7 @@ class BrowserCommand(BaseCommand):
             {
                 "names": ["--timeout"],
                 "help": (
-                    "Timeout in seconds to wait for browser connection "
-                    "(default: 60)"
+                    "Timeout in seconds to wait for browser connection (default: 60)"
                 ),
                 "type": int,
                 "default": 60,
@@ -87,9 +86,7 @@ class BrowserCommand(BaseCommand):
                 return port
             except OSError:
                 continue
-        raise RuntimeError(
-            f"Could not find available port starting from {start_port}"
-        )
+        raise RuntimeError(f"Could not find available port starting from {start_port}")
 
     async def websocket_handler(self, request: Any) -> Any:
         """Handle WebSocket connections from the browser."""
@@ -113,8 +110,8 @@ class BrowserCommand(BaseCommand):
                         cap_data = ws_msg.data.get("result", {})
                         cap_key = ws_msg.data.get("capability")
                         if cap_key and cap_data:
-                            self.capabilities_data[cap_key] = (
-                                BrowserCapability(**cap_data)
+                            self.capabilities_data[cap_key] = BrowserCapability(
+                                **cap_data
                             )
 
                     elif ws_msg.type == MessageType.COMPLETE:
@@ -136,27 +133,21 @@ class BrowserCommand(BaseCommand):
                                 "secure_context",
                             ]:
                                 if key in caps:
-                                    cap_dict[key] = BrowserCapability(
-                                        **caps[key]
-                                    )
+                                    cap_dict[key] = BrowserCapability(**caps[key])
                                 elif key in self.capabilities_data:
                                     cap_dict[key] = self.capabilities_data[key]
 
                             # Store complete capabilities
                             self.capabilities_data = {
                                 **cap_dict,
-                                "user_agent": caps.get(
-                                    "user_agent", "Unknown"
-                                ),
+                                "user_agent": caps.get("user_agent", "Unknown"),
                                 "overall_compatible": caps.get(
                                     "overall_compatible", False
                                 ),
                             }
                         self.debug_complete = True
                 elif msg.type == WSMsgType.ERROR:
-                    console.print(
-                        f"[red]WebSocket error: {ws.exception()}[/red]"
-                    )
+                    console.print(f"[red]WebSocket error: {ws.exception()}[/red]")
         finally:
             self.ws_clients.discard(ws)
             await ws.close()
@@ -192,8 +183,7 @@ class BrowserCommand(BaseCommand):
         await site.start()
 
         console.print(
-            f"\n[green]✓[/green] Debug server started on port "
-            f"[cyan]{port}[/cyan]"
+            f"\n[green]✓[/green] Debug server started on port [cyan]{port}[/cyan]"
         )
 
         # Wait for debug to complete or timeout
@@ -280,17 +270,14 @@ class BrowserCommand(BaseCommand):
                     status_color = "green" if cap.supported else "red"
                     cap_table.add_row(
                         display_name,
-                        f"[{status_color}]{status_icon} "
-                        f"{cap.details}[/{status_color}]",
+                        f"[{status_color}]{status_icon} {cap.details}[/{status_color}]",
                         cap.version or "",
                     )
 
             console.print(cap_table)
 
             # Overall compatibility
-            console.print(
-                f"\n[bold]User Agent:[/bold] {capabilities.user_agent}"
-            )
+            console.print(f"\n[bold]User Agent:[/bold] {capabilities.user_agent}")
             if capabilities.overall_compatible:
                 console.print(
                     "[bold green]✓ Browser is fully compatible with "
@@ -335,8 +322,7 @@ class BrowserCommand(BaseCommand):
         # Prompt user to open browser
         if not no_browser:
             console.print(
-                "\n[yellow]Press Enter to open the debugger in your "
-                "browser...[/yellow]"
+                "\n[yellow]Press Enter to open the debugger in your browser...[/yellow]"
             )
             input()
             webbrowser.open(url)
@@ -355,18 +341,14 @@ class BrowserCommand(BaseCommand):
             console=console,
             transient=True,
         ) as progress:
-            task = progress.add_task(
-                "Waiting for browser connection...", total=None
-            )
+            task = progress.add_task("Waiting for browser connection...", total=None)
 
             # Run servers
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
             try:
-                result = loop.run_until_complete(
-                    self.run_servers(port, timeout)
-                )
+                result = loop.run_until_complete(self.run_servers(port, timeout))
             finally:
                 loop.close()
 
@@ -374,10 +356,7 @@ class BrowserCommand(BaseCommand):
 
         # Process results
         capabilities = None
-        if (
-            self.capabilities_data
-            and "overall_compatible" in self.capabilities_data
-        ):
+        if self.capabilities_data and "overall_compatible" in self.capabilities_data:
             # Build BrowserCapabilities object
             cap_dict = {}
             for key in [
@@ -398,9 +377,7 @@ class BrowserCommand(BaseCommand):
             if all(key in cap_dict for key in cap_dict):
                 capabilities = BrowserCapabilities(
                     **cap_dict,
-                    user_agent=self.capabilities_data.get(
-                        "user_agent", "Unknown"
-                    ),
+                    user_agent=self.capabilities_data.get("user_agent", "Unknown"),
                     overall_compatible=self.capabilities_data.get(
                         "overall_compatible", False
                     ),
@@ -408,14 +385,11 @@ class BrowserCommand(BaseCommand):
 
         # Display results
         if result["completed"]:
-            console.print(
-                "\n[green]✓ Debug session completed successfully![/green]"
-            )
+            console.print("\n[green]✓ Debug session completed successfully![/green]")
             self.display_results(capabilities, self.messages)
         elif result["timed_out"]:
             console.print(
-                f"\n[red]✗ Debug session timed out after {timeout} "
-                f"seconds[/red]"
+                f"\n[red]✗ Debug session timed out after {timeout} seconds[/red]"
             )
             console.print("[dim]No browser connection was established.[/dim]")
         else:

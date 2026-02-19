@@ -37,10 +37,7 @@ class McpCommand(BaseCommand):
         return [
             {
                 "names": ["--transport", "-t"],
-                "help": (
-                    "Transport mode: stdio (default), sse, "
-                    "or streamable-http"
-                ),
+                "help": ("Transport mode: stdio (default), sse, or streamable-http"),
                 "type": str,
                 "default": "stdio",
                 "required": False,
@@ -144,9 +141,7 @@ class McpCommand(BaseCommand):
 
         try:
             if transport == "stdio":
-                console.print(
-                    "[blue]Starting MCP server in stdio mode...[/blue]"
-                )
+                console.print("[blue]Starting MCP server in stdio mode...[/blue]")
                 mcp_server.run()
             elif transport == "sse":
                 console.print(
@@ -160,9 +155,7 @@ class McpCommand(BaseCommand):
                     f"{host}:{port}...[/blue]"
                 )
                 # HTTP transport requires host and port parameters per FastMCP documentation
-                mcp_server.run(
-                    transport="streamable-http", host=host, port=port
-                )
+                mcp_server.run(transport="streamable-http", host=host, port=port)
 
             # Normal exit
             return MCPServerResult(
@@ -204,9 +197,7 @@ def create_mcp_server() -> FastMCP:
 
     # Get configuration from environment
     gnosis_api_key = os.getenv("DEEPGRAM_API_KEY")
-    gnosis_url = os.getenv(
-        "DEEPGRAM_GNOSIS_URL", "https://gnosis.deepgram.com"
-    )
+    gnosis_url = os.getenv("DEEPGRAM_GNOSIS_URL", "https://gnosis.deepgram.com")
     debug = os.getenv("DEEPGRAM_MCP_DEBUG", "").lower() in ("1", "true", "yes")
 
     # Debug logging to diagnose URL issue
@@ -305,9 +296,7 @@ def create_mcp_server() -> FastMCP:
         if ctx and debug:
             await ctx.info(f"Checking API spec: {api_type} {endpoint}")
 
-        prompt = (
-            f"Provide the API specification for Deepgram's {api_type.upper()} "
-        )
+        prompt = f"Provide the API specification for Deepgram's {api_type.upper()} "
         if endpoint:
             prompt += f"endpoint: {endpoint}"
         else:

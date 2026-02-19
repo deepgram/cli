@@ -88,7 +88,7 @@ See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
 
 - `tests/` - Integration tests
 - `packages/*/tests/unit/` - Unit tests
-- Runs on Python 3.10-3.12, Linux/Windows/macOS
+- Runs on Python 3.10-3.14, Linux/Windows/macOS
 
 ## Release
 

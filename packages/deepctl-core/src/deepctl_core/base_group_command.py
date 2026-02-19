@@ -41,9 +41,7 @@ class BaseGroupCommand(BaseCommand):
         if not hasattr(self, "invoke_without_command"):
             self.invoke_without_command = False
 
-    def add_subcommand(
-        self, name: str, command_class: type[BaseCommand]
-    ) -> None:
+    def add_subcommand(self, name: str, command_class: type[BaseCommand]) -> None:
         """Add a subcommand to this group.
 
         Args:
@@ -89,9 +87,7 @@ class BaseGroupCommand(BaseCommand):
             # No subcommand was invoked
             if self.invoke_without_command:
                 # Call the group handler if defined
-                return self.handle_group(
-                    config, auth_manager, client, **kwargs
-                )
+                return self.handle_group(config, auth_manager, client, **kwargs)
             else:
                 # Show help by default
                 click.echo(ctx.get_help())

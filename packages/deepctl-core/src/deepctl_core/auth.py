@@ -113,9 +113,7 @@ class AuthManager:
         # Check keyring for API key
         has_api_key = False
         try:
-            api_key = keyring.get_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}"
-            )
+            api_key = keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
             has_api_key = bool(api_key)
         except Exception:
             pass
@@ -154,9 +152,7 @@ class AuthManager:
         """Check if running in CI mode (credentials from environment)."""
         # If both API key and project ID are provided via environment,
         # we're in CI mode
-        return bool(
-            os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID")
-        )
+        return bool(os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID"))
 
     def get_api_key(self, ignore_env: bool = False) -> str | None:
         """Get API key following precedence: explicit > profile > env.
@@ -173,9 +169,7 @@ class AuthManager:
 
         # Check keyring first
         try:
-            api_key = keyring.get_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}"
-            )
+            api_key = keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
             if api_key:
                 return api_key
         except Exception:
@@ -368,30 +362,21 @@ class AuthManager:
         # Validate API key format (basic check)
         if not api_key.startswith(("sk-", "pk-")):
             console.print(
-                "[red]Warning:[/red] API key format doesn't match expected "
-                "pattern"
+                "[red]Warning:[/red] API key format doesn't match expected pattern"
             )
 
         # Verify credentials before storing
         console.print("[dim]Verifying credentials...[/dim]")
-        success, message, error_type = self.verify_credentials(
-            api_key, project_id
-        )
+        success, message, error_type = self.verify_credentials(api_key, project_id)
 
         if not success:
             console.print(f"[red]Error:[/red] {message}")
             if error_type == "auth":
-                raise AuthenticationError(
-                    f"API key verification failed: {message}"
-                )
+                raise AuthenticationError(f"API key verification failed: {message}")
             elif error_type == "project":
-                raise AuthenticationError(
-                    f"Project ID verification failed: {message}"
-                )
+                raise AuthenticationError(f"Project ID verification failed: {message}")
             else:
-                raise AuthenticationError(
-                    f"Credential verification failed: {message}"
-                )
+                raise AuthenticationError(f"Credential verification failed: {message}")
 
         console.print(f"[green]✓[/green] {message}")
 
@@ -400,18 +385,12 @@ class AuthManager:
         keyring_available = False
 
         try:
-            keyring.set_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}", api_key
-            )
+            keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
             # Don't store project ID in keyring - it goes in profile config only
-            console.print(
-                "[green]✓[/green] API key stored securely in system keyring"
-            )
+            console.print("[green]✓[/green] API key stored securely in system keyring")
             keyring_available = True
         except Exception as e:
-            console.print(
-                f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
-            )
+            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
             console.print("API key will be stored in config file instead")
 
         # Update config with non-sensitive data
@@ -440,9 +419,7 @@ class AuthManager:
         """
         # URL-friendly characters matching Go implementation
         url_friendly_chars = string.ascii_letters + string.digits + "-._~"
-        return "".join(
-            random.choice(url_friendly_chars) for _ in range(length)
-        )
+        return "".join(random.choice(url_friendly_chars) for _ in range(length))
 
     def login_with_device_flow(self) -> None:
         """Login using device flow (interactive method)."""
@@ -450,9 +427,7 @@ class AuthManager:
 
         try:
             # Get hostname for device identification
-            hostname = (
-                os.uname().nodename if hasattr(os, "uname") else "unknown"
-            )
+            hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
 
             # Request device code (returns device code response and client_id)
             device_response, client_id = self._request_device_code()
@@ -484,28 +459,18 @@ class AuthManager:
             # Open browser
             try:
                 webbrowser.open(verification_uri)
-                console.print(
-                    "[green]✓[/green] Opened browser for authentication"
-                )
+                console.print("[green]✓[/green] Opened browser for authentication")
             except Exception as e:
-                console.print(
-                    f"[yellow]Warning:[/yellow] Could not open browser: {e}"
-                )
-                console.print(
-                    "Please manually navigate to the verification URL above"
-                )
+                console.print(f"[yellow]Warning:[/yellow] Could not open browser: {e}")
+                console.print("Please manually navigate to the verification URL above")
 
             # Poll for token
-            token_response = self._poll_for_token(
-                device_response, client_id, hostname
-            )
+            token_response = self._poll_for_token(device_response, client_id, hostname)
 
             # Store token and get user info
             self._store_token(token_response)
 
-            console.print(
-                "\n[green]Key created and stored successfully.[/green]"
-            )
+            console.print("\n[green]Key created and stored successfully.[/green]")
             console.print("\nYou are now logged in. Happy coding!")
 
         except Exception as e:
@@ -546,9 +511,7 @@ class AuthManager:
                 )
 
         except httpx.RequestError as e:
-            raise AuthenticationError(
-                f"Network error during device code request: {e}"
-            )
+            raise AuthenticationError(f"Network error during device code request: {e}")
 
     def _poll_for_token(
         self,
@@ -615,18 +578,12 @@ class AuthManager:
         keyring_available = False
 
         try:
-            keyring.set_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}", api_key
-            )
+            keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
             # Don't store project ID in keyring - it goes in profile config only
-            console.print(
-                "[green]✓[/green] API key stored securely in system keyring"
-            )
+            console.print("[green]✓[/green] API key stored securely in system keyring")
             keyring_available = True
         except Exception as e:
-            console.print(
-                f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
-            )
+            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
             console.print("API key will be stored in config file instead")
 
         # Update config - only store API key if keyring is not available
@@ -700,8 +657,7 @@ class AuthManager:
 
         return ProfilesResult(
             profiles=profiles,
-            current_profile=self.config.profile
-            or self.config._config.default_profile,
+            current_profile=self.config.profile or self.config._config.default_profile,
         )
 
     def __del__(self) -> None:

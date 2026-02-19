@@ -50,9 +50,7 @@ class TimingCollector:
         """Disable timing collection."""
         self.enabled = False
 
-    def start_timing(
-        self, name: str, metadata: dict[str, Any] | None = None
-    ) -> None:
+    def start_timing(self, name: str, metadata: dict[str, Any] | None = None) -> None:
         """Start timing for a named operation."""
         if not self.enabled:
             return
@@ -164,9 +162,7 @@ class TimingCollector:
 
                     # Calculate percentage of total time
                     if summary["total_time_ms"] > 0:
-                        percentage = (
-                            duration_ms / summary["total_time_ms"]
-                        ) * 100
+                        percentage = (duration_ms / summary["total_time_ms"]) * 100
                         percentage_str = f"({percentage:.1f}%)"
                     else:
                         percentage_str = ""

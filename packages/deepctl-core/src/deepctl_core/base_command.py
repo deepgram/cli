@@ -89,9 +89,7 @@ class BaseCommand(ABC):
                                     )
 
                     except Exception as e:
-                        console.print(
-                            f"[red]Authentication required:[/red] {e}"
-                        )
+                        console.print(f"[red]Authentication required:[/red] {e}")
                         raise click.ClickException(str(e))
 
             # Check project ID if required
@@ -111,9 +109,7 @@ class BaseCommand(ABC):
             # Execute the command
             try:
                 with TimingContext(f"command_{self.name}_handler"):
-                    result = self.handle(
-                        config, auth_manager, client, **kwargs
-                    )
+                    result = self.handle(config, auth_manager, client, **kwargs)
 
                 # Handle command result
                 if result is not None:
@@ -195,9 +191,7 @@ class BaseCommand(ABC):
             elif output_format == "csv":
                 self._output_csv(result)
             else:
-                console.print(
-                    f"[red]Unknown output format:[/red] {output_format}"
-                )
+                console.print(f"[red]Unknown output format:[/red] {output_format}")
                 self._output_json(result)
 
     def _output_json(self, result: Any) -> None:
@@ -216,19 +210,13 @@ class BaseCommand(ABC):
         if isinstance(result, dict | list):
             console.print(yaml.dump(result, default_flow_style=False))
         else:
-            console.print(
-                yaml.dump({"result": str(result)}, default_flow_style=False)
-            )
+            console.print(yaml.dump({"result": str(result)}, default_flow_style=False))
 
     def _output_table(self, result: Any) -> None:
         """Output result as table."""
         from rich.table import Table
 
-        if (
-            isinstance(result, list)
-            and len(result) > 0
-            and isinstance(result[0], dict)
-        ):
+        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
             # List of dictionaries - create table
             table = Table(show_header=True, header_style="bold blue")
 
@@ -239,9 +227,7 @@ class BaseCommand(ABC):
 
                 # Add rows
                 for item in result:
-                    table.add_row(
-                        *[str(item.get(key, "")) for key in result[0]]
-                    )
+                    table.add_row(*[str(item.get(key, "")) for key in result[0]])
 
             console.print(table)
 
@@ -265,11 +251,7 @@ class BaseCommand(ABC):
         import csv
         import io
 
-        if (
-            isinstance(result, list)
-            and len(result) > 0
-            and isinstance(result[0], dict)
-        ):
+        if isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
             # List of dictionaries
             output = io.StringIO()
             dict_writer = csv.DictWriter(output, fieldnames=result[0].keys())
@@ -330,9 +312,7 @@ class BaseCommand(ABC):
             return default
 
         try:
-            return str(
-                click.prompt(message, default=default, hide_input=hide_input)
-            )
+            return str(click.prompt(message, default=default, hide_input=hide_input))
         except click.Abort:
             raise click.ClickException("User cancelled input")
 

@@ -94,9 +94,7 @@ class ProjectsCommand(BaseCommand):
             elif show_current:
                 return self._show_current_project(config, auth_manager, client)
             elif set_default:
-                return self._set_default_project(
-                    config, auth_manager, set_default
-                )
+                return self._set_default_project(config, auth_manager, set_default)
             else:
                 # Default behavior - list projects
                 return self._list_projects(client)
@@ -105,9 +103,7 @@ class ProjectsCommand(BaseCommand):
             console.print(f"[red]Error:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
-    def _list_projects(
-        self, client: DeepgramClient
-    ) -> ProjectsResult | BaseResult:
+    def _list_projects(self, client: DeepgramClient) -> ProjectsResult | BaseResult:
         """List all projects."""
         console.print("[blue]Fetching projects...[/blue]")
 
@@ -137,9 +133,7 @@ class ProjectsCommand(BaseCommand):
                 )
 
             project_models: list[ProjectInfo] = []
-            console.print(
-                f"[green]Found {len(projects_raw)} project(s):[/green]"
-            )
+            console.print(f"[green]Found {len(projects_raw)} project(s):[/green]")
 
             for proj in projects_raw:
                 # Handle project objects that might not be dicts
@@ -199,9 +193,7 @@ class ProjectsCommand(BaseCommand):
                 console.print("[green]✓[/green] Project created successfully")
                 console.print(f"[dim]Project ID:[/dim] {project_id}")
 
-                proj = ProjectInfo(
-                    project_id=project_id, name=name, company=company
-                )
+                proj = ProjectInfo(project_id=project_id, name=name, company=company)
                 return ProjectsResult(
                     status="success",
                     message="Project created successfully",
@@ -210,8 +202,7 @@ class ProjectsCommand(BaseCommand):
                 )
             else:
                 console.print(
-                    "[yellow]Project creation response missing "
-                    "project_id[/yellow]"
+                    "[yellow]Project creation response missing project_id[/yellow]"
                 )
                 return ProjectsResult(
                     status="warning",
@@ -251,12 +242,8 @@ class ProjectsCommand(BaseCommand):
                 console.print(f"  ID: {project_id}")
                 console.print(f"  Company: {company}")
 
-                proj = ProjectInfo(
-                    project_id=project_id, name=name, company=company
-                )
-                return ProjectsResult(
-                    status="success", projects=[proj], count=1
-                )
+                proj = ProjectInfo(project_id=project_id, name=name, company=company)
+                return ProjectsResult(status="success", projects=[proj], count=1)
             else:
                 console.print("[yellow]Project details incomplete[/yellow]")
                 # Still try to create a project info with what we have
@@ -270,9 +257,7 @@ class ProjectsCommand(BaseCommand):
                     if isinstance(result_dict, dict)
                     else None
                 )
-                proj = ProjectInfo(
-                    project_id=project_id, name=name, company=company
-                )
+                proj = ProjectInfo(project_id=project_id, name=name, company=company)
                 return ProjectsResult(
                     status="warning",
                     message="Incomplete project data",
@@ -293,8 +278,7 @@ class ProjectsCommand(BaseCommand):
         if not project_id:
             console.print("[yellow]No current project set[/yellow]")
             console.print(
-                "Set a project ID with: "
-                "deepctl login --project-id <project_id>"
+                "Set a project ID with: deepctl login --project-id <project_id>"
             )
             console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
             return BaseResult(status="info", message="No current project set")
@@ -320,13 +304,10 @@ class ProjectsCommand(BaseCommand):
                 console.print("[green]✓[/green] Project ID validated")
             except Exception as e:
                 console.print(
-                    f"[yellow]Warning:[/yellow] Could not validate "
-                    f"project: {e}"
+                    f"[yellow]Warning:[/yellow] Could not validate project: {e}"
                 )
                 if not self.confirm("Continue anyway?", default=False):
-                    return BaseResult(
-                        status="cancelled", message="Cancelled by user"
-                    )
+                    return BaseResult(status="cancelled", message="Cancelled by user")
 
             # Update profile
             config.create_profile(
@@ -336,9 +317,7 @@ class ProjectsCommand(BaseCommand):
                 base_url=current_profile.base_url,
             )
 
-            console.print(
-                f"[green]✓[/green] Default project set to: {project_id}"
-            )
+            console.print(f"[green]✓[/green] Default project set to: {project_id}")
 
             return BaseResult(
                 status="success",

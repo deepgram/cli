@@ -63,9 +63,7 @@ class TLSTestResult(BaseModel):
     tls_version: str | None = None
     cipher_suite: str | None = None
     certificate_chain: list[CertificateInfo] = Field(default_factory=list)
-    revocation_endpoints: list[RevocationEndpointTest] = Field(
-        default_factory=list
-    )
+    revocation_endpoints: list[RevocationEndpointTest] = Field(default_factory=list)
     chain_valid: bool = False
     chain_errors: list[str] = Field(default_factory=list)
     raw_openssl_output: str | None = None
@@ -100,9 +98,7 @@ class NetworkDebugResult(BaseResult):
     dns_results: dict[str, DNSResult] = Field(default_factory=dict)
     endpoint_results: list[EndpointTestResult] = Field(default_factory=list)
     tls_test_results: dict[str, TLSTestResult] = Field(default_factory=dict)
-    python_requests_tests: list[PythonRequestsTest] = Field(
-        default_factory=list
-    )
+    python_requests_tests: list[PythonRequestsTest] = Field(default_factory=list)
     command_results: list[CommandExecutionResult] = Field(default_factory=list)
     proxy_detected: bool = False
     proxy_settings: dict[str, str] | None = None

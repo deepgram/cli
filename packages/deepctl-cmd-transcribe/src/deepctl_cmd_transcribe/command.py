@@ -121,9 +121,7 @@ class TranscribeCommand(BaseCommand):
 
         # Check if source is provided
         if not source:
-            return BaseResult(
-                status="error", message="No audio source provided"
-            )
+            return BaseResult(status="error", message="No audio source provided")
 
         # Validate input if not skipped
         if not no_validate and not self._validate_source(source):
@@ -173,9 +171,7 @@ class TranscribeCommand(BaseCommand):
             # Save to file if requested
             if save_to:
                 self._save_transcript(transcript, save_to)
-                console.print(
-                    f"[green]✓[/green] Transcript saved to: {save_to}"
-                )
+                console.print(f"[green]✓[/green] Transcript saved to: {save_to}")
 
             # Return structured result
             return TranscribeResult(

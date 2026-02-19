@@ -103,9 +103,7 @@ class UsageCommand(BaseCommand):
                 console.print("[blue]Fetching usage for last month...[/blue]")
             elif current_month:
                 start_date, end_date = self._get_current_month_range()
-                console.print(
-                    "[blue]Fetching usage for current month...[/blue]"
-                )
+                console.print("[blue]Fetching usage for current month...[/blue]")
             elif start_date or end_date:
                 # Validate custom date range
                 if start_date and not validate_date_format(start_date):
@@ -127,9 +125,7 @@ class UsageCommand(BaseCommand):
             else:
                 # Default to current month
                 start_date, end_date = self._get_current_month_range()
-                console.print(
-                    "[blue]Fetching usage for current month...[/blue]"
-                )
+                console.print("[blue]Fetching usage for current month...[/blue]")
 
             # Get usage data
             result = client.get_usage(project_id, start_date, end_date)
@@ -182,19 +178,11 @@ class UsageCommand(BaseCommand):
                 # For SDK response objects, we need to access attributes
                 # directly
                 result_dict = {
-                    "results": (
-                        result.results if hasattr(result, "results") else []
-                    ),
-                    "start": (
-                        result.start
-                        if hasattr(result, "start")
-                        else start_date
-                    ),
+                    "results": (result.results if hasattr(result, "results") else []),
+                    "start": (result.start if hasattr(result, "start") else start_date),
                     "end": result.end if hasattr(result, "end") else end_date,
                     "project_id": (
-                        result.project_id
-                        if hasattr(result, "project_id")
-                        else ""
+                        result.project_id if hasattr(result, "project_id") else ""
                     ),
                 }
             else:
@@ -236,16 +224,13 @@ class UsageCommand(BaseCommand):
 
                 # Display summary
                 console.print(
-                    f"\n[green]Usage Summary ({start_date} to "
-                    f"{end_date}):[/green]"
+                    f"\n[green]Usage Summary ({start_date} to {end_date}):[/green]"
                 )
                 console.print(f"  Total Hours: {total_hours:,.1f}")
                 console.print(f"  Total Requests: {total_requests:,}")
 
                 if total_tts_characters > 0:
-                    console.print(
-                        f"  TTS Characters: {total_tts_characters:,}"
-                    )
+                    console.print(f"  TTS Characters: {total_tts_characters:,}")
 
                 if total_tokens_out > 0:
                     console.print(f"  Tokens Out: {total_tokens_out:,}")
@@ -268,17 +253,12 @@ class UsageCommand(BaseCommand):
                                 f"{item['tts'].get('characters', 0):,}"
                             )
                             console.print(
-                                f"    TTS Requests: "
-                                f"{item['tts'].get('requests', 0):,}"
+                                f"    TTS Requests: {item['tts'].get('requests', 0):,}"
                             )
 
-                        if (
-                            "tokens" in item
-                            and item["tokens"].get("out", 0) > 0
-                        ):
+                        if "tokens" in item and item["tokens"].get("out", 0) > 0:
                             console.print(
-                                f"    Tokens Out: "
-                                f"{item['tokens'].get('out', 0):,}"
+                                f"    Tokens Out: {item['tokens'].get('out', 0):,}"
                             )
 
                 project_id = result_dict.get("project_id", "")
@@ -290,8 +270,7 @@ class UsageCommand(BaseCommand):
                 )
             else:
                 console.print(
-                    "[yellow]No usage data found for the specified "
-                    "period[/yellow]"
+                    "[yellow]No usage data found for the specified period[/yellow]"
                 )
                 return BaseResult(status="info", message="No usage data found")
 
@@ -315,9 +294,7 @@ class UsageCommand(BaseCommand):
         self, usage_data: dict[str, Any], start_date: str, end_date: str
     ) -> None:
         """Display usage summary."""
-        console.print(
-            f"\n[green]Usage Summary ({start_date} to " f"{end_date}):[/green]"
-        )
+        console.print(f"\n[green]Usage Summary ({start_date} to {end_date}):[/green]")
 
         # Try to extract common usage metrics
         total_requests = usage_data.get("requests", 0)
@@ -331,8 +308,7 @@ class UsageCommand(BaseCommand):
             if isinstance(total_duration, int | float):
                 hours = total_duration / 3600
                 console.print(
-                    f"  Total Duration: {hours:.2f} hours "
-                    f"({total_duration:,} seconds)"
+                    f"  Total Duration: {hours:.2f} hours ({total_duration:,} seconds)"
                 )
             else:
                 console.print(f"  Total Duration: {total_duration}")
@@ -350,13 +326,9 @@ class UsageCommand(BaseCommand):
                 "breakdown",
             ]:
                 if isinstance(value, int | float):
-                    console.print(
-                        f"  {key.replace('_', ' ').title()}: " f"{value:,}"
-                    )
+                    console.print(f"  {key.replace('_', ' ').title()}: {value:,}")
                 else:
-                    console.print(
-                        f"  {key.replace('_', ' ').title()}: {value}"
-                    )
+                    console.print(f"  {key.replace('_', ' ').title()}: {value}")
 
     def _display_usage_details(self, usage_data: dict[str, Any]) -> None:
         """Display detailed usage breakdown."""
@@ -373,8 +345,7 @@ class UsageCommand(BaseCommand):
                     for key, value in data.items():
                         if isinstance(value, int | float):
                             console.print(
-                                f"    {key.replace('_', ' ').title()}: "
-                                f"{value:,}"
+                                f"    {key.replace('_', ' ').title()}: {value:,}"
                             )
                         else:
                             console.print(

@@ -16,12 +16,8 @@ class GnosisRequest(BaseModel):
     messages: List[Dict[str, str]] = Field(
         ..., description="List of messages in the conversation"
     )
-    model: str = Field(
-        default="deepgram", description="Model to use for generation"
-    )
-    temperature: float = Field(
-        default=0.7, description="Temperature for generation"
-    )
+    model: str = Field(default="deepgram", description="Model to use for generation")
+    temperature: float = Field(default=0.7, description="Temperature for generation")
     max_tokens: Optional[int] = Field(
         default=None, description="Maximum tokens to generate"
     )
@@ -38,9 +34,7 @@ class GnosisResponse(BaseModel):
     )
     model: Optional[str] = Field(default=None, description="Model used")
     id: Optional[str] = Field(default=None, description="Response ID")
-    created: Optional[int] = Field(
-        default=None, description="Creation timestamp"
-    )
+    created: Optional[int] = Field(default=None, description="Creation timestamp")
 
 
 class GnosisClient:
@@ -123,28 +117,20 @@ class GnosisClient:
                 response.raise_for_status()
 
                 if self.debug:
-                    print(
-                        f"[DEBUG] Response: {response.text}", file=sys.stderr
-                    )
+                    print(f"[DEBUG] Response: {response.text}", file=sys.stderr)
 
                 gnosis_response = GnosisResponse(**response.json())
                 if gnosis_response.choices and gnosis_response.choices[0].get(
                     "message", {}
                 ).get("content"):
-                    return str(
-                        gnosis_response.choices[0]["message"]["content"]
-                    )
+                    return str(gnosis_response.choices[0]["message"]["content"])
 
                 return "No response from Deepgram AI"
             except httpx.HTTPStatusError as e:
                 if self.debug:
                     print(f"[DEBUG] HTTP Error: {e}", file=sys.stderr)
-                    print(
-                        f"[DEBUG] Response: {e.response.text}", file=sys.stderr
-                    )
-                return (
-                    f"HTTP Error {e.response.status_code}: {e.response.text}"
-                )
+                    print(f"[DEBUG] Response: {e.response.text}", file=sys.stderr)
+                return f"HTTP Error {e.response.status_code}: {e.response.text}"
             except Exception as e:
                 error_msg = f"Error calling Deepgram AI: {str(e)}"
                 if self.debug:
@@ -325,9 +311,7 @@ Examples:
                 history.append({"role": "user", "content": user_input})
 
                 # Get response
-                response = await client.chat(
-                    history, system_prompt=args.system_prompt
-                )
+                response = await client.chat(history, system_prompt=args.system_prompt)
 
                 # Add response to history
                 history.append({"role": "assistant", "content": response})
@@ -341,16 +325,12 @@ Examples:
                 # For JSON output, get the raw response
                 messages = []
                 if args.system_prompt:
-                    messages.append(
-                        {"role": "system", "content": args.system_prompt}
-                    )
+                    messages.append({"role": "system", "content": args.system_prompt})
                 messages.append({"role": "user", "content": args.question})
 
                 # We need to modify the client to return the full response
                 # For now, just get the text response
-                response = await client.ask_question(
-                    args.question, args.system_prompt
-                )
+                response = await client.ask_question(args.question, args.system_prompt)
                 result = {
                     "question": args.question,
                     "response": response,
@@ -358,9 +338,7 @@ Examples:
                 }
                 print(json.dumps(result, indent=2))
             else:
-                response = await client.ask_question(
-                    args.question, args.system_prompt
-                )
+                response = await client.ask_question(args.question, args.system_prompt)
                 print(response)
 
     except Exception as e:

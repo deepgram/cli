@@ -1,53 +1,40 @@
 name: Test
 
-# This workflow runs tests and checks on every push and PR
-# It uses Makefile commands where possible for consistency with local development
-
 on:
   push:
   pull_request:
 
 jobs:
   test:
-    name: Test Python ${{ matrix.python-version }}
+    name: Test Python ${{ matrix.python-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-        if: runner.os != 'Windows'
-
-      - name: Install uv (Windows)
-        run: |
-          irm https://astral.sh/uv/install.ps1 | iex
-          echo "$env:USERPROFILE\.cargo\bin" >> $env:GITHUB_PATH
-        if: runner.os == 'Windows'
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: |
-          uv sync --all-extras
+        run: uv sync --group testing
 
-      - name: Run tests with tox
+      - name: Run tests
         run: |
-          uv run tox -e py$(echo ${{ matrix.python-version }} | tr -d '.')
+          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v
 
       - name: Test CLI installation
         run: |
-          # Test that the CLI can be imported and run
           uv run python -c "from deepctl.main import main; print('Import successful')"
           uv run deepctl --version
 
@@ -58,22 +45,24 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: |
-          uv sync --all-extras
+        run: uv sync --group testing
 
-      - name: Run linters with tox
-        run: |
-          uv run tox -e lint
+      - name: Check formatting
+        run: uv run ruff format --check src/ packages/*/src
+
+      - name: Lint
+        run: uv run ruff check src/ packages/*/src
+
+      - name: Type check
+        run: uv run mypy src/ packages/*/src
 
   build-test:
     name: Test Build Process
@@ -82,18 +71,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@v4
 
       - name: Install build dependencies
-        run: |
-          uv pip install --system build
+        run: uv pip install --system build
 
       - name: Test build process
         run: make build

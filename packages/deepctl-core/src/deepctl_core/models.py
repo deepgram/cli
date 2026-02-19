@@ -15,9 +15,7 @@ __all__ = [
 class BaseResult(BaseModel):
     """Common base for all command result payloads."""
 
-    status: str = Field(
-        default="success", description="Outcome marker/messages key"
-    )
+    status: str = Field(default="success", description="Outcome marker/messages key")
     message: str | None = None
 
 

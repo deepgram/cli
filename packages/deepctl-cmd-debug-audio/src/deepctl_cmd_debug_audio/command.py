@@ -54,8 +54,7 @@ class AudioCommand(BaseCommand):
             {
                 "names": ["--ffprobe-args"],
                 "help": (
-                    "Custom ffprobe arguments "
-                    "(e.g., '-show_streams -show_format')"
+                    "Custom ffprobe arguments (e.g., '-show_streams -show_format')"
                 ),
                 "type": str,
                 "is_option": True,
@@ -106,9 +105,7 @@ class AudioCommand(BaseCommand):
                     else None
                 ),
                 size=(
-                    int(format_data.get("size", 0))
-                    if format_data.get("size")
-                    else None
+                    int(format_data.get("size", 0)) if format_data.get("size") else None
                 ),
                 bit_rate=format_data.get("bit_rate"),
                 nb_streams=(
@@ -156,9 +153,7 @@ class AudioCommand(BaseCommand):
 
             if audio_info.format.duration:
                 minutes, seconds = divmod(audio_info.format.duration, 60)
-                console.print(
-                    f"  • Duration: {int(minutes):02d}:{seconds:06.3f}"
-                )
+                console.print(f"  • Duration: {int(minutes):02d}:{seconds:06.3f}")
 
             if audio_info.format.size:
                 size_mb = audio_info.format.size / (1024 * 1024)
@@ -174,9 +169,7 @@ class AudioCommand(BaseCommand):
             for i, stream in enumerate(audio_info.streams):
                 if len(audio_info.streams) > 1:
                     console.print(f"\n  Stream {i + 1}:")
-                codec_name = (
-                    stream.codec_long_name or stream.codec_name or "Unknown"
-                )
+                codec_name = stream.codec_long_name or stream.codec_name or "Unknown"
                 console.print(f"  • Codec: {codec_name}")
                 if stream.sample_rate:
                     console.print(f"  • Sample Rate: {stream.sample_rate} Hz")
@@ -187,9 +180,7 @@ class AudioCommand(BaseCommand):
                     )
                 if stream.bit_rate:
                     bit_rate_kbps = int(stream.bit_rate) / 1000
-                    console.print(
-                        f"  • Stream Bit Rate: {bit_rate_kbps:.0f} kbps"
-                    )
+                    console.print(f"  • Stream Bit Rate: {bit_rate_kbps:.0f} kbps")
 
     def display_verbose_info(self, audio_info: AudioInfo) -> None:
         """Display detailed audio information in table format."""
@@ -248,9 +239,7 @@ class AudioCommand(BaseCommand):
                             display_value = f"{bit_rate_kbps:.0f} kbps"
                         elif key == "duration" and value:
                             minutes, seconds = divmod(value, 60)
-                            display_value = (
-                                f"{int(minutes):02d}:{seconds:06.3f}"
-                            )
+                            display_value = f"{int(minutes):02d}:{seconds:06.3f}"
 
                         stream_table.add_row(display_key, display_value)
 
@@ -268,9 +257,7 @@ class AudioCommand(BaseCommand):
             from rich.syntax import Syntax
 
             json_str = json.dumps(audio_info.raw_data, indent=2)
-            syntax = Syntax(
-                json_str, "json", theme="monokai", line_numbers=True
-            )
+            syntax = Syntax(json_str, "json", theme="monokai", line_numbers=True)
             console.print(syntax)
 
     def handle(
@@ -364,8 +351,7 @@ class AudioCommand(BaseCommand):
                     console.print(f"  {issue}")
             else:
                 console.print(
-                    "  [green]✓[/green] Audio appears to be compatible "
-                    "with Deepgram"
+                    "  [green]✓[/green] Audio appears to be compatible with Deepgram"
                 )
 
             return AudioDebugResult(
@@ -378,8 +364,7 @@ class AudioCommand(BaseCommand):
         except Exception as e:
             console.print(
                 Panel(
-                    f"[red]✗ Error analyzing audio file[/red]\n\n"
-                    f"[dim]{e!s}[/dim]",
+                    f"[red]✗ Error analyzing audio file[/red]\n\n[dim]{e!s}[/dim]",
                     title="Analysis Failed",
                     border_style="red",
                 )
