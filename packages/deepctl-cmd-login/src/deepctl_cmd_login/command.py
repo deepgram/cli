@@ -31,6 +31,19 @@ class LoginCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
+    examples = [
+        "dg login",
+        "dg login --api-key YOUR_API_KEY",
+        "dg login --api-key YOUR_KEY --project-id YOUR_PROJECT",
+        "dg login --profile staging --api-key YOUR_KEY",
+    ]
+    agent_help = (
+        "Authenticate with Deepgram. Can accept an API key directly via "
+        "--api-key flag, or prompt interactively. Credentials are stored "
+        "securely in the system keyring. Supports named profiles for "
+        "managing multiple environments."
+    )
+
     def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
@@ -305,6 +318,15 @@ class LogoutCommand(BaseCommand):
 
     # Logout doesn't require existing auth
     requires_auth = False
+
+    examples = [
+        "dg logout",
+        "dg logout --profile staging",
+    ]
+    agent_help = (
+        "Clear stored Deepgram credentials. Removes the API key from the "
+        "system keyring for the active or specified profile."
+    )
     requires_project = False
     ci_friendly = True
 
@@ -411,6 +433,17 @@ class ProfilesCommand(BaseCommand):
 
     # Profiles command doesn't require auth
     requires_auth = False
+
+    examples = [
+        "dg profiles --list",
+        "dg profiles --show default",
+        "dg profiles --switch staging",
+    ]
+    agent_help = (
+        "Manage named authentication profiles. Each profile stores a "
+        "separate API key and project ID, useful for switching between "
+        "development, staging, and production environments."
+    )
     requires_project = False
     ci_friendly = True
 

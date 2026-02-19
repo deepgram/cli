@@ -211,11 +211,14 @@ class PluginManager:
         command_func.__name__ = command_instance.name.replace("-", "_")
         command_func.__doc__ = command_instance.help
 
+        # Build help text with examples
+        help_text = self._build_help_text(command_instance)
+
         # Create base command
         cmd = click.Command(
             name=command_instance.name,
             callback=command_func,
-            help=command_instance.help,
+            help=help_text,
             short_help=command_instance.short_help or command_instance.help,
         )
 
@@ -223,6 +226,23 @@ class PluginManager:
         cmd = self._add_command_arguments(cmd, command_instance)
 
         return cmd
+
+    def _build_help_text(self, instance: Any) -> str:
+        """Build help text with examples appended.
+
+        Args:
+            instance: BaseCommand instance
+
+        Returns:
+            Help text string, optionally with examples section
+        """
+        help_text = instance.help
+        examples = getattr(instance, "examples", [])
+        if examples:
+            help_text += "\n\nExamples:\n"
+            for ex in examples:
+                help_text += f"  {ex}\n"
+        return help_text
 
     def _create_click_group(self, group_instance: BaseGroupCommand) -> click.Group:
         """Create a Click group from a BaseGroupCommand instance.

@@ -30,6 +30,19 @@ class TranscribeCommand(BaseCommand):
     requires_project = False  # Project ID is optional for transcription
     ci_friendly = True
 
+    examples = [
+        "dg transcribe recording.wav",
+        "dg transcribe https://example.com/audio.mp3 --model nova-3",
+        "dg transcribe call.wav --diarize --language en-US",
+        "dg transcribe meeting.mp3 --output json --save-to transcript.json",
+    ]
+    agent_help = (
+        "Transcribe audio files or URLs using Deepgram's speech-to-text API. "
+        "Accepts local file paths or HTTP URLs. Supports model selection, "
+        "language codes, speaker diarization, and multiple output formats. "
+        "Requires authentication via 'dg login' or DEEPGRAM_API_KEY env var."
+    )
+
     def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [

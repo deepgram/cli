@@ -28,6 +28,16 @@ class ProjectsCommand(BaseCommand):
     requires_project = False  # Project ID is optional for listing
     ci_friendly = True
 
+    examples = [
+        "dg projects --list",
+        "dg projects --show PROJECT_ID",
+        "dg projects --create 'My New Project'",
+    ]
+    agent_help = (
+        "List, create, and inspect Deepgram projects. Projects are containers "
+        "for API keys and usage tracking. Requires authentication."
+    )
+
     def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [

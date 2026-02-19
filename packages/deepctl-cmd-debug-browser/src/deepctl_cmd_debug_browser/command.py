@@ -36,6 +36,16 @@ class BrowserCommand(BaseCommand):
 
     # Browser debug doesn't require auth
     requires_auth = False
+
+    examples = [
+        "dg debug browser",
+        "dg debug browser --port 8080",
+    ]
+    agent_help = (
+        "Launch a local web page that tests browser capabilities for "
+        "Deepgram services — WebSocket support, microphone access, "
+        "audio encoding, and WebRTC. Opens a browser automatically."
+    )
     requires_project = False
     ci_friendly = False  # This command opens a browser
 

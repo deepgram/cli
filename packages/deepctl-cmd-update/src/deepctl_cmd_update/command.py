@@ -30,6 +30,16 @@ class UpdateCommand(BaseCommand):
     help = "Check for and install updates to deepctl"
     requires_auth = False  # Update command doesn't need authentication
 
+    examples = [
+        "dg update",
+        "dg update --check-only",
+    ]
+    agent_help = (
+        "Check for and install updates to deepctl. Can check PyPI for newer "
+        "versions and apply the update using the appropriate method (pip, "
+        "pipx, uv, or Homebrew)."
+    )
+
     def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [

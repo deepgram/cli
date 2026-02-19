@@ -218,6 +218,19 @@ def main() -> None:
         except ImportError:
             print_pending_plugin_notifications = None  # type: ignore[assignment]
 
+        # Start background AI CLI detection (non-blocking)
+        try:
+            from deepctl_cmd_skills.startup_check import (
+                check_and_notify as skills_check_and_notify,
+            )
+            from deepctl_cmd_skills.startup_check import (
+                print_pending_notification as print_pending_skills_notification,
+            )
+
+            skills_check_and_notify(quiet=quiet_requested)
+        except ImportError:
+            print_pending_skills_notification = None  # type: ignore[assignment]
+
         with TimingContext("total_execution"):
             with TimingContext("argument_preprocessing"):
                 # Preprocess arguments to handle hyphenated commands
@@ -236,6 +249,8 @@ def main() -> None:
             print_pending_notification()
         if print_pending_plugin_notifications is not None:
             print_pending_plugin_notifications()
+        if print_pending_skills_notification is not None:
+            print_pending_skills_notification()
 
         # Print timing summary if timing was enabled
         if timing_requested:

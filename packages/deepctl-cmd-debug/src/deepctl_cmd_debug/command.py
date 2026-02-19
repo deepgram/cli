@@ -23,6 +23,18 @@ class DebugCommand(BaseGroupCommand):
     requires_project = False
     ci_friendly = True
 
+    examples = [
+        "dg debug audio recording.wav",
+        "dg debug network",
+        "dg debug browser",
+        "dg debug stream",
+    ]
+    agent_help = (
+        "Diagnostic utilities for troubleshooting Deepgram integrations. "
+        "Contains subcommands for audio file analysis, network connectivity "
+        "testing, browser capability checks, and WebSocket stream debugging."
+    )
+
     # Show help when invoked without subcommand
     invoke_without_command = False
 

@@ -37,6 +37,16 @@ class StreamCommand(BaseCommand):
 
     requires_auth = True
     requires_project = False
+
+    examples = [
+        "dg debug stream",
+        "dg debug stream --port 3001",
+    ]
+    agent_help = (
+        "Launch a local WebSocket proxy that sits between your application "
+        "and Deepgram's streaming API. Logs all frames for debugging audio "
+        "streaming issues. Requires authentication."
+    )
     ci_friendly = False
 
     def get_arguments(self) -> list[dict[str, Any]]:

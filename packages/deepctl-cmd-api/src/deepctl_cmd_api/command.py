@@ -29,6 +29,17 @@ class ApiCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
+    examples = [
+        "dg api /v1/projects",
+        "dg api -X POST /v1/projects -f name=MyProject",
+        "dg api /v1/projects --jq '.projects[0].name'",
+    ]
+    agent_help = (
+        "Make authenticated HTTP requests to any Deepgram REST API endpoint. "
+        "Works like curl with auto-injected credentials. Supports all HTTP methods, "
+        "body construction via -f key=value, and jq filtering of responses."
+    )
+
     def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [

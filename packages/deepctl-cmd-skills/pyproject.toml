@@ -1,0 +1,22 @@
+[project]
+name = "deepctl-cmd-skills"
+description = "AI coding assistant skill management for deepctl"
+readme = "README.md"
+version = "0.1.10" # x-release-please-version
+requires-python = ">=3.10"
+authors = [{ name = "Deepgram DevRel", email = "devrel@deepgram.com" }]
+dependencies = [
+    "deepctl-core>=0.1.10", # x-release-please-version
+    "click>=8.0.0",
+    "rich>=13.0.0",
+]
+
+[project.entry-points."deepctl.commands"]
+skills = "deepctl_cmd_skills.command:SkillsCommand"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deepctl_cmd_skills"]

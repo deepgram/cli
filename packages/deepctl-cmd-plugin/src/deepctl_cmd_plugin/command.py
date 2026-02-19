@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import subprocess
 import sys
@@ -47,6 +48,19 @@ class PluginCommand(BaseGroupCommand):
 
     name = "plugin"
     help = "Manage deepctl plugins"
+
+    examples = [
+        "dg plugin search transcribe",
+        "dg plugin install deepctl-plugin-example",
+        "dg plugin list",
+        "dg plugin update deepctl-plugin-example",
+        "dg plugin remove deepctl-plugin-example",
+    ]
+    agent_help = (
+        "Install, update, remove, search, and list deepctl plugins. "
+        "Plugins extend deepctl with additional commands. Uses an isolated "
+        "virtual environment for plugin dependencies."
+    )
 
     def __init__(self) -> None:
         """Initialize plugin command."""
@@ -352,6 +366,7 @@ class PluginCommand(BaseGroupCommand):
 
         if result.success:
             print_success(result.message)
+            self._maybe_update_skills()
         else:
             print_error(result.error or result.message)
             raise click.ClickException(result.error or result.message)
@@ -419,6 +434,7 @@ class PluginCommand(BaseGroupCommand):
 
         if result.success:
             print_success(result.message)
+            self._maybe_update_skills()
         else:
             print_error(result.error or result.message)
             raise click.ClickException(result.error or result.message)
@@ -465,6 +481,7 @@ class PluginCommand(BaseGroupCommand):
 
         if result.success:
             print_success(result.message)
+            self._maybe_update_skills()
         else:
             print_error(result.error or result.message)
             raise click.ClickException(result.error or result.message)
@@ -1143,3 +1160,41 @@ except:
         # This is a simplified version - in reality you'd introspect
         # the entry points to find actual command names
         return "varies"
+
+    def _maybe_update_skills(self) -> None:
+        """Regenerate AI CLI skills if installed (best-effort)."""
+        try:
+            from deepctl_core.skill_generator import (
+                _commands_hash,
+                collect_command_metadata,
+                get_all_generators,
+                get_skills_state,
+                save_skills_state,
+            )
+
+            state = get_skills_state()
+            if not state.get("installed_skills") or not state.get(
+                "auto_update", True
+            ):
+                return
+
+            commands = collect_command_metadata()
+            version = importlib.metadata.version("deepctl")
+            generators = {g.cli_name: g for g in get_all_generators()}
+
+            for cli_name, info in state["installed_skills"].items():
+                gen = generators.get(cli_name)
+                if gen:
+                    paths = gen.install(commands, version)
+                    info.update(
+                        {
+                            "paths": [str(p) for p in paths],
+                            "version": version,
+                            "commands_hash": _commands_hash(commands),
+                        }
+                    )
+
+            save_skills_state(state)
+            console.print("[dim]AI assistant skills updated[/dim]")
+        except Exception:
+            pass  # Non-fatal

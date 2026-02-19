@@ -49,6 +49,7 @@ dependencies = [
     "deepctl-cmd-debug-stream>=0.1.10",  # x-release-please-version
     "deepctl-cmd-update>=0.1.10",        # x-release-please-version
     "deepctl-cmd-plugin>=0.1.10",        # x-release-please-version
+    "deepctl-cmd-skills>=0.1.10",        # x-release-please-version
     "deepctl-shared-utils>=0.1.10",      # x-release-please-version
     "pydantic>=2.0.0",
     "rich>=13.0.0",
@@ -173,6 +174,7 @@ deepctl-cmd-debug-audio = { workspace = true }
 deepctl-cmd-debug-stream = { workspace = true }
 deepctl-cmd-update = { workspace = true }
 deepctl-cmd-plugin = { workspace = true }
+deepctl-cmd-skills = { workspace = true }
 deepctl-shared-utils = { workspace = true }
 deepctl-plugin-example = { workspace = true }
 
@@ -257,7 +259,7 @@ fixable = ["ALL"]
 # Ignore imports in tests
 "**/test_*.py" = ["F401", "ARG"]
 # Ignore unused arguments in command handler methods
-"**/command.py" = ["ARG002"]
-"**/commands.py" = ["ARG002"]
+"**/command.py" = ["ARG002", "ARG005", "RUF012"]
+"**/commands.py" = ["ARG002", "ARG005", "RUF012"]
 "**/strategies.py" = ["ARG002"]
 # The root project (deepctl) is implicitly a member since it contains [project]

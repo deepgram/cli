@@ -46,6 +46,16 @@ class NetworkCommand(BaseCommand):
 
     # Network debug doesn't require auth
     requires_auth = False
+
+    examples = [
+        "dg debug network",
+        "dg debug network --verbose",
+    ]
+    agent_help = (
+        "Test network connectivity to Deepgram services. Checks DNS "
+        "resolution, TLS certificates, HTTP and WebSocket endpoints, "
+        "and reports latency. Useful for diagnosing firewall or proxy issues."
+    )
     requires_project = False
     ci_friendly = True
 

@@ -1,7 +1,7 @@
 """Base command class for deepctl commands."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 import click
 from rich.console import Console
@@ -26,6 +26,10 @@ class BaseCommand(ABC):
     requires_auth: bool = False
     requires_project: bool = False
     ci_friendly: bool = True
+
+    # Agent-oriented metadata
+    examples: ClassVar[list[str]] = []
+    agent_help: str = ""
 
     def __init__(self) -> None:
         """Initialize base command."""

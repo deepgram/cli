@@ -53,6 +53,7 @@ cli/
 │   ├── deepctl-cmd-mcp/              # MCP server command for deepctl to interact with Deepgram's AI assistant service
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
 │   ├── deepctl-cmd-projects/         # Projects command for deepctl
+│   ├── deepctl-cmd-skills/           # AI coding assistant skill management for deepctl
 │   ├── deepctl-cmd-transcribe/       # Transcribe command for deepctl
 │   ├── deepctl-cmd-update/           # Update command for deepctl
 │   ├── deepctl-cmd-usage/            # Usage command for deepctl
@@ -132,6 +133,7 @@ brew install deepctl
 | `deepctl plugin` | Plugin management command for deepctl |
 | `deepctl profiles` | Login command for deepctl |
 | `deepctl projects` | Projects command for deepctl |
+| `deepctl skills` | AI coding assistant skill management for deepctl |
 | `deepctl transcribe` | Transcribe command for deepctl |
 | `deepctl update` | Update command for deepctl |
 | `deepctl usage` | Usage command for deepctl |
@@ -191,6 +193,7 @@ deepctl transcribe audio.wav --output json|yaml|table|csv
 | [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server command for deepctl to interact with Deepgram's AI assistant service |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
 | [`deepctl-cmd-projects`](packages/deepctl-cmd-projects) | Projects command for deepctl |
+| [`deepctl-cmd-skills`](packages/deepctl-cmd-skills) | AI coding assistant skill management for deepctl |
 | [`deepctl-cmd-transcribe`](packages/deepctl-cmd-transcribe) | Transcribe command for deepctl |
 | [`deepctl-cmd-update`](packages/deepctl-cmd-update) | Update command for deepctl |
 | [`deepctl-cmd-usage`](packages/deepctl-cmd-usage) | Usage command for deepctl |

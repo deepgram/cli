@@ -28,6 +28,17 @@ class AudioCommand(BaseCommand):
     help = "Debug audio file issues for Deepgram transcription"
     short_help = "Debug audio issues"
 
+    examples = [
+        "dg debug audio recording.wav",
+        "dg debug audio https://example.com/audio.mp3",
+        "dg debug audio podcast.mp3 --verbose",
+    ]
+    agent_help = (
+        "Analyze audio files for compatibility with Deepgram's transcription "
+        "API. Reports format, codec, sample rate, channels, and duration. "
+        "Flags issues that may cause transcription failures."
+    )
+
     # Audio debug doesn't require auth
     requires_auth = False
     requires_project = False

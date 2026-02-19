@@ -26,6 +26,17 @@ class McpCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
+    examples = [
+        "dg mcp",
+        "dg mcp --transport sse --port 8080",
+        "dg mcp --transport streamable-http --host 0.0.0.0",
+    ]
+    agent_help = (
+        "Run an MCP (Model Context Protocol) server that exposes Deepgram's "
+        "AI assistant capabilities as tools. Configure in your AI editor's "
+        "MCP settings. Supports stdio, SSE, and streamable-http transports."
+    )
+
     def __init__(self) -> None:
         """Initialize the MCP command."""
         super().__init__()

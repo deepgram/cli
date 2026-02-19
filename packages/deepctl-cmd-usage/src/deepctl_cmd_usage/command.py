@@ -30,6 +30,17 @@ class UsageCommand(BaseCommand):
     requires_project = True
     ci_friendly = True
 
+    examples = [
+        "dg usage",
+        "dg usage --days 30",
+        "dg usage --start 2025-01-01 --end 2025-01-31",
+    ]
+    agent_help = (
+        "View Deepgram API usage statistics for the current project. "
+        "Shows request counts and audio hours over a configurable date range. "
+        "Requires authentication and a project ID."
+    )
+
     def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [

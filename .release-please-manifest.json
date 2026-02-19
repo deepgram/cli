@@ -15,5 +15,6 @@
   "packages/deepctl-cmd-mcp": "0.1.10",
   "packages/deepctl-cmd-update": "0.1.10",
   "packages/deepctl-cmd-plugin": "0.1.10",
+  "packages/deepctl-cmd-skills": "0.1.10",
   "packages/deepctl-plugin-example": "0.1.10"
 }
