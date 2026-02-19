@@ -163,7 +163,7 @@ def cli(
 
         # Setup output formatting
         setup_output(
-            format_type=output or ctx.obj["config"].get("output.format", "json"),
+            format_type=output or "default",
             quiet=quiet,
             verbose=verbose,
         )

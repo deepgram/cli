@@ -12,6 +12,7 @@ from deepctl_core import (
 )
 from deepctl_shared_utils import validate_audio_file, validate_url
 from rich.console import Console
+from rich.table import Table
 
 from .models import TranscribeResult
 
@@ -164,19 +165,10 @@ class TranscribeCommand(BaseCommand):
             # Determine if source is file or URL
             if self._is_url(source):
                 console.print("[dim]Processing URL...[/dim]")
-                result = client.transcribe_url(source, options)
+                result_dict = client.transcribe_url(source, options)
             else:
                 console.print("[dim]Processing file...[/dim]")
-                result = client.transcribe_file(source, options)
-
-            # Convert SDK response object to dict
-            result_dict = result
-            if hasattr(result, "to_dict"):
-                result_dict = result.to_dict()
-            elif hasattr(result, "dict"):
-                result_dict = result.dict()
-            elif hasattr(result, "__dict__"):
-                result_dict = result.__dict__
+                result_dict = client.transcribe_file(source, options)
 
             # Extract transcript text
             transcript = self._extract_transcript(result_dict)
@@ -201,6 +193,81 @@ class TranscribeCommand(BaseCommand):
             console.print(f"[red]Transcription failed:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
+    def output_result(self, result: Any, config: Config) -> None:
+        """Custom output for transcribe results."""
+        import json
+        from datetime import date, datetime
+
+        def _default(obj: Any) -> str:
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            return str(obj)
+
+        from deepctl_core.output import get_output_format
+
+        output_format = get_output_format()
+
+        # --output json: return raw Deepgram API response
+        if output_format == "json":
+            if isinstance(result, TranscribeResult) and result.full_result:
+                console.print_json(
+                    json.dumps(result.full_result, indent=2, default=_default)
+                )
+            else:
+                # Fallback for error results
+                super().output_result(result, config)
+            return
+
+        # Default / table / other formats: metadata table + transcript text
+        if isinstance(result, TranscribeResult) and result.status == "success":
+            metadata = result.full_result.get("metadata", {})
+            model_info = metadata.get("model_info", {})
+            model_name = None
+            model_version = None
+            for info in model_info.values():
+                model_name = info.get("name")
+                model_version = info.get("version")
+                break
+
+            # Build metadata table
+            table = Table(show_header=False, box=None, padding=(0, 2))
+            table.add_column("Key", style="dim")
+            table.add_column("Value")
+
+            table.add_row("Request ID", metadata.get("request_id", "—"))
+            table.add_row("Source", result.source)
+            table.add_row("Model", model_name or result.model)
+            if model_version:
+                table.add_row("Version", model_version)
+            duration = metadata.get("duration")
+            if duration is not None:
+                mins, secs = divmod(float(duration), 60)
+                table.add_row("Duration", f"{int(mins)}:{secs:05.2f}")
+            channels = metadata.get("channels")
+            if channels is not None:
+                table.add_row("Channels", str(int(channels)))
+            if result.saved_to:
+                table.add_row("Saved to", result.saved_to)
+
+            console.print(table)
+            console.print()
+
+            # Print transcript text
+            transcript = result.transcript
+            if transcript and transcript != "No transcript found in response":
+                console.print(transcript.strip())
+            else:
+                # Try paragraphs transcript for cleaner output
+                paragraphs_text = self._extract_paragraphs_transcript(
+                    result.full_result
+                )
+                if paragraphs_text:
+                    console.print(paragraphs_text.strip())
+                else:
+                    console.print("[yellow]No transcript found in response[/yellow]")
+        else:
+            super().output_result(result, config)
+
     def _validate_source(self, source: str) -> bool:
         """Validate audio source (file or URL)."""
         if self._is_url(source):
@@ -215,24 +282,42 @@ class TranscribeCommand(BaseCommand):
     def _extract_transcript(self, result: dict[str, Any]) -> str:
         """Extract transcript text from API result."""
         try:
-            # Handle different response formats
+            # Try paragraphs transcript first (best formatted)
+            paragraphs = self._extract_paragraphs_transcript(result)
+            if paragraphs:
+                return paragraphs
+
+            # Fall back to alternatives transcript
             if "results" in result and "channels" in result["results"]:
-                # Standard format
                 channels = result["results"]["channels"]
                 if channels and "alternatives" in channels[0]:
-                    return str(channels[0]["alternatives"][0]["transcript"])
+                    return str(channels[0]["alternatives"][0].get("transcript", ""))
 
-            # Fallback to looking for transcript in other locations
+            # Fallback to top-level transcript
             if "transcript" in result:
                 return str(result["transcript"])
 
-            return "No transcript found in response"
+            return ""
 
         except Exception as e:
             console.print(
                 f"[yellow]Warning:[/yellow] Could not extract transcript: {e}"
             )
             return str(result)
+
+    def _extract_paragraphs_transcript(self, result: dict[str, Any]) -> str:
+        """Extract formatted paragraphs transcript from API result."""
+        try:
+            channels = result.get("results", {}).get("channels", [])
+            if channels:
+                alternatives = channels[0].get("alternatives", [])
+                if alternatives:
+                    paragraphs = alternatives[0].get("paragraphs", {})
+                    if paragraphs and "transcript" in paragraphs:
+                        return str(paragraphs["transcript"])
+        except Exception:
+            pass
+        return ""
 
     def _save_transcript(self, transcript: str, file_path: str) -> None:
         """Save transcript to file."""

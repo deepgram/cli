@@ -591,11 +591,11 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.output._output_config", {"format": "yaml", "quiet": False, "verbose": False, "color": True})
     def test_output_result_yaml(self, mock_console, mock_command_class):
         """Test output_result with YAML format."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "yaml"
 
         result = {"key": "value", "nested": {"inner": "data"}}
         command.output_result(result, config)
@@ -608,13 +608,13 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.output._output_config", {"format": "table", "quiet": False, "verbose": False, "color": True})
     def test_output_result_table_list_of_dicts(
         self, mock_console, mock_command_class
     ):
         """Test output_result with table format and list of dicts."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "table"
 
         result = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
         command.output_result(result, config)
@@ -628,11 +628,11 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.output._output_config", {"format": "table", "quiet": False, "verbose": False, "color": True})
     def test_output_result_table_dict(self, mock_console, mock_command_class):
         """Test output_result with table format and dict."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "table"
 
         result = {"name": "Alice", "age": 30, "city": "NYC"}
         command.output_result(result, config)
@@ -642,13 +642,13 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.output._output_config", {"format": "csv", "quiet": False, "verbose": False, "color": True})
     def test_output_result_csv_list_of_dicts(
         self, mock_console, mock_command_class
     ):
         """Test output_result with CSV format and list of dicts."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "csv"
 
         result = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
         command.output_result(result, config)
@@ -662,11 +662,11 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.output._output_config", {"format": "csv", "quiet": False, "verbose": False, "color": True})
     def test_output_result_csv_dict(self, mock_console, mock_command_class):
         """Test output_result with CSV format and dict."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "csv"
 
         result = {"name": "Alice", "age": 30}
         command.output_result(result, config)
@@ -680,13 +680,13 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.output._output_config", {"format": "unknown", "quiet": False, "verbose": False, "color": True})
     def test_output_result_unknown_format(
         self, mock_console, mock_command_class
     ):
         """Test output_result with unknown format falls back to JSON."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "unknown"
 
         result = {"key": "value"}
 

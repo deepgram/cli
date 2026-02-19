@@ -15,6 +15,7 @@ from .models import (
 from .output import (
     OutputFormatter,
     get_console,
+    get_output_format,
     print_error,
     print_info,
     print_output,

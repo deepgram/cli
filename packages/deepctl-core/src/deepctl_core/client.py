@@ -114,7 +114,7 @@ class DeepgramClient:
                 request=audio_data, **default_options
             )
 
-            return dict(response)
+            return response.model_dump()
 
         except Exception as e:
             console.print(f"[red]Error transcribing file:[/red] {e}")
@@ -147,7 +147,7 @@ class DeepgramClient:
                 url=url, **default_options
             )
 
-            return dict(response)
+            return response.model_dump()
 
         except Exception as e:
             console.print(f"[red]Error transcribing URL:[/red] {e}")
@@ -161,7 +161,7 @@ class DeepgramClient:
         """
         try:
             response = self.client.manage.v("1").get_projects()
-            return dict(response)
+            return response.model_dump()
 
         except Exception as e:
             console.print(f"[red]Error getting projects:[/red] {e}")
@@ -187,7 +187,7 @@ class DeepgramClient:
 
         try:
             response = self.client.manage.v("1").get_project(project_id)
-            return dict(response)
+            return response.model_dump()
 
         except Exception as e:
             console.print(f"[red]Error getting project:[/red] {e}")
@@ -209,7 +209,7 @@ class DeepgramClient:
                 project_data["company"] = company
 
             response = self.client.manage.v("1").create_project(project_data)
-            return dict(response)
+            return response.model_dump()
 
         except Exception as e:
             console.print(f"[red]Error creating project:[/red] {e}")
@@ -247,9 +247,9 @@ class DeepgramClient:
                 params["end"] = end_date
 
             response = self.client.manage.v("1").get_usage_summary(project_id, params)
-            if isinstance(response, dict):
-                response["project_id"] = project_id
-            return dict(response)
+            result = response.model_dump()
+            result["project_id"] = project_id
+            return result
 
         except Exception as e:
             console.print(f"[red]Error getting usage:[/red] {e}")
@@ -271,7 +271,7 @@ class DeepgramClient:
 
         try:
             response = self.client.manage.v("1").get_project(project_id)
-            return dict(response)
+            return response.model_dump()
 
         except Exception as e:
             console.print(f"[red]Error getting models:[/red] {e}")

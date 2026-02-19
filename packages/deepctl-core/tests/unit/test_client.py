@@ -10,6 +10,13 @@ from deepctl_core.auth import AuthManager
 from deepctl_core.config import Config
 
 
+def _mock_sdk_response(data: dict) -> Mock:
+    """Create a mock SDK response object with model_dump()."""
+    response = Mock()
+    response.model_dump.return_value = data
+    return response
+
+
 class TestDeepgramClient:
     """Test DeepgramClient class."""
 
@@ -147,8 +154,8 @@ class TestDeepgramClient:
         mock_exists.return_value = True
         mock_instance = Mock()
         mock_media = Mock()
-        mock_response = {"transcript": "Hello world"}
-        mock_media.transcribe_file.return_value = mock_response
+        mock_data = {"transcript": "Hello world"}
+        mock_media.transcribe_file.return_value = _mock_sdk_response(mock_data)
         mock_instance.listen.v1.media = mock_media
         mock_dg_client.return_value = mock_instance
 
@@ -168,8 +175,8 @@ class TestDeepgramClient:
         # Setup mock client
         mock_instance = Mock()
         mock_media = Mock()
-        mock_response = {"transcript": "Hello world"}
-        mock_media.transcribe_url.return_value = mock_response
+        mock_data = {"transcript": "Hello world"}
+        mock_media.transcribe_url.return_value = _mock_sdk_response(mock_data)
         mock_instance.listen.v1.media = mock_media
         mock_dg_client.return_value = mock_instance
 
@@ -201,20 +208,20 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_manage = Mock()
-        mock_response = {
+        mock_data = {
             "projects": [
                 {"project_id": "proj1", "name": "Project 1"},
                 {"project_id": "proj2", "name": "Project 2"},
             ]
         }
-        mock_manage.get_projects.return_value = mock_response
+        mock_manage.get_projects.return_value = _mock_sdk_response(mock_data)
         mock_instance.manage.v.return_value = mock_manage
         mock_dg_client.return_value = mock_instance
 
         # Get projects
         result = client.get_projects()
 
-        assert result == mock_response
+        assert result == mock_data
         mock_manage.get_projects.assert_called_once()
 
     @patch("deepctl_core.client.DGClient")
@@ -223,15 +230,15 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_manage = Mock()
-        mock_response = {"project_id": "test-project", "name": "Test Project"}
-        mock_manage.get_project.return_value = mock_response
+        mock_data = {"project_id": "test-project", "name": "Test Project"}
+        mock_manage.get_project.return_value = _mock_sdk_response(mock_data)
         mock_instance.manage.v.return_value = mock_manage
         mock_dg_client.return_value = mock_instance
 
         # Get project
         result = client.get_project("test-project")
 
-        assert result == mock_response
+        assert result == mock_data
         mock_manage.get_project.assert_called_once_with("test-project")
 
     @patch("deepctl_core.client.DGClient")
@@ -240,8 +247,8 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_manage = Mock()
-        mock_response = {"minutes": 1000, "cost": 25.00}
-        mock_manage.get_usage_summary.return_value = mock_response
+        mock_data = {"minutes": 1000, "cost": 25.00}
+        mock_manage.get_usage_summary.return_value = _mock_sdk_response(mock_data)
         mock_instance.manage.v.return_value = mock_manage
         mock_dg_client.return_value = mock_instance
 
@@ -268,13 +275,13 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_manage = Mock()
-        mock_response = {"project_id": "new-proj", "name": "New Project"}
-        mock_manage.create_project.return_value = mock_response
+        mock_data = {"project_id": "new-proj", "name": "New Project"}
+        mock_manage.create_project.return_value = _mock_sdk_response(mock_data)
         mock_instance.manage.v.return_value = mock_manage
         mock_dg_client.return_value = mock_instance
 
         # Create project
         result = client.create_project("New Project")
 
-        assert result == mock_response
+        assert result == mock_data
         mock_manage.create_project.assert_called_once()

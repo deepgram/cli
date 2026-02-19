@@ -170,10 +170,19 @@ def _check_url_accessibility(url: str) -> bool:
         console.print("[dim]Checking URL accessibility...[/dim]")
 
         with httpx.Client(timeout=10.0) as client:
-            # Use HEAD request to check without downloading
+            # Try HEAD first; fall back to a ranged GET if the server
+            # doesn't support HEAD (some CDNs/redirect services return
+            # 404 or 405 for HEAD but serve GET fine).
             response = client.head(url, follow_redirects=True)
 
-            if response.status_code == 200:
+            if response.status_code not in range(200, 400):
+                response = client.get(
+                    url,
+                    follow_redirects=True,
+                    headers={"Range": "bytes=0-0"},
+                )
+
+            if response.status_code in (200, 206):
                 # Check content type if available
                 content_type = response.headers.get("content-type", "").lower()
                 if content_type and not any(

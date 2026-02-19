@@ -24,7 +24,7 @@ stderr_console = Console(stderr=True)
 
 # Global output configuration
 _output_config = {
-    "format": "json",
+    "format": "default",
     "quiet": False,
     "verbose": False,
     "color": True,
@@ -432,6 +432,15 @@ def prompt_input(message: str, default: str | None = None) -> str:
 
         response = input(prompt_text).strip()
         return response if response else (default or "")
+
+
+def get_output_format() -> str:
+    """Get the current output format.
+
+    Returns:
+        Output format string ("default", "json", "yaml", "table", "csv")
+    """
+    return str(_output_config["format"])
 
 
 def get_console() -> Console:

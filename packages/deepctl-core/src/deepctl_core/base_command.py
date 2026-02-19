@@ -171,7 +171,9 @@ class BaseCommand(ABC):
             return
 
         with TimingContext("result_formatting"):
-            output_format = config.get("output.format", "json")
+            from .output import get_output_format
+
+            output_format = get_output_format()
 
             # Unwrap Pydantic models for serialisation
             # local import to avoid circulars
@@ -187,7 +189,7 @@ class BaseCommand(ABC):
                 result = [item.model_dump() for item in result]
 
         with TimingContext(f"output_{output_format}"):
-            if output_format == "json":
+            if output_format in ("json", "default"):
                 self._output_json(result)
             elif output_format == "yaml":
                 self._output_yaml(result)
@@ -202,11 +204,17 @@ class BaseCommand(ABC):
     def _output_json(self, result: Any) -> None:
         """Output result as JSON."""
         import json
+        from datetime import date, datetime
+
+        def _default(obj: Any) -> str:
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            return str(obj)
 
         if isinstance(result, dict | list):
-            console.print_json(json.dumps(result, indent=2))
+            console.print_json(json.dumps(result, indent=2, default=_default))
         else:
-            console.print(json.dumps({"result": str(result)}, indent=2))
+            console.print(json.dumps({"result": str(result)}, indent=2, default=_default))
 
     def _output_yaml(self, result: Any) -> None:
         """Output result as YAML."""
