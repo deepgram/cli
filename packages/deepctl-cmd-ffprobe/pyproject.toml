@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepctl-shared-utils"
+name = "deepctl-cmd-ffprobe"
 version = "0.1.10" # x-release-please-version
-description = "Shared utilities for deepctl"
+description = "FFprobe configuration command for deepctl"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
@@ -18,13 +18,25 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-keywords = ["deepgram", "utilities", "validation", "helpers"]
+keywords = ["deepgram", "cli", "ffprobe", "audio", "config"]
 requires-python = ">=3.10"
-dependencies = ["pydantic>=2.0.0", "click>=8.0.0", "httpx>=0.24.0", "rich>=13.0.0"]
+dependencies = [
+    "deepctl-core>=0.1.10", # x-release-please-version
+    "deepctl-shared-utils>=0.1.10", # x-release-please-version
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+# Internal commands not meant to be called directly
+
+[project.entry-points."deepctl.commands"]
+ffprobe = "deepctl_cmd_ffprobe.command:FfprobeCommand"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepctl_shared_utils*"]
+include = ["deepctl_cmd_ffprobe*"]

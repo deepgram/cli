@@ -63,6 +63,14 @@
       "component": "deepctl-cmd-debug-stream",
       "skip-github-release": true
     },
+    "packages/deepctl-cmd-debug-probe": {
+      "component": "deepctl-cmd-debug-probe",
+      "skip-github-release": true
+    },
+    "packages/deepctl-cmd-ffprobe": {
+      "component": "deepctl-cmd-ffprobe",
+      "skip-github-release": true
+    },
     "packages/deepctl-cmd-mcp": {
       "component": "deepctl-cmd-mcp",
       "skip-github-release": true
@@ -106,6 +114,8 @@
         "deepctl-cmd-debug-browser",
         "deepctl-cmd-debug-network",
         "deepctl-cmd-debug-stream",
+        "deepctl-cmd-debug-probe",
+        "deepctl-cmd-ffprobe",
         "deepctl-cmd-mcp",
         "deepctl-cmd-update",
         "deepctl-cmd-plugin",

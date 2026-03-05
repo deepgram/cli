@@ -12,6 +12,8 @@
   "packages/deepctl-cmd-debug-browser": "0.1.10",
   "packages/deepctl-cmd-debug-network": "0.1.10",
   "packages/deepctl-cmd-debug-stream": "0.1.10",
+  "packages/deepctl-cmd-debug-probe": "0.1.10",
+  "packages/deepctl-cmd-ffprobe": "0.1.10",
   "packages/deepctl-cmd-mcp": "0.1.10",
   "packages/deepctl-cmd-update": "0.1.10",
   "packages/deepctl-cmd-plugin": "0.1.10",

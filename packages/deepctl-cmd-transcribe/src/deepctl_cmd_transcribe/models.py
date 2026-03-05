@@ -12,3 +12,4 @@ class TranscribeResult(BaseResult):
     transcript: str
     saved_to: str | None = None
     full_result: dict[str, Any]
+    probe_info: dict[str, Any] | None = None

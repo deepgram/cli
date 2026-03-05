@@ -47,6 +47,8 @@ dependencies = [
     "deepctl-cmd-debug-network>=0.1.10", # x-release-please-version
     "deepctl-cmd-debug-audio>=0.1.10",   # x-release-please-version
     "deepctl-cmd-debug-stream>=0.1.10",  # x-release-please-version
+    "deepctl-cmd-debug-probe>=0.1.10",  # x-release-please-version
+    "deepctl-cmd-ffprobe>=0.1.10",      # x-release-please-version
     "deepctl-cmd-update>=0.1.10",        # x-release-please-version
     "deepctl-cmd-plugin>=0.1.10",        # x-release-please-version
     "deepctl-cmd-skills>=0.1.10",        # x-release-please-version
@@ -173,6 +175,8 @@ deepctl-cmd-debug-browser = { workspace = true }
 deepctl-cmd-debug-network = { workspace = true }
 deepctl-cmd-debug-audio = { workspace = true }
 deepctl-cmd-debug-stream = { workspace = true }
+deepctl-cmd-debug-probe = { workspace = true }
+deepctl-cmd-ffprobe = { workspace = true }
 deepctl-cmd-update = { workspace = true }
 deepctl-cmd-plugin = { workspace = true }
 deepctl-cmd-skills = { workspace = true }

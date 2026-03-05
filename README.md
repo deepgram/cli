@@ -48,7 +48,9 @@ cli/
 │   ├── deepctl-cmd-debug-audio/      # Audio debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-network/    # Network debug subcommand for deepctl
+│   ├── deepctl-cmd-debug-probe/      # Debug probe subcommand for deepctl — live ffprobe analysis during streaming
 │   ├── deepctl-cmd-debug-stream/     # Stream debug subcommand for deepctl
+│   ├── deepctl-cmd-ffprobe/          # FFprobe configuration command for deepctl
 │   ├── deepctl-cmd-init/             # Init command for deepctl — scaffold Deepgram starter apps
 │   ├── deepctl-cmd-login/            # Login command for deepctl
 │   ├── deepctl-cmd-mcp/              # MCP server command for deepctl to interact with Deepgram's AI assistant service
@@ -126,8 +128,10 @@ brew install deepctl
 | `deepctl debug audio` | Audio debug subcommand for deepctl |
 | `deepctl debug browser` | Browser debug subcommand for deepctl |
 | `deepctl debug network` | Network debug subcommand for deepctl |
+| `deepctl debug probe` | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
 | `deepctl debug stream` | Stream debug subcommand for deepctl |
 | `deepctl debug` | Debug command group for deepctl |
+| `deepctl ffprobe` | FFprobe configuration command for deepctl |
 | `deepctl init` | Init command for deepctl — scaffold Deepgram starter apps |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
@@ -190,7 +194,9 @@ deepctl transcribe audio.wav --output json|yaml|table|csv
 | [`deepctl-cmd-debug-audio`](packages/deepctl-cmd-debug-audio) | Audio debug subcommand for deepctl |
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
 | [`deepctl-cmd-debug-network`](packages/deepctl-cmd-debug-network) | Network debug subcommand for deepctl |
+| [`deepctl-cmd-debug-probe`](packages/deepctl-cmd-debug-probe) | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
 | [`deepctl-cmd-debug-stream`](packages/deepctl-cmd-debug-stream) | Stream debug subcommand for deepctl |
+| [`deepctl-cmd-ffprobe`](packages/deepctl-cmd-ffprobe) | FFprobe configuration command for deepctl |
 | [`deepctl-cmd-init`](packages/deepctl-cmd-init) | Init command for deepctl — scaffold Deepgram starter apps |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
 | [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server command for deepctl to interact with Deepgram's AI assistant service |

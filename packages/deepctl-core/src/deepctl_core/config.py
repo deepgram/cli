@@ -44,6 +44,12 @@ class UpdateConfig(BaseModel):
     cached_version_info: dict[str, Any] | None = None
 
 
+class ToolsConfig(BaseModel):
+    """External tools configuration."""
+
+    ffprobe_path: str | None = None
+
+
 class DeepgramConfig(BaseModel):
     """Main configuration model."""
 
@@ -53,6 +59,7 @@ class DeepgramConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
 
 class Config:
@@ -275,6 +282,7 @@ class Config:
             "output": self._config.output.model_dump(exclude_none=True),
             "plugins": self._config.plugins.model_dump(exclude_none=True),
             "update": self._config.update.model_dump(exclude_none=True),
+            "tools": self._config.tools.model_dump(exclude_none=True),
         }
 
         # Ensure config directory exists

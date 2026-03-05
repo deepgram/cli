@@ -10,7 +10,12 @@ from deepctl_core import (
     Config,
     DeepgramClient,
 )
-from deepctl_shared_utils import validate_audio_file, validate_url
+from deepctl_shared_utils import (
+    probe_file,
+    require_ffprobe,
+    validate_audio_file,
+    validate_url,
+)
 from rich.console import Console
 from rich.table import Table
 
@@ -112,6 +117,12 @@ class TranscribeCommand(BaseCommand):
                 "is_flag": True,
                 "is_option": True,
             },
+            {
+                "names": ["--probe"],
+                "help": "Analyze audio file before transcribing",
+                "is_flag": True,
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -132,6 +143,7 @@ class TranscribeCommand(BaseCommand):
         detect_topics = kwargs.get("detect_topics", False)
         save_to = kwargs.get("save_to")
         no_validate = kwargs.get("no_validate", False)
+        probe = kwargs.get("probe", False)
 
         # Check if source is provided
         if not source:
@@ -140,6 +152,31 @@ class TranscribeCommand(BaseCommand):
         # Validate input if not skipped
         if not no_validate and not self._validate_source(source):
             return BaseResult(status="error", message="Invalid audio source")
+
+        # Run ffprobe analysis if requested
+        probe_info = None
+        if probe:
+            if not require_ffprobe(config):
+                return BaseResult(
+                    status="error",
+                    message="ffprobe is required but not found",
+                )
+
+            if self._is_url(source):
+                console.print(
+                    "[yellow]Warning:[/yellow] Cannot probe remote URLs "
+                    "— skipping audio analysis"
+                )
+            else:
+                probe_result = probe_file(source, config)
+                if probe_result:
+                    probe_info = probe_result.model_dump(exclude_none=True)
+                    self._print_probe_table(probe_result)
+                else:
+                    console.print(
+                        "[yellow]Warning:[/yellow] Audio analysis "
+                        "failed — continuing with transcription"
+                    )
 
         # Build transcription options
         options = {
@@ -187,6 +224,7 @@ class TranscribeCommand(BaseCommand):
                 transcript=transcript,
                 full_result=result_dict,
                 saved_to=save_to,
+                probe_info=probe_info,
             )
 
         except Exception as e:
@@ -267,6 +305,53 @@ class TranscribeCommand(BaseCommand):
                     console.print("[yellow]No transcript found in response[/yellow]")
         else:
             super().output_result(result, config)
+
+    def _print_probe_table(self, probe_result: object) -> None:
+        """Print ffprobe analysis results as a Rich table."""
+        from deepctl_shared_utils.ffprobe_models import AudioProbeResult
+
+        if not isinstance(probe_result, AudioProbeResult):
+            return
+
+        table = Table(
+            title="Audio File Analysis",
+            show_header=False,
+            padding=(0, 2),
+        )
+        table.add_column("Property", style="cyan")
+        table.add_column("Value")
+
+        if probe_result.format:
+            fmt = probe_result.format
+            if fmt.format_name:
+                table.add_row("Format", fmt.format_name)
+            if fmt.duration is not None:
+                mins, secs = divmod(fmt.duration, 60)
+                table.add_row("Duration", f"{int(mins)}:{secs:05.2f}")
+            if fmt.size is not None:
+                size_mb = fmt.size / (1024 * 1024)
+                table.add_row("Size", f"{size_mb:.2f} MB")
+            if fmt.bit_rate:
+                kbps = int(fmt.bit_rate) // 1000
+                table.add_row("Bit Rate", f"{kbps} kbps")
+
+        if probe_result.streams:
+            stream = probe_result.streams[0]
+            if stream.codec_name:
+                label = stream.codec_name
+                if stream.codec_long_name:
+                    label = f"{stream.codec_name} ({stream.codec_long_name})"
+                table.add_row("Codec", label)
+            if stream.sample_rate:
+                table.add_row("Sample Rate", f"{stream.sample_rate} Hz")
+            if stream.channels is not None:
+                layout = f" ({stream.channel_layout})" if stream.channel_layout else ""
+                table.add_row("Channels", f"{stream.channels}{layout}")
+            if stream.bits_per_sample:
+                table.add_row("Bit Depth", f"{stream.bits_per_sample}-bit")
+
+        console.print(table)
+        console.print()
 
     def _validate_source(self, source: str) -> bool:
         """Validate audio source (file or URL)."""
