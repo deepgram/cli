@@ -50,6 +50,7 @@ dependencies = [
     "deepctl-cmd-update>=0.1.10",        # x-release-please-version
     "deepctl-cmd-plugin>=0.1.10",        # x-release-please-version
     "deepctl-cmd-skills>=0.1.10",        # x-release-please-version
+    "deepctl-cmd-init>=0.1.10",          # x-release-please-version
     "deepctl-shared-utils>=0.1.10",      # x-release-please-version
     "pydantic>=2.0.0",
     "rich>=13.0.0",
@@ -175,6 +176,7 @@ deepctl-cmd-debug-stream = { workspace = true }
 deepctl-cmd-update = { workspace = true }
 deepctl-cmd-plugin = { workspace = true }
 deepctl-cmd-skills = { workspace = true }
+deepctl-cmd-init = { workspace = true }
 deepctl-shared-utils = { workspace = true }
 deepctl-plugin-example = { workspace = true }
 

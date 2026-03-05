@@ -49,6 +49,7 @@ cli/
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-network/    # Network debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-stream/     # Stream debug subcommand for deepctl
+│   ├── deepctl-cmd-init/             # Init command for deepctl — scaffold Deepgram starter apps
 │   ├── deepctl-cmd-login/            # Login command for deepctl
 │   ├── deepctl-cmd-mcp/              # MCP server command for deepctl to interact with Deepgram's AI assistant service
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
@@ -127,6 +128,7 @@ brew install deepctl
 | `deepctl debug network` | Network debug subcommand for deepctl |
 | `deepctl debug stream` | Stream debug subcommand for deepctl |
 | `deepctl debug` | Debug command group for deepctl |
+| `deepctl init` | Init command for deepctl — scaffold Deepgram starter apps |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
 | `deepctl mcp` | MCP server command for deepctl to interact with Deepgram's AI assistant service |
@@ -189,6 +191,7 @@ deepctl transcribe audio.wav --output json|yaml|table|csv
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
 | [`deepctl-cmd-debug-network`](packages/deepctl-cmd-debug-network) | Network debug subcommand for deepctl |
 | [`deepctl-cmd-debug-stream`](packages/deepctl-cmd-debug-stream) | Stream debug subcommand for deepctl |
+| [`deepctl-cmd-init`](packages/deepctl-cmd-init) | Init command for deepctl — scaffold Deepgram starter apps |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
 | [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server command for deepctl to interact with Deepgram's AI assistant service |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |

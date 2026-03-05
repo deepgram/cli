@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepctl-cmd-init"
+version = "0.1.10" # x-release-please-version
+description = "Init command for deepctl — scaffold Deepgram starter apps"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["deepgram", "cli", "init", "starter", "templates"]
+requires-python = ">=3.10"
+dependencies = [
+    "deepctl-core>=0.1.10", # x-release-please-version
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "httpx>=0.24.0",
+    "pydantic>=2.0.0",
+]
+
+[project.entry-points."deepctl.commands"]
+init = "deepctl_cmd_init.command:InitCommand"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepctl_cmd_init*"]
+
+[tool.uv.sources]
+deepctl-core = { workspace = true }

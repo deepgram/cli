@@ -79,6 +79,10 @@
       "component": "deepctl-cmd-skills",
       "skip-github-release": true
     },
+    "packages/deepctl-cmd-init": {
+      "component": "deepctl-cmd-init",
+      "skip-github-release": true
+    },
     "packages/deepctl-plugin-example": {
       "component": "deepctl-plugin-example",
       "skip-github-release": true
@@ -106,6 +110,7 @@
         "deepctl-cmd-update",
         "deepctl-cmd-plugin",
         "deepctl-cmd-skills",
+        "deepctl-cmd-init",
         "deepctl-plugin-example"
       ]
     }
