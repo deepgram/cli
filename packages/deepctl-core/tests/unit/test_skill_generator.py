@@ -19,6 +19,7 @@ from deepctl_core.skill_generator import (
     detect_ai_clis,
     get_all_generators,
     get_skills_state,
+    render_developer_guide,
     render_skill_content,
     save_skills_state,
     skills_need_update,
@@ -111,50 +112,86 @@ class TestSkillsState:
             assert skills_need_update([_make_command()]) is True
 
 
-class TestRenderSkillContent:
-    """Test render_skill_content."""
+class TestRenderDeveloperGuide:
+    """Test render_developer_guide and render_skill_content delegation."""
 
     def test_basic_render(self):
-        cmds = [_make_command()]
-        content = render_skill_content(cmds, "1.0.0")
-        assert "# deepctl CLI" in content
+        content = render_developer_guide("1.0.0")
+        assert "# Deepgram Developer Guide" in content
         assert "v1.0.0" in content
-        assert "dg test foo" in content
         assert "Authentication" in content
 
+    def test_contains_stt_content(self):
+        content = render_developer_guide("1.0.0")
+        assert "Speech-to-Text" in content
+        assert "Nova-3" in content
+        assert "diarize" in content
+        assert "smart_format" in content
+
+    def test_contains_tts_content(self):
+        content = render_developer_guide("1.0.0")
+        assert "Text-to-Speech" in content
+        assert "Aura-2" in content
+        assert "aura-2-andromeda-en" in content
+
+    def test_contains_audio_intelligence(self):
+        content = render_developer_guide("1.0.0")
+        assert "Audio Intelligence" in content
+        assert "summarize" in content
+        assert "sentiment" in content
+
+    def test_contains_voice_agent(self):
+        content = render_developer_guide("1.0.0")
+        assert "Voice Agent" in content
+        assert "barge-in" in content.lower() or "Barge-in" in content
+
+    def test_contains_sdks(self):
+        content = render_developer_guide("1.0.0")
+        assert "deepgram-sdk" in content
+        assert "@deepgram/sdk" in content
+        assert "pip install" in content
+        assert "npm install" in content
+
+    def test_contains_resources(self):
+        content = render_developer_guide("1.0.0")
+        assert "developers.deepgram.com" in content
+        assert "console.deepgram.com" in content
+        assert "discord.gg/deepgram" in content
+        assert "github.com/deepgram" in content
+
+    def test_contains_mcp_server(self):
+        content = render_developer_guide("1.0.0")
+        assert "MCP" in content
+        assert '"dg"' in content or "'dg'" in content
+        assert "mcpServers" in content
+
+    def test_contains_cli_section(self):
+        content = render_developer_guide("1.0.0")
+        assert "deepctl CLI" in content
+        assert "dg transcribe" in content
+        assert "dg login" in content
+
     def test_frontmatter(self):
-        cmds = [_make_command()]
-        content = render_skill_content(cmds, "1.0.0", include_frontmatter=True)
+        content = render_developer_guide("1.0.0", include_frontmatter=True)
         assert content.startswith("---\n")
         assert "description:" in content
 
     def test_no_frontmatter_by_default(self):
-        cmds = [_make_command()]
-        content = render_skill_content(cmds, "1.0.0")
+        content = render_developer_guide("1.0.0")
         assert not content.startswith("---")
 
-    def test_group_with_subcommands(self):
-        group = _make_command(name="debug", is_group=True, full_command="deepctl debug")
-        sub = _make_command(name="audio", parent_group="debug", full_command="deepctl debug audio")
-        content = render_skill_content([group, sub], "1.0.0")
-        assert "deepctl debug" in content
-        assert "deepctl debug audio" in content
+    def test_render_skill_content_delegates(self):
+        """render_skill_content should delegate to render_developer_guide."""
+        cmds = [_make_command()]
+        content = render_skill_content(cmds, "1.0.0")
+        assert "# Deepgram Developer Guide" in content
+        assert "Speech-to-Text" in content
 
-    def test_auth_indicator(self):
-        cmd = _make_command(requires_auth=True)
-        content = render_skill_content([cmd], "1.0.0")
-        assert "Requires authentication" in content
-
-    def test_options_rendered(self):
-        cmd = _make_command(
-            arguments=[
-                {"name": "source", "is_option": False},
-                {"names": ["--model", "-m"], "help": "Model to use", "default": "nova-2", "is_option": True},
-            ]
-        )
-        content = render_skill_content([cmd], "1.0.0")
-        assert "--model, -m" in content
-        assert "nova-2" in content
+    def test_render_skill_content_frontmatter(self):
+        cmds = [_make_command()]
+        content = render_skill_content(cmds, "1.0.0", include_frontmatter=True)
+        assert content.startswith("---\n")
+        assert "description:" in content
 
 
 class TestClaudeCodeGenerator:

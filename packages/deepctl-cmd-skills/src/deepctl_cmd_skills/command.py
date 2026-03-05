@@ -296,10 +296,7 @@ class SkillsCommand(BaseGroupCommand):
         save_skills_state(state)
 
         if total_written:
-            print_success(
-                f"\nInstalled skills: {len(total_written)} file(s), "
-                f"{len(commands)} commands"
-            )
+            print_success(f"\nInstalled skills: {len(total_written)} file(s)")
         else:
             print_info("No skills were installed.")
 
@@ -349,7 +346,7 @@ class SkillsCommand(BaseGroupCommand):
                 print_success(f"  Updated {p}")
 
         save_skills_state(state)
-        print_success(f"Updated {updated_count} skill(s) ({len(commands)} commands)")
+        print_success(f"Updated {updated_count} skill(s)")
 
     def _handle_remove(
         self,
