@@ -37,8 +37,8 @@ uv run dg <command> --help  # Command help
 2. **Always run `make check`** after code changes to catch ruff/mypy issues
 3. **Always run `make readmes`** after adding or modifying packages
 4. **Run `dg skills update`** after adding new commands to regenerate AI skill files
-5. **Version markers** — every version line in pyproject.toml must have `# x-release-please-version`
-6. **New packages require updates to**: root `pyproject.toml`, `release-please-config.json`, `.release-please-manifest.json`, `.github/workflows/test.yml` (test paths)
+5. **Version markers** — every `version =` line in pyproject.toml must have `# x-release-please-version` (NOT on dependency lines)
+6. **New packages require updates to**: root `pyproject.toml`, `.github/release-please-config.json`, `.github/.release-please-manifest.json`, `.github/workflows/test.yml` (test paths)
 
 ## Workspace Packages
 

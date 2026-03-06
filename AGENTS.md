@@ -115,7 +115,7 @@ classifiers = [
 keywords = ["deepgram", "cli", "<name>"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10", # x-release-please-version
+    "deepctl-core>=0.1.10",
     "click>=8.0.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
@@ -135,7 +135,7 @@ include = ["deepctl_cmd_<name>*"]
 deepctl-core = { workspace = true }
 ```
 
-**Critical**: The `# x-release-please-version` comment is required on every version line — release-please uses these markers.
+**Critical**: The `# x-release-please-version` comment is required on the `version =` line only (not on dependency lines) — release-please uses these markers.
 
 ### 3. `models.py`
 
@@ -254,27 +254,24 @@ Update these files:
 **`/pyproject.toml`** (root):
 ```toml
 # In [project] dependencies:
-"deepctl-cmd-<name>>=0.1.10",    # x-release-please-version
+"deepctl-cmd-<name>>=0.0.1",
 
 # In [tool.uv.sources]:
 deepctl-cmd-<name> = { workspace = true }
 ```
 
-**`/release-please-config.json`**:
+**`/.github/release-please-config.json`**:
 ```json
 // In "packages":
 "packages/deepctl-cmd-<name>": {
   "component": "deepctl-cmd-<name>",
-  "skip-github-release": true
+  "include-component-in-tag": true
 }
-
-// In "plugins"[0]."components" array:
-"deepctl-cmd-<name>"
 ```
 
-**`/.release-please-manifest.json`**:
+**`/.github/.release-please-manifest.json`**:
 ```json
-"packages/deepctl-cmd-<name>": "0.1.10"
+"packages/deepctl-cmd-<name>": "0.0.1"
 ```
 
 **`/.github/workflows/test.yml`**: Add `packages/deepctl-cmd-<name>/tests` to the pytest path list.
@@ -578,11 +575,11 @@ Tests run on Python 3.10-3.14 across Ubuntu, Windows, and macOS. The lint job ru
 
 ### Versioning
 
-All packages share a single version via release-please linked versions. Current: `0.1.10`.
+Each package is versioned independently via release-please.
 
-- `# x-release-please-version` comments mark lines that get bumped
-- `.release-please-manifest.json` tracks current versions per package
-- `release-please-config.json` defines package components
+- `# x-release-please-version` comments on `version =` lines mark what gets bumped (NOT on dependency lines)
+- `.github/.release-please-manifest.json` tracks current versions per package
+- `.github/release-please-config.json` defines package components
 
 ### Release Flow
 
@@ -593,9 +590,8 @@ All packages share a single version via release-please linked versions. Current:
 
 ### Adding a New Package to Releases
 
-1. Add to `release-please-config.json` `"packages"` section
-2. Add component name to `"plugins"[0]."components"` array
-3. Add to `.release-please-manifest.json` with current version
+1. Add to `.github/release-please-config.json` `"packages"` section
+2. Add to `.github/.release-please-manifest.json` with initial version (e.g. `"0.0.1"`)
 
 ---
 
@@ -632,4 +628,4 @@ All packages share a single version via release-please linked versions. Current:
 7. **Override `output_result()`** — if your command prints Rich output, suppress auto-JSON in default mode
 8. **`make readmes` after changes** — always regenerate READMEs after adding/modifying packages
 9. **`dg skills update` after adding commands** — regenerate AI assistant skill files
-10. **Version markers everywhere** — `# x-release-please-version` on all version lines
+10. **Version markers on `version =` lines only** — `# x-release-please-version` (not on dependency lines)

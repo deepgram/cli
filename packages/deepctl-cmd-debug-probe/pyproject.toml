@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-debug-probe"
-version = "0.1.10" # x-release-please-version
+version = "0.0.1" # x-release-please-version
 description = "Debug probe subcommand for deepctl — live ffprobe analysis during streaming"
 readme = "README.md"
 license = "MIT"
@@ -21,8 +21,8 @@ classifiers = [
 keywords = ["deepgram", "cli", "debug", "probe", "ffprobe", "websocket"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10", # x-release-please-version
-    "deepctl-shared-utils>=0.1.10", # x-release-please-version
+    "deepctl-core>=0.1.10",
+    "deepctl-shared-utils>=0.1.10",
     "click>=8.0.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",

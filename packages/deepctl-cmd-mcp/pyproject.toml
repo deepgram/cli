@@ -11,7 +11,7 @@ authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "deepctl-core>=0.1.10", # x-release-please-version
+    "deepctl-core>=0.1.10",
     "mcp>=1.0.0",
     "rich>=13.9.4",
     "click>=8.1.7",

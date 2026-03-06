@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-init"
-version = "0.1.10" # x-release-please-version
+version = "0.0.1" # x-release-please-version
 description = "Init command for deepctl — scaffold Deepgram starter apps"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
 keywords = ["deepgram", "cli", "init", "starter", "templates"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10", # x-release-please-version
+    "deepctl-core>=0.1.10",
     "click>=8.0.0",
     "rich>=13.0.0",
     "httpx>=0.24.0",
