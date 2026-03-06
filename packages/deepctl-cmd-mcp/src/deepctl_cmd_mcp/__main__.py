@@ -31,9 +31,7 @@ def main() -> None:
     parser.add_argument(
         "--port", type=int, default=8000, help="Port for HTTP transports"
     )
-    parser.add_argument(
-        "--host", default="127.0.0.1", help="Host for HTTP transports"
-    )
+    parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
     parser.add_argument(
         "--base-url",
         default=os.getenv("DEEPGRAM_DX_URL", "http://localhost:8080"),
@@ -44,14 +42,14 @@ def main() -> None:
         default=os.getenv("DEEPGRAM_API_KEY"),
         help="Deepgram API key",
     )
-    parser.add_argument(
-        "--debug", action="store_true", help="Enable debug logging"
-    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
 
     if not args.api_key:
-        print("Error: No API key. Set DEEPGRAM_API_KEY or use --api-key.", file=sys.stderr)
+        print(
+            "Error: No API key. Set DEEPGRAM_API_KEY or use --api-key.", file=sys.stderr
+        )
         sys.exit(1)
 
     from .command import run_proxy

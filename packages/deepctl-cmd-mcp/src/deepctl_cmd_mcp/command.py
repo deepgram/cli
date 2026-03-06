@@ -31,7 +31,7 @@ class McpCommand(BaseCommand):
     )
     short_help = "Run MCP proxy for Deepgram AI"
 
-    requires_auth = False
+    requires_auth = True
     requires_project = False
     ci_friendly = True
 
@@ -58,9 +58,7 @@ class McpCommand(BaseCommand):
         return [
             {
                 "names": ["--transport", "-t"],
-                "help": (
-                    "Transport mode: stdio (default), sse, or streamable-http"
-                ),
+                "help": ("Transport mode: stdio (default) or sse"),
                 "type": str,
                 "default": "stdio",
                 "required": False,
@@ -79,16 +77,6 @@ class McpCommand(BaseCommand):
                 "help": "Host address for HTTP server (default: 127.0.0.1)",
                 "type": str,
                 "default": "127.0.0.1",
-                "required": False,
-                "is_option": True,
-            },
-            {
-                "names": ["--api-key"],
-                "help": (
-                    "Override API key for Deepgram (falls back to "
-                    "profile or DEEPGRAM_API_KEY env var)"
-                ),
-                "type": str,
                 "required": False,
                 "is_option": True,
             },
@@ -126,13 +114,12 @@ class McpCommand(BaseCommand):
         transport = kwargs.get("transport", "stdio").lower()
         port = kwargs.get("port", 8000)
         host = kwargs.get("host", "127.0.0.1")
-        api_key = kwargs.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
-        if not api_key:
-            api_key = auth_manager.get_api_key()
+        api_key = auth_manager.get_api_key()
+        assert api_key  # guaranteed by requires_auth = True
         base_url = kwargs.get("base_url", DEFAULT_BASE_URL)
         debug = kwargs.get("debug", False)
 
-        valid_transports = ["stdio", "sse", "streamable-http"]
+        valid_transports = ["stdio", "sse"]
         if transport not in valid_transports:
             console.print(
                 f"[red]Invalid transport type:[/red] {transport}. "
@@ -140,15 +127,6 @@ class McpCommand(BaseCommand):
             )
             return MCPServerResult(
                 status="error", message=f"Invalid transport type: {transport}"
-            )
-
-        if not api_key:
-            console.print(
-                "[red]No API key found.[/red] "
-                "Set DEEPGRAM_API_KEY, use --api-key, or run dg login."
-            )
-            return MCPServerResult(
-                status="error", message="No API key configured"
             )
 
         # Set up signal handling for graceful shutdown
@@ -160,8 +138,7 @@ class McpCommand(BaseCommand):
         try:
             if transport != "stdio":
                 console.print(
-                    f"[blue]Starting MCP proxy ({transport}) on "
-                    f"{host}:{port}...[/blue]"
+                    f"[blue]Starting MCP proxy ({transport}) on {host}:{port}...[/blue]"
                 )
 
             asyncio.run(
@@ -178,7 +155,7 @@ class McpCommand(BaseCommand):
             return MCPServerResult(
                 status="success",
                 message="MCP proxy stopped",
-                transport=TransportType(transport.replace("-", "")),
+                transport=TransportType(transport),
                 port=port if transport != "stdio" else None,
                 host=host if transport != "stdio" else None,
             )
@@ -187,16 +164,20 @@ class McpCommand(BaseCommand):
             return MCPServerResult(
                 status="cancelled",
                 message="MCP proxy stopped by user",
-                transport=TransportType(transport.replace("-", "")),
+                transport=TransportType(transport),
                 port=port if transport != "stdio" else None,
                 host=host if transport != "stdio" else None,
             )
         except Exception as e:
-            console.print(f"[red]Error running MCP proxy:[/red] {e}")
+            msg = str(e)
+            if hasattr(e, "exceptions"):
+                for sub in e.exceptions:
+                    msg += f"\n  Caused by: {sub!r}"
+            console.print(f"[red]Error running MCP proxy:[/red] {msg}")
             return MCPServerResult(
                 status="error",
                 message=str(e),
-                transport=TransportType(transport.replace("-", "")),
+                transport=TransportType(transport),
                 port=port if transport != "stdio" else None,
                 host=host if transport != "stdio" else None,
             )
@@ -218,19 +199,21 @@ async def run_proxy(
     import mcp.server.stdio
     import mcp.types as types
     from mcp.client.session import ClientSession
-    from mcp.client.sse import sse_client
+    from mcp.client.streamable_http import streamablehttp_client
     from mcp.server.lowlevel import NotificationOptions, Server
     from mcp.server.models import InitializationOptions
 
-    sse_url = f"{base_url.rstrip('/')}/kapa/mcp/sse"
+    mcp_url = f"{base_url.rstrip('/')}/kapa/mcp"
     headers = {"Authorization": f"Token {api_key}"}
 
     if debug:
-        print(f"[DEBUG] Connecting to {sse_url}", file=sys.stderr)
+        print(f"[DEBUG] Connecting to {mcp_url}", file=sys.stderr)
 
-    async with sse_client(url=sse_url, headers=headers) as streams:
-        read_stream, write_stream = streams[0], streams[1]
-
+    async with streamablehttp_client(url=mcp_url, headers=headers) as (
+        read_stream,
+        write_stream,
+        _get_session_id,
+    ):
         async with ClientSession(read_stream, write_stream) as remote:
             await remote.initialize()
 
@@ -252,9 +235,7 @@ async def run_proxy(
             @local.call_tool()
             async def handle_call_tool(
                 name: str, arguments: dict[str, Any] | None
-            ) -> list[
-                types.TextContent | types.ImageContent | types.EmbeddedResource
-            ]:
+            ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
                 result = await remote.call_tool(name, arguments or {})
                 return result.content  # type: ignore[return-value]
 
@@ -272,8 +253,6 @@ async def run_proxy(
                     await local.run(srv_r, srv_w, init_options)
             elif transport == "sse":
                 await _run_sse_server(local, init_options, host, port)
-            elif transport == "streamable-http":
-                await _run_streamable_http_server(local, init_options, host, port)
 
 
 async def _run_sse_server(
@@ -291,9 +270,10 @@ async def _run_sse_server(
     sse = SseServerTransport("/messages")
 
     async def handle_sse(request: Any) -> None:
-        async with sse.connect_sse(
-            request.scope, request.receive, request.send
-        ) as (read, write):
+        async with sse.connect_sse(request.scope, request.receive, request.send) as (
+            read,
+            write,
+        ):
             await server.run(read, write, init_options)
 
     app = Starlette(
@@ -310,15 +290,3 @@ async def _run_sse_server(
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")
     srv = uvicorn.Server(config)
     await srv.serve()
-
-
-async def _run_streamable_http_server(
-    server: Any,
-    init_options: Any,
-    host: str,
-    port: int,
-) -> None:
-    """Run local MCP server with streamable HTTP transport."""
-    # Streamable HTTP uses the same Starlette pattern but with a different
-    # transport. For now, fall back to SSE which is widely supported.
-    await _run_sse_server(server, init_options, host, port)

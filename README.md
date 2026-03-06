@@ -53,7 +53,7 @@ cli/
 │   ├── deepctl-cmd-ffprobe/          # FFprobe configuration command for deepctl
 │   ├── deepctl-cmd-init/             # Init command for deepctl — scaffold Deepgram starter apps
 │   ├── deepctl-cmd-login/            # Login command for deepctl
-│   ├── deepctl-cmd-mcp/              # MCP server command for deepctl to interact with Deepgram's AI assistant service
+│   ├── deepctl-cmd-mcp/              # MCP proxy command for deepctl — connects to Deepgram's developer API
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
 │   ├── deepctl-cmd-projects/         # Projects command for deepctl
 │   ├── deepctl-cmd-skills/           # AI coding assistant skill management for deepctl
@@ -135,7 +135,7 @@ brew install deepctl
 | `deepctl init` | Init command for deepctl — scaffold Deepgram starter apps |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
-| `deepctl mcp` | MCP server command for deepctl to interact with Deepgram's AI assistant service |
+| `deepctl mcp` | MCP proxy command for deepctl — connects to Deepgram's developer API |
 | `deepctl plugin` | Plugin management command for deepctl |
 | `deepctl profiles` | Login command for deepctl |
 | `deepctl projects` | Projects command for deepctl |
@@ -184,6 +184,31 @@ Priority: CLI args > env vars > user config (`~/.config/deepctl/config.yaml` on 
 deepctl transcribe audio.wav --output json|yaml|table|csv
 ```
 
+### MCP Server
+
+Use `deepctl mcp` to connect Deepgram's developer tools to your AI code editor.
+
+```bash
+# Login first
+deepctl login
+```
+
+Add to your editor's MCP config (Claude Code `.mcp.json`, Cursor `.cursor/mcp.json`, etc.):
+
+```json
+{
+  "mcpServers": {
+    "deepgram": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["deepctl", "mcp"]
+    }
+  }
+}
+```
+
+See [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) for full setup instructions including Cursor, Windsurf, pipx, and local development.
+
 ## Packages
 
 <!-- BEGIN:packages -->
@@ -199,7 +224,7 @@ deepctl transcribe audio.wav --output json|yaml|table|csv
 | [`deepctl-cmd-ffprobe`](packages/deepctl-cmd-ffprobe) | FFprobe configuration command for deepctl |
 | [`deepctl-cmd-init`](packages/deepctl-cmd-init) | Init command for deepctl — scaffold Deepgram starter apps |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
-| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server command for deepctl to interact with Deepgram's AI assistant service |
+| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP proxy command for deepctl — connects to Deepgram's developer API |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
 | [`deepctl-cmd-projects`](packages/deepctl-cmd-projects) | Projects command for deepctl |
 | [`deepctl-cmd-skills`](packages/deepctl-cmd-skills) | AI coding assistant skill management for deepctl |

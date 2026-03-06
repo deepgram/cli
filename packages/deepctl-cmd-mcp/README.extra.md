@@ -1,36 +1,3 @@
-# deepctl-cmd-mcp
-
-> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
-
-MCP proxy command for deepctl — connects to Deepgram's developer API
-
-## Installation
-
-This package is included with deepctl and does not need to be installed separately.
-
-### Install deepctl
-
-```bash
-# Install with pip
-pip install deepctl
-
-# Or install with uv
-uv tool install deepctl
-
-# Or install with pipx
-pipx install deepctl
-
-# Or run without installing
-uvx deepctl --help
-pipx run deepctl --help
-```
-
-## Commands
-
-| Command | Entry Point |
-|---------|-------------|
-| `deepctl mcp` | `deepctl_cmd_mcp.command:McpCommand` |
-
 ## MCP Server Setup
 
 The `deepctl mcp` command runs an MCP (Model Context Protocol) proxy that
@@ -137,16 +104,3 @@ run it as an HTTP server:
 # SSE transport
 deepctl mcp --transport sse --port 8000
 ```
-
-## Dependencies
-
-- `mcp>=1.0.0`
-- `rich>=13.9.4`
-- `click>=8.1.7`
-- `pydantic>=2.10.1`
-- `uvicorn>=0.30.0`
-- `starlette>=0.37.0`
-
-## License
-
-MIT — see [LICENSE](../../LICENSE)

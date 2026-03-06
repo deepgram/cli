@@ -8,10 +8,23 @@ This package provides internal APIs for deepctl and its command packages. It is 
 
 ## Installation
 
-Installed automatically with deepctl:
+This package is included with deepctl and does not need to be installed separately.
+
+### Install deepctl
 
 ```bash
+# Install with pip
 pip install deepctl
+
+# Or install with uv
+uv tool install deepctl
+
+# Or install with pipx
+pipx install deepctl
+
+# Or run without installing
+uvx deepctl --help
+pipx run deepctl --help
 ```
 
 ## Dependencies

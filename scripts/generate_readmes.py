@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PACKAGES_DIR = ROOT / "packages"
 
 # Skip packages with comprehensive manual READMEs
-SKIP_PACKAGES = {"deepctl-plugin-example"}
+SKIP_PACKAGES: set[str] = set()
 
 # Internal package prefixes to exclude from dependency lists
 INTERNAL_PREFIXES = ("deepctl-core", "deepctl-cmd-", "deepctl-shared-")
@@ -41,11 +41,14 @@ def load_pyproject(package_dir: Path) -> dict:
         return tomllib.load(f)
 
 
-def classify_package(name: str) -> str:
+def classify_package(name: str, data: dict) -> str:
     """Classify a package as 'command', 'debug-subcommand', or 'core'."""
     if re.match(r"^deepctl-cmd-debug-.+$", name):
         return "debug-subcommand"
     if name.startswith("deepctl-cmd-"):
+        return "command"
+    eps = data.get("project", {}).get("entry-points", {})
+    if eps.get("deepctl.plugins") or eps.get("deepctl.commands"):
         return "command"
     return "core"
 
@@ -74,11 +77,54 @@ def get_entry_points(data: dict) -> dict[str, str]:
     for cmd_name, target in eps.get("deepctl.subcommands.debug", {}).items():
         entry_points[cmd_name] = target
 
+    # Check deepctl.plugins
+    for cmd_name, target in eps.get("deepctl.plugins", {}).items():
+        entry_points[cmd_name] = target
+
     return entry_points
 
 
+def render_install_section() -> list[str]:
+    """Render the common installation section for built-in packages."""
+    return [
+        "## Installation",
+        "",
+        "This package is included with deepctl and does not need to be "
+        "installed separately.",
+        "",
+        "### Install deepctl",
+        "",
+        "```bash",
+        "# Install with pip",
+        "pip install deepctl",
+        "",
+        "# Or install with uv",
+        "uv tool install deepctl",
+        "",
+        "# Or install with pipx",
+        "pipx install deepctl",
+        "",
+        "# Or run without installing",
+        "uvx deepctl --help",
+        "pipx run deepctl --help",
+        "```",
+    ]
+
+
+def render_extra_content(package_dir: Path) -> list[str]:
+    """Load README.extra.md if it exists for package-specific content."""
+    extra_path = package_dir / "README.extra.md"
+    if extra_path.exists():
+        return ["", extra_path.read_text().rstrip()]
+    return []
+
+
 def render_command_readme(
-    name: str, description: str, entry_points: dict, external_deps: list
+    name: str,
+    description: str,
+    entry_points: dict,
+    external_deps: list,
+    package_dir: Path,
 ) -> str:
     """Render README for a command package (deepctl-cmd-*)."""
     lines = [
@@ -89,21 +135,22 @@ def render_command_readme(
         "",
         description,
         "",
-        "## Installation",
-        "",
-        "Installed automatically with deepctl:",
-        "",
-        "```bash",
-        "pip install deepctl",
-        "```",
-        "",
-        "## Commands",
-        "",
-        "| Command | Entry Point |",
-        "|---------|-------------|",
     ]
+    lines.extend(render_install_section())
+
+    lines.extend(
+        [
+            "",
+            "## Commands",
+            "",
+            "| Command | Entry Point |",
+            "|---------|-------------|",
+        ]
+    )
     for cmd, target in sorted(entry_points.items()):
         lines.append(f"| `deepctl {cmd}` | `{target}` |")
+
+    lines.extend(render_extra_content(package_dir))
 
     lines.extend(["", "## Dependencies", ""])
     if external_deps:
@@ -119,7 +166,11 @@ def render_command_readme(
 
 
 def render_debug_subcommand_readme(
-    name: str, description: str, entry_points: dict, external_deps: list
+    name: str,
+    description: str,
+    entry_points: dict,
+    external_deps: list,
+    package_dir: Path,
 ) -> str:
     """Render README for a debug subcommand package."""
     lines = [
@@ -132,21 +183,22 @@ def render_debug_subcommand_readme(
         "",
         "This is a subcommand of `deepctl debug`.",
         "",
-        "## Installation",
-        "",
-        "Installed automatically with deepctl:",
-        "",
-        "```bash",
-        "pip install deepctl",
-        "```",
-        "",
-        "## Commands",
-        "",
-        "| Command | Entry Point |",
-        "|---------|-------------|",
     ]
+    lines.extend(render_install_section())
+
+    lines.extend(
+        [
+            "",
+            "## Commands",
+            "",
+            "| Command | Entry Point |",
+            "|---------|-------------|",
+        ]
+    )
     for cmd, target in sorted(entry_points.items()):
         lines.append(f"| `deepctl debug {cmd}` | `{target}` |")
+
+    lines.extend(render_extra_content(package_dir))
 
     lines.extend(["", "## Dependencies", ""])
     if external_deps:
@@ -162,7 +214,10 @@ def render_debug_subcommand_readme(
 
 
 def render_core_readme(
-    name: str, description: str, external_deps: list
+    name: str,
+    description: str,
+    external_deps: list,
+    package_dir: Path,
 ) -> str:
     """Render README for a core/utility package."""
     lines = [
@@ -176,17 +231,12 @@ def render_core_readme(
         "This package provides internal APIs for deepctl and its command"
         " packages. It is not intended for direct use.",
         "",
-        "## Installation",
-        "",
-        "Installed automatically with deepctl:",
-        "",
-        "```bash",
-        "pip install deepctl",
-        "```",
-        "",
-        "## Dependencies",
-        "",
     ]
+    lines.extend(render_install_section())
+
+    lines.extend(render_extra_content(package_dir))
+
+    lines.extend(["", "## Dependencies", ""])
     if external_deps:
         for dep in external_deps:
             lines.append(f"- `{dep}`")
@@ -208,18 +258,20 @@ def generate_readme(package_dir: Path) -> str:
     deps = project.get("dependencies", [])
     external_deps = get_external_deps(deps)
     entry_points = get_entry_points(data)
-    kind = classify_package(name)
+    kind = classify_package(name, data)
 
     if kind == "debug-subcommand":
         return render_debug_subcommand_readme(
-            name, description, entry_points, external_deps
+            name, description, entry_points, external_deps, package_dir
         )
     elif kind == "command":
         return render_command_readme(
-            name, description, entry_points, external_deps
+            name, description, entry_points, external_deps, package_dir
         )
     else:
-        return render_core_readme(name, description, external_deps)
+        return render_core_readme(
+            name, description, external_deps, package_dir
+        )
 
 
 def get_package_dirs(single: str | None = None) -> list[Path]:

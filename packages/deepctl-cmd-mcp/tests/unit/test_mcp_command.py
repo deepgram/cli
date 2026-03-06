@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 from deepctl_cmd_mcp.command import McpCommand
@@ -16,7 +15,7 @@ class TestMcpCommand:
         """Test command metadata."""
         command = McpCommand()
         assert command.name == "mcp"
-        assert command.requires_auth is False
+        assert command.requires_auth is True
         assert command.requires_project is False
         assert command.ci_friendly is True
         assert hasattr(command, "_shutdown_requested")
@@ -32,7 +31,6 @@ class TestMcpCommand:
             "--transport",
             "--port",
             "--host",
-            "--api-key",
             "--base-url",
             "--debug",
         }
@@ -57,24 +55,22 @@ class TestMcpCommand:
         assert "Invalid transport type" in result.message
 
     def test_handle_no_api_key(self):
-        """Test handling missing API key."""
+        """Test handling missing API key (guard runs before handle, but assert catches it)."""
         command = McpCommand()
         config = MagicMock()
         auth_manager = MagicMock()
         auth_manager.get_api_key.return_value = None
         client = MagicMock()
 
-        with patch.dict(os.environ, {}, clear=True):
-            result = command.handle(
+        import pytest
+
+        with pytest.raises(AssertionError):
+            command.handle(
                 config,
                 auth_manager,
                 client,
                 transport="stdio",
             )
-
-        assert isinstance(result, MCPServerResult)
-        assert result.status == "error"
-        assert "No API key" in result.message
 
     @patch("deepctl_cmd_mcp.command.asyncio.run")
     @patch("signal.signal")

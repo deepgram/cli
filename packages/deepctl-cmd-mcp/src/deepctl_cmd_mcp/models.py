@@ -11,7 +11,6 @@ class TransportType(str, Enum):
 
     STDIO = "stdio"
     SSE = "sse"
-    STREAMABLEHTTP = "streamablehttp"
 
 
 class MCPServerResult(BaseModel):
