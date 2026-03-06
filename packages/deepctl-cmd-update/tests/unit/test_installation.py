@@ -1,5 +1,6 @@
 """Unit tests for installation detection."""
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -7,6 +8,10 @@ import pytest
 from deepctl_cmd_update.installation import (
     InstallationDetector,
     InstallMethod,
+)
+
+unix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="Unix-specific path test"
 )
 
 
@@ -79,6 +84,7 @@ class TestHomebrewDetection:
     def detector(self):
         return InstallationDetector()
 
+    @unix_only
     @patch("deepctl_cmd_update.installation.sys")
     def test_apple_silicon_path(self, mock_sys):
         """Detect Homebrew on Apple Silicon."""
@@ -90,6 +96,7 @@ class TestHomebrewDetection:
         ):
             assert detector._is_homebrew_install() is True
 
+    @unix_only
     @patch("deepctl_cmd_update.installation.sys")
     def test_intel_mac_path(self, mock_sys):
         """Detect Homebrew on Intel Mac."""
@@ -104,6 +111,7 @@ class TestHomebrewDetection:
         ):
             assert detector._is_homebrew_install() is True
 
+    @unix_only
     @patch("deepctl_cmd_update.installation.sys")
     def test_linux_homebrew_path(self, mock_sys):
         """Detect Homebrew on Linux."""
@@ -138,6 +146,7 @@ class TestUvToolDetection:
     def detector(self):
         return InstallationDetector()
 
+    @unix_only
     @patch("deepctl_cmd_update.installation.sys")
     @patch.dict(
         "os.environ", {"UV_TOOL_DIR": "/custom/uv/tools"}, clear=False
@@ -184,6 +193,7 @@ class TestOneshotDetection:
         result = detector._detect_oneshot_execution()
         assert result == InstallMethod.UVX
 
+    @unix_only
     @patch("deepctl_cmd_update.installation.sys")
     @patch.dict("os.environ", {}, clear=False)
     def test_pipx_run_detected(self, mock_sys):

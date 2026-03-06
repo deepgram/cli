@@ -7,6 +7,10 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+unix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="Unix-specific path test"
+)
+
 from deepctl_core.plugin_env import (
     PLUGIN_DIR,
     PLUGIN_STATE_FILE,
@@ -129,6 +133,7 @@ class TestGetVenvPython:
         with patch.object(Path, "exists", return_value=False):
             assert get_venv_python() is None
 
+    @unix_only
     @pytest.mark.unit
     def test_returns_python_path_on_unix(self):
         def mock_exists(self_path):
@@ -162,6 +167,7 @@ class TestGetVenvSitePackages:
         with patch.object(Path, "exists", return_value=False):
             assert get_venv_site_packages() is None
 
+    @unix_only
     @pytest.mark.unit
     def test_finds_site_packages_on_unix(self, tmp_path):
         """Test finding site-packages in a real directory structure."""

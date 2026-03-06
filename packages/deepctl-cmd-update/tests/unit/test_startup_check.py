@@ -48,8 +48,14 @@ class TestCIDetection:
 class TestOneshotDetection:
     """Test one-shot execution detection."""
 
-    @patch.dict("os.environ", {}, clear=True)
+    @patch.dict(
+        "os.environ",
+        {"UV_INTERNAL__PARENT_INTERPRETER": ""},
+        clear=False,
+    )
     def test_not_oneshot(self):
+        import os
+        os.environ.pop("UV_INTERNAL__PARENT_INTERPRETER", None)
         assert _is_oneshot() is False
 
     @patch.dict(
