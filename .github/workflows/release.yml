@@ -1,18 +1,35 @@
-name: Release to PyPI
+name: Release
 
-# Triggered by release-please creating a v* tag
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
 
 jobs:
-  build:
-    name: Build all packages
+  release-please:
+    name: Release Please
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ github.token }}
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+
+  build:
+    name: Build packages
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -22,19 +39,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install build dependencies
-        run: pip install build
+        run: pip install build twine
 
       - name: Build all packages
-        run: |
-          for pkg in . packages/*; do
-            if [ -f "$pkg/pyproject.toml" ]; then
-              echo "📦 Building $pkg..."
-              python -m build "$pkg" --outdir dist/
-            fi
-          done
+        run: make build
 
-      - name: List built artifacts
-        run: ls -lh dist/
+      - name: Verify built packages
+        run: make verify-packages
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -46,8 +57,6 @@ jobs:
     name: Test installation
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -64,9 +73,7 @@ jobs:
 
       - name: Test installation
         run: |
-          # Get absolute path to dist directory
           DIST_DIR=$(pwd)/dist
-          # Install deepctl with local packages available for dependency resolution
           pip install --find-links "$DIST_DIR" dist/deepctl-*.whl
           deepctl --version
 
@@ -75,10 +82,6 @@ jobs:
     needs: [build, test]
     runs-on: ubuntu-latest
     environment: pypi
-    permissions:
-      contents: read
-      id-token: write # Required for PyPI trusted publishing
-
     steps:
       - name: Set up Python
         uses: actions/setup-python@v4
