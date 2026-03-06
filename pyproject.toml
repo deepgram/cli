@@ -119,8 +119,8 @@ files = "src/,packages/*/src"
 
 [[tool.mypy.overrides]]
 module = "deepctl_cmd_mcp.*"
-# FastMCP type stubs are incomplete for transport-specific parameters
-disable_error_code = ["call-arg"]
+# MCP SDK type stubs are incomplete (decorators, transport parameters)
+disable_error_code = ["call-arg", "no-untyped-call", "no-untyped-def", "untyped-decorator", "misc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests"]

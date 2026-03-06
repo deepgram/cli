@@ -134,6 +134,19 @@ quality: format-check lint-check typecheck ## Run all quality checks
 # RELEASE MANAGEMENT
 # ===================================================================
 
+build: clean ## Build all packages into dist/
+	@pip install build
+	@for pkg in . packages/*; do \
+		if [ -f "$$pkg/pyproject.toml" ]; then \
+			echo "  Building $$pkg..."; \
+			python -m build "$$pkg" --outdir dist/; \
+		fi; \
+	done
+
+verify-packages: ## Verify built packages with twine
+	@pip install twine
+	twine check dist/*
+
 readmes: ## Generate sub-package READMEs from pyproject.toml metadata
 	python3 scripts/generate_readmes.py
 

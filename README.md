@@ -11,7 +11,7 @@ Official Deepgram CLI. Modular Python package with plugin system.
 
 ```bash
 git clone https://github.com/deepgram/cli && cd cli
-uv venv && uv pip install -e ".[dev]"
+uv sync
 ```
 
 ### Run CLI
@@ -26,8 +26,8 @@ uv run deepctl transcribe audio.wav
 
 ```bash
 make dev                   # Format, lint, test
+make check                 # Format, lint, typecheck (no tests)
 make test                  # Run tests
-uv run tox                 # Test all Python versions
 ```
 
 ### Requirements
@@ -98,7 +98,7 @@ See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
 
 ## Release
 
-Merging conventional commits to `main` triggers [release-please](https://github.com/googleapis/release-please) to open a release PR. Merging that PR creates a `v*` tag, which triggers the PyPI publish workflow. All 16 packages are version-locked.
+Merging conventional commits to `main` triggers [release-please](https://github.com/googleapis/release-please) to open a release PR. Merging that PR creates a `v*` tag, which triggers the PyPI publish workflow. All packages are version-locked.
 
 ## Installation
 
@@ -176,7 +176,7 @@ Plugins installed into the isolated venv are automatically discovered and loaded
 
 ### Configuration
 
-Priority: CLI args > env vars > `~/.deepgram/config.yaml` > `./deepgram.yaml`
+Priority: CLI args > env vars > user config (`~/.config/deepctl/config.yaml` on Linux, `~/Library/Application Support/deepctl/config.yaml` on macOS) > `./deepgram.yaml`
 
 ### Output Formats
 

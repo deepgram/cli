@@ -1,40 +1,50 @@
-"""MCP server command for Deepgram AI agent tools."""
+"""MCP proxy command for Deepgram — bridges remote MCP tools to local editors."""
 
+from __future__ import annotations
+
+import asyncio
 import os
 import signal
-from typing import Any, Dict, List, Optional
+import sys
+from typing import TYPE_CHECKING, Any
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
-from mcp.server.fastmcp import Context, FastMCP
 from rich.console import Console
 
-from .gnosis import GnosisClient
 from .models import MCPServerResult, TransportType
+
+if TYPE_CHECKING:
+    pass
 
 console = Console()
 
+DEFAULT_BASE_URL = "http://localhost:8080"
+
 
 class McpCommand(BaseCommand):
-    """MCP server command for interacting with Deepgram's AI assistant."""
+    """MCP proxy that connects to Deepgram's developer tools."""
 
     name = "mcp"
-    help = "Run an MCP server that connects to Deepgram's AI assistant service"
-    short_help = "Run MCP server for Deepgram AI"
+    help = (
+        "Run an MCP proxy that connects to Deepgram's developer API and "
+        "exposes remote tools locally for AI editors"
+    )
+    short_help = "Run MCP proxy for Deepgram AI"
 
-    # MCP doesn't require existing auth to start, but can use it
     requires_auth = False
     requires_project = False
     ci_friendly = True
 
     examples = [
         "dg mcp",
-        "dg mcp --transport sse --port 8080",
-        "dg mcp --transport streamable-http --host 0.0.0.0",
+        "dg mcp --transport sse --port 8000",
+        "dg mcp --base-url http://localhost:8080",
     ]
     agent_help = (
-        "Run an MCP (Model Context Protocol) server that exposes Deepgram's "
-        "AI assistant capabilities as tools. Configure in your AI editor's "
-        "MCP settings. Supports stdio, SSE, and streamable-http transports."
+        "Run an MCP (Model Context Protocol) proxy that connects to Deepgram's "
+        "developer API and exposes remote AI assistant tools locally. Configure "
+        "in your AI editor's MCP settings. Supports stdio, SSE, and "
+        "streamable-http transports."
     )
 
     def __init__(self) -> None:
@@ -43,12 +53,14 @@ class McpCommand(BaseCommand):
         self._shutdown_requested = False
         self._original_sigint_handler: Any = None
 
-    def get_arguments(self) -> List[Dict[str, Any]]:
+    def get_arguments(self) -> list[dict[str, Any]]:
         """Get command arguments and options."""
         return [
             {
                 "names": ["--transport", "-t"],
-                "help": ("Transport mode: stdio (default), sse, or streamable-http"),
+                "help": (
+                    "Transport mode: stdio (default), sse, or streamable-http"
+                ),
                 "type": str,
                 "default": "stdio",
                 "required": False,
@@ -73,7 +85,7 @@ class McpCommand(BaseCommand):
             {
                 "names": ["--api-key"],
                 "help": (
-                    "Override API key for Deepgram AI service (falls back to "
+                    "Override API key for Deepgram (falls back to "
                     "profile or DEEPGRAM_API_KEY env var)"
                 ),
                 "type": str,
@@ -81,10 +93,10 @@ class McpCommand(BaseCommand):
                 "is_option": True,
             },
             {
-                "names": ["--gnosis-url"],
-                "help": "Base URL for Deepgram AI service",
+                "names": ["--base-url"],
+                "help": "Base URL for Deepgram developer API",
                 "type": str,
-                "default": "https://gnosis.deepgram.com",
+                "default": DEFAULT_BASE_URL,
                 "required": False,
                 "is_option": True,
             },
@@ -100,8 +112,7 @@ class McpCommand(BaseCommand):
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
             self._shutdown_requested = True
-            console.print("\n[yellow]MCP server stopped by user[/yellow]")
-            # Exit immediately - don't wait for anything
+            console.print("\n[yellow]MCP proxy stopped by user[/yellow]")
             os._exit(0)
 
     def handle(
@@ -111,18 +122,16 @@ class McpCommand(BaseCommand):
         client: DeepgramClient,
         **kwargs: Any,
     ) -> Any:
-        """Handle MCP server command."""
+        """Handle MCP proxy command."""
         transport = kwargs.get("transport", "stdio").lower()
         port = kwargs.get("port", 8000)
         host = kwargs.get("host", "127.0.0.1")
-        gnosis_api_key = kwargs.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
-        # Fallback to stored credentials if no key provided
-        if not gnosis_api_key:
-            gnosis_api_key = auth_manager.get_api_key()
-        gnosis_url = kwargs.get("gnosis_url", "https://gnosis.deepgram.com")
+        api_key = kwargs.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
+        if not api_key:
+            api_key = auth_manager.get_api_key()
+        base_url = kwargs.get("base_url", DEFAULT_BASE_URL)
         debug = kwargs.get("debug", False)
 
-        # Validate transport type
         valid_transports = ["stdio", "sse", "streamable-http"]
         if transport not in valid_transports:
             console.print(
@@ -133,61 +142,57 @@ class McpCommand(BaseCommand):
                 status="error", message=f"Invalid transport type: {transport}"
             )
 
-        # Store configuration in environment for the MCP server
-        if isinstance(gnosis_api_key, str) and gnosis_api_key:
-            os.environ["DEEPGRAM_API_KEY"] = gnosis_api_key
-        os.environ["DEEPGRAM_GNOSIS_URL"] = gnosis_url
-        if debug:
-            os.environ["DEEPGRAM_MCP_DEBUG"] = "1"
-
-        # Create and run the MCP server
-        mcp_server = create_mcp_server()
+        if not api_key:
+            console.print(
+                "[red]No API key found.[/red] "
+                "Set DEEPGRAM_API_KEY, use --api-key, or run dg login."
+            )
+            return MCPServerResult(
+                status="error", message="No API key configured"
+            )
 
         # Set up signal handling for graceful shutdown
         self._original_sigint_handler = signal.signal(
             signal.SIGINT, self._handle_shutdown
         )
-        # Also handle SIGTERM
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
         try:
-            if transport == "stdio":
-                console.print("[blue]Starting MCP server in stdio mode...[/blue]")
-                mcp_server.run()
-            elif transport == "sse":
+            if transport != "stdio":
                 console.print(
-                    f"[blue]Starting MCP SSE server on {host}:{port}...[/blue]"
-                )
-                # SSE transport requires host and port parameters per FastMCP documentation
-                mcp_server.run(transport="sse", host=host, port=port)
-            elif transport == "streamable-http":
-                console.print(
-                    f"[blue]Starting MCP Streamable HTTP server on "
+                    f"[blue]Starting MCP proxy ({transport}) on "
                     f"{host}:{port}...[/blue]"
                 )
-                # HTTP transport requires host and port parameters per FastMCP documentation
-                mcp_server.run(transport="streamable-http", host=host, port=port)
 
-            # Normal exit
+            asyncio.run(
+                run_proxy(
+                    transport=transport,
+                    host=host,
+                    port=port,
+                    api_key=api_key,
+                    base_url=base_url,
+                    debug=debug,
+                )
+            )
+
             return MCPServerResult(
                 status="success",
-                message="MCP server stopped",
+                message="MCP proxy stopped",
                 transport=TransportType(transport.replace("-", "")),
                 port=port if transport != "stdio" else None,
                 host=host if transport != "stdio" else None,
             )
 
         except KeyboardInterrupt:
-            # This should not happen since we handle SIGINT, but just in case
             return MCPServerResult(
                 status="cancelled",
-                message="MCP server stopped by user",
+                message="MCP proxy stopped by user",
                 transport=TransportType(transport.replace("-", "")),
                 port=port if transport != "stdio" else None,
                 host=host if transport != "stdio" else None,
             )
         except Exception as e:
-            console.print(f"[red]Error running MCP server:[/red] {e}")
+            console.print(f"[red]Error running MCP proxy:[/red] {e}")
             return MCPServerResult(
                 status="error",
                 message=str(e),
@@ -196,222 +201,124 @@ class McpCommand(BaseCommand):
                 host=host if transport != "stdio" else None,
             )
         finally:
-            # Restore original signal handler
             if self._original_sigint_handler:
                 signal.signal(signal.SIGINT, self._original_sigint_handler)
 
 
-def create_mcp_server() -> FastMCP:
-    """Create the MCP server with Deepgram AI assistant tools."""
-    # Create FastMCP instance
-    mcp = FastMCP("Deepgram AI Assistant")
+async def run_proxy(
+    *,
+    transport: str,
+    host: str,
+    port: int,
+    api_key: str,
+    base_url: str,
+    debug: bool,
+) -> None:
+    """Connect to remote Deepgram MCP server and expose tools locally."""
+    import mcp.server.stdio
+    import mcp.types as types
+    from mcp.client.session import ClientSession
+    from mcp.client.sse import sse_client
+    from mcp.server.lowlevel import NotificationOptions, Server
+    from mcp.server.models import InitializationOptions
 
-    # Get configuration from environment
-    gnosis_api_key = os.getenv("DEEPGRAM_API_KEY")
-    gnosis_url = os.getenv("DEEPGRAM_GNOSIS_URL", "https://gnosis.deepgram.com")
-    debug = os.getenv("DEEPGRAM_MCP_DEBUG", "").lower() in ("1", "true", "yes")
+    sse_url = f"{base_url.rstrip('/')}/kapa/mcp/sse"
+    headers = {"Authorization": f"Token {api_key}"}
 
-    # Debug logging to diagnose URL issue
     if debug:
-        import sys
+        print(f"[DEBUG] Connecting to {sse_url}", file=sys.stderr)
 
-        print(
-            f"[DEBUG] DEEPGRAM_GNOSIS_URL from env: {gnosis_url}",
-            file=sys.stderr,
-        )
+    async with sse_client(url=sse_url, headers=headers) as streams:
+        read_stream, write_stream = streams[0], streams[1]
 
-    # Create a shared Gnosis client instance
-    try:
-        gnosis_client = GnosisClient(
-            api_key=gnosis_api_key,
-            base_url=gnosis_url,
-            debug=debug,
-        )
-    except ValueError:
-        # Client will be None if no API key is available
-        gnosis_client = None
+        async with ClientSession(read_stream, write_stream) as remote:
+            await remote.initialize()
 
-    @mcp.tool()
-    async def ask_question(question: str, ctx: Context[Any, Any, Any]) -> str:
-        """Ask questions about Deepgram products and services.
+            # Discover remote tools
+            tools_result = await remote.list_tools()
+            remote_tools: list[types.Tool] = tools_result.tools
 
-        This is the **catch-all** helper for natural-language queries about
-        anything related to Deepgram. Use it for general product or feature
-        questions, onboarding advice ("How do I get started with live
-        transcription?"), pricing, SDK capabilities, best practices, model
-        details, or any other information request that does **not** obviously
-        belong to one of the specialised tools below.
+            if debug:
+                names = [t.name for t in remote_tools]
+                print(f"[DEBUG] Remote tools: {names}", file=sys.stderr)
 
-        Example questions that should route to this tool:
-        • "What is the difference between pre-recorded and live transcription?"
-        • "Does Deepgram offer speaker diarization?"
-        • "How accurate is Nova-2 on telephone audio?"
+            # Create local server that proxies everything to the remote
+            local = Server("Deepgram MCP")
 
-        Args:
-            question: The question to ask about Deepgram (products, services,
-                SDKs, APIs, pricing, etc.)
-            ctx: MCP context used by FastMCP
-        """
-        if not gnosis_client:
-            return (
-                "Error: Deepgram API key not configured. Please set "
-                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
-                "credential."
-            )
+            @local.list_tools()
+            async def handle_list_tools() -> list[types.Tool]:
+                return remote_tools
 
-        if debug:
-            await ctx.info(f"Asking question: {question}")
+            @local.call_tool()
+            async def handle_call_tool(
+                name: str, arguments: dict[str, Any] | None
+            ) -> list[
+                types.TextContent | types.ImageContent | types.EmbeddedResource
+            ]:
+                result = await remote.call_tool(name, arguments or {})
+                return result.content  # type: ignore[return-value]
 
-        try:
-            return await gnosis_client.ask_question(
-                question,
-                system_prompt=(
-                    "You are a helpful assistant that answers questions about "
-                    "Deepgram products and services."
+            init_options = InitializationOptions(
+                server_name="deepgram-mcp",
+                server_version="0.1.10",
+                capabilities=local.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
                 ),
             )
-        except Exception as e:
-            return f"Error: {str(e)}"
 
-    @mcp.tool()
-    async def check_api_spec(
-        api_type: str = "rest",
-        endpoint: str = "",
-        ctx: Optional[Context[Any, Any, Any]] = None,
-    ) -> str:
-        """Retrieve Deepgram **API reference** details.
+            if transport == "stdio":
+                async with mcp.server.stdio.stdio_server() as (srv_r, srv_w):
+                    await local.run(srv_r, srv_w, init_options)
+            elif transport == "sse":
+                await _run_sse_server(local, init_options, host, port)
+            elif transport == "streamable-http":
+                await _run_streamable_http_server(local, init_options, host, port)
 
-        Use this tool when the user explicitly asks for endpoint specifics,
-        HTTP verbs, WebSocket event schemas, request/response bodies,
-        authentication headers, rate limits, or error codes—anything that
-        belongs to the formal API specification.
 
-        Example queries that should trigger this tool:
-        • "Show me the REST API spec for /v1/listen"
-        • "What fields does the WebSocket start message accept?"
-        • "Which status codes can the Transcription API return?"
+async def _run_sse_server(
+    server: Any,
+    init_options: Any,
+    host: str,
+    port: int,
+) -> None:
+    """Run local MCP server with SSE transport."""
+    import uvicorn
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.routing import Route
 
-        Args:
-            api_type: Either 'rest' or 'websocket'. Defaults to 'rest'.
-            endpoint: Optional specific endpoint path (e.g., "/v1/listen").
-                Leave blank for an overview.
-            ctx: MCP context
-        """
-        if not gnosis_client:
-            return (
-                "Error: Deepgram API key not configured. Please set "
-                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
-                "credential."
-            )
+    sse = SseServerTransport("/messages")
 
-        if ctx and debug:
-            await ctx.info(f"Checking API spec: {api_type} {endpoint}")
+    async def handle_sse(request: Any) -> None:
+        async with sse.connect_sse(
+            request.scope, request.receive, request.send
+        ) as (read, write):
+            await server.run(read, write, init_options)
 
-        prompt = f"Provide the API specification for Deepgram's {api_type.upper()} "
-        if endpoint:
-            prompt += f"endpoint: {endpoint}"
-        else:
-            prompt += "endpoints"
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Route(
+                "/messages",
+                endpoint=sse.handle_post_message,
+                methods=["POST"],
+            ),
+        ]
+    )
 
-        try:
-            return await gnosis_client.ask_question(
-                prompt,
-                system_prompt=(
-                    "You are a technical assistant that provides detailed API "
-                    "specifications for Deepgram."
-                ),
-            )
-        except Exception as e:
-            return f"Error: {str(e)}"
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    srv = uvicorn.Server(config)
+    await srv.serve()
 
-    @mcp.tool()
-    async def get_code_example(
-        language: str,
-        use_case: str,
-        ctx: Optional[Context[Any, Any, Any]] = None,
-    ) -> str:
-        """Return **ready-to-run code samples** that integrate Deepgram.
 
-        Use this when the user asks for sample code or snippets in a particular
-        language or SDK, e.g. "Give me a Python example for real-time
-        transcription" or "Show a JavaScript snippet for batch processing".
-
-        Args:
-            language: Target programming language (python, javascript,
-                typescript, go, java, csharp, etc.)
-            use_case: The scenario for the snippet (e.g., "real-time
-                transcription", "batch processing").
-            ctx: MCP context
-        """
-        if not gnosis_client:
-            return (
-                "Error: Deepgram API key not configured. Please set "
-                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
-                "credential."
-            )
-
-        if ctx and debug:
-            await ctx.info(f"Getting code example: {language} for {use_case}")
-
-        prompt = f"Provide a {language} code example for: {use_case}"
-
-        try:
-            return await gnosis_client.ask_question(
-                prompt,
-                system_prompt=(
-                    f"You are a code assistant that provides {language} "
-                    f"code examples for Deepgram."
-                ),
-            )
-        except Exception as e:
-            return f"Error: {str(e)}"
-
-    @mcp.tool()
-    async def search_docs(
-        query: str,
-        category: str = "all",
-        ctx: Optional[Context[Any, Any, Any]] = None,
-    ) -> str:
-        """Keyword search across official Deepgram documentation.
-
-        Ideal for requests that mention "documentation", "docs", "guide",
-        or when the user wants a how-to or tutorial section. The search can
-        be narrowed to specific categories like guides, SDK references, or
-        API reference.
-
-        Example queries:
-        • "Find the docs page about audio formats"
-        • "Search the guides for diarization"
-
-        Args:
-            query: Search terms to look for.
-            category: One of 'guides', 'api-reference', 'sdks', or 'all'.
-                Defaults to 'all'.
-            ctx: MCP context
-        """
-        if not gnosis_client:
-            return (
-                "Error: Deepgram API key not configured. Please set "
-                "DEEPGRAM_API_KEY, use the --api-key flag, or store a "
-                "credential."
-            )
-
-        if ctx and debug:
-            await ctx.info(f"Searching docs: {query} in {category}")
-
-        search_prompt = f"Search Deepgram documentation for: {query}"
-        if category != "all":
-            search_prompt += f" (category: {category})"
-
-        try:
-            return await gnosis_client.ask_question(
-                search_prompt,
-                system_prompt=(
-                    "You are a documentation assistant that helps find "
-                    "relevant information in Deepgram's docs."
-                ),
-            )
-        except Exception as e:
-            return f"Error: {str(e)}"
-
-    return mcp
+async def _run_streamable_http_server(
+    server: Any,
+    init_options: Any,
+    host: str,
+    port: int,
+) -> None:
+    """Run local MCP server with streamable HTTP transport."""
+    # Streamable HTTP uses the same Starlette pattern but with a different
+    # transport. For now, fall back to SSE which is widely supported.
+    await _run_sse_server(server, init_options, host, port)

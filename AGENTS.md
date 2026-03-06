@@ -385,7 +385,7 @@ from deepctl_core import (
 
 ### Config System
 
-- **User config**: `~/.config/deepctl/deepgram/config.yaml` (macOS: `~/Library/Application Support/...`)
+- **User config**: `~/.config/deepctl/config.yaml` (Linux) / `~/Library/Application Support/deepctl/config.yaml` (macOS)
 - **Project config**: `./deepgram.yaml` in current directory
 - **Environment variables**: `DEEPGRAM_API_KEY`, `DEEPGRAM_PROJECT_ID`, `DEEPGRAM_BASE_URL`, `DEEPGRAM_OUTPUT_FORMAT`, `DEEPGRAM_PROFILE`
 - **Profile precedence**: explicit `--profile` flag > `active_profile` (from `dg profiles switch`) > `default_profile`
@@ -465,7 +465,7 @@ Click converts `--my-option` to `my_option` in kwargs. Arguments are processed i
 | `make readmes-check` | Check READMEs are up to date (CI) |
 | `make clean` | Remove build artifacts and caches |
 
-**Aliases**: `make t` (test), `make f` (format), `make l` (lint-fix), `make q` (check)
+**Aliases**: `make t` (test), `make tl` (lint), `make f` (format), `make l` (lint-fix), `make q` (check)
 
 ### README Generation
 
@@ -612,7 +612,9 @@ All packages share a single version via release-please linked versions. Current:
 | `dg api` | `deepctl-cmd-api` | Yes | Raw API requests (`dg api GET /v1/projects`) |
 | `dg init` | `deepctl-cmd-init` | No | Scaffold starter apps from templates gallery |
 | `dg mcp` | `deepctl-cmd-mcp` | No | Run MCP server for AI assistants |
-| `dg debug` | `deepctl-cmd-debug` | No | Debug group (audio, browser, network, stream) |
+| `dg debug` | `deepctl-cmd-debug` | No | Debug group (audio, browser, network, probe, stream) |
+| `dg debug probe` | `deepctl-cmd-debug-probe` | No | Live ffprobe analysis during streaming |
+| `dg ffprobe` | `deepctl-cmd-ffprobe` | No | FFprobe configuration |
 | `dg update` | `deepctl-cmd-update` | No | Check for and install updates |
 | `dg plugin` | `deepctl-cmd-plugin` | No | Manage external plugins |
 | `dg skills` | `deepctl-cmd-skills` | No | AI coding assistant integrations |

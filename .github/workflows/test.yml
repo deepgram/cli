@@ -31,7 +31,7 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-debug-probe/tests packages/deepctl-cmd-ffprobe/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-cmd-init/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v
+          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-cmd-api/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-debug-stream/tests packages/deepctl-cmd-debug-probe/tests packages/deepctl-cmd-ffprobe/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-cmd-skills/tests packages/deepctl-cmd-init/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v
 
       - name: Test CLI installation
         run: |
