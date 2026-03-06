@@ -196,18 +196,18 @@ class TestOneshotDetection:
     @unix_only
     @patch("deepctl_cmd_update.installation.sys")
     @patch.dict("os.environ", {}, clear=False)
-    def test_pipx_run_detected(self, mock_sys):
+    def test_pipx_run_detected(self, mock_sys, tmp_path):
         """pipx run is detected via cache path."""
-        home = str(Path.home())
-        mock_sys.executable = f"{home}/.local/pipx/.cache/some/bin/python3"
-        detector = InstallationDetector()
-        with patch.object(
-            Path,
-            "resolve",
-            return_value=Path(
-                f"{home}/.local/pipx/.cache/some/bin/python3"
-            ),
+        # Create a real file so Path.resolve() works
+        fake_exe = tmp_path / ".local" / "pipx" / ".cache" / "some" / "bin" / "python3"
+        fake_exe.parent.mkdir(parents=True)
+        fake_exe.touch()
+        mock_sys.executable = str(fake_exe)
+        with patch.dict(
+            "os.environ", {"PIPX_HOME": str(tmp_path / ".local" / "pipx")},
+            clear=False,
         ):
+            detector = InstallationDetector()
             result = detector._detect_oneshot_execution()
             assert result == InstallMethod.PIPX_RUN
 
