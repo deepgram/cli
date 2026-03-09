@@ -481,36 +481,24 @@ class AuthManager:
                 f"{device_response.verification_uri}?{urlencode(query_params)}"
             )
 
-            # Display prompt message like Go implementation
+            # Open browser immediately and start polling
             console.print(
-                "\n[bold]Hello from Deepgram![/bold] Press Enter to open "
-                "browser and login automatically."
-            )
-            console.print(
-                f"[dim]Here is your login link in case browser did not "
-                f"open:[/dim] [dim]{verification_uri}[/dim]\n"
+                "\n[bold]Hello from Deepgram![/bold] Opening browser to "
+                "complete login..."
             )
 
-            # Wait for Enter key (skip if stdin is not a TTY)
-            try:
-                if hasattr(console, "is_terminal") and not console.is_terminal:
-                    console.print(
-                        "[dim]Non-interactive terminal — opening browser automatically[/dim]"
-                    )
-                else:
-                    console.input()
-            except EOFError:
-                console.print("[dim]Opening browser automatically...[/dim]")
-
-            # Open browser
             try:
                 webbrowser.open(verification_uri)
                 console.print("[green]✓[/green] Opened browser for authentication")
             except Exception as e:
                 console.print(f"[yellow]Warning:[/yellow] Could not open browser: {e}")
-                console.print("Please manually navigate to the verification URL above")
 
-            # Poll for token
+            console.print(
+                f"[dim]If the browser didn't open, visit:[/dim] "
+                f"[dim]{verification_uri}[/dim]\n"
+            )
+
+            # Poll for token (starts immediately — user may have clicked the link)
             token_response = self._poll_for_token(device_response, hostname)
 
             # Store token and get user info
