@@ -103,8 +103,39 @@ Merging conventional commits to `main` triggers [release-please](https://github.
 
 ### Quick Install
 
+**macOS / Linux:**
+
 ```bash
 curl -fsSL https://deepgram.com/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr https://deepgram.com/install.ps1 -useb | iex
+```
+
+### Install Options
+
+```bash
+# Install a specific version
+curl -fsSL https://deepgram.com/install.sh | sh -s -- v0.2.1
+
+# Force reinstall over existing installation
+curl -fsSL https://deepgram.com/install.sh | sh -s -- --force
+
+# Both
+curl -fsSL https://deepgram.com/install.sh | sh -s -- --force v0.2.1
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Install a specific version
+$env:DEEPCTL_VERSION='0.2.1'; iwr https://deepgram.com/install.ps1 -useb | iex
+
+# Force reinstall
+$env:DEEPCTL_FORCE='1'; iwr https://deepgram.com/install.ps1 -useb | iex
 ```
 
 ### Other Methods

@@ -1,9 +1,33 @@
 #!/bin/sh
 # Deepgram CLI installer
-# Usage: curl -fsSL https://deepgram.com/install.sh | sh
+# Usage:
+#   curl -fsSL https://deepgram.com/install.sh | sh
+#   curl -fsSL https://deepgram.com/install.sh | sh -s -- --force
+#   curl -fsSL https://deepgram.com/install.sh | sh -s -- v0.2.1
+#   curl -fsSL https://deepgram.com/install.sh | sh -s -- --force v0.2.1
+#   curl -fsSL https://deepgram.com/install.sh | DEEPCTL_VERSION=0.2.1 sh
+#   curl -fsSL https://deepgram.com/install.sh | DEEPCTL_FORCE=1 sh
 set -e
 
 PACKAGE="deepctl"
+FORCE="${DEEPCTL_FORCE:-0}"
+VERSION="${DEEPCTL_VERSION:-}"
+
+# --- Parse arguments ---
+
+for arg in "$@"; do
+    case "$arg" in
+        --force|-f)
+            FORCE=1
+            ;;
+        v*)
+            VERSION="${arg#v}"
+            ;;
+        *)
+            VERSION="$arg"
+            ;;
+    esac
+done
 
 # --- Helpers ---
 
@@ -38,11 +62,31 @@ install_uv() {
     has uv || err "Failed to install uv. Please install manually: https://docs.astral.sh/uv/"
 }
 
+# --- Build install args ---
+
+build_install_spec() {
+    if [ -n "$VERSION" ]; then
+        echo "${PACKAGE}==${VERSION}"
+    else
+        echo "${PACKAGE}"
+    fi
+}
+
 # --- Main ---
 
 say ""
 say "  Deepgram CLI Installer"
 say "  ======================"
+say ""
+
+SPEC="$(build_install_spec)"
+
+if [ -n "$VERSION" ]; then
+    say "Version: ${VERSION}"
+fi
+if [ "$FORCE" = "1" ]; then
+    say "Force: reinstall"
+fi
 say ""
 
 # Detect OS
@@ -52,26 +96,36 @@ case "$OS" in
     *) err "Unsupported operating system: $OS" ;;
 esac
 
+# Build flags
+UV_FLAGS=""
+PIPX_FLAGS=""
+PIP_FLAGS=""
+if [ "$FORCE" = "1" ]; then
+    UV_FLAGS="--force"
+    PIPX_FLAGS="--force"
+    PIP_FLAGS="--force-reinstall"
+fi
+
 # Try install methods in order of preference
 if has uv; then
-    say "Found uv, installing ${PACKAGE}..."
-    uv tool install "$PACKAGE"
+    say "Found uv, installing ${SPEC}..."
+    uv tool install $UV_FLAGS "$SPEC"
 elif has pipx; then
-    say "Found pipx, installing ${PACKAGE}..."
-    pipx install "$PACKAGE"
+    say "Found pipx, installing ${SPEC}..."
+    pipx install $PIPX_FLAGS "$SPEC"
 elif has pip3; then
-    say "Found pip3, installing ${PACKAGE}..."
-    pip3 install --user "$PACKAGE"
+    say "Found pip3, installing ${SPEC}..."
+    pip3 install --user $PIP_FLAGS "$SPEC"
 elif has pip; then
-    say "Found pip, installing ${PACKAGE}..."
-    pip install --user "$PACKAGE"
+    say "Found pip, installing ${SPEC}..."
+    pip install --user $PIP_FLAGS "$SPEC"
 else
     say "No Python package manager found. Installing uv first..."
     say ""
     install_uv
     say ""
-    say "Installing ${PACKAGE}..."
-    uv tool install "$PACKAGE"
+    say "Installing ${SPEC}..."
+    uv tool install $UV_FLAGS "$SPEC"
 fi
 
 say ""
