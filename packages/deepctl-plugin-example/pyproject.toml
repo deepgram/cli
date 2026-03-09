@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-plugin-example"
-version = "0.1.10" # x-release-please-version
+version = "0.1.11" # x-release-please-version
 description = "Example plugin for deepctl"
 readme = "README.md"
 license = "MIT"
