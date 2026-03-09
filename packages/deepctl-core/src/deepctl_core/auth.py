@@ -1,9 +1,6 @@
-"""Cross-platform authentication system for deepctl based on the Go CLI
-implementation."""
+"""Cross-platform authentication system for deepctl using dx-id OIDC provider."""
 
 import os
-import random
-import string
 import time
 import webbrowser
 from urllib.parse import urlencode
@@ -19,12 +16,13 @@ from .models import ProfileInfo, ProfilesResult
 
 console = Console()
 
-# Constants from Go implementation
-COMMUNITY_BASE_URL = os.getenv(
-    "DEEPGRAM_CLI_BASE_URL", "https://community.deepgram.com"
-)
-DEVICE_CODE_URL = f"{COMMUNITY_BASE_URL}/api/auth/device/code"
-TOKEN_POLL_URL = f"{COMMUNITY_BASE_URL}/api/auth/device/token"
+# Auth provider base URL (dx-id OIDC provider)
+AUTH_BASE_URL = os.getenv("DEEPGRAM_CLI_BASE_URL", "https://id.dx.deepgram.com")
+DEVICE_CODE_URL = f"{AUTH_BASE_URL}/device/code"
+TOKEN_POLL_URL = f"{AUTH_BASE_URL}/device/token"
+
+# Registered OIDC client ID for the CLI
+CLIENT_ID = "deepgram-cli"
 
 # Keyring service identifier using reverse domain notation
 KEYRING_SERVICE = "com.deepgram.dx.deepctl"
@@ -49,12 +47,9 @@ class TokenResponse(BaseModel):
     expires_in: int | None = None
     scope: str | None = None
 
-    # The access_token returned is the actual Deepgram API key
     @property
     def api_key(self) -> str:
         """Get the API key from the response."""
-        # The community server returns the actual API key in the
-        # access_token field
         return self.access_token
 
 
@@ -83,8 +78,8 @@ class AuthManager:
         self.config = config
         self.explicit_api_key = explicit_api_key
         self.explicit_project_id = explicit_project_id
-        # Disable SSL verification for local development
-        verify = not COMMUNITY_BASE_URL.startswith("https://community-local")
+        # Disable SSL verification for local dev (DEEPGRAM_CLI_INSECURE=1)
+        verify = not bool(os.getenv("DEEPGRAM_CLI_INSECURE"))
         self.client = httpx.Client(timeout=30.0, verify=verify)
 
     def has_env_credentials(self) -> tuple[bool, bool]:
@@ -465,19 +460,6 @@ class AuthManager:
         if project_id:
             console.print(f"[dim]Project ID:[/dim] {project_id}")
 
-    def _generate_client_id(self, length: int = 40) -> str:
-        """Generate a random client ID for device flow.
-
-        Args:
-            length: Length of the client ID
-
-        Returns:
-            Random URL-safe string
-        """
-        # URL-friendly characters matching Go implementation
-        url_friendly_chars = string.ascii_letters + string.digits + "-._~"
-        return "".join(random.choice(url_friendly_chars) for _ in range(length))
-
     def login_with_device_flow(self) -> None:
         """Login using device flow (interactive method)."""
         console.print("[blue]Starting device flow authentication...[/blue]")
@@ -486,14 +468,13 @@ class AuthManager:
             # Get hostname for device identification
             hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
 
-            # Request device code (returns device code response and client_id)
-            device_response, client_id = self._request_device_code()
+            # Request device code from dx-id auth provider
+            device_response = self._request_device_code()
 
-            # Build verification URI with query parameters like Go
-            # implementation
+            # Build verification URI with query parameters
             query_params = {
                 "device_code": device_response.device_code,
-                "client_id": client_id,
+                "client_id": CLIENT_ID,
                 "hostname": hostname,
             }
             verification_uri = (
@@ -530,7 +511,7 @@ class AuthManager:
                 console.print("Please manually navigate to the verification URL above")
 
             # Poll for token
-            token_response = self._poll_for_token(device_response, client_id, hostname)
+            token_response = self._poll_for_token(device_response, hostname)
 
             # Store token and get user info
             self._store_token(token_response)
@@ -542,23 +523,18 @@ class AuthManager:
             console.print(f"[red]Error during device flow:[/red] {e}")
             raise AuthenticationError(f"Device flow failed: {e}")
 
-    def _request_device_code(self) -> tuple[DeviceCodeResponse, str]:
-        """Request device code from community site.
+    def _request_device_code(self) -> DeviceCodeResponse:
+        """Request device code from auth provider.
 
         Returns:
-            Tuple of (DeviceCodeResponse, client_id)
+            DeviceCodeResponse with device code and verification URI
         """
-        # Get hostname info (like Go implementation)
         hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
 
-        # Generate random client ID like Go implementation
-        client_id = self._generate_client_id(40)
-
         payload = {
-            "client_id": client_id,
+            "client_id": CLIENT_ID,
             "hostname": hostname,
-            # Full scopes needed for CLI
-            "scopes": ["admin"],
+            "scopes": "admin",
         }
 
         try:
@@ -569,7 +545,7 @@ class AuthManager:
             )
 
             if response.status_code == 201:
-                return DeviceCodeResponse(**response.json()), client_id
+                return DeviceCodeResponse(**response.json())
             else:
                 raise AuthenticationError(
                     f"Device code request failed: {response.status_code}"
@@ -581,7 +557,6 @@ class AuthManager:
     def _poll_for_token(
         self,
         device_response: DeviceCodeResponse,
-        client_id: str,
         hostname: str,
     ) -> TokenResponse:
         """Poll for token using device code."""
@@ -589,10 +564,9 @@ class AuthManager:
 
         start_time = time.time()
 
-        # Build query parameters like Go implementation
         query_params = {
             "device_code": device_response.device_code,
-            "client_id": client_id,
+            "client_id": CLIENT_ID,
             "hostname": hostname,
         }
 
@@ -635,7 +609,7 @@ class AuthManager:
 
     def _store_token(self, token_response: TokenResponse) -> None:
         """Store authentication token."""
-        # The access_token from community site is already a Deepgram API key
+        # The access_token from dx-id is the Deepgram API key
         api_key = token_response.access_token
         project_id = token_response.project_id
 
