@@ -29,7 +29,6 @@ deepctl/
 │   └── ...
 ├── scripts/
 │   └── generate_readmes.py         # README auto-generation
-├── homebrew/                       # Homebrew formula generation
 └── .github/workflows/              # CI/CD
 ```
 

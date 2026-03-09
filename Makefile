@@ -27,11 +27,6 @@ help: ## Show this help message
 	@echo "  \033[36mdev\033[0m                  Format, lint, and test (full dev cycle)"
 	@echo "  \033[36mtest\033[0m                 Run tests"
 	@echo ""
-	@echo "🍺 \033[1mHomebrew:\033[0m"
-	@echo "  \033[36mbuild-homebrew\033[0m       Build both Homebrew formulas (wheel + binary)"
-	@echo "  \033[36mbuild-homebrew-wheels\033[0m Build wheel-based formula (recommended)"
-	@echo "  \033[36mbuild-homebrew-binary\033[0m Build standalone binary formula"
-	@echo ""
 	@echo "🧪 \033[1mTesting:\033[0m"
 	@echo "  \033[36mtest\033[0m                 Run tests (development)"
 	@echo "  \033[36mcheck\033[0m                Quick quality check (no tests)"
@@ -192,48 +187,6 @@ pre-commit-install: ## Install pre-commit hooks
 
 pre-commit-run: ## Run pre-commit on all files
 	uv run pre-commit run --all-files
-
-# ===================================================================
-# HOMEBREW TESTING
-# ===================================================================
-
-.PHONY: build-binary build-homebrew-wheels build-homebrew-binary build-homebrew
-.PHONY: tap-wheels tap-binary tap tap-install tap-uninstall
-
-# Main Homebrew targets (user-facing)
-build-homebrew: build-homebrew-wheels build-homebrew-binary ## Build both Homebrew formulas (wheel + binary)
-
-build-homebrew-wheels: clean ## Build wheel-based Homebrew formula (recommended)
-	@echo "📦 Building all packages..."
-	@pip install build
-	@for pkg in . packages/*; do \
-		if [ -f "$$pkg/pyproject.toml" ]; then \
-			echo "  Building $$pkg..."; \
-			python -m build "$$pkg" --outdir dist/; \
-		fi; \
-	done
-	@./homebrew/scripts/generate-wheel-tap.sh
-
-build-homebrew-binary: build-binary ## Build standalone binary Homebrew formula
-	@./homebrew/scripts/generate-tap.sh
-
-# Advanced/internal Homebrew targets
-build-binary: ## Build standalone binary for Homebrew
-	@./homebrew/scripts/build-binary.sh
-
-tap-wheels: build-homebrew-wheels ## Generate wheel formula only (no building)
-	@echo "✅ Wheel-based formula ready: homebrew/dist/deepctl.rb"
-
-tap-binary: build-homebrew-binary ## Generate binary formula only (no building)
-	@echo "✅ Binary-based formula ready: homebrew/dist/deepctl-standalone.rb"
-
-tap: tap-binary ## Generate binary formula (legacy, use build-homebrew-binary instead)
-
-tap-install: ## Test: Install deepctl via local Homebrew formula
-	@./homebrew/scripts/tap-install.sh
-
-tap-uninstall: ## Test: Uninstall deepctl from Homebrew
-	@./homebrew/scripts/tap-uninstall.sh
 
 # ===================================================================
 # ALIASES (for convenience)

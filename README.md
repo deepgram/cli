@@ -101,19 +101,25 @@ Merging conventional commits to `main` triggers [release-please](https://github.
 
 ## Installation
 
+### Quick Install
+
+```bash
+curl -fsSL https://deepgram.com/install.sh | sh
+```
+
+### Other Methods
+
+```bash
+uv tool install deepctl
+pip install deepctl
+pipx install deepctl
+```
+
 ### Try Without Installing
 
 ```bash
 uv run deepctl --help
 pipx run deepctl --help
-```
-
-### {WIP} Install
-
-```bash
-pip install deepctl
-uv tool install deepctl
-brew install deepctl
 ```
 
 ## Usage
