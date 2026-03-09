@@ -1,0 +1,9 @@
+# Changelog
+
+## [0.0.2](https://github.com/deepgram/cli/compare/deepctl-cmd-init-v0.0.1...deepctl-cmd-init-v0.0.2) (2026-03-09)
+
+
+### Features
+
+* **init:** add dg init command to scaffold Deepgram starter apps ([60c17c3](https://github.com/deepgram/cli/commit/60c17c305851cdc2b2489e0f80dc4c64bebd0a0d))
+* **mcp:** fix auth, switch to streamable-http, and improve READMEs ([8e76d60](https://github.com/deepgram/cli/commit/8e76d6096ec319b5f0c85d57b299a7f05a60b5a8))

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-debug-network"
-version = "0.1.10" # x-release-please-version
+version = "0.1.11" # x-release-please-version
 description = "Network debug subcommand for deepctl"
 readme = "README.md"
 license = "MIT"
