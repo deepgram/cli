@@ -49,7 +49,6 @@ cli/
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-network/    # Network debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-probe/      # Debug probe subcommand for deepctl — live ffprobe analysis during streaming
-│   ├── deepctl-cmd-debug-stream/     # Stream debug subcommand for deepctl
 │   ├── deepctl-cmd-ffprobe/          # FFprobe configuration command for deepctl
 │   ├── deepctl-cmd-init/             # Init command for deepctl — scaffold Deepgram starter apps
 │   ├── deepctl-cmd-login/            # Login command for deepctl
@@ -129,7 +128,6 @@ brew install deepctl
 | `deepctl debug browser` | Browser debug subcommand for deepctl |
 | `deepctl debug network` | Network debug subcommand for deepctl |
 | `deepctl debug probe` | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
-| `deepctl debug stream` | Stream debug subcommand for deepctl |
 | `deepctl debug` | Debug command group for deepctl |
 | `deepctl ffprobe` | FFprobe configuration command for deepctl |
 | `deepctl init` | Init command for deepctl — scaffold Deepgram starter apps |
@@ -220,7 +218,6 @@ See [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) for full setup instructions in
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
 | [`deepctl-cmd-debug-network`](packages/deepctl-cmd-debug-network) | Network debug subcommand for deepctl |
 | [`deepctl-cmd-debug-probe`](packages/deepctl-cmd-debug-probe) | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
-| [`deepctl-cmd-debug-stream`](packages/deepctl-cmd-debug-stream) | Stream debug subcommand for deepctl |
 | [`deepctl-cmd-ffprobe`](packages/deepctl-cmd-ffprobe) | FFprobe configuration command for deepctl |
 | [`deepctl-cmd-init`](packages/deepctl-cmd-init) | Init command for deepctl — scaffold Deepgram starter apps |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |

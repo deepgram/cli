@@ -60,10 +60,6 @@
       "component": "deepctl-cmd-debug-network",
       "include-component-in-tag": true
     },
-    "packages/deepctl-cmd-debug-stream": {
-      "component": "deepctl-cmd-debug-stream",
-      "include-component-in-tag": true
-    },
     "packages/deepctl-cmd-debug-probe": {
       "component": "deepctl-cmd-debug-probe",
       "include-component-in-tag": true
