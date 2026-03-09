@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/deepgram/cli/compare/v0.2.0...v0.2.1) (2026-03-09)
+
+
+### Features
+
+* **install:** replace Homebrew with curl-pipe-sh installer ([87bd0c6](https://github.com/deepgram/cli/commit/87bd0c675452b2e8257392b8509730b9a3de34dc))
+
 ## [0.2.0](https://github.com/deepgram/cli/compare/v0.1.10...v0.2.0) (2026-03-09)
 
 
