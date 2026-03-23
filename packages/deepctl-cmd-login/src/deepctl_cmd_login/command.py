@@ -166,11 +166,94 @@ class LoginCommand(BaseCommand):
 
         # Determine authentication method
         if api_key:
-            return self._cli_auth(
+            result = self._cli_auth(
                 config, auth_manager, str(api_key), project_id, force_write
             )
         else:
-            return self._web_auth(config, auth_manager, force_write)
+            result = self._web_auth(config, auth_manager, force_write)
+
+        # Post-login: offer skills setup if login succeeded and no skills installed
+        if result.status == "success":
+            self._maybe_prompt_skills_setup()
+
+        return result
+
+    def _maybe_prompt_skills_setup(self) -> None:
+        """After login, nudge the user to set up AI coding tool skills."""
+        import sys
+
+        if not sys.stdout.isatty():
+            return  # Non-interactive — skip
+
+        try:
+            from deepctl_core.skill_generator import (
+                detect_ai_clis,
+                get_skills_state,
+            )
+
+            state = get_skills_state()
+            if state.get("installed_skills"):
+                return  # Skills already installed
+
+            detected = detect_ai_clis()
+            if not detected:
+                return  # No AI tools found
+
+            names = ", ".join(g.display_name for g in detected)
+            console.print(f"\n[cyan]AI coding tools detected: {names}[/cyan]")
+            console.print(
+                "[dim]Deepgram skills teach AI assistants how to use our APIs, "
+                "docs, and this CLI.[/dim]"
+            )
+
+            if self.confirm(
+                "Set up Deepgram skills for your AI tools now?", default=True
+            ):
+                console.print()
+                # Run setup inline
+                from deepctl_core.skill_generator import (
+                    _commands_hash,
+                    collect_command_metadata,
+                    fetch_repo_skills,
+                    save_skills_state,
+                )
+
+                console.print("[blue]Downloading Deepgram skills...[/blue]")
+                try:
+                    fetch_repo_skills(force=True)
+                except Exception:
+                    pass
+
+                import importlib.metadata
+                from datetime import datetime, timezone
+
+                commands = collect_command_metadata()
+                try:
+                    version = importlib.metadata.version("deepctl")
+                except importlib.metadata.PackageNotFoundError:
+                    version = "0.0.0"
+
+                for gen in detected:
+                    paths = gen.install(commands, version)
+                    cmd_hash = _commands_hash(commands)
+                    state["installed_skills"][gen.cli_name] = {
+                        "paths": [str(p) for p in paths],
+                        "installed_at": datetime.now(timezone.utc).isoformat(),
+                        "version": version,
+                        "commands_hash": cmd_hash,
+                    }
+                    for p in paths:
+                        console.print(f"  [green]✓[/green] {p}")
+
+                save_skills_state(state)
+                console.print(
+                    "\n[green]Skills installed![/green] "
+                    "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+                )
+            else:
+                console.print("[dim]You can run 'dg skills setup' later.[/dim]")
+        except Exception:
+            pass  # Best-effort — never fail the login
 
     def _cli_auth(
         self,

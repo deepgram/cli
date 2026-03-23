@@ -44,6 +44,7 @@ cli/
 ├── src/deepctl/                      # Main CLI entry point
 ├── packages/
 │   ├── deepctl-cmd-api/              # API command for deepctl
+│   ├── deepctl-cmd-billing/          # Billing command for deepctl
 │   ├── deepctl-cmd-debug/            # Debug command group for deepctl
 │   ├── deepctl-cmd-debug-audio/      # Audio debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
@@ -51,11 +52,18 @@ cli/
 │   ├── deepctl-cmd-debug-probe/      # Debug probe subcommand for deepctl — live ffprobe analysis during streaming
 │   ├── deepctl-cmd-ffprobe/          # FFprobe configuration command for deepctl
 │   ├── deepctl-cmd-init/             # Init command for deepctl — scaffold Deepgram starter apps
+│   ├── deepctl-cmd-keys/             # API keys management command for deepctl
+│   ├── deepctl-cmd-listen/           # Listen (live speech-to-text) command for deepctl
 │   ├── deepctl-cmd-login/            # Login command for deepctl
 │   ├── deepctl-cmd-mcp/              # MCP proxy command for deepctl — connects to Deepgram's developer API
+│   ├── deepctl-cmd-members/          # Members management command for deepctl
+│   ├── deepctl-cmd-models/           # Models command for deepctl
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
 │   ├── deepctl-cmd-projects/         # Projects command for deepctl
+│   ├── deepctl-cmd-read/             # Read (text intelligence) command for deepctl
+│   ├── deepctl-cmd-requests/         # Requests history command for deepctl
 │   ├── deepctl-cmd-skills/           # AI coding assistant skill management for deepctl
+│   ├── deepctl-cmd-speak/            # Speak (text-to-speech) command for deepctl
 │   ├── deepctl-cmd-transcribe/       # Transcribe command for deepctl
 │   ├── deepctl-cmd-update/           # Update command for deepctl
 │   ├── deepctl-cmd-usage/            # Usage command for deepctl
@@ -161,6 +169,7 @@ pipx run deepctl --help
 | Command | Description |
 |---------|-------------|
 | `deepctl api` | API command for deepctl |
+| `deepctl billing` | Billing command for deepctl |
 | `deepctl debug audio` | Audio debug subcommand for deepctl |
 | `deepctl debug browser` | Browser debug subcommand for deepctl |
 | `deepctl debug network` | Network debug subcommand for deepctl |
@@ -168,13 +177,20 @@ pipx run deepctl --help
 | `deepctl debug` | Debug command group for deepctl |
 | `deepctl ffprobe` | FFprobe configuration command for deepctl |
 | `deepctl init` | Init command for deepctl — scaffold Deepgram starter apps |
+| `deepctl keys` | API keys management command for deepctl |
+| `deepctl listen` | Listen (live speech-to-text) command for deepctl |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
 | `deepctl mcp` | MCP proxy command for deepctl — connects to Deepgram's developer API |
+| `deepctl members` | Members management command for deepctl |
+| `deepctl models` | Models command for deepctl |
 | `deepctl plugin` | Plugin management command for deepctl |
 | `deepctl profiles` | Login command for deepctl |
 | `deepctl projects` | Projects command for deepctl |
+| `deepctl read` | Read (text intelligence) command for deepctl |
+| `deepctl requests` | Requests history command for deepctl |
 | `deepctl skills` | AI coding assistant skill management for deepctl |
+| `deepctl speak` | Speak (text-to-speech) command for deepctl |
 | `deepctl transcribe` | Transcribe command for deepctl |
 | `deepctl update` | Update command for deepctl |
 | `deepctl usage` | Usage command for deepctl |
@@ -250,6 +266,7 @@ See [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) for full setup instructions in
 | Package | Description |
 |---------|-------------|
 | [`deepctl-cmd-api`](packages/deepctl-cmd-api) | API command for deepctl |
+| [`deepctl-cmd-billing`](packages/deepctl-cmd-billing) | Billing command for deepctl |
 | [`deepctl-cmd-debug`](packages/deepctl-cmd-debug) | Debug command group for deepctl |
 | [`deepctl-cmd-debug-audio`](packages/deepctl-cmd-debug-audio) | Audio debug subcommand for deepctl |
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
@@ -257,11 +274,18 @@ See [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) for full setup instructions in
 | [`deepctl-cmd-debug-probe`](packages/deepctl-cmd-debug-probe) | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
 | [`deepctl-cmd-ffprobe`](packages/deepctl-cmd-ffprobe) | FFprobe configuration command for deepctl |
 | [`deepctl-cmd-init`](packages/deepctl-cmd-init) | Init command for deepctl — scaffold Deepgram starter apps |
+| [`deepctl-cmd-keys`](packages/deepctl-cmd-keys) | API keys management command for deepctl |
+| [`deepctl-cmd-listen`](packages/deepctl-cmd-listen) | Listen (live speech-to-text) command for deepctl |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
 | [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP proxy command for deepctl — connects to Deepgram's developer API |
+| [`deepctl-cmd-members`](packages/deepctl-cmd-members) | Members management command for deepctl |
+| [`deepctl-cmd-models`](packages/deepctl-cmd-models) | Models command for deepctl |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
 | [`deepctl-cmd-projects`](packages/deepctl-cmd-projects) | Projects command for deepctl |
+| [`deepctl-cmd-read`](packages/deepctl-cmd-read) | Read (text intelligence) command for deepctl |
+| [`deepctl-cmd-requests`](packages/deepctl-cmd-requests) | Requests history command for deepctl |
 | [`deepctl-cmd-skills`](packages/deepctl-cmd-skills) | AI coding assistant skill management for deepctl |
+| [`deepctl-cmd-speak`](packages/deepctl-cmd-speak) | Speak (text-to-speech) command for deepctl |
 | [`deepctl-cmd-transcribe`](packages/deepctl-cmd-transcribe) | Transcribe command for deepctl |
 | [`deepctl-cmd-update`](packages/deepctl-cmd-update) | Update command for deepctl |
 | [`deepctl-cmd-usage`](packages/deepctl-cmd-usage) | Usage command for deepctl |

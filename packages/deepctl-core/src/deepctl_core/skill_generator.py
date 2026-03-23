@@ -43,6 +43,9 @@ class CommandMetadata:
 
 _SKILLS_DIR = Path.home() / ".deepctl" / "skills"
 _STATE_FILE = _SKILLS_DIR / "skills.json"
+_REPO_CACHE_DIR = _SKILLS_DIR / "repo_cache"
+_SKILLS_REPO = "deepgram/skills"
+_SKILLS_BRANCH = "main"
 
 
 def get_skills_state() -> dict[str, Any]:
@@ -58,6 +61,56 @@ def save_skills_state(state: dict[str, Any]) -> None:
     """Persist the skills state file."""
     _SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     _STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def fetch_repo_skills(force: bool = False) -> dict[str, str]:
+    """Download skill markdown files from the deepgram/skills GitHub repo.
+
+    Returns a mapping of skill name -> markdown content.
+    Caches locally to avoid repeated network requests.
+    """
+    import urllib.request
+
+    cache_marker = _REPO_CACHE_DIR / ".fetched"
+    if not force and cache_marker.exists():
+        # Return cached content
+        return _read_cached_skills()
+
+    base = f"https://raw.githubusercontent.com/{_SKILLS_REPO}/{_SKILLS_BRANCH}"
+    skill_names = ["api", "docs", "starters", "mcp"]
+    skills: dict[str, str] = {}
+
+    _REPO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    for name in skill_names:
+        url = f"{base}/skills/{name}/SKILL.md"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                content = resp.read().decode("utf-8")
+            skills[name] = content
+            (  # Cache to disk
+                _REPO_CACHE_DIR / f"{name}.md"
+            ).write_text(content)
+        except Exception:
+            # Use cached version if available
+            cached = _REPO_CACHE_DIR / f"{name}.md"
+            if cached.exists():
+                skills[name] = cached.read_text()
+
+    if skills:
+        cache_marker.write_text("1")
+
+    return skills
+
+
+def _read_cached_skills() -> dict[str, str]:
+    """Read previously cached repo skills."""
+    skills: dict[str, str] = {}
+    if not _REPO_CACHE_DIR.exists():
+        return skills
+    for md_file in _REPO_CACHE_DIR.glob("*.md"):
+        skills[md_file.stem] = md_file.read_text()
+    return skills
 
 
 def _commands_hash(commands: list[CommandMetadata]) -> str:

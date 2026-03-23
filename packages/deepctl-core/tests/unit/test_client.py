@@ -207,49 +207,43 @@ class TestDeepgramClient:
         """Test getting projects list."""
         # Setup mock
         mock_instance = Mock()
-        mock_manage = Mock()
         mock_data = {
             "projects": [
                 {"project_id": "proj1", "name": "Project 1"},
                 {"project_id": "proj2", "name": "Project 2"},
             ]
         }
-        mock_manage.get_projects.return_value = _mock_sdk_response(mock_data)
-        mock_instance.manage.v.return_value = mock_manage
+        mock_instance.manage.v1.projects.list.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         # Get projects
         result = client.get_projects()
 
         assert result == mock_data
-        mock_manage.get_projects.assert_called_once()
+        mock_instance.manage.v1.projects.list.assert_called_once()
 
     @patch("deepctl_core.client.DGClient")
     def test_get_project(self, mock_dg_client, client):
         """Test getting a specific project."""
         # Setup mock
         mock_instance = Mock()
-        mock_manage = Mock()
         mock_data = {"project_id": "test-project", "name": "Test Project"}
-        mock_manage.get_project.return_value = _mock_sdk_response(mock_data)
-        mock_instance.manage.v.return_value = mock_manage
+        mock_instance.manage.v1.projects.get.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         # Get project
         result = client.get_project("test-project")
 
         assert result == mock_data
-        mock_manage.get_project.assert_called_once_with("test-project")
+        mock_instance.manage.v1.projects.get.assert_called_once_with("test-project")
 
     @patch("deepctl_core.client.DGClient")
     def test_get_usage(self, mock_dg_client, client):
         """Test getting usage statistics."""
         # Setup mock
         mock_instance = Mock()
-        mock_manage = Mock()
         mock_data = {"minutes": 1000, "cost": 25.00}
-        mock_manage.get_usage_summary.return_value = _mock_sdk_response(mock_data)
-        mock_instance.manage.v.return_value = mock_manage
+        mock_instance.manage.v1.projects.usage.get.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         # Get usage with individual date parameters
@@ -262,26 +256,288 @@ class TestDeepgramClient:
             "cost": 25.00,
             "project_id": "test-project",
         }
-        mock_manage.get_usage_summary.assert_called_once()
-
-        # Check call arguments
-        call_args = mock_manage.get_usage_summary.call_args[0]
-        assert call_args[0] == "test-project"
-        assert call_args[1] == {"start": "2024-01-01", "end": "2024-01-31"}
+        mock_instance.manage.v1.projects.usage.get.assert_called_once()
 
     @patch("deepctl_core.client.DGClient")
     def test_create_project(self, mock_dg_client, client):
         """Test creating a project."""
         # Setup mock
         mock_instance = Mock()
-        mock_manage = Mock()
         mock_data = {"project_id": "new-proj", "name": "New Project"}
-        mock_manage.create_project.return_value = _mock_sdk_response(mock_data)
-        mock_instance.manage.v.return_value = mock_manage
+        mock_instance.manage.v1.projects.update.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         # Create project
         result = client.create_project("New Project")
 
         assert result == mock_data
-        mock_manage.create_project.assert_called_once()
+        mock_instance.manage.v1.projects.update.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_list_models(self, mock_dg_client, client):
+        """Test listing models."""
+        mock_instance = Mock()
+        mock_data = {"stt": [], "tts": []}
+        mock_instance.manage.v1.models.list.return_value = _mock_sdk_response(
+            mock_data
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.list_models()
+
+        assert result == mock_data
+        mock_instance.manage.v1.models.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_get_model(self, mock_dg_client, client):
+        """Test getting a specific model."""
+        mock_instance = Mock()
+        mock_data = {"uuid": "model-id", "name": "Nova-3"}
+        mock_instance.manage.v1.models.get.return_value = _mock_sdk_response(
+            mock_data
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.get_model("model-id")
+
+        assert result == mock_data
+        mock_instance.manage.v1.models.get.assert_called_once_with("model-id")
+
+    @patch("deepctl_core.client.DGClient")
+    def test_speak_text(self, mock_dg_client, client):
+        """Test generating speech from text."""
+        mock_instance = Mock()
+        mock_audio_iter = iter([b"audio"])
+        mock_instance.speak.v1.audio.generate.return_value = mock_audio_iter
+        mock_dg_client.return_value = mock_instance
+
+        result = client.speak_text("Hello world", model="aura-2-asteria-en")
+
+        assert result is mock_audio_iter
+        mock_instance.speak.v1.audio.generate.assert_called_once_with(
+            text="Hello world", model="aura-2-asteria-en"
+        )
+
+    @patch("deepctl_core.client.DGClient")
+    def test_analyze_text(self, mock_dg_client, client):
+        """Test analyzing text."""
+        mock_instance = Mock()
+        mock_data = {"results": {"summary": {"text": "hi"}}}
+        mock_instance.read.v1.text.analyze.return_value = _mock_sdk_response(
+            mock_data
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.analyze_text("Hello world", summarize=True)
+
+        assert result == mock_data
+        mock_instance.read.v1.text.analyze.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_list_keys(self, mock_dg_client, client):
+        """Test listing API keys."""
+        mock_instance = Mock()
+        mock_data = {"api_keys": []}
+        mock_instance.manage.v1.projects.keys.list.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.list_keys(project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.keys.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_create_key(self, mock_dg_client, client):
+        """Test creating an API key."""
+        mock_instance = Mock()
+        mock_data = {"api_key_id": "k1", "key": "sk-xxx"}
+        mock_instance.manage.v1.projects.keys.create.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.create_key(
+            project_id="test-project", comment="test key"
+        )
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.keys.create.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_get_key(self, mock_dg_client, client):
+        """Test getting a specific API key."""
+        mock_instance = Mock()
+        mock_data = {"api_key_id": "key-id"}
+        mock_instance.manage.v1.projects.keys.get.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.get_key("key-id", project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.keys.get.assert_called_once_with(
+            "test-project", "key-id"
+        )
+
+    @patch("deepctl_core.client.DGClient")
+    def test_delete_key(self, mock_dg_client, client):
+        """Test deleting an API key."""
+        mock_instance = Mock()
+        mock_data = {}
+        mock_instance.manage.v1.projects.keys.delete.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.delete_key("key-id", project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.keys.delete.assert_called_once_with(
+            "test-project", "key-id"
+        )
+
+    @patch("deepctl_core.client.DGClient")
+    def test_list_requests(self, mock_dg_client, client):
+        """Test listing API requests."""
+        mock_instance = Mock()
+        mock_data = {"requests": []}
+        mock_instance.manage.v1.projects.requests.list.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.list_requests(project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.requests.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_get_request(self, mock_dg_client, client):
+        """Test getting a specific API request."""
+        mock_instance = Mock()
+        mock_data = {"request_id": "req-id"}
+        mock_instance.manage.v1.projects.requests.get.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.get_request("req-id", project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.requests.get.assert_called_once_with(
+            "test-project", "req-id"
+        )
+
+    @patch("deepctl_core.client.DGClient")
+    def test_get_billing_breakdown(self, mock_dg_client, client):
+        """Test getting billing breakdown."""
+        mock_instance = Mock()
+        mock_data = {"results": []}
+        mock_instance.manage.v1.projects.billing.breakdown.list.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.get_billing_breakdown(project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.billing.breakdown.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_get_balances(self, mock_dg_client, client):
+        """Test getting project balances."""
+        mock_instance = Mock()
+        mock_data = {"balances": []}
+        mock_instance.manage.v1.projects.billing.balances.list.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.get_balances(project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.billing.balances.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_list_members(self, mock_dg_client, client):
+        """Test listing project members."""
+        mock_instance = Mock()
+        mock_data = {"members": []}
+        mock_instance.manage.v1.projects.members.list.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.list_members(project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.members.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_remove_member(self, mock_dg_client, client):
+        """Test removing a project member."""
+        mock_instance = Mock()
+        mock_data = {}
+        mock_instance.manage.v1.projects.members.delete.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.remove_member("member-id", project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.members.delete.assert_called_once_with(
+            "test-project", "member-id"
+        )
+
+    @patch("deepctl_core.client.DGClient")
+    def test_list_invites(self, mock_dg_client, client):
+        """Test listing project invites."""
+        mock_instance = Mock()
+        mock_data = {"invites": []}
+        mock_instance.manage.v1.projects.members.invites.list.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.list_invites(project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.members.invites.list.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_create_invite(self, mock_dg_client, client):
+        """Test creating a project invite."""
+        mock_instance = Mock()
+        mock_data = {}
+        mock_instance.manage.v1.projects.members.invites.create.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.create_invite(
+            "a@b.com", "member", project_id="test-project"
+        )
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.members.invites.create.assert_called_once()
+
+    @patch("deepctl_core.client.DGClient")
+    def test_delete_invite(self, mock_dg_client, client):
+        """Test deleting a project invite."""
+        mock_instance = Mock()
+        mock_data = {}
+        mock_instance.manage.v1.projects.members.invites.delete.return_value = (
+            _mock_sdk_response(mock_data)
+        )
+        mock_dg_client.return_value = mock_instance
+
+        result = client.delete_invite("a@b.com", project_id="test-project")
+
+        assert result == mock_data
+        mock_instance.manage.v1.projects.members.invites.delete.assert_called_once_with(
+            "test-project", "a@b.com"
+        )

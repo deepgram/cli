@@ -1,6 +1,8 @@
 """Output formatting utilities for deepctl."""
 
 import json
+import os
+import sys
 from io import StringIO
 from typing import Any
 
@@ -18,16 +20,42 @@ from rich.progress import (
 from rich.syntax import Syntax
 from rich.table import Table
 
-# Global console instance
-console = Console()
-stderr_console = Console(stderr=True)
+# ── Agentic / non-TTY detection ──────────────────────────────────
+
+_AGENTIC_ENV_VARS = (
+    "CLAUDE_CODE",
+    "CODEX_CLI",
+    "GEMINI_CLI",
+    "AIDER",
+    "CONTINUE_GLOBAL_DIR",
+)
+
+
+def is_agentic() -> bool:
+    """Detect if running inside an AI coding tool or non-interactive pipe.
+
+    Returns True when stdout is not a terminal OR a known agentic
+    environment variable is set.  This lets commands produce
+    machine-friendly output automatically.
+    """
+    if not sys.stdout.isatty():
+        return True
+    return any(os.environ.get(v) for v in _AGENTIC_ENV_VARS)
+
+
+_agentic = is_agentic()
+
+# Global console instance — plain when agentic, rich when interactive
+console = Console(no_color=_agentic, highlight=not _agentic)
+stderr_console = Console(stderr=True, no_color=_agentic, highlight=not _agentic)
 
 # Global output configuration
-_output_config = {
+_output_config: dict[str, Any] = {
     "format": "default",
     "quiet": False,
     "verbose": False,
-    "color": True,
+    "color": not _agentic,
+    "agentic": _agentic,
 }
 
 
@@ -36,11 +64,14 @@ def setup_output(
 ) -> None:
     """Setup global output configuration.
 
-    Args:
-        format_type: Output format (json, yaml, table, csv)
-        quiet: Suppress non-essential output
-        verbose: Enable verbose output
+    When running in an agentic/non-TTY context and no explicit format is
+    requested (format_type == "default"), auto-switch to JSON for
+    machine-friendly output.
     """
+    # Auto-default to JSON in agentic mode when user didn't pick a format
+    if format_type == "default" and _output_config["agentic"]:
+        format_type = "json"
+
     _output_config.update({"format": format_type, "quiet": quiet, "verbose": verbose})
 
     # Update console settings
@@ -273,42 +304,38 @@ def print_output(data: Any, format_type: str | None = None) -> None:
 
 
 def print_success(message: str) -> None:
-    """Print success message.
-
-    Args:
-        message: Success message
-    """
+    """Print success message."""
     if not _output_config["quiet"]:
-        console.print(f"[green]✓[/green] {message}")
+        if _output_config["agentic"]:
+            stderr_console.print(f"OK: {message}")
+        else:
+            console.print(f"[green]✓[/green] {message}")
 
 
 def print_error(message: str) -> None:
-    """Print error message.
-
-    Args:
-        message: Error message
-    """
-    stderr_console.print(f"[red]✗[/red] {message}")
+    """Print error message."""
+    if _output_config["agentic"]:
+        stderr_console.print(f"ERROR: {message}")
+    else:
+        stderr_console.print(f"[red]✗[/red] {message}")
 
 
 def print_warning(message: str) -> None:
-    """Print warning message.
-
-    Args:
-        message: Warning message
-    """
+    """Print warning message."""
     if not _output_config["quiet"]:
-        console.print(f"[yellow]⚠[/yellow] {message}")
+        if _output_config["agentic"]:
+            stderr_console.print(f"WARN: {message}")
+        else:
+            console.print(f"[yellow]⚠[/yellow] {message}")
 
 
 def print_info(message: str) -> None:
-    """Print info message.
-
-    Args:
-        message: Info message
-    """
+    """Print info message."""
     if not _output_config["quiet"]:
-        console.print(f"[blue]ℹ[/blue] {message}")
+        if _output_config["agentic"]:
+            stderr_console.print(f"INFO: {message}")
+        else:
+            console.print(f"[blue]ℹ[/blue] {message}")
 
 
 def print_debug(message: str) -> None:

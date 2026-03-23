@@ -83,6 +83,7 @@ class SkillsCommand(BaseGroupCommand):
             self._create_update_command(context_wrapper),
             self._create_remove_command(context_wrapper),
             self._create_list_command(context_wrapper),
+            self._create_setup_command(context_wrapper),
         ]
 
     # ------------------------------------------------------------------
@@ -185,6 +186,27 @@ class SkillsCommand(BaseGroupCommand):
             lambda config, auth_manager, client, **kw: self._handle_list()
         )
         return list_cmd
+
+    def _create_setup_command(self, context_wrapper: Any) -> click.Command:
+        """Create the setup subcommand — interactive first-run wizard."""
+
+        @click.command(
+            name="setup",
+            help="Interactive setup: detect AI tools and install Deepgram skills",
+        )
+        @click.option(
+            "--all",
+            "install_all",
+            is_flag=True,
+            help="Install for all detected tools without prompting",
+        )
+        def setup_cmd(**kwargs: Any) -> None:
+            pass
+
+        setup_cmd.callback = context_wrapper(
+            lambda config, auth_manager, client, **kw: self._handle_setup(**kw)
+        )
+        return setup_cmd
 
     # ------------------------------------------------------------------
     # Handlers
@@ -420,3 +442,111 @@ class SkillsCommand(BaseGroupCommand):
             print_info(
                 "[dim]Auto-update is enabled — skills regenerate on plugin changes.[/dim]"
             )
+
+    def _handle_setup(self, install_all: bool = False) -> None:
+        """Interactive first-run setup: detect AI tools and install skills.
+
+        Downloads Deepgram skills from the deepgram/skills GitHub repo and
+        installs both the repo skills and the local deepctl command reference
+        for each selected AI coding tool.
+        """
+        import sys
+
+        from deepctl_core.skill_generator import (
+            _commands_hash,
+            collect_command_metadata,
+            detect_ai_clis,
+            fetch_repo_skills,
+            get_all_generators,
+            get_skills_state,
+            save_skills_state,
+        )
+
+        is_tty = sys.stdout.isatty()
+
+        # 1. Detect AI coding tools
+        generators = detect_ai_clis()
+
+        if not generators:
+            print_info("No AI coding assistants detected on this system.")
+            print_info("Supported tools:")
+            for g in get_all_generators():
+                print_info(f"  - {g.display_name}")
+            return
+
+        # Show what was found
+        console.print("\n[bold]Detected AI coding tools:[/bold]")
+        for g in generators:
+            console.print(f"  [green]●[/green] {g.display_name}")
+        console.print()
+
+        # 2. Download repo skills
+        console.print("[blue]Downloading Deepgram skills from GitHub...[/blue]")
+        try:
+            repo_skills = fetch_repo_skills(force=True)
+            if repo_skills:
+                print_success(
+                    f"Downloaded {len(repo_skills)} skill(s): "
+                    f"{', '.join(repo_skills.keys())}"
+                )
+            else:
+                print_warning(
+                    "Could not download skills from GitHub. "
+                    "Installing local skills only."
+                )
+        except Exception:
+            repo_skills = {}
+            print_warning("Could not reach GitHub. Installing local skills only.")
+
+        # 3. Collect local command metadata for the deepctl skill
+        commands = collect_command_metadata()
+        try:
+            version = importlib.metadata.version("deepctl")
+        except importlib.metadata.PackageNotFoundError:
+            version = "0.0.0"
+
+        state = get_skills_state()
+        total_written: list[str] = []
+
+        # 4. For each detected tool, offer to install
+        for gen in generators:
+            if (
+                not install_all
+                and is_tty
+                and not click.confirm(
+                    f"Install Deepgram skills for {gen.display_name}?",
+                    default=True,
+                )
+            ):
+                continue
+
+            # Install the local deepctl developer guide
+            paths = gen.install(commands, version)
+            cmd_hash = _commands_hash(commands)
+            state["installed_skills"][gen.cli_name] = {
+                "paths": [str(p) for p in paths],
+                "installed_at": datetime.now(timezone.utc).isoformat(),
+                "version": version,
+                "commands_hash": cmd_hash,
+                "repo_skills": list(repo_skills.keys()),
+            }
+            for p in paths:
+                total_written.append(str(p))
+                print_success(f"  {p}")
+
+        save_skills_state(state)
+
+        if total_written:
+            console.print()
+            print_success(f"Setup complete — {len(total_written)} file(s) installed")
+            if repo_skills:
+                console.print(
+                    "\n[dim]Deepgram skills include: API reference, docs, "
+                    "starter apps, and MCP setup.[/dim]"
+                )
+            console.print(
+                "[dim]Run 'dg skills update' after installing new plugins "
+                "to keep skills current.[/dim]"
+            )
+        else:
+            print_info("No skills were installed.")

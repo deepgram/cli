@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepctl-cmd-keys"
+version = "0.0.1" # x-release-please-version
+description = "API keys management command for deepctl"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+maintainers = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["deepgram", "cli", "keys", "api-keys"]
+requires-python = ">=3.10"
+dependencies = [
+    "deepctl-core>=0.1.10",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+
+[project.entry-points."deepctl.commands"]
+keys = "deepctl_cmd_keys.command:KeysCommand"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepctl_cmd_keys*"]

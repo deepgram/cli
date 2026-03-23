@@ -52,6 +52,14 @@ dependencies = [
     "deepctl-cmd-plugin>=0.1.10",
     "deepctl-cmd-skills>=0.0.1",
     "deepctl-cmd-init>=0.0.1",
+    "deepctl-cmd-models>=0.0.1",
+    "deepctl-cmd-speak>=0.0.1",
+    "deepctl-cmd-keys>=0.0.1",
+    "deepctl-cmd-read>=0.0.1",
+    "deepctl-cmd-listen>=0.0.1",
+    "deepctl-cmd-requests>=0.0.1",
+    "deepctl-cmd-billing>=0.0.1",
+    "deepctl-cmd-members>=0.0.1",
     "deepctl-shared-utils>=0.1.10",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
@@ -121,6 +129,11 @@ module = "deepctl_cmd_mcp.*"
 # MCP SDK type stubs are incomplete (decorators, transport parameters)
 disable_error_code = ["call-arg", "no-untyped-call", "no-untyped-def", "untyped-decorator", "misc"]
 
+[[tool.mypy.overrides]]
+module = ["sounddevice", "sounddevice.*", "numpy", "numpy.*"]
+# Optional microphone dependencies — no type stubs available
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests"]
 python_files = ["test_*.py", "*_test.py"]
@@ -179,6 +192,14 @@ deepctl-cmd-update = { workspace = true }
 deepctl-cmd-plugin = { workspace = true }
 deepctl-cmd-skills = { workspace = true }
 deepctl-cmd-init = { workspace = true }
+deepctl-cmd-models = { workspace = true }
+deepctl-cmd-speak = { workspace = true }
+deepctl-cmd-keys = { workspace = true }
+deepctl-cmd-read = { workspace = true }
+deepctl-cmd-listen = { workspace = true }
+deepctl-cmd-requests = { workspace = true }
+deepctl-cmd-billing = { workspace = true }
+deepctl-cmd-members = { workspace = true }
 deepctl-shared-utils = { workspace = true }
 deepctl-plugin-example = { workspace = true }
 

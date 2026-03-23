@@ -208,7 +208,7 @@ class TestPrintFunctions:
     """Test print utility functions."""
 
     @patch("deepctl_core.output.console")
-    @patch("deepctl_core.output._output_config", {"quiet": False})
+    @patch("deepctl_core.output._output_config", {"quiet": False, "agentic": False})
     def test_print_success(self, mock_console):
         """Test printing success message."""
         print_success("Operation completed")
@@ -218,7 +218,7 @@ class TestPrintFunctions:
         )
 
     @patch("deepctl_core.output.console")
-    @patch("deepctl_core.output._output_config", {"quiet": True})
+    @patch("deepctl_core.output._output_config", {"quiet": True, "agentic": False})
     def test_print_success_quiet(self, mock_console):
         """Test printing success message in quiet mode."""
         print_success("Operation completed")
@@ -227,6 +227,7 @@ class TestPrintFunctions:
         mock_console.print.assert_not_called()
 
     @patch("deepctl_core.output.stderr_console")
+    @patch("deepctl_core.output._output_config", {"quiet": False, "agentic": False})
     def test_print_error(self, mock_console):
         """Test printing error message."""
         print_error("Something went wrong")
@@ -235,8 +236,18 @@ class TestPrintFunctions:
             "[red]✗[/red] Something went wrong"
         )
 
+    @patch("deepctl_core.output.stderr_console")
+    @patch("deepctl_core.output._output_config", {"quiet": False, "agentic": True})
+    def test_print_error_agentic(self, mock_console):
+        """Test printing error message in agentic mode."""
+        print_error("Something went wrong")
+
+        mock_console.print.assert_called_once_with(
+            "ERROR: Something went wrong"
+        )
+
     @patch("deepctl_core.output.console")
-    @patch("deepctl_core.output._output_config", {"quiet": False})
+    @patch("deepctl_core.output._output_config", {"quiet": False, "agentic": False})
     def test_print_warning(self, mock_console):
         """Test printing warning message."""
         print_warning("Be careful")
@@ -246,7 +257,7 @@ class TestPrintFunctions:
         )
 
     @patch("deepctl_core.output.console")
-    @patch("deepctl_core.output._output_config", {"quiet": False})
+    @patch("deepctl_core.output._output_config", {"quiet": False, "agentic": False})
     def test_print_info(self, mock_console):
         """Test printing info message."""
         print_info("FYI")

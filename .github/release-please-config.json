@@ -106,6 +106,46 @@
       "include-component-in-tag": true,
       "make-latest": false
     },
+    "packages/deepctl-cmd-models": {
+      "component": "deepctl-cmd-models",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-speak": {
+      "component": "deepctl-cmd-speak",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-keys": {
+      "component": "deepctl-cmd-keys",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-read": {
+      "component": "deepctl-cmd-read",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-listen": {
+      "component": "deepctl-cmd-listen",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-requests": {
+      "component": "deepctl-cmd-requests",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-billing": {
+      "component": "deepctl-cmd-billing",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
+    "packages/deepctl-cmd-members": {
+      "component": "deepctl-cmd-members",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
     "packages/deepctl-plugin-example": {
       "component": "deepctl-plugin-example",
       "include-component-in-tag": true,
