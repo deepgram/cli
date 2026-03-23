@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.11...deepctl-cmd-login-v0.1.12) (2026-03-23)
+
+
+### Features
+
+* add 8 new commands covering full Deepgram API surface ([a034321](https://github.com/deepgram/cli/commit/a0343218bb65241c46e43556d7c67ccb472542f7))
+
 ## [0.1.11](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.10...deepctl-cmd-login-v0.1.11) (2026-03-09)
 
 
