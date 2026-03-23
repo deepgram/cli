@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/deepgram/cli/compare/v0.2.1...v0.2.2) (2026-03-23)
+
+
+### Features
+
+* add 8 new commands covering full Deepgram API surface ([a034321](https://github.com/deepgram/cli/commit/a0343218bb65241c46e43556d7c67ccb472542f7))
+* **install:** add Windows installer and version/force options ([59620b2](https://github.com/deepgram/cli/commit/59620b2860dced68af027edf477bcbeb717c7b03))
+
 ## [0.2.1](https://github.com/deepgram/cli/compare/v0.2.0...v0.2.1) (2026-03-09)
 
 

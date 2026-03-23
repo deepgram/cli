@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.0...deepctl-core-v0.2.1) (2026-03-23)
+
+
+### Features
+
+* add 8 new commands covering full Deepgram API surface ([a034321](https://github.com/deepgram/cli/commit/a0343218bb65241c46e43556d7c67ccb472542f7))
+
 ## [0.2.0](https://github.com/deepgram/cli/compare/deepctl-core-v0.1.10...deepctl-core-v0.2.0) (2026-03-09)
 
 
