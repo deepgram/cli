@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.1...deepctl-core-v0.2.2) (2026-03-24)
+
+
+### Documentation
+
+* rewrite README with banner image, add logo to CLI help ([8c51166](https://github.com/deepgram/cli/commit/8c511663a19633b845f4284195b48fe003be0086))
+
 ## [0.2.1](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.0...deepctl-core-v0.2.1) (2026-03-23)
 
 
