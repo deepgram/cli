@@ -1,0 +1,184 @@
+name: "Bug report"
+description: Report something that is broken or crashes
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please give a **minimal** repro when you can.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Short one-liner of the problem
+      placeholder: "Crash when running dg transcribe on a large file"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Tell us what you saw and what you expected instead
+      placeholder: |
+        Actual:
+        - ...
+
+        Expected:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro_steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps; include inputs that matter (model, options, etc.)
+      placeholder: |
+        1. Install deepctl 0.2.2
+        2. Run dg transcribe large-file.wav
+        3. Observe error XYZ
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: Full command you ran and the output (redact secrets).
+      render: text
+      placeholder: |
+        $ dg transcribe audio.wav --model nova-3
+        Error: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: Full stack trace or error message (use --verbose for more detail)
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: command_area
+    attributes:
+      label: Command area
+      options:
+        - transcribe
+        - speak
+        - listen
+        - read
+        - models / keys / members / billing
+        - login / auth
+        - mcp
+        - debug
+        - init
+        - plugin
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: repro_rate
+    attributes:
+      label: How often?
+      options:
+        - Always
+        - Often
+        - Sometimes
+        - Rarely
+        - Only once
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Is this a regression?
+      options:
+        - label: "Yes, it worked in an earlier version"
+          required: false
+
+  - type: input
+    id: worked_version
+    attributes:
+      label: Last working version (if known)
+      placeholder: "0.2.1"
+    validations:
+      required: false
+
+  - type: input
+    id: cli_version
+    attributes:
+      label: CLI version
+      description: Output of `dg --version`
+      placeholder: "deepctl, version 0.2.2"
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      placeholder: "3.11.9"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - curl installer (install.sh / install.ps1)
+        - pip
+        - pipx
+        - uv tool
+        - From source
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      multiple: true
+      options:
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Linux (x86_64)
+        - Linux (arm64)
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra_env
+    attributes:
+      label: Environment details
+      description: Anything else? Docker, CI, proxies, corporate network, etc.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: request_id
+    attributes:
+      label: Request ID (optional)
+      description: From API error messages or response headers (`dg-request-id`)
+      placeholder: "req_def456"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: conduct
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

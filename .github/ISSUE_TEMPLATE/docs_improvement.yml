@@ -1,0 +1,38 @@
+name: "Docs improvement"
+description: Fix or improve documentation, examples, or help text
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Affected page or section
+      placeholder: "README.md, dg speak --help, packages/deepctl-cmd-speak/README.md"
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is unclear or wrong?
+      placeholder: "Option --encoding is not documented; example is outdated"
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change
+      render: markdown
+      placeholder: "Replace snippet with... Add note about..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example code (if any)
+      render: bash
+      placeholder: "# short snippet"
+    validations:
+      required: false

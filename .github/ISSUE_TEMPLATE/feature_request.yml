@@ -1,0 +1,74 @@
+name: "Feature request"
+description: Suggest a new capability or command
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: "Add dg agent command for interactive voice conversations"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user problem does this address?
+      placeholder: "Today I need to write a lot of code to set up a voice agent..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Command shape, flags, defaults. Keep it simple.
+      render: bash
+      placeholder: |
+        # Example
+        dg agent --prompt "You are a helpful assistant" --voice aura-2-asteria-en
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: "Use the API directly; use dg api; do nothing"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - New command
+        - Enhancement to existing command
+        - Core / framework change
+        - Plugin system
+        - Docs / examples only
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Nice to have
+        - Important
+        - High impact
+        - Blocker
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context / links
+      placeholder: "Related issues, forum threads, API docs, etc."
+    validations:
+      required: false
