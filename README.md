@@ -4,7 +4,23 @@
 [![Version](https://img.shields.io/pypi/v/deepctl)](https://pypi.org/project/deepctl/)
 [![Python](https://img.shields.io/pypi/pyversions/deepctl)](https://pypi.org/project/deepctl/)
 [![License](https://img.shields.io/github/license/deepgram/cli)](https://github.com/deepgram/cli/blob/main/LICENSE)
-![Deepgram CLI](docs/assets/deepgram-cli.png)
+```sh
+Usage: dg [OPTIONS] COMMAND [ARGS]...
+
+████████████████
+██████████████████
+████████████████████
+█████████████████████
+███████      ████████
+███████       ███████
+             ████████
+      ███████████████
+    ████████████████
+  ████████████████
+████████████████
+
+deepctl — Official Deepgram CLI STT · TTS · Audio Intelligence
+```
 
 The official Deepgram CLI brings speech-to-text, text-to-speech, audio
 intelligence, and project management directly into your terminal. Aliases:
