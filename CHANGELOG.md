@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.3](https://github.com/deepgram/cli/compare/v0.2.2...v0.2.3) (2026-03-24)
+
+
+### Documentation
+
+* add community files from SDK template ([7deb2ba](https://github.com/deepgram/cli/commit/7deb2ba718ab762db4a42e0d33b5ca7747fcb807))
+* add MIT license file ([9334818](https://github.com/deepgram/cli/commit/9334818339ae017735ff1e44a3a650eb57800616))
+* point Code of Conduct to canonical community URL ([b1ae7f5](https://github.com/deepgram/cli/commit/b1ae7f5478163896198b6e949b8815b0d386ea27))
+* replace generic CoC with official Deepgram Code of Conduct ([187eb1b](https://github.com/deepgram/cli/commit/187eb1b904314a6eabe1f92c21a70d7616fd40e6))
+* rewrite README with banner image, add logo to CLI help ([8c51166](https://github.com/deepgram/cli/commit/8c511663a19633b845f4284195b48fe003be0086))
+
 ## [0.2.2](https://github.com/deepgram/cli/compare/v0.2.1...v0.2.2) (2026-03-23)
 
 
