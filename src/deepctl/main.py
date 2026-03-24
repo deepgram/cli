@@ -147,8 +147,21 @@ def cli(
     timing: bool,
     timing_detailed: bool,
 ) -> None:
-    """deepctl - Official Deepgram CLI for speech recognition and audio
-    intelligence."""
+    """\b
+    ████████████████
+    ██████████████████
+    ████████████████████
+    █████████████████████
+    ███████      ████████
+    ███████       ███████
+                 ████████
+          ███████████████
+        ████████████████
+      ████████████████
+    ████████████████
+
+    deepctl — Official Deepgram CLI
+    STT · TTS · Audio Intelligence"""
 
     # Enable timing if requested
     if timing or timing_detailed:

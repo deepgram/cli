@@ -1,40 +1,238 @@
-# deepctl
+# Deepgram CLI
 
-> [!WARNING]  
-> **Alpha Software**: This CLI is experimental and under active development.
+[![Test](https://github.com/deepgram/cli/actions/workflows/test.yml/badge.svg)](https://github.com/deepgram/cli/actions/workflows/test.yml)
+[![Version](https://img.shields.io/pypi/v/deepctl)](https://pypi.org/project/deepctl/)
+[![Python](https://img.shields.io/pypi/pyversions/deepctl)](https://pypi.org/project/deepctl/)
+[![License](https://img.shields.io/github/license/deepgram/cli)](https://github.com/deepgram/cli/blob/main/LICENSE)
+![Deepgram CLI](docs/assets/deepgram-cli.png)
 
-Official Deepgram CLI. Modular Python package with plugin system.
+The official Deepgram CLI brings speech-to-text, text-to-speech, audio
+intelligence, and project management directly into your terminal. Aliases:
+`deepctl`, `deepgram`, `dg`.
+
+## Installation
+
+### Quick Install
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://deepgram.com/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr https://deepgram.com/install.ps1 -useb | iex
+```
+
+### Package Managers
+
+```bash
+pip install deepctl          # pip
+uv tool install deepctl      # uv
+pipx install deepctl         # pipx
+```
+
+### Try Without Installing
+
+```bash
+uvx deepctl --help
+pipx run deepctl --help
+```
+
+## Getting Started
+
+```bash
+# Authenticate with Deepgram
+dg login
+
+# Transcribe an audio file
+dg transcribe recording.wav
+
+# Text-to-speech
+dg speak "Hello from Deepgram" -o hello.mp3
+
+# Live microphone transcription
+dg listen --mic
+
+# Analyze text for sentiment and topics
+dg read "The product is amazing" --sentiment --topics
+```
+
+## Features
+
+### Speech-to-Text
+
+Transcribe audio files, URLs, or live microphone input.
+
+```bash
+dg transcribe meeting.wav --diarize --smart-format
+dg transcribe https://example.com/audio.mp3 --model nova-3
+dg listen --mic --model nova-3 --language en-US
+cat audio.raw | dg listen --encoding linear16 --sample-rate 16000
+```
+
+### Text-to-Speech
+
+Convert text to natural speech. Supports file output and piping.
+
+```bash
+dg speak "Welcome to Deepgram" -o welcome.mp3
+dg speak --file script.txt -o output.mp3 -m aura-2-luna-en
+echo "Hello" | dg speak -o greeting.mp3
+dg speak "Stream me" | ffplay -nodisp -    # pipe to audio player
+```
+
+### Text Intelligence
+
+Analyze text for sentiment, summaries, topics, and intents.
+
+```bash
+dg read "Customer called about billing" --sentiment --summarize
+dg read --file article.txt --topics --intents
+cat feedback.txt | dg read --sentiment
+```
+
+### Project Management
+
+Manage your Deepgram account from the terminal.
+
+```bash
+dg projects --list                        # List projects
+dg keys --list                            # List API keys
+dg keys --create --comment "staging"      # Create API key
+dg members                                # List team members
+dg members --invite user@co.com           # Invite member
+dg usage --last-month                     # View usage stats
+dg billing                                # Check balances
+dg requests --limit 20 --status failed    # Request history
+dg models --type tts                      # List available models
+```
+
+### Direct API Access
+
+Make authenticated requests to any Deepgram endpoint.
+
+```bash
+dg api /v1/projects
+dg api /v1/projects -X POST -f name="New Project"
+dg api /v1/listen -X POST --input audio.wav --jq '.results'
+```
+
+### Debugging Tools
+
+Diagnose audio, network, and browser issues.
+
+```bash
+dg debug audio --file recording.wav       # Analyze audio compatibility
+dg debug network --verbose                # Test connectivity to Deepgram
+dg debug probe --port 3100                # Live stream audio analysis
+```
+
+### MCP Server
+
+Connect Deepgram tools to AI coding assistants (Claude Code, Cursor, etc.).
+
+```bash
+dg mcp                                    # Start MCP server (stdio)
+dg mcp --transport sse --port 8000        # SSE transport
+```
+
+Add to your editor's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "deepgram": {
+      "type": "stdio",
+      "command": "dg",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### AI Tool Integration
+
+Automatically detect and configure AI coding assistants with Deepgram skills.
+
+```bash
+dg skills status                          # Detect AI tools
+dg skills setup                           # Interactive setup wizard
+dg skills install --all                   # Install for all detected tools
+```
+
+### Starter Apps
+
+Scaffold a new project from Deepgram templates.
+
+```bash
+dg init --list                            # Browse templates
+dg init node-live-transcription           # Clone and set up
+```
+
+## CI / Automation
+
+Every command is CI-friendly. Authentication works via environment variables,
+all interactive prompts have flag-based alternatives, and destructive operations
+require explicit `--yes`.
+
+```bash
+# CI authentication
+export DEEPGRAM_API_KEY="your-key"
+export DEEPGRAM_PROJECT_ID="your-project-id"
+
+# Non-interactive usage
+dg transcribe recording.wav
+dg speak "Deploy complete" -o notification.mp3
+dg keys --create --comment "ci-key" --scopes member
+dg keys --delete KEY_ID --yes
+dg read --file report.txt --summarize
+
+# Output formats for scripting
+dg projects --list -o json
+dg keys --list -o csv
+dg usage --last-week -o yaml
+```
+
+When running in a non-TTY environment (pipes, CI, or AI coding tools), the CLI
+automatically switches to structured JSON output with plain-text status messages.
+
+## Plugins
+
+Extend the CLI with custom commands.
+
+```bash
+dg plugin search deepctl-               # Find plugins
+dg plugin install <package>              # Install
+dg plugin list                           # List installed
+dg plugin remove <package>              # Remove
+```
+
+Create your own — see the [plugin example](packages/deepctl-plugin-example).
+
+## Configuration
+
+**Priority:** CLI flags > environment variables > profile config > project config
+
+```bash
+dg login                                 # Interactive or --api-key
+dg login --profile staging --api-key SK  # Named profiles
+dg profiles --list                       # List profiles
+dg profiles --switch staging             # Switch profile
+```
+
+Output format on any command: `--output json|yaml|table|csv`
 
 ## Development
 
-### Setup
-
 ```bash
 git clone https://github.com/deepgram/cli && cd cli
-uv sync
+uv sync --group dev
+make dev                                 # Format + lint + test
+make check                               # Format + lint + typecheck (no tests)
 ```
-
-### Run CLI
-
-```bash
-uv run deepctl --help
-uv run deepctl login
-uv run deepctl transcribe audio.wav
-```
-
-### Development Commands
-
-```bash
-make dev                   # Format, lint, test
-make check                 # Format, lint, typecheck (no tests)
-make test                  # Run tests
-```
-
-### Requirements
-
-- Python 3.10+
-- uv package manager
-- Cross-platform: Linux, Windows, macOS
 
 ### Architecture
 
@@ -75,94 +273,6 @@ cli/
 ```
 <!-- END:architecture -->
 
-### Plugin Development
-
-```python
-from deepctl_core.base_command import BaseCommand
-
-class MyCommand(BaseCommand):
-    name = "mycommand"
-    help = "My custom command"
-
-    def handle(self, config, auth_manager, client, **kwargs):
-        pass
-```
-
-Register your command in `pyproject.toml` under the `deepctl.plugins` entry point group:
-
-```toml
-[project.entry-points."deepctl.plugins"]
-mycommand = "my_plugin.command:MyCommand"
-```
-
-See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example).
-
-### Testing
-
-- `tests/` - Integration tests
-- `packages/*/tests/unit/` - Unit tests
-- Runs on Python 3.10-3.14, Linux/Windows/macOS
-
-## Release
-
-Merging conventional commits to `main` triggers [release-please](https://github.com/googleapis/release-please) to open a release PR. Merging that PR creates a `v*` tag, which triggers the PyPI publish workflow. All packages are version-locked.
-
-## Installation
-
-### Quick Install
-
-**macOS / Linux:**
-
-```bash
-curl -fsSL https://deepgram.com/install.sh | sh
-```
-
-**Windows (PowerShell):**
-
-```powershell
-iwr https://deepgram.com/install.ps1 -useb | iex
-```
-
-### Install Options
-
-```bash
-# Install a specific version
-curl -fsSL https://deepgram.com/install.sh | sh -s -- v0.2.1
-
-# Force reinstall over existing installation
-curl -fsSL https://deepgram.com/install.sh | sh -s -- --force
-
-# Both
-curl -fsSL https://deepgram.com/install.sh | sh -s -- --force v0.2.1
-```
-
-**Windows (PowerShell):**
-
-```powershell
-# Install a specific version
-$env:DEEPCTL_VERSION='0.2.1'; iwr https://deepgram.com/install.ps1 -useb | iex
-
-# Force reinstall
-$env:DEEPCTL_FORCE='1'; iwr https://deepgram.com/install.ps1 -useb | iex
-```
-
-### Other Methods
-
-```bash
-uv tool install deepctl
-pip install deepctl
-pipx install deepctl
-```
-
-### Try Without Installing
-
-```bash
-uv run deepctl --help
-pipx run deepctl --help
-```
-
-## Usage
-
 ### Commands
 
 <!-- BEGIN:commands -->
@@ -196,71 +306,7 @@ pipx run deepctl --help
 | `deepctl usage` | Usage command for deepctl |
 <!-- END:commands -->
 
-### Aliases
-
-- `deepctl` (primary)
-- `deepgram`
-- `dg`
-
-### Plugins
-
-```bash
-deepctl plugin search                    # Browse available plugins
-deepctl plugin install <package>         # Install a plugin
-deepctl plugin list -v                   # List installed plugins (verbose)
-deepctl plugin remove <package>          # Remove a plugin
-deepctl plugin update <package>          # Update a plugin
-```
-
-Plugin installation adapts to how deepctl was installed:
-
-| Install method | Plugin strategy |
-|---|---|
-| `pip` / `uv` (venv) | Installs into current environment |
-| `pipx` | `pipx inject deepctl <plugin>` |
-| `uv tool` | `uv tool install deepctl --with <plugin>` |
-| Homebrew / system / binary | Isolated venv at `~/.deepctl/plugins/venv/` |
-| Development (editable) | Installs into current environment |
-| `uvx` / `pipx run` | Not supported (ephemeral) |
-
-Plugins installed into the isolated venv are automatically discovered and loaded on every CLI invocation.
-
-### Configuration
-
-Priority: CLI args > env vars > user config (`~/.config/deepctl/config.yaml` on Linux, `~/Library/Application Support/deepctl/config.yaml` on macOS) > `./deepgram.yaml`
-
-### Output Formats
-
-```bash
-deepctl transcribe audio.wav --output json|yaml|table|csv
-```
-
-### MCP Server
-
-Use `deepctl mcp` to connect Deepgram's developer tools to your AI code editor.
-
-```bash
-# Login first
-deepctl login
-```
-
-Add to your editor's MCP config (Claude Code `.mcp.json`, Cursor `.cursor/mcp.json`, etc.):
-
-```json
-{
-  "mcpServers": {
-    "deepgram": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["deepctl", "mcp"]
-    }
-  }
-}
-```
-
-See [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) for full setup instructions including Cursor, Windsurf, pipx, and local development.
-
-## Packages
+### Packages
 
 <!-- BEGIN:packages -->
 | Package | Description |
@@ -294,16 +340,31 @@ See [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) for full setup instructions in
 | [`deepctl-shared-utils`](packages/deepctl-shared-utils) | Shared utilities for deepctl |
 <!-- END:packages -->
 
+## Release
+
+Merging [conventional commits](https://www.conventionalcommits.org/) to `main`
+triggers [release-please](https://github.com/googleapis/release-please) to open
+a release PR. Merging that PR creates tags and publishes all changed packages to
+PyPI. Each package is versioned independently.
+
+## Requirements
+
+- Python 3.10+
+- Cross-platform: Linux, Windows, macOS
+
 ## Contributing
 
-1. Fork repository
-2. Run `make dev` (formats, lints, tests)
-3. Add tests for changes
-4. Submit pull request
+1. Fork the repository
+2. `uv sync --group dev`
+3. `make dev` (formats, lints, tests)
+4. Submit a pull request
+
+See [AGENTS.md](AGENTS.md) for detailed architecture and conventions.
 
 ## Links
 
 - [Documentation](https://developers.deepgram.com/docs/cli)
+- [API Reference](https://developers.deepgram.com/reference)
 - [Discord](https://discord.gg/deepgram)
 - [Issues](https://github.com/deepgram/cli/issues)
 

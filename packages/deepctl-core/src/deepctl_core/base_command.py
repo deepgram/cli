@@ -189,7 +189,11 @@ class BaseCommand(ABC):
                 result = [item.model_dump() for item in result]
 
         with TimingContext(f"output_{output_format}"):
-            if output_format in ("json", "default"):
+            if output_format == "default":
+                # Commands handle their own display in default mode;
+                # only emit structured output when explicitly requested.
+                return
+            elif output_format == "json":
                 self._output_json(result)
             elif output_format == "yaml":
                 self._output_yaml(result)
