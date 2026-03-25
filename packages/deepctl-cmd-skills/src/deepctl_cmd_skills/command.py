@@ -465,23 +465,55 @@ class SkillsCommand(BaseGroupCommand):
         is_tty = sys.stdout.isatty()
 
         # 1. Detect AI coding tools
-        generators = detect_ai_clis()
+        detected = detect_ai_clis()
 
-        if not generators:
+        if not detected:
             print_info("No AI coding assistants detected on this system.")
             print_info("Supported tools:")
             for g in get_all_generators():
                 print_info(f"  - {g.display_name}")
             return
 
-        # Show what was found
-        console.print("\n[bold]Detected AI coding tools:[/bold]")
-        for g in generators:
-            console.print(f"  [green]●[/green] {g.display_name}")
-        console.print()
+        # 2. Interactive selection (or --all for CI)
+        if install_all:
+            selected = list(detected)
+        elif is_tty:
+            console.print("\n[bold]Detected AI coding tools:[/bold]\n")
+            for i, g in enumerate(detected, 1):
+                console.print(f"  [green]{i}.[/green] {g.display_name}")
+            console.print()
 
-        # 2. Download repo skills
-        console.print("[blue]Downloading Deepgram skills from GitHub...[/blue]")
+            raw = click.prompt(
+                "Install skills for (comma-separated numbers, all, or none)",
+                default="all",
+            )
+            raw = raw.strip().lower()
+
+            if raw in ("none", "n", "0"):
+                print_info("No skills installed.")
+                return
+
+            if raw == "all":
+                selected = list(detected)
+            else:
+                indices: set[int] = set()
+                for part in raw.split(","):
+                    part = part.strip()
+                    if part.isdigit():
+                        idx = int(part)
+                        if 1 <= idx <= len(detected):
+                            indices.add(idx - 1)
+                selected = [detected[i] for i in sorted(indices)]
+
+            if not selected:
+                print_info("No valid tools selected.")
+                return
+        else:
+            # Non-TTY without --all: install for all detected
+            selected = list(detected)
+
+        # 3. Download repo skills
+        console.print("\n[blue]Downloading Deepgram skills from GitHub...[/blue]")
         try:
             repo_skills = fetch_repo_skills(force=True)
             if repo_skills:
@@ -498,7 +530,7 @@ class SkillsCommand(BaseGroupCommand):
             repo_skills = {}
             print_warning("Could not reach GitHub. Installing local skills only.")
 
-        # 3. Collect local command metadata for the deepctl skill
+        # 4. Collect command metadata and install for selected tools
         commands = collect_command_metadata()
         try:
             version = importlib.metadata.version("deepctl")
@@ -508,19 +540,7 @@ class SkillsCommand(BaseGroupCommand):
         state = get_skills_state()
         total_written: list[str] = []
 
-        # 4. For each detected tool, offer to install
-        for gen in generators:
-            if (
-                not install_all
-                and is_tty
-                and not click.confirm(
-                    f"Install Deepgram skills for {gen.display_name}?",
-                    default=True,
-                )
-            ):
-                continue
-
-            # Install the local deepctl developer guide
+        for gen in selected:
             paths = gen.install(commands, version)
             cmd_hash = _commands_hash(commands)
             state["installed_skills"][gen.cli_name] = {
@@ -532,18 +552,13 @@ class SkillsCommand(BaseGroupCommand):
             }
             for p in paths:
                 total_written.append(str(p))
-                print_success(f"  {p}")
+                print_success(f"  {gen.display_name} → {p}")
 
         save_skills_state(state)
 
         if total_written:
             console.print()
             print_success(f"Setup complete — {len(total_written)} file(s) installed")
-            if repo_skills:
-                console.print(
-                    "\n[dim]Deepgram skills include: API reference, docs, "
-                    "starter apps, and MCP setup.[/dim]"
-                )
             console.print(
                 "[dim]Run 'dg skills update' after installing new plugins "
                 "to keep skills current.[/dim]"

@@ -179,7 +179,7 @@ class LoginCommand(BaseCommand):
         return result
 
     def _maybe_prompt_skills_setup(self) -> None:
-        """After login, nudge the user to set up AI coding tool skills."""
+        """After login, offer interactive skills setup for detected AI tools."""
         import sys
 
         if not sys.stdout.isatty():
@@ -199,59 +199,83 @@ class LoginCommand(BaseCommand):
             if not detected:
                 return  # No AI tools found
 
-            names = ", ".join(g.display_name for g in detected)
-            console.print(f"\n[cyan]AI coding tools detected: {names}[/cyan]")
             console.print(
-                "[dim]Deepgram skills teach AI assistants how to use our APIs, "
-                "docs, and this CLI.[/dim]"
+                "\n[cyan]AI coding tools detected:[/cyan]"
+                "\n[dim]Deepgram skills teach AI assistants how to use "
+                "our APIs, docs, and this CLI.[/dim]\n"
             )
 
-            if self.confirm(
-                "Set up Deepgram skills for your AI tools now?", default=True
-            ):
-                console.print()
-                # Run setup inline
-                from deepctl_core.skill_generator import (
-                    _commands_hash,
-                    collect_command_metadata,
-                    fetch_repo_skills,
-                    save_skills_state,
-                )
+            # Show numbered list with all detected pre-selected
+            for i, gen in enumerate(detected, 1):
+                console.print(f"  [green]{i}.[/green] {gen.display_name}")
+            console.print()
 
-                console.print("[blue]Downloading Deepgram skills...[/blue]")
-                try:
-                    fetch_repo_skills(force=True)
-                except Exception:
-                    pass
+            raw = Prompt.ask(
+                "Install skills for (comma-separated numbers, [bold]all[/bold], or [bold]none[/bold])",
+                default="all",
+            )
+            raw = raw.strip().lower()
 
-                import importlib.metadata
-                from datetime import datetime, timezone
-
-                commands = collect_command_metadata()
-                try:
-                    version = importlib.metadata.version("deepctl")
-                except importlib.metadata.PackageNotFoundError:
-                    version = "0.0.0"
-
-                for gen in detected:
-                    paths = gen.install(commands, version)
-                    cmd_hash = _commands_hash(commands)
-                    state["installed_skills"][gen.cli_name] = {
-                        "paths": [str(p) for p in paths],
-                        "installed_at": datetime.now(timezone.utc).isoformat(),
-                        "version": version,
-                        "commands_hash": cmd_hash,
-                    }
-                    for p in paths:
-                        console.print(f"  [green]✓[/green] {p}")
-
-                save_skills_state(state)
-                console.print(
-                    "\n[green]Skills installed![/green] "
-                    "[dim]Run 'dg skills update' after plugin changes.[/dim]"
-                )
-            else:
+            if raw in ("none", "n", "0", ""):
                 console.print("[dim]You can run 'dg skills setup' later.[/dim]")
+                return
+
+            if raw == "all":
+                selected = list(detected)
+            else:
+                indices: set[int] = set()
+                for part in raw.split(","):
+                    part = part.strip()
+                    if part.isdigit():
+                        idx = int(part)
+                        if 1 <= idx <= len(detected):
+                            indices.add(idx - 1)
+                selected = [detected[i] for i in sorted(indices)]
+
+            if not selected:
+                console.print("[dim]No tools selected.[/dim]")
+                return
+
+            # Install skills for selected tools
+            from deepctl_core.skill_generator import (
+                _commands_hash,
+                collect_command_metadata,
+                fetch_repo_skills,
+                save_skills_state,
+            )
+
+            console.print("\n[blue]Downloading Deepgram skills...[/blue]")
+            try:
+                fetch_repo_skills(force=True)
+            except Exception:
+                pass
+
+            import importlib.metadata
+            from datetime import datetime, timezone
+
+            commands = collect_command_metadata()
+            try:
+                version = importlib.metadata.version("deepctl")
+            except importlib.metadata.PackageNotFoundError:
+                version = "0.0.0"
+
+            for gen in selected:
+                paths = gen.install(commands, version)
+                cmd_hash = _commands_hash(commands)
+                state["installed_skills"][gen.cli_name] = {
+                    "paths": [str(p) for p in paths],
+                    "installed_at": datetime.now(timezone.utc).isoformat(),
+                    "version": version,
+                    "commands_hash": cmd_hash,
+                }
+                for p in paths:
+                    console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
+
+            save_skills_state(state)
+            console.print(
+                "\n[green]Skills installed![/green] "
+                "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+            )
         except Exception:
             pass  # Best-effort — never fail the login
 
