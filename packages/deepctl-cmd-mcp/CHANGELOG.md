@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.11...deepctl-cmd-mcp-v0.1.12) (2026-03-25)
+
+
+### Bug Fixes
+
+* **mcp:** update default base URL to api.dx.deepgram.com ([c514545](https://github.com/deepgram/cli/commit/c514545c52622f516eb51703fa787fa0d68751ff))
+
 ## [0.1.11](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.10...deepctl-cmd-mcp-v0.1.11) (2026-03-09)
 
 

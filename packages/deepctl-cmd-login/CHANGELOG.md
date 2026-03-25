@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.12...deepctl-cmd-login-v0.1.13) (2026-03-25)
+
+
+### Features
+
+* **skills:** fetch latest skills from deepgram/skills on every install ([b498311](https://github.com/deepgram/cli/commit/b4983116361b232ecad926ed6ced84ae84f09e37))
+* **skills:** interactive tool selection for skills setup ([382b7a0](https://github.com/deepgram/cli/commit/382b7a05d47548175771b9e34f1396973d9b1e77))
+
 ## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.11...deepctl-cmd-login-v0.1.12) (2026-03-23)
 
 

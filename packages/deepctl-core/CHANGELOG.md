@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.2...deepctl-core-v0.2.3) (2026-03-25)
+
+
+### Features
+
+* **skills:** fetch latest skills from deepgram/skills on every install ([b498311](https://github.com/deepgram/cli/commit/b4983116361b232ecad926ed6ced84ae84f09e37))
+
 ## [0.2.2](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.1...deepctl-core-v0.2.2) (2026-03-24)
 
 

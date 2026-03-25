@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.4](https://github.com/deepgram/cli/compare/v0.2.3...v0.2.4) (2026-03-25)
+
+
+### Features
+
+* **skills:** fetch latest skills from deepgram/skills on every install ([b498311](https://github.com/deepgram/cli/commit/b4983116361b232ecad926ed6ced84ae84f09e37))
+* **skills:** interactive tool selection for skills setup ([382b7a0](https://github.com/deepgram/cli/commit/382b7a05d47548175771b9e34f1396973d9b1e77))
+
+
+### Bug Fixes
+
+* **mcp:** update default base URL to api.dx.deepgram.com ([c514545](https://github.com/deepgram/cli/commit/c514545c52622f516eb51703fa787fa0d68751ff))
+
 ## [0.2.3](https://github.com/deepgram/cli/compare/v0.2.2...v0.2.3) (2026-03-24)
 
 
