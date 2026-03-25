@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 console = Console()
 
-DEFAULT_BASE_URL = "http://localhost:8080"
+DEFAULT_BASE_URL = "https://api.dx.deepgram.com"
 
 
 class McpCommand(BaseCommand):
@@ -38,7 +38,7 @@ class McpCommand(BaseCommand):
     examples = [
         "dg mcp",
         "dg mcp --transport sse --port 8000",
-        "dg mcp --base-url http://localhost:8080",
+        "dg mcp --base-url https://api.dx.deepgram.com",
     ]
     agent_help = (
         "Run an MCP (Model Context Protocol) proxy that connects to Deepgram's "

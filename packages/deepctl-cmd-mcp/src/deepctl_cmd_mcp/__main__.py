@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
     parser.add_argument(
         "--base-url",
-        default=os.getenv("DEEPGRAM_DX_URL", "http://localhost:8080"),
+        default=os.getenv("DEEPGRAM_DX_URL", "https://api.dx.deepgram.com"),
         help="Base URL for Deepgram developer API",
     )
     parser.add_argument(
