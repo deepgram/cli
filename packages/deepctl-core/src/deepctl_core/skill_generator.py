@@ -73,8 +73,15 @@ def fetch_repo_skills(force: bool = False) -> dict[str, str]:
 
     cache_marker = _REPO_CACHE_DIR / ".fetched"
     if not force and cache_marker.exists():
-        # Return cached content
-        return _read_cached_skills()
+        # Check if cache is less than 1 hour old
+        import time
+
+        try:
+            age = time.time() - cache_marker.stat().st_mtime
+            if age < 3600:  # 1 hour
+                return _read_cached_skills()
+        except OSError:
+            pass
 
     base = f"https://raw.githubusercontent.com/{_SKILLS_REPO}/{_SKILLS_BRANCH}"
     skill_names = ["api", "docs", "starters", "mcp"]
@@ -653,10 +660,21 @@ class SkillGenerator(ABC):
         """
 
     def install(self, commands: list[CommandMetadata], version: str) -> list[Path]:
-        """Generate and write skill files. Returns paths written."""
+        """Generate and write skill files with latest repo skills."""
+        # Always fetch fresh skills from deepgram/skills repo
+        repo_skills = fetch_repo_skills(force=True)
+
         files = self.generate(commands, version)
         written: list[Path] = []
         for path, content in files.items():
+            # Append repo skill content to the generated file
+            if repo_skills:
+                sections = [
+                    f"\n\n## {name.title()}\n\n{body}"
+                    for name, body in repo_skills.items()
+                ]
+                content += "\n".join(sections)
+
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
             written.append(path)

@@ -223,9 +223,10 @@ class TestClaudeCodeGenerator:
         target = tmp_path / "commands" / "deepctl.md"
         with patch.object(gen, "get_skill_paths", return_value=[target]):
             with patch.object(gen, "generate", return_value={target: "# test content\n"}):
-                written = gen.install([_make_command()], "1.0.0")
-                assert target in written
-                assert target.read_text() == "# test content\n"
+                with patch("deepctl_core.skill_generator.fetch_repo_skills", return_value={}):
+                    written = gen.install([_make_command()], "1.0.0")
+                    assert target in written
+                    assert target.read_text() == "# test content\n"
 
     def test_remove_deletes_file(self, tmp_path):
         gen = ClaudeCodeGenerator()

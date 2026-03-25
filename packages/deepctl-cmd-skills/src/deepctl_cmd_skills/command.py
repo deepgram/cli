@@ -456,7 +456,6 @@ class SkillsCommand(BaseGroupCommand):
             _commands_hash,
             collect_command_metadata,
             detect_ai_clis,
-            fetch_repo_skills,
             get_all_generators,
             get_skills_state,
             save_skills_state,
@@ -512,25 +511,8 @@ class SkillsCommand(BaseGroupCommand):
             # Non-TTY without --all: install for all detected
             selected = list(detected)
 
-        # 3. Download repo skills
-        console.print("\n[blue]Downloading Deepgram skills from GitHub...[/blue]")
-        try:
-            repo_skills = fetch_repo_skills(force=True)
-            if repo_skills:
-                print_success(
-                    f"Downloaded {len(repo_skills)} skill(s): "
-                    f"{', '.join(repo_skills.keys())}"
-                )
-            else:
-                print_warning(
-                    "Could not download skills from GitHub. "
-                    "Installing local skills only."
-                )
-        except Exception:
-            repo_skills = {}
-            print_warning("Could not reach GitHub. Installing local skills only.")
-
-        # 4. Collect command metadata and install for selected tools
+        # 3. Collect command metadata and install for selected tools
+        console.print("\n[blue]Installing Deepgram skills...[/blue]")
         commands = collect_command_metadata()
         try:
             version = importlib.metadata.version("deepctl")
@@ -548,7 +530,6 @@ class SkillsCommand(BaseGroupCommand):
                 "installed_at": datetime.now(timezone.utc).isoformat(),
                 "version": version,
                 "commands_hash": cmd_hash,
-                "repo_skills": list(repo_skills.keys()),
             }
             for p in paths:
                 total_written.append(str(p))

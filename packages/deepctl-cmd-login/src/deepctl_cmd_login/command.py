@@ -240,15 +240,10 @@ class LoginCommand(BaseCommand):
             from deepctl_core.skill_generator import (
                 _commands_hash,
                 collect_command_metadata,
-                fetch_repo_skills,
                 save_skills_state,
             )
 
-            console.print("\n[blue]Downloading Deepgram skills...[/blue]")
-            try:
-                fetch_repo_skills(force=True)
-            except Exception:
-                pass
+            console.print("\n[blue]Installing Deepgram skills...[/blue]")
 
             import importlib.metadata
             from datetime import datetime, timezone
