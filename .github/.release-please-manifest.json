@@ -26,5 +26,6 @@
   "packages/deepctl-cmd-requests": "0.0.2",
   "packages/deepctl-cmd-billing": "0.0.2",
   "packages/deepctl-cmd-members": "0.0.2",
+  "packages/deepctl-cmd-completion": "0.0.1",
   "packages/deepctl-plugin-example": "0.1.11"
 }

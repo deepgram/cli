@@ -14,7 +14,7 @@ from deepctl_core import (
 from rich.console import Console
 from rich.prompt import Prompt
 
-from .models import LoginResult, LogoutResult
+from .models import LoginResult, LogoutResult, WhoamiResult
 
 console = Console()
 
@@ -694,3 +694,110 @@ class ProfilesCommand(BaseCommand):
         else:
             # Default behavior - show current profile
             return self.handle(config, auth_manager, client, current=True)
+
+
+class WhoamiCommand(BaseCommand):
+    """Show current authentication status."""
+
+    name = "whoami"
+    help = "Show current authentication status"
+    short_help = "Show auth status"
+
+    requires_auth = False
+    requires_project = False
+    ci_friendly = True
+
+    examples = [
+        "dg whoami",
+        "dg whoami --profile staging",
+    ]
+    agent_help = (
+        "Show current authentication state: which profile is active, "
+        "masked API key with its storage source (system keyring, config "
+        "file, or environment variable), and configured project ID."
+    )
+
+    def get_arguments(self) -> list[dict[str, Any]]:
+        """Get command arguments."""
+        return [
+            {
+                "names": ["--profile"],
+                "help": "Profile to inspect (default: active profile)",
+                "type": str,
+                "required": False,
+                "is_option": True,
+            },
+        ]
+
+    def handle(
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
+        **kwargs: Any,
+    ) -> Any:
+        """Handle whoami command."""
+        import os
+
+        import keyring as _keyring
+        from deepctl_core.auth import KEYRING_SERVICE
+
+        if kwargs.get("profile"):
+            config.profile = kwargs["profile"]
+
+        profile_name = config.profile or "default"
+        profile_cfg = config.get_profile(profile_name)
+
+        # Determine key and its exact storage source
+        api_key: str | None = None
+        key_source = "not set"
+
+        try:
+            api_key = _keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
+            if api_key:
+                key_source = "system keyring"
+        except Exception:
+            pass
+
+        if not api_key and profile_cfg.api_key:
+            api_key = profile_cfg.api_key
+            key_source = "config file"
+
+        if not api_key:
+            env_key = os.environ.get("DEEPGRAM_API_KEY")
+            if env_key:
+                api_key = env_key
+                key_source = "DEEPGRAM_API_KEY (env)"
+
+        authenticated = api_key is not None
+        masked: str | None = None
+        if api_key:
+            masked = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else "****"
+
+        project_id = auth_manager.get_project_id()
+        base_url = profile_cfg.base_url or "https://api.deepgram.com"
+
+        if not authenticated:
+            console.print(
+                "[yellow]Not logged in.[/yellow] Run 'dg login' to authenticate."
+            )
+        else:
+            console.print("[green]✓[/green] Authenticated")
+            console.print(f"  Profile:    {profile_name}")
+            console.print(f"  API Key:    {masked}  [dim]({key_source})[/dim]")
+            console.print(
+                f"  Project ID: {project_id}"
+                if project_id
+                else "  Project ID: [dim]not set[/dim]"
+            )
+            if base_url != "https://api.deepgram.com":
+                console.print(f"  Base URL:   {base_url}")
+
+        return WhoamiResult(
+            authenticated=authenticated,
+            profile=profile_name,
+            api_key_masked=masked,
+            key_source=key_source,
+            project_id=project_id,
+            base_url=base_url,
+        )

@@ -20,3 +20,14 @@ class LogoutResult(BaseResult):
 
     profile: str | None = None
     profiles_count: int | None = None  # when --all is used
+
+
+class WhoamiResult(BaseResult):
+    """Return structure for `dg whoami` command."""
+
+    authenticated: bool
+    profile: str
+    api_key_masked: str | None = None
+    key_source: str
+    project_id: str | None = None
+    base_url: str | None = None

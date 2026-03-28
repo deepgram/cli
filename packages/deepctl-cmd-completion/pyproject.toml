@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deepctl-cmd-login"
-version = "0.1.13" # x-release-please-version
-description = "Login command for deepctl"
+name = "deepctl-cmd-completion"
+version = "0.0.1" # x-release-please-version
+description = "Shell completion command for deepctl"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
@@ -18,13 +18,12 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-keywords = ["deepgram", "cli", "login", "authentication"]
+keywords = ["deepgram", "cli", "completion", "shell"]
 requires-python = ">=3.10"
 dependencies = [
     "deepctl-core>=0.1.10",
     "click>=8.0.0",
     "rich>=13.0.0",
-    "deepgram-sdk>=6.0.0rc2",
     "pydantic>=2.0.0",
 ]
 
@@ -32,14 +31,11 @@ dependencies = [
 # Internal commands not meant to be called directly
 
 [project.entry-points."deepctl.commands"]
-login = "deepctl_cmd_login.command:LoginCommand"
-logout = "deepctl_cmd_login.command:LogoutCommand"
-profiles = "deepctl_cmd_login.command:ProfilesCommand"
-whoami = "deepctl_cmd_login.command:WhoamiCommand"
+completion = "deepctl_cmd_completion.command:CompletionCommand"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["deepctl_cmd_login*"]
+include = ["deepctl_cmd_completion*"]

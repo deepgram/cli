@@ -119,6 +119,12 @@ class KeysCommand(BaseCommand):
                 "is_flag": True,
                 "is_option": True,
             },
+            {
+                "names": ["--dry-run"],
+                "help": "Show what would happen without making any changes",
+                "is_flag": True,
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -133,14 +139,20 @@ class KeysCommand(BaseCommand):
         delete_key = kwargs.get("delete")
         project_id = kwargs.get("project_id")
 
+        dry_run = kwargs.get("dry_run", False)
+
         try:
             if create_key:
-                return self._create_key(client, project_id, **kwargs)
+                return self._create_key(client, project_id, dry_run=dry_run, **kwargs)
             elif show_key:
                 return self._show_key(client, show_key, project_id)
             elif delete_key:
                 return self._delete_key(
-                    client, delete_key, project_id, kwargs.get("yes", False)
+                    client,
+                    delete_key,
+                    project_id,
+                    kwargs.get("yes", False),
+                    dry_run=dry_run,
                 )
             else:
                 # Default: list keys
@@ -205,6 +217,7 @@ class KeysCommand(BaseCommand):
         self,
         client: DeepgramClient,
         project_id: str | None,
+        dry_run: bool = False,
         **kwargs: Any,
     ) -> BaseResult:
         comment = kwargs.get("comment", "")
@@ -216,6 +229,18 @@ class KeysCommand(BaseCommand):
         ttl = kwargs.get("ttl")
         tags_str = kwargs.get("tags")
         tags = [t.strip() for t in tags_str.split(",")] if tags_str else None
+
+        if dry_run:
+            console.print("[yellow]Dry run — no changes made[/yellow]")
+            console.print(f"  Would create key: comment='{comment or '(none)'}'")
+            console.print(f"  Scopes:  {', '.join(scopes)}")
+            if expiration:
+                console.print(f"  Expires: {expiration}")
+            if ttl:
+                console.print(f"  TTL:     {ttl}s")
+            if tags:
+                console.print(f"  Tags:    {', '.join(tags)}")
+            return BaseResult(status="dry_run", message="Dry run: key would be created")
 
         console.print("[blue]Creating API key...[/blue]")
 
@@ -284,7 +309,15 @@ class KeysCommand(BaseCommand):
         key_id: str,
         project_id: str | None,
         yes: bool = False,
+        dry_run: bool = False,
     ) -> BaseResult:
+        if dry_run:
+            console.print("[yellow]Dry run — no changes made[/yellow]")
+            console.print(f"  Would delete key: {key_id}")
+            return BaseResult(
+                status="dry_run", message=f"Dry run: key {key_id} would be deleted"
+            )
+
         if not yes and not self.confirm(
             f"Delete API key {key_id}? This cannot be undone.", default=False
         ):

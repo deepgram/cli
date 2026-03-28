@@ -259,6 +259,7 @@ cli/
 ├── packages/
 │   ├── deepctl-cmd-api/              # API command for deepctl
 │   ├── deepctl-cmd-billing/          # Billing command for deepctl
+│   ├── deepctl-cmd-completion/       # Shell completion command for deepctl
 │   ├── deepctl-cmd-debug/            # Debug command group for deepctl
 │   ├── deepctl-cmd-debug-audio/      # Audio debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
@@ -296,6 +297,7 @@ cli/
 |---------|-------------|
 | `deepctl api` | API command for deepctl |
 | `deepctl billing` | Billing command for deepctl |
+| `deepctl completion` | Shell completion command for deepctl |
 | `deepctl debug audio` | Audio debug subcommand for deepctl |
 | `deepctl debug browser` | Browser debug subcommand for deepctl |
 | `deepctl debug network` | Network debug subcommand for deepctl |
@@ -320,6 +322,7 @@ cli/
 | `deepctl transcribe` | Transcribe command for deepctl |
 | `deepctl update` | Update command for deepctl |
 | `deepctl usage` | Usage command for deepctl |
+| `deepctl whoami` | Login command for deepctl |
 <!-- END:commands -->
 
 ### Packages
@@ -329,6 +332,7 @@ cli/
 |---------|-------------|
 | [`deepctl-cmd-api`](packages/deepctl-cmd-api) | API command for deepctl |
 | [`deepctl-cmd-billing`](packages/deepctl-cmd-billing) | Billing command for deepctl |
+| [`deepctl-cmd-completion`](packages/deepctl-cmd-completion) | Shell completion command for deepctl |
 | [`deepctl-cmd-debug`](packages/deepctl-cmd-debug) | Debug command group for deepctl |
 | [`deepctl-cmd-debug-audio`](packages/deepctl-cmd-debug-audio) | Audio debug subcommand for deepctl |
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |

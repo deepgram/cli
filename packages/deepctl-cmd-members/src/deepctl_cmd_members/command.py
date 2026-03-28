@@ -95,6 +95,12 @@ class MembersCommand(BaseCommand):
                 "is_flag": True,
                 "is_option": True,
             },
+            {
+                "names": ["--dry-run"],
+                "help": "Show what would happen without making any changes",
+                "is_flag": True,
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -110,18 +116,27 @@ class MembersCommand(BaseCommand):
         revoke_email = kwargs.get("revoke_invite")
         project_id = kwargs.get("project_id")
         yes = kwargs.get("yes", False)
+        dry_run = kwargs.get("dry_run", False)
 
         try:
             if invite_email:
                 return self._invite_member(
-                    client, invite_email, kwargs.get("scope", "member"), project_id
+                    client,
+                    invite_email,
+                    kwargs.get("scope", "member"),
+                    project_id,
+                    dry_run=dry_run,
                 )
             elif remove_id:
-                return self._remove_member(client, remove_id, project_id, yes)
+                return self._remove_member(
+                    client, remove_id, project_id, yes, dry_run=dry_run
+                )
             elif show_invites:
                 return self._list_invites(client, project_id)
             elif revoke_email:
-                return self._revoke_invite(client, revoke_email, project_id, yes)
+                return self._revoke_invite(
+                    client, revoke_email, project_id, yes, dry_run=dry_run
+                )
             else:
                 return self._list_members(client, project_id)
 
@@ -185,7 +200,15 @@ class MembersCommand(BaseCommand):
         email: str,
         scope: str,
         project_id: str | None,
+        dry_run: bool = False,
     ) -> BaseResult:
+        if dry_run:
+            console.print("[yellow]Dry run — no changes made[/yellow]")
+            console.print(f"  Would invite: {email}  (scope: {scope})")
+            return BaseResult(
+                status="dry_run", message=f"Dry run: would invite {email}"
+            )
+
         console.print(f"[blue]Inviting {email} with scope '{scope}'...[/blue]")
         client.create_invite(email=email, scope=scope, project_id=project_id)
         console.print(f"[green]Invitation sent to {email}[/green]")
@@ -197,7 +220,15 @@ class MembersCommand(BaseCommand):
         member_id: str,
         project_id: str | None,
         yes: bool = False,
+        dry_run: bool = False,
     ) -> BaseResult:
+        if dry_run:
+            console.print("[yellow]Dry run — no changes made[/yellow]")
+            console.print(f"  Would remove member: {member_id}")
+            return BaseResult(
+                status="dry_run", message=f"Dry run: would remove member {member_id}"
+            )
+
         if not yes and not self.confirm(
             f"Remove member {member_id} from the project?", default=False
         ):
@@ -251,7 +282,16 @@ class MembersCommand(BaseCommand):
         email: str,
         project_id: str | None,
         yes: bool = False,
+        dry_run: bool = False,
     ) -> BaseResult:
+        if dry_run:
+            console.print("[yellow]Dry run — no changes made[/yellow]")
+            console.print(f"  Would revoke invite for: {email}")
+            return BaseResult(
+                status="dry_run",
+                message=f"Dry run: would revoke invite for {email}",
+            )
+
         if not yes and not self.confirm(f"Revoke invite for {email}?", default=False):
             return BaseResult(status="cancelled", message="Cancelled by user")
 

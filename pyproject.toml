@@ -60,6 +60,7 @@ dependencies = [
     "deepctl-cmd-requests>=0.0.1",
     "deepctl-cmd-billing>=0.0.1",
     "deepctl-cmd-members>=0.0.1",
+    "deepctl-cmd-completion>=0.0.1",
     "deepctl-shared-utils>=0.1.10",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
@@ -200,6 +201,7 @@ deepctl-cmd-listen = { workspace = true }
 deepctl-cmd-requests = { workspace = true }
 deepctl-cmd-billing = { workspace = true }
 deepctl-cmd-members = { workspace = true }
+deepctl-cmd-completion = { workspace = true }
 deepctl-shared-utils = { workspace = true }
 deepctl-plugin-example = { workspace = true }
 

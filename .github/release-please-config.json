@@ -146,6 +146,11 @@
       "include-component-in-tag": true,
       "make-latest": false
     },
+    "packages/deepctl-cmd-completion": {
+      "component": "deepctl-cmd-completion",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
     "packages/deepctl-plugin-example": {
       "component": "deepctl-plugin-example",
       "include-component-in-tag": true,
