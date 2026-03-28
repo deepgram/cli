@@ -111,7 +111,7 @@ import '../styles/global.css';
         <div class="inline-flex items-center gap-3 px-4 py-2.5 rounded-xl font-mono text-sm backdrop-blur-sm"
              style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9528 50%, #2c2c33 100%) border-box; box-shadow: 0 0 0 1px #0003, 0 8px 24px #0004;">
           <span class="text-dg-green/50 select-none">$</span>
-          <span id="install-pill" class="text-dg-text">pip install deepctl</span>
+          <span id="install-pill" class="text-dg-text">curl -fsSL deepgram.com/install.sh | sh</span>
           <button id="copy-pill" onclick="copyInstall()" aria-label="Copy"
                   class="text-dg-pebble hover:text-dg-green transition-colors">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -311,35 +311,37 @@ import '../styles/global.css';
         <h2 class="font-black tracking-tight mb-3" style="font-size: clamp(1.75rem, 4vw, 2.5rem); letter-spacing: -0.03em;">
           Get started in seconds
         </h2>
-        <p class="text-dg-muted text-base mb-12">Requires Python 3.10+. Authenticate once, then go.</p>
+        <p class="text-dg-muted text-base mb-12">One command. Every platform. Authenticate once, then go.</p>
 
         <!-- tabs -->
         <div class="inline-flex gap-1 p-1 rounded-2xl mb-5" style="background:#0b0b0c; border: 1px solid #2c2c33;">
-          {['pip', 'uvx', 'pipx', 'homebrew'].map((m, i) => (
-            <button
-              class={`install-tab px-4 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150 ${i === 0 ? 'bg-dg-charcoal text-dg-text shadow-sm' : 'text-dg-muted hover:text-dg-text'}`}
-              data-method={m} onclick="switchInstall(this)">{m}
-            </button>
-          ))}
+          <button class="install-tab px-4 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150 bg-dg-charcoal text-dg-text shadow-sm"
+                  data-method="unix" onclick="switchInstall(this)">macOS / Linux</button>
+          <button class="install-tab px-4 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150 text-dg-muted hover:text-dg-text"
+                  data-method="windows" onclick="switchInstall(this)">Windows</button>
         </div>
 
-        {[
-          ['pip',     'pip install deepctl'],
-          ['uvx',     'uvx deepctl --help'],
-          ['pipx',    'pipx install deepctl'],
-          ['homebrew','brew install deepgram/tap/deepctl'],
-        ].map(([method, cmd], i) => (
-          <div class={`install-block ${i > 0 ? 'hidden' : ''}`} data-method={method}>
-            <div class="flex items-center gap-3 px-5 py-4 rounded-2xl font-mono text-sm"
-                 style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9532 50%, #2c2c33 100%) border-box; box-shadow: 0 4px 24px #0003;">
-              <span class="text-dg-green/50 select-none">$</span>
-              <span class="flex-1 text-left text-dg-text">{cmd}</span>
-              <button onclick={`copyCmd('${cmd}')`} class="text-dg-pebble hover:text-dg-green transition-colors" aria-label="Copy">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-              </button>
-            </div>
+        <div class="install-block" data-method="unix">
+          <div class="flex items-center gap-3 px-5 py-4 rounded-2xl font-mono text-sm"
+               style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9532 50%, #2c2c33 100%) border-box; box-shadow: 0 4px 24px #0003;">
+            <span class="text-dg-green/50 select-none">$</span>
+            <span class="flex-1 text-left text-dg-text">curl -fsSL deepgram.com/install.sh | sh</span>
+            <button onclick="copyCmd('curl -fsSL deepgram.com/install.sh | sh')" class="text-dg-pebble hover:text-dg-green transition-colors" aria-label="Copy">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            </button>
           </div>
-        ))}
+        </div>
+
+        <div class="install-block hidden" data-method="windows">
+          <div class="flex items-center gap-3 px-5 py-4 rounded-2xl font-mono text-sm"
+               style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9532 50%, #2c2c33 100%) border-box; box-shadow: 0 4px 24px #0003;">
+            <span class="text-dg-green/50 select-none">PS&gt;</span>
+            <span class="flex-1 text-left text-dg-text">iwr deepgram.com/install.ps1 | iex</span>
+            <button onclick="copyCmd('iwr deepgram.com/install.ps1 | iex')" class="text-dg-pebble hover:text-dg-green transition-colors" aria-label="Copy">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            </button>
+          </div>
+        </div>
 
         <div class="mt-10 rounded-2xl overflow-hidden shadow-xl shadow-black/40"
              style="border: 1px solid transparent; background: linear-gradient(#0d0d11, #0d0d11) padding-box, linear-gradient(145deg, #2c2c33 0%, #149afb18 100%) border-box;">
