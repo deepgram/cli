@@ -5,7 +5,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
-  SITE_URL     = "https://deepgram-cli.netlify.app"
+  SITE_URL     = "https://cli.deepgram.com"
 
 # Netlify's own CI is disabled (stop_builds = true).
 # All deploys are driven by GitHub Actions:
