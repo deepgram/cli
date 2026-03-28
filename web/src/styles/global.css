@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dg-black:    #050506;
+  --color-dg-bg:       #0b0b0c;
+  --color-dg-charcoal: #1a1a1f;
+  --color-dg-border:   #2c2c33;
+  --color-dg-pebble:   #4e4e52;
+  --color-dg-green:    #13ef95;
+  --color-dg-blue:     #149afb;
+  --color-dg-text:     #fbfbff;
+  --color-dg-fog:      #edede2;
+  --color-dg-muted:    #949498;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Fira Code", Monaco, Consolas, "Courier New", monospace;
+}
+
+@layer base {
+  html { scroll-behavior: smooth; }
+  body {
+    background-color: #050506;
+    color: #fbfbff;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection { background: #13ef9530; color: #fbfbff; }
+}
+
+/* ── Real Deepgram gradient border (padding-box / border-box) ── */
+.gb-green {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#1a1a1f, #1a1a1f) padding-box,
+    linear-gradient(135deg, #13ef9540 0%, #2c2c33 60%) border-box;
+}
+.gb-blue {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#1a1a1f, #1a1a1f) padding-box,
+    linear-gradient(135deg, #149afb35 0%, #2c2c33 60%) border-box;
+}
+.gb-purple {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#1a1a1f, #1a1a1f) padding-box,
+    linear-gradient(135deg, #a855f730 0%, #2c2c33 60%) border-box;
+}
+.gb-amber {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#1a1a1f, #1a1a1f) padding-box,
+    linear-gradient(135deg, #f59e0b30 0%, #2c2c33 60%) border-box;
+}
+.gb-brand {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#141418, #141418) padding-box,
+    linear-gradient(135deg, #008fc140 0%, #00f09940 100%) border-box;
+}
+.gb-subtle {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#0b0b0c, #0b0b0c) padding-box,
+    linear-gradient(145deg, #2c2c3380 0%, #13ef9518 50%, #149afb12 100%) border-box;
+}
+
+/* ── Text gradient ── */
+.text-gradient {
+  background: linear-gradient(90deg, #149afb -30%, #13ef95 78%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Button glow (from marketing site: box-shadow green+blue) ── */
+.btn-glow {
+  box-shadow: 6px 0 20px 0 #38edac30, -6px 0 20px 0 #149afb25;
+}
+.btn-glow:hover {
+  box-shadow: 6px 0 28px 0 #38edac45, -6px 0 28px 0 #149afb35;
+}
+
+/* ── Animated gradient button background ── */
+.btn-animated-bg {
+  background: linear-gradient(to right, #008fc1, #00f099, #008fc1, #00f099);
+  background-size: 300% 100%;
+  transition: background-position 400ms ease-in-out;
+}
+.btn-animated-bg:hover {
+  background-position: 100% 0;
+}
+
+/* ── Hero conic gradient (inspired by marketing site) ── */
+.hero-conic {
+  background:
+    conic-gradient(from 90deg at 80% 55%, #000000, #0f7466) no-repeat,
+    conic-gradient(from 270deg at 20% 55%, #0f7466, #000000) no-repeat;
+  background-blend-mode: screen;
+}
+
+/* ── Cursor blink ── */
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.cursor-blink { animation: blink 1s step-start infinite; }
+
+/* ── Ping (pulsing dot) ── */
+@keyframes ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+.animate-ping { animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0b0b0c; }
+::-webkit-scrollbar-thumb { background: #2c2c33; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4e4e52; }

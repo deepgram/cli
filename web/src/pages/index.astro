@@ -1,0 +1,534 @@
+---
+import '../styles/global.css';
+---
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="generator" content={Astro.generator} />
+  <title>dg — The Deepgram CLI</title>
+  <meta name="description" content="Transcribe, synthesize, and stream audio directly from your terminal. The official CLI for Deepgram's speech AI platform." />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body class="bg-dg-black text-dg-text font-sans overflow-x-hidden" style="font-feature-settings: 'cv02','cv03','cv04','cv11';">
+
+  <!-- dot grid -->
+  <div class="fixed inset-0 pointer-events-none z-0 select-none" aria-hidden="true"
+       style="background-image: radial-gradient(circle, rgba(44,44,51,0.35) 1px, transparent 1px); background-size: 28px 28px;"></div>
+  <!-- vignette -->
+  <div class="fixed inset-0 pointer-events-none z-0" aria-hidden="true"
+       style="background: radial-gradient(ellipse 100% 50% at 50% 0%, transparent 30%, #050506 100%);"></div>
+
+  <!-- ══════════════════════════════════════════ NAV ══ -->
+  <header class="fixed top-0 inset-x-0 z-50 px-4 pt-4">
+    <nav class="max-w-5xl mx-auto h-12 flex items-center justify-between px-4 rounded-2xl border border-dg-border/60 backdrop-blur-2xl bg-dg-bg/60 shadow-xl shadow-black/40">
+      <!-- logo -->
+      <div class="flex items-center gap-2.5">
+        <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="Deepgram">
+          <rect width="32" height="32" rx="8" fill="#13ef95" fill-opacity="0.12"/>
+          <path d="M8 8h6v16H8V8zm6 0h6v8h-6V8z" fill="#13ef95"/>
+        </svg>
+        <span class="font-bold text-sm tracking-tight text-dg-text">deepgram</span>
+        <span class="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wide bg-dg-green/12 border border-dg-green/25 text-dg-green">CLI</span>
+      </div>
+      <!-- links -->
+      <div class="flex items-center gap-5">
+        <a href="https://developers.deepgram.com" target="_blank" rel="noopener"
+           class="hidden sm:block text-xs text-dg-muted hover:text-dg-text transition-colors duration-150">Docs</a>
+        <a href="https://github.com/deepgram/cli" target="_blank" rel="noopener"
+           class="text-xs text-dg-muted hover:text-dg-text transition-colors duration-150 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span class="hidden sm:inline">GitHub</span>
+        </a>
+        <a href="#install"
+           class="btn-animated-bg btn-glow px-4 py-1.5 rounded-xl text-xs font-bold text-black transition-all duration-200">
+          Install
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="relative z-10">
+
+    <!-- ══════════════════════════════════════════ HERO ══ -->
+    <section class="relative pt-44 pb-32 px-6 overflow-hidden">
+
+      <!-- marketing site-style conic gradient -->
+      <div class="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[600px] opacity-30"
+             style="background: conic-gradient(from 90deg at 70% 55%, #000, #0f7466), conic-gradient(from 270deg at 30% 55%, #0f7466, #000); background-blend-mode: screen; mix-blend-mode: screen; filter: blur(60px);"></div>
+        <div class="absolute -top-20 left-1/2 -translate-x-1/2 w-[600px] h-[400px]"
+             style="background: radial-gradient(ellipse, #13ef9514 0%, transparent 70%);"></div>
+        <div class="absolute top-40 left-1/4 w-80 h-80"
+             style="background: radial-gradient(ellipse, #149afb0c 0%, transparent 70%);"></div>
+      </div>
+
+      <div class="relative max-w-4xl mx-auto text-center">
+
+        <!-- badge -->
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full mb-10 text-xs text-dg-muted"
+             style="border: 1px solid transparent; background: linear-gradient(#1a1a1f, #1a1a1f) padding-box, linear-gradient(90deg, #2c2c33, #13ef9540) border-box;">
+          <span class="relative inline-flex">
+            <span class="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-dg-green opacity-40"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-dg-green"></span>
+          </span>
+          Official Deepgram Developer Tool &nbsp;·&nbsp; v0.2.4
+        </div>
+
+        <!-- headline — marketing site uses 96px display -->
+        <h1 class="font-black tracking-tight leading-[0.92] mb-8"
+            style="font-size: clamp(3rem, 8vw, 5.5rem); letter-spacing: -0.04em;">
+          <span class="block text-dg-text">Speech AI,</span>
+          <span class="block text-gradient" style="padding-bottom: 0.1em;">in your terminal.</span>
+        </h1>
+
+        <p class="text-lg text-dg-muted max-w-lg mx-auto mb-10 leading-relaxed font-light">
+          Transcribe, synthesize, and stream audio. The official CLI for Deepgram's speech platform.
+        </p>
+
+        <!-- CTAs -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-3 mb-14">
+          <a href="#install"
+             class="btn-animated-bg btn-glow group w-full sm:w-auto px-7 py-3.5 rounded-xl text-sm font-bold text-black flex items-center justify-center gap-2">
+            Get started
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+            </svg>
+          </a>
+          <a href="https://github.com/deepgram/cli" target="_blank" rel="noopener"
+             class="group w-full sm:w-auto px-7 py-3.5 rounded-xl text-sm font-semibold text-dg-fog hover:text-dg-text transition-all duration-200 flex items-center justify-center gap-2"
+             style="border: 1px solid transparent; background: linear-gradient(#1a1a1f, #1a1a1f) padding-box, linear-gradient(135deg, #2c2c33 0%, #2c2c3380 100%) border-box;">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+            View on GitHub
+          </a>
+        </div>
+
+        <!-- install chip -->
+        <div class="inline-flex items-center gap-3 px-4 py-2.5 rounded-xl font-mono text-sm backdrop-blur-sm"
+             style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9528 50%, #2c2c33 100%) border-box; box-shadow: 0 0 0 1px #0003, 0 8px 24px #0004;">
+          <span class="text-dg-green/50 select-none">$</span>
+          <span id="install-pill" class="text-dg-text">pip install deepctl</span>
+          <button id="copy-pill" onclick="copyInstall()" aria-label="Copy"
+                  class="text-dg-pebble hover:text-dg-green transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Terminal ── -->
+      <div class="relative max-w-[660px] mx-auto mt-20">
+        <!-- ambient glow -->
+        <div class="absolute -inset-8 rounded-3xl pointer-events-none"
+             style="background: radial-gradient(ellipse at 50% 90%, #13ef9514 0%, transparent 70%);"></div>
+
+        <!-- gradient border using real technique -->
+        <div class="rounded-2xl shadow-2xl shadow-black"
+             style="border: 1px solid transparent; background: linear-gradient(#0d0d11, #0d0d11) padding-box, linear-gradient(145deg, #2c2c33 0%, #13ef9535 50%, #149afb20 100%) border-box;">
+          <!-- chrome -->
+          <div class="flex items-center justify-between px-4 py-3" style="border-bottom: 1px solid #2c2c33;">
+            <div class="flex items-center gap-1.5">
+              <span class="w-3 h-3 rounded-full" style="background:#ff5f56;"></span>
+              <span class="w-3 h-3 rounded-full" style="background:#ffbd2e;"></span>
+              <span class="w-3 h-3 rounded-full" style="background:#27c93f;"></span>
+            </div>
+            <div class="font-mono text-[11px] text-dg-muted flex items-center gap-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-dg-green/50"></span>
+              dg — zsh — 80×24
+            </div>
+            <div class="w-14"></div>
+          </div>
+          <!-- body -->
+          <div class="px-5 py-5 font-mono text-sm leading-7 min-h-[290px]"
+               style="background: linear-gradient(180deg, #0d0d11 0%, #0f0f13 100%); border-radius: 0 0 14px 14px;">
+            <div id="terminal-output" class="text-dg-fog"></div>
+            <div class="flex items-center gap-2 text-dg-muted">
+              <span class="text-dg-green font-bold">❯</span>
+              <span id="terminal-cursor" class="inline-block w-[7px] h-[15px] rounded-sm align-middle bg-dg-green/80 cursor-blink"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ STATS STRIP ══ -->
+    <div style="border-top: 1px solid #2c2c3340; border-bottom: 1px solid #2c2c3340;">
+      <div class="max-w-5xl mx-auto py-6 px-6 grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
+        {[
+          ['25+', 'Commands'],
+          ['nova-3', 'Default STT model'],
+          ['Python 3.10+', 'Runtime'],
+          ['MIT', 'License'],
+        ].map(([v, l]) => (
+          <div>
+            <div class="font-bold text-dg-text" style="font-size:1.25rem;">{v}</div>
+            <div class="text-xs text-dg-muted mt-1">{l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ BENTO ══ -->
+    <section class="py-28 px-6">
+      <div class="max-w-5xl mx-auto">
+        <div class="text-center mb-16">
+          <h2 class="font-black tracking-tight mb-3" style="font-size: clamp(1.75rem, 4vw, 2.5rem); letter-spacing: -0.03em;">
+            Everything speech AI. One command.
+          </h2>
+          <p class="text-dg-muted text-base max-w-lg mx-auto">Built for developers who live in the terminal and need their tools to keep up.</p>
+        </div>
+
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+          <!-- STT — tall card -->
+          <div class="gb-green rounded-2xl lg:row-span-2 group hover:shadow-lg hover:shadow-dg-green/5 transition-shadow">
+            <div class="rounded-2xl h-full bg-dg-charcoal p-6 flex flex-col" style="background: linear-gradient(160deg, #1a1a1f 0%, #161619 100%);">
+              <div class="w-11 h-11 rounded-xl flex items-center justify-center mb-5" style="background: #13ef9515; border: 1px solid #13ef9530;">
+                <svg class="w-5 h-5 text-dg-green" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+              </div>
+              <h3 class="font-bold text-base mb-2 text-dg-text">Speech-to-text</h3>
+              <p class="text-sm text-dg-muted leading-relaxed flex-1">Transcribe files and URLs with nova-3. Speaker diarization, smart formatting, topic detection, and summaries — all from one command.</p>
+              <div class="mt-6 px-3 py-2 rounded-lg font-mono text-xs text-dg-muted group-hover:text-dg-pebble transition-colors"
+                   style="background:#0b0b0c; border: 1px solid #2c2c33;">
+                <span class="text-dg-green">$</span> dg transcribe <span class="text-amber-400">podcast.mp3</span> --diarize
+              </div>
+            </div>
+          </div>
+
+          <!-- Live streaming -->
+          <div class="gb-blue rounded-2xl group hover:shadow-lg hover:shadow-dg-blue/5 transition-shadow">
+            <div class="rounded-2xl bg-dg-charcoal p-6" style="background: linear-gradient(160deg, #1a1a1f 0%, #161619 100%);">
+              <div class="w-11 h-11 rounded-xl flex items-center justify-center mb-5" style="background: #149afb15; border: 1px solid #149afb30;">
+                <svg class="w-5 h-5 text-dg-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+              </div>
+              <h3 class="font-bold text-base mb-2 text-dg-text">Live streaming</h3>
+              <p class="text-sm text-dg-muted leading-relaxed">WebSocket stream from mic or stdin. Real-time transcripts with interim results and word-level timing.</p>
+            </div>
+          </div>
+
+          <!-- TTS -->
+          <div class="gb-purple rounded-2xl group hover:shadow-lg hover:shadow-purple-500/5 transition-shadow">
+            <div class="rounded-2xl bg-dg-charcoal p-6" style="background: linear-gradient(160deg, #1a1a1f 0%, #161619 100%);">
+              <div class="w-11 h-11 rounded-xl flex items-center justify-center mb-5" style="background: #a855f715; border: 1px solid #a855f730;">
+                <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m0 0l-2-2m2 2l2-2M6.464 8.464a5 5 0 000 7.072"/></svg>
+              </div>
+              <h3 class="font-bold text-base mb-2 text-dg-text">Text-to-speech</h3>
+              <p class="text-sm text-dg-muted leading-relaxed">Generate speech with Aura voices. Pipe to ffplay or save to file.</p>
+            </div>
+          </div>
+
+          <!-- Agent — wide -->
+          <div class="gb-amber rounded-2xl sm:col-span-2 group hover:shadow-lg hover:shadow-amber-400/5 transition-shadow">
+            <div class="rounded-2xl bg-dg-charcoal p-6 flex flex-col sm:flex-row gap-6" style="background: linear-gradient(160deg, #1a1a1f 0%, #161619 100%);">
+              <div class="flex-1">
+                <div class="w-11 h-11 rounded-xl flex items-center justify-center mb-5" style="background: #f59e0b15; border: 1px solid #f59e0b30;">
+                  <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                </div>
+                <h3 class="font-bold text-base mb-2 text-dg-text">Agent-ready by default</h3>
+                <p class="text-sm text-dg-muted leading-relaxed">Auto-detects Claude Code, Aider, and Codex. Disables prompts, routes status to stderr, switches to JSON — no flags needed.</p>
+              </div>
+              <div class="sm:w-52 rounded-xl font-mono text-xs p-3.5 leading-6 self-start flex-shrink-0"
+                   style="background:#0b0b0c; border: 1px solid #2c2c33;">
+                <div class="text-dg-muted mb-1"># Auto-detected</div>
+                <div><span class="text-amber-400">CLAUDECODE</span>=<span class="text-dg-green">1</span></div>
+                <div class="mt-2 text-dg-muted"># Explicit</div>
+                <div class="text-dg-text">dg ... <span class="text-amber-400">--agent-friendly</span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ PIPES ══ -->
+    <section class="py-28 px-6" style="border-top: 1px solid #2c2c3330;">
+      <div class="max-w-5xl mx-auto grid lg:grid-cols-[1fr_1.15fr] gap-16 items-center">
+        <div>
+          <p class="text-xs font-bold text-dg-green uppercase tracking-widest mb-5">UNIX philosophy</p>
+          <h2 class="font-black tracking-tight mb-5 leading-tight" style="font-size: clamp(1.75rem, 4vw, 2.5rem); letter-spacing: -0.03em;">
+            Pipe-friendly.<br/>Script-ready.
+          </h2>
+          <p class="text-dg-muted leading-relaxed mb-8 text-sm">
+            Every command writes structured data to stdout and diagnostics to stderr.
+            Switch formats with <code class="font-mono text-dg-text text-xs px-1.5 py-0.5 rounded" style="background:#1a1a1f; border: 1px solid #2c2c33;">-o json</code> or let it
+            auto-switch when piped. Plays nicely with every UNIX tool you already know.
+          </p>
+          <div class="space-y-4">
+            {[
+              ['JSON / YAML / table / CSV', 'Explicit output format, or auto-JSON when piped.'],
+              ['Errors to stderr', 'Clean stdout channel. No surprises in pipes.'],
+              ['Exit codes everywhere', 'Non-zero on error. Works in set -e scripts.'],
+            ].map(([label, desc]) => (
+              <div class="flex gap-3 items-start">
+                <div class="mt-0.5 w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center" style="background:#13ef9515; border: 1px solid #13ef9535;">
+                  <svg class="w-2.5 h-2.5 text-dg-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </div>
+                <div>
+                  <div class="font-semibold text-sm text-dg-text">{label}</div>
+                  <div class="text-xs text-dg-muted mt-0.5">{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div class="rounded-2xl overflow-hidden shadow-2xl shadow-black/60"
+             style="border: 1px solid transparent; background: linear-gradient(#0d0d11, #0d0d11) padding-box, linear-gradient(145deg, #2c2c33 0%, #149afb25 100%) border-box;">
+          <div class="flex items-center gap-1.5 px-4 py-3.5" style="background:#090909; border-bottom: 1px solid #2c2c33;">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
+          </div>
+          <div class="p-5 font-mono text-sm leading-7 space-y-0.5">
+            <div class="text-dg-muted text-xs"># Transcribe + extract with jq</div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg transcribe call.mp3 -o json \</span></div>
+            <div class="pl-5 text-dg-fog">| jq <span class="text-amber-400">'.results.channels[0]
+    .alternatives[0].transcript'</span></div>
+            <div class="text-dg-muted pt-0.5 text-xs">"Hello and welcome to our Q1 review..."</div>
+
+            <div class="text-dg-muted text-xs pt-3"># TTS piped to speaker</div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg speak <span class="text-amber-400">"Hello from Deepgram"</span> \</span></div>
+            <div class="pl-5 text-dg-fog">| ffplay -nodisp -autoexit -</div>
+
+            <div class="text-dg-muted text-xs pt-3"># Stream mic → log</div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg listen --mic -o json | tee log.jsonl</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ INSTALL ══ -->
+    <section id="install" class="py-28 px-6" style="border-top: 1px solid #2c2c3330;">
+      <div class="max-w-2xl mx-auto text-center">
+        <h2 class="font-black tracking-tight mb-3" style="font-size: clamp(1.75rem, 4vw, 2.5rem); letter-spacing: -0.03em;">
+          Get started in seconds
+        </h2>
+        <p class="text-dg-muted text-base mb-12">Requires Python 3.10+. Authenticate once, then go.</p>
+
+        <!-- tabs -->
+        <div class="inline-flex gap-1 p-1 rounded-2xl mb-5" style="background:#0b0b0c; border: 1px solid #2c2c33;">
+          {['pip', 'uvx', 'pipx', 'homebrew'].map((m, i) => (
+            <button
+              class={`install-tab px-4 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150 ${i === 0 ? 'bg-dg-charcoal text-dg-text shadow-sm' : 'text-dg-muted hover:text-dg-text'}`}
+              data-method={m} onclick="switchInstall(this)">{m}
+            </button>
+          ))}
+        </div>
+
+        {[
+          ['pip',     'pip install deepctl'],
+          ['uvx',     'uvx deepctl --help'],
+          ['pipx',    'pipx install deepctl'],
+          ['homebrew','brew install deepgram/tap/deepctl'],
+        ].map(([method, cmd], i) => (
+          <div class={`install-block ${i > 0 ? 'hidden' : ''}`} data-method={method}>
+            <div class="flex items-center gap-3 px-5 py-4 rounded-2xl font-mono text-sm"
+                 style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9532 50%, #2c2c33 100%) border-box; box-shadow: 0 4px 24px #0003;">
+              <span class="text-dg-green/50 select-none">$</span>
+              <span class="flex-1 text-left text-dg-text">{cmd}</span>
+              <button onclick={`copyCmd('${cmd}')`} class="text-dg-pebble hover:text-dg-green transition-colors" aria-label="Copy">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              </button>
+            </div>
+          </div>
+        ))}
+
+        <div class="mt-10 rounded-2xl overflow-hidden shadow-xl shadow-black/40"
+             style="border: 1px solid transparent; background: linear-gradient(#0d0d11, #0d0d11) padding-box, linear-gradient(145deg, #2c2c33 0%, #149afb18 100%) border-box;">
+          <div class="flex items-center gap-1.5 px-4 py-3.5" style="background:#090909; border-bottom: 1px solid #2c2c33;">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
+          </div>
+          <div class="p-5 font-mono text-sm text-left space-y-0.5 leading-7">
+            <div class="text-dg-muted text-xs"># Authenticate</div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg login</span></div>
+            <div class="text-dg-muted text-xs pt-2"># Transcribe</div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg transcribe audio.mp3</span></div>
+            <div class="text-dg-muted text-xs pt-2"># Explore</div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg --help</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ AGENTS ══ -->
+    <section class="py-28 px-6" style="border-top: 1px solid #2c2c3330;">
+      <div class="max-w-5xl mx-auto">
+        <!-- from marketing site: radial corner gradients on big CTA sections -->
+        <div class="relative rounded-3xl overflow-hidden"
+             style="border: 1px solid transparent; background: linear-gradient(#0e0e12, #0e0e12) padding-box, linear-gradient(135deg, #2c2c33 0%, #13ef9525 50%, #149afb18 100%) border-box; box-shadow: inset 0 0 80px #13ef9508;">
+          <div class="absolute top-0 right-0 w-80 h-80 pointer-events-none"
+               style="background: radial-gradient(ellipse at top right, #13ef9510 0%, transparent 70%);"></div>
+          <div class="absolute bottom-0 left-0 w-64 h-64 pointer-events-none"
+               style="background: radial-gradient(ellipse at bottom left, #149afb08 0%, transparent 70%);"></div>
+
+          <div class="relative grid lg:grid-cols-2 gap-10 p-8 sm:p-14 items-center">
+            <div>
+              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-dg-green text-xs font-semibold mb-6"
+                   style="border: 1px solid #13ef9325; background: #13ef9312;">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                Built for AI agents
+              </div>
+              <h2 class="font-black tracking-tight mb-4 leading-tight" style="font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -0.03em;">
+                Works with your AI coding tools
+              </h2>
+              <p class="text-dg-muted leading-relaxed mb-6 text-sm">
+                <code class="font-mono text-dg-text text-xs px-1.5 py-0.5 rounded" style="background:#1a1a1f; border: 1px solid #2c2c33;">dg</code>
+                auto-detects Claude Code, Aider, Codex and more. Detected agents get
+                non-interactive defaults, clean JSON output, and stderr-only status — automatically.
+              </p>
+              <code class="inline-block font-mono text-xs px-4 py-2.5 rounded-xl text-dg-fog"
+                    style="background:#0b0b0c; border: 1px solid #2c2c33;">
+                dg transcribe audio.mp3 --agent-friendly
+              </code>
+            </div>
+
+            <div class="rounded-2xl overflow-hidden shadow-xl shadow-black/60"
+                 style="border: 1px solid transparent; background: linear-gradient(#090a0d, #090a0d) padding-box, linear-gradient(145deg, #2c2c33 0%, #13ef9525 100%) border-box;">
+              <div class="flex items-center gap-1.5 px-4 py-3" style="background:#07070a; border-bottom: 1px solid #1e1e24;">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f56]"></span>
+                <span class="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]"></span>
+                <span class="w-2.5 h-2.5 rounded-full bg-[#27c93f]"></span>
+              </div>
+              <div class="p-4 font-mono text-xs leading-6">
+                <div class="text-dg-green mb-2">$ dg transcribe --agent-friendly</div>
+                <div class="text-dg-pebble">{"{"}</div>
+                <div class="pl-3 text-dg-fog">"command": <span class="text-amber-400">"transcribe"</span>,</div>
+                <div class="pl-3 text-dg-fog">"agent_hints": <span class="text-amber-400 break-words">"Accepts local files or HTTP URLs..."</span>,</div>
+                <div class="pl-3 text-dg-fog">"requires_auth": <span class="text-dg-blue">true</span>,</div>
+                <div class="pl-3 text-dg-fog">"non_interactive": <span class="text-dg-blue">true</span>,</div>
+                <div class="pl-3 text-dg-fog">"output_formats": [<span class="text-amber-400">"json"</span>, <span class="text-amber-400">"yaml"</span>, ...]</div>
+                <div class="text-dg-pebble">{"}"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══════════════════════════════════════ FOOTER ══ -->
+  <footer class="py-14 px-6 relative z-10" style="border-top: 1px solid #2c2c3330;">
+    <div class="max-w-5xl mx-auto">
+      <div class="flex flex-col sm:flex-row justify-between gap-8 mb-10">
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <svg width="20" height="20" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#13ef95" fill-opacity="0.12"/><path d="M8 8h6v16H8V8zm6 0h6v8h-6V8z" fill="#13ef95"/></svg>
+            <span class="font-bold text-sm">deepgram</span>
+            <span class="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wide" style="background: #13ef9512; border: 1px solid #13ef9325; color: #13ef95;">CLI</span>
+          </div>
+          <p class="text-xs text-dg-muted leading-relaxed max-w-xs">The official CLI for Deepgram's speech AI platform. Built with ♥ by Deepgram DevRel.</p>
+        </div>
+        <div class="grid grid-cols-2 sm:flex sm:flex-row gap-4 sm:gap-8 text-xs text-dg-muted">
+          <a href="https://developers.deepgram.com" target="_blank" rel="noopener" class="hover:text-dg-text transition-colors">Docs</a>
+          <a href="https://console.deepgram.com" target="_blank" rel="noopener" class="hover:text-dg-text transition-colors">Console</a>
+          <a href="https://developers.deepgram.com/reference" target="_blank" rel="noopener" class="hover:text-dg-text transition-colors">API Reference</a>
+          <a href="https://github.com/deepgram/cli" target="_blank" rel="noopener" class="hover:text-dg-text transition-colors">GitHub</a>
+          <a href="https://deepgram.com" target="_blank" rel="noopener" class="hover:text-dg-text transition-colors">Deepgram.com</a>
+        </div>
+      </div>
+      <div class="pt-6 text-[11px] text-dg-pebble" style="border-top: 1px solid #2c2c3330;">
+        © {new Date().getFullYear()} Deepgram, Inc. All rights reserved.
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
+
+<script>
+  // ── Terminal typewriter ──────────────────────────────────────
+  const LINES = [
+    { p: '❯ ', t: 'dg transcribe keynote.mp3 --diarize', c: '' },
+    { p: '',   t: '✓  Transcribing · nova-3 · 2 speakers detected', c: '#13ef95' },
+    { p: '',   t: '[Speaker 1]  "Welcome to our annual product keynote."', c: '#949498' },
+    { p: '',   t: '[Speaker 2]  "This year we ship the fastest model yet."', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    { p: '❯ ', t: 'dg speak "Hello from Deepgram" | ffplay -nodisp -', c: '' },
+    { p: '',   t: '✓  Synthesizing · aura-2-en-us', c: '#13ef95' },
+    { p: '',   t: '▶  Streaming 3.2s of audio…', c: '#949498' },
+    { p: '',   t: '', c: '' },
+    { p: '❯ ', t: 'dg listen --mic --model nova-3 --interim', c: '' },
+    { p: '',   t: '✓  Listening on Built-in Microphone…', c: '#13ef95' },
+    { p: '',   t: '"The quick brown fox jumps over the lazy dog."', c: '#edede2' },
+  ];
+
+  const out = document.getElementById('terminal-output');
+  let li = 0, ci = 0, cur: HTMLElement | null = null;
+
+  function tick() {
+    if (li >= LINES.length) {
+      setTimeout(() => { if (out) out.innerHTML = ''; li = 0; ci = 0; cur = null; setTimeout(tick, 400); }, 3800);
+      return;
+    }
+    const line = LINES[li];
+    if (ci === 0) {
+      const row = document.createElement('div');
+      row.className = 'flex gap-2';
+      if (line.t === '') {
+        row.innerHTML = '&nbsp;';
+        out?.appendChild(row);
+        li++; ci = 0; cur = null;
+        setTimeout(tick, 60);
+        return;
+      }
+      if (line.p) {
+        const pfx = document.createElement('span');
+        pfx.style.cssText = 'color:#13ef95; font-weight:700;';
+        pfx.textContent = line.p;
+        row.appendChild(pfx);
+      }
+      const span = document.createElement('span');
+      if (line.c) span.style.color = line.c;
+      row.appendChild(span);
+      out?.appendChild(row);
+      cur = span;
+    }
+    if (cur && ci < line.t.length) {
+      cur.textContent += line.t[ci++];
+      setTimeout(tick, line.p ? 36 : 8);
+    } else {
+      li++; ci = 0; cur = null;
+      setTimeout(tick, line.p ? 480 : 80);
+    }
+  }
+  setTimeout(tick, 700);
+
+  // ── Tabs ──────────────────────────────────────────────────────
+  function switchInstall(btn: HTMLElement) {
+    const m = btn.dataset['method'];
+    document.querySelectorAll<HTMLElement>('.install-tab').forEach(t => {
+      t.classList.remove('bg-dg-charcoal', 'text-dg-text', 'shadow-sm');
+      t.classList.add('text-dg-muted');
+    });
+    btn.classList.remove('text-dg-muted');
+    btn.classList.add('bg-dg-charcoal', 'text-dg-text', 'shadow-sm');
+    document.querySelectorAll<HTMLElement>('.install-block').forEach(b => {
+      b.classList.toggle('hidden', b.dataset['method'] !== m);
+    });
+  }
+
+  // ── Copy ─────────────────────────────────────────────────────
+  function copyInstall() {
+    const t = document.getElementById('install-pill')?.textContent ?? '';
+    navigator.clipboard.writeText(t).then(() => {
+      const b = document.getElementById('copy-pill') as HTMLElement;
+      if (b) { b.style.color = '#13ef95'; setTimeout(() => { b.style.color = ''; }, 1500); }
+    });
+  }
+  function copyCmd(t: string) { navigator.clipboard.writeText(t); }
+
+  (window as any).switchInstall = switchInstall;
+  (window as any).copyInstall = copyInstall;
+  (window as any).copyCmd = copyCmd;
+</script>
