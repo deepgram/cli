@@ -28,25 +28,15 @@ import '../styles/global.css';
     <nav class="max-w-5xl mx-auto h-12 flex items-center justify-between px-4 rounded-2xl border border-dg-border/60 backdrop-blur-2xl bg-dg-bg/60 shadow-xl shadow-black/40">
       <!-- logo -->
       <div class="flex items-center gap-2.5">
-        <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-label="Deepgram">
-          <rect width="32" height="32" rx="8" fill="#13ef95" fill-opacity="0.12"/>
-          <path d="M8 8h6v16H8V8zm6 0h6v8h-6V8z" fill="#13ef95"/>
-        </svg>
-        <span class="font-bold text-sm tracking-tight text-dg-text">deepgram</span>
+        <img src="/wordmark-dark.svg" alt="Deepgram" style="height:18px; width:auto;" />
         <span class="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wide bg-dg-green/12 border border-dg-green/25 text-dg-green">CLI</span>
       </div>
       <!-- links -->
       <div class="flex items-center gap-5">
-        <a href="https://developers.deepgram.com" target="_blank" rel="noopener"
-           class="hidden sm:block text-xs text-dg-muted hover:text-dg-text transition-colors duration-150">Docs</a>
         <a href="https://github.com/deepgram/cli" target="_blank" rel="noopener"
            class="text-xs text-dg-muted hover:text-dg-text transition-colors duration-150 flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
           <span class="hidden sm:inline">GitHub</span>
-        </a>
-        <a href="#install"
-           class="btn-animated-bg btn-glow px-4 py-1.5 rounded-xl text-xs font-bold text-black transition-all duration-200">
-          Install
         </a>
       </div>
     </nav>
@@ -90,31 +80,14 @@ import '../styles/global.css';
           Transcribe, synthesize, and stream audio. The official CLI for Deepgram's speech platform.
         </p>
 
-        <!-- CTAs -->
-        <div class="flex flex-col sm:flex-row items-center justify-center gap-3 mb-14">
-          <a href="#install"
-             class="btn-animated-bg btn-glow group w-full sm:w-auto px-7 py-3.5 rounded-xl text-sm font-bold text-black flex items-center justify-center gap-2">
-            Get started
-            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
-            </svg>
-          </a>
-          <a href="https://github.com/deepgram/cli" target="_blank" rel="noopener"
-             class="group w-full sm:w-auto px-7 py-3.5 rounded-xl text-sm font-semibold text-dg-fog hover:text-dg-text transition-all duration-200 flex items-center justify-center gap-2"
-             style="border: 1px solid transparent; background: linear-gradient(#1a1a1f, #1a1a1f) padding-box, linear-gradient(135deg, #2c2c33 0%, #2c2c3380 100%) border-box;">
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-            View on GitHub
-          </a>
-        </div>
-
-        <!-- install chip -->
-        <div class="inline-flex items-center gap-3 px-4 py-2.5 rounded-xl font-mono text-sm backdrop-blur-sm"
-             style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9528 50%, #2c2c33 100%) border-box; box-shadow: 0 0 0 1px #0003, 0 8px 24px #0004;">
+        <!-- install chip — primary CTA -->
+        <div class="inline-flex items-center gap-3 px-5 py-3.5 rounded-xl font-mono text-sm backdrop-blur-sm"
+             style="border: 1px solid transparent; background: linear-gradient(#111115, #111115) padding-box, linear-gradient(90deg, #2c2c33 0%, #13ef9532 50%, #2c2c33 100%) border-box; box-shadow: 0 0 0 1px #0003, 0 8px 32px #0005;">
           <span class="text-dg-green/50 select-none">$</span>
           <span id="install-pill" class="text-dg-text">curl -fsSL deepgram.com/install.sh | sh</span>
           <button id="copy-pill" onclick="copyInstall()" aria-label="Copy"
-                  class="text-dg-pebble hover:text-dg-green transition-colors">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  class="text-dg-pebble hover:text-dg-green transition-colors ml-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
             </svg>
           </button>
@@ -424,9 +397,8 @@ import '../styles/global.css';
     <div class="max-w-5xl mx-auto">
       <div class="flex flex-col sm:flex-row justify-between gap-8 mb-10">
         <div>
-          <div class="flex items-center gap-2 mb-3">
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#13ef95" fill-opacity="0.12"/><path d="M8 8h6v16H8V8zm6 0h6v8h-6V8z" fill="#13ef95"/></svg>
-            <span class="font-bold text-sm">deepgram</span>
+          <div class="flex items-center gap-2.5 mb-3">
+            <img src="/wordmark-dark.svg" alt="Deepgram" style="height:18px; width:auto;" />
             <span class="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wide" style="background: #13ef9512; border: 1px solid #13ef9325; color: #13ef95;">CLI</span>
           </div>
           <p class="text-xs text-dg-muted leading-relaxed max-w-xs">The official CLI for Deepgram's speech AI platform. Built with ♥ by Deepgram DevRel.</p>
