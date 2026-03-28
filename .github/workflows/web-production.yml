@@ -1,0 +1,50 @@
+name: Deploy web — production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Only one production deploy at a time; never cancel in-progress
+concurrency:
+  group: web-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & deploy to production
+    # Only fire on root-package releases (v0.2.4, v1.0.0, …).
+    # Sub-package tags look like deepctl-core-v0.2.3 — skip those.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    environment:
+      name: web-production
+      url: https://cli.deepgram.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build
+        run: npm run build
+        working-directory: web
+        env:
+          SITE_URL: https://cli.deepgram.com
+
+      - name: Deploy to Netlify (production)
+        run: npx netlify-cli deploy --dir dist --prod
+        working-directory: web
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
