@@ -43,7 +43,7 @@ jobs:
           SITE_URL: https://cli.deepgram.com
 
       - name: Deploy to Netlify (production)
-        run: npx netlify-cli deploy --dir dist --prod
+        run: npx netlify-cli deploy --dir dist --prod --no-build
         working-directory: web
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}

@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: web-staging
-      url: ${{ steps.deploy.outputs.deploy-url }}
+      url: https://staging--deepgram-cli.netlify.app
 
     steps:
       - uses: actions/checkout@v4
@@ -40,14 +40,7 @@ jobs:
           SITE_URL: ${{ vars.STAGING_SITE_URL || 'https://cli.staging.deepgram.com' }}
 
       - name: Deploy to Netlify (staging)
-        id: deploy
-        run: |
-          URL=$(npx netlify-cli deploy \
-            --dir dist \
-            --alias staging \
-            --json \
-            2>/dev/null | jq -r '.deploy_url')
-          echo "deploy-url=$URL" >> "$GITHUB_OUTPUT"
+        run: npx netlify-cli deploy --dir dist --alias staging --no-build
         working-directory: web
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
