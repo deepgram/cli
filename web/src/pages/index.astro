@@ -2,17 +2,233 @@
 import '../styles/global.css';
 ---
 
-<html lang="en">
+<html lang="en" prefix="og: https://ogp.me/ns#">
 <head>
+  <!-- ── Essentials ──────────────────────────────────────── -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="generator" content={Astro.generator} />
-  <title>dg — The Deepgram CLI</title>
-  <meta name="description" content="Transcribe, synthesize, and stream audio directly from your terminal. The official CLI for Deepgram's speech AI platform." />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+  <!-- ── Primary SEO ────────────────────────────────────── -->
+  <title>Deepgram CLI (dg) — Speech-to-Text, TTS & Audio AI from Your Terminal</title>
+  <meta name="description" content="The official Deepgram CLI. Transcribe audio files, stream live speech, synthesize text-to-speech, and call the Deepgram API — all from your terminal. One-line install on macOS, Linux, and Windows." />
+  <meta name="keywords" content="Deepgram CLI, speech-to-text command line, audio transcription CLI, dg command, deepctl, transcribe audio terminal, text-to-speech CLI, speech AI, nova-3 model, live transcription, audio intelligence, developer tool, speech recognition command line" />
+  <meta name="author" content="Deepgram" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <link rel="canonical" href="https://cli.deepgram.com/" />
+
+  <!-- ── Open Graph ──────────────────────────────────────── -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Deepgram CLI" />
+  <meta property="og:title" content="Deepgram CLI — Speech AI from Your Terminal" />
+  <meta property="og:description" content="Transcribe audio files, stream live speech, and synthesize voices directly from your terminal. The official CLI for Deepgram's speech AI platform." />
+  <meta property="og:url" content="https://cli.deepgram.com/" />
+  <meta property="og:image" content="https://cli.deepgram.com/og-image.svg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Deepgram CLI — Speech AI, in your terminal. Install with curl -fsSL deepgram.com/install.sh | sh" />
+  <meta property="og:locale" content="en_US" />
+
+  <!-- ── Twitter / X Card ───────────────────────────────── -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@DeepgramAI" />
+  <meta name="twitter:creator" content="@DeepgramAI" />
+  <meta name="twitter:title" content="Deepgram CLI — Speech AI from Your Terminal" />
+  <meta name="twitter:description" content="Transcribe audio files, stream live speech, and synthesize voices directly from your terminal. Install with one command." />
+  <meta name="twitter:image" content="https://cli.deepgram.com/og-image.svg" />
+  <meta name="twitter:image:alt" content="Deepgram CLI landing page" />
+
+  <!-- ── Favicons & Manifest ────────────────────────────── -->
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon.ico" sizes="48x48" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <meta name="theme-color" content="#13ef95" />
+  <meta name="msapplication-TileColor" content="#050506" />
+
+  <!-- ── Fonts ──────────────────────────────────────────── -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- ── DNS prefetch ───────────────────────────────────── -->
+  <link rel="dns-prefetch" href="https://deepgram.com" />
+  <link rel="dns-prefetch" href="https://developers.deepgram.com" />
+  <link rel="dns-prefetch" href="https://github.com" />
+
+  <!-- ── LLMs.txt discovery ────────────────────────────── -->
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="LLMs.txt — AI-readable site summary" />
+  <link rel="alternate" type="text/plain" href="/llms-full.txt" title="LLMs-full.txt — Complete CLI reference for AI" />
+
+  <!-- ── JSON-LD Structured Data ───────────────────────── -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://cli.deepgram.com/#software",
+        "name": "Deepgram CLI",
+        "alternateName": ["dg", "deepctl"],
+        "description": "The official command-line interface for Deepgram's speech AI platform. Transcribe audio files, stream live speech, synthesize text-to-speech, and interact with the full Deepgram API from your terminal.",
+        "url": "https://cli.deepgram.com/",
+        "downloadUrl": "https://deepgram.com/install.sh",
+        "installUrl": "https://deepgram.com/install.sh",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Speech Recognition Software",
+        "operatingSystem": ["macOS", "Linux", "Windows"],
+        "softwareVersion": "0.2.4",
+        "releaseNotes": "https://github.com/deepgram/cli/releases",
+        "softwareRequirements": "Python 3.10 or later",
+        "programmingLanguage": "Python",
+        "license": "https://github.com/deepgram/cli/blob/main/LICENSE",
+        "codeRepository": "https://github.com/deepgram/cli",
+        "screenshot": "https://cli.deepgram.com/og-image.svg",
+        "featureList": [
+          "Speech-to-text transcription from files and URLs",
+          "Live streaming transcription from microphone or stdin",
+          "Text-to-speech synthesis with multiple voice models",
+          "Text intelligence: sentiment, summarization, topic detection",
+          "Direct Deepgram API access via CLI",
+          "API key and project management",
+          "AI agent detection with non-interactive mode",
+          "Shell completion for bash, zsh, and fish",
+          "Plugin system with isolated venv",
+          "MCP server for AI editor integration",
+          "Multiple output formats: JSON, YAML, table, CSV"
+        ],
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+          "description": "Free and open source"
+        },
+        "publisher": {
+          "@id": "https://cli.deepgram.com/#organization"
+        },
+        "author": {
+          "@id": "https://cli.deepgram.com/#organization"
+        },
+        "maintainer": {
+          "@id": "https://cli.deepgram.com/#organization"
+        }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://cli.deepgram.com/#organization",
+        "name": "Deepgram",
+        "url": "https://deepgram.com",
+        "logo": "https://cli.deepgram.com/wordmark-dark.svg",
+        "sameAs": [
+          "https://github.com/deepgram",
+          "https://twitter.com/DeepgramAI",
+          "https://www.linkedin.com/company/deepgram",
+          "https://www.youtube.com/@deepgram"
+        ],
+        "contactPoint": {
+          "@type": "ContactPoint",
+          "contactType": "developer support",
+          "url": "https://developers.deepgram.com/support"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://cli.deepgram.com/#website",
+        "url": "https://cli.deepgram.com/",
+        "name": "Deepgram CLI",
+        "description": "Official landing page for the Deepgram command-line interface",
+        "publisher": {
+          "@id": "https://cli.deepgram.com/#organization"
+        },
+        "inLanguage": "en-US"
+      },
+      {
+        "@type": "WebPage",
+        "@id": "https://cli.deepgram.com/#webpage",
+        "url": "https://cli.deepgram.com/",
+        "name": "Deepgram CLI — Speech-to-Text, TTS & Audio AI from Your Terminal",
+        "description": "The official Deepgram CLI. Transcribe audio, stream live speech, synthesize voices, and call the Deepgram API from your terminal.",
+        "isPartOf": { "@id": "https://cli.deepgram.com/#website" },
+        "about": { "@id": "https://cli.deepgram.com/#software" },
+        "breadcrumb": {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Deepgram",
+              "item": "https://deepgram.com"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "CLI",
+              "item": "https://cli.deepgram.com"
+            }
+          ]
+        },
+        "inLanguage": "en-US",
+        "potentialAction": {
+          "@type": "DownloadAction",
+          "target": "https://deepgram.com/install.sh",
+          "name": "Install Deepgram CLI"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://cli.deepgram.com/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is the Deepgram CLI?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Deepgram CLI (dg or deepctl) is the official command-line interface for Deepgram's speech AI platform. It lets developers transcribe audio files and URLs, stream live speech-to-text from a microphone, synthesize text-to-speech, and interact with the full Deepgram REST API — all from the terminal."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I install the Deepgram CLI?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "On macOS or Linux, run: curl -fsSL deepgram.com/install.sh | sh. On Windows PowerShell, run: iwr deepgram.com/install.ps1 | iex. You can also install via pip (pip install deepctl), pipx, uvx, or Homebrew."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I transcribe an audio file with the Deepgram CLI?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "After logging in with 'dg login', run: dg transcribe recording.wav. You can also transcribe URLs (dg transcribe https://example.com/audio.mp3), enable speaker diarization (--diarize), select a model (--model nova-3), and export to JSON (--output json)."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does the Deepgram CLI work with AI coding tools like Claude Code?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The Deepgram CLI auto-detects AI agent environments including Claude Code, Aider, OpenAI Codex, and others. In agent context it automatically disables interactive prompts, routes status messages to stderr, and defaults to JSON output. Pass --agent-friendly to any command to get a machine-readable JSON schema of its parameters and capabilities."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What speech-to-text models does the Deepgram CLI support?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Deepgram CLI supports all Deepgram models including nova-3 (default for streaming), nova-2, Whisper, and enhanced/base tier models. Use the --model flag or run 'dg models' to list all available models."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I pipe the Deepgram CLI output to other tools?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The CLI is fully UNIX-composable. Use --output json (or -o json) to get structured JSON, which can be piped to jq, grep, and other tools. When stdout is a pipe, the CLI automatically switches to JSON. Status messages always go to stderr to keep stdout clean."
+            }
+          }
+        ]
+      }
+    ]
+  })} />
 </head>
 <body class="bg-dg-black text-dg-text font-sans overflow-x-hidden" style="font-feature-settings: 'cv02','cv03','cv04','cv11';">
 

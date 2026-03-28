@@ -1,0 +1,23 @@
+User-agent: *
+Allow: /
+
+# Block AI training crawlers that don't respect llms.txt
+User-agent: CCBot
+Disallow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://cli.deepgram.com/sitemap-index.xml

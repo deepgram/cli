@@ -1,0 +1,385 @@
+# Deepgram CLI — Full Reference
+
+> The official command-line interface for Deepgram's speech AI platform.
+> Version: 0.2.4 | License: MIT | Python 3.10+ required
+> GitHub: https://github.com/deepgram/cli
+
+---
+
+## Installation
+
+### macOS / Linux
+```bash
+curl -fsSL deepgram.com/install.sh | sh
+```
+
+### Windows (PowerShell)
+```powershell
+iwr deepgram.com/install.ps1 | iex
+```
+
+### Package managers (alternative)
+```bash
+pip install deepctl       # pip
+pipx install deepctl      # pipx (isolated)
+uvx deepctl --help        # uvx (run without install)
+brew install deepgram/tap/deepctl  # Homebrew
+```
+
+Aliases: `dg`, `deepctl`, `deepgram`
+
+---
+
+## Authentication
+
+### Login (browser-based)
+```bash
+dg login
+```
+Opens browser for OIDC device flow authentication. Credentials stored securely in system keyring.
+
+### Login (API key)
+```bash
+dg login --api-key sk-your-key --project-id your-project-id
+dg login --profile staging --api-key sk-staging-key
+```
+
+### Check auth status
+```bash
+dg whoami                    # Show current profile, masked key, key source, project ID
+dg whoami --profile staging  # Check a specific profile
+```
+
+### Logout
+```bash
+dg logout
+dg logout --all              # Clear all profiles
+dg logout --keep-config      # Clear credentials but keep project ID
+```
+
+### Profiles
+```bash
+dg profiles --list           # List all profiles
+dg profiles --switch staging # Switch active profile
+dg profiles --current        # Show current profile details
+```
+
+---
+
+## Speech-to-Text (Transcription)
+
+### Transcribe a local file
+```bash
+dg transcribe recording.wav
+dg transcribe podcast.mp3 --model nova-3
+dg transcribe interview.mp4 --diarize --language en-US
+dg transcribe meeting.wav --summarize --detect-topics
+dg transcribe call.mp3 --output json --save-to transcript.json
+```
+
+### Transcribe a URL
+```bash
+dg transcribe https://example.com/audio.mp3
+dg transcribe https://example.com/call.wav --diarize --model nova-3
+```
+
+### Options
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--model` | STT model (nova-3, nova-2, whisper, etc.) | nova-2 |
+| `--language` | Language code (en-US, es-ES, fr-FR, etc.) | en-US |
+| `--diarize` | Enable speaker diarization | false |
+| `--smart-format` | Smart formatting (punctuation, capitalization) | true |
+| `--punctuate` | Enable punctuation | true |
+| `--summarize` | Generate transcript summary | false |
+| `--detect-topics` | Topic detection | false |
+| `--save-to` | Save output to file path | — |
+| `--no-validate` | Skip file validation | false |
+| `--probe` | Analyze audio before transcribing | false |
+
+---
+
+## Live Streaming (Real-time STT)
+
+### Microphone input
+```bash
+dg listen --mic
+dg listen --mic --model nova-3 --language en-US
+dg listen --mic --interim                     # Show partial results
+```
+
+### Stdin / pipe input
+```bash
+cat audio.raw | dg listen --encoding linear16 --sample-rate 16000
+ffmpeg -i audio.mp3 -f s16le -ar 16000 -ac 1 - | dg listen --encoding linear16 --sample-rate 16000
+```
+
+### Options
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--mic` | Use microphone input | false |
+| `--model` | STT model | nova-3 |
+| `--language` | Language code | en-US |
+| `--encoding` | Audio encoding for stdin (linear16, mulaw) | — |
+| `--sample-rate` | Sample rate in Hz | 16000 |
+| `--channels` | Number of audio channels | 1 |
+| `--interim` | Show interim/partial results | false |
+| `--smart-format` | Smart formatting | true |
+| `--punctuate` | Punctuation | true |
+
+---
+
+## Text-to-Speech
+
+```bash
+dg speak "Hello from Deepgram"
+dg speak "Hello" --output output.mp3
+dg speak "Hello" | ffplay -nodisp -autoexit -   # Pipe to player
+echo "Hello world" | dg speak                    # Stdin input
+dg speak --file script.txt                        # From file
+```
+
+### Options
+| Flag | Description |
+|------|-------------|
+| `--output` | Save to file path |
+| `--model` | Voice model (aura-2-en-us, etc.) |
+| `--encoding` | Output encoding (mp3, linear16, flac, wav, ogg) |
+| `--file` | Read text from file |
+
+---
+
+## Text Intelligence
+
+```bash
+dg read "The product exceeded expectations" --sentiment
+dg read --file article.txt --summarize --detect-topics --detect-entities
+echo "Meeting notes..." | dg read --summarize
+```
+
+---
+
+## API Key Management
+
+```bash
+dg keys                              # List all API keys
+dg keys --create --comment "CI key" --scopes member
+dg keys --create --ttl 86400         # 24-hour key
+dg keys --show KEY_ID                # Show key details
+dg keys --delete KEY_ID              # Delete a key (prompts for confirmation)
+dg keys --delete KEY_ID --yes        # Skip confirmation
+dg keys --delete KEY_ID --dry-run    # Preview without deleting
+```
+
+---
+
+## Project Management
+
+```bash
+dg projects                          # List projects
+dg projects --create "My Project"    # Create project
+dg projects --show PROJECT_ID        # Show project details
+```
+
+---
+
+## Team Members
+
+```bash
+dg members                           # List members
+dg members --invite user@example.com --scope member
+dg members --invite user@example.com --dry-run  # Preview
+dg members --remove MEMBER_ID
+dg members --invites                 # List pending invites
+dg members --revoke-invite user@example.com
+```
+
+---
+
+## Usage & Billing
+
+```bash
+dg usage                             # Usage summary
+dg usage --start 2024-01-01 --end 2024-01-31
+dg billing                           # Account balance
+dg requests                          # Recent API requests
+```
+
+---
+
+## Direct API Access
+
+```bash
+dg api /v1/projects
+dg api /v1/projects/PROJECT_ID/keys --method POST -f comment="new key" -f scopes:='["member"]'
+dg api /v1/projects/PROJECT_ID/usage/requests | jq '.requests[].path'
+```
+
+---
+
+## MCP Server (AI Editor Integration)
+
+```bash
+dg mcp                               # Start MCP server (stdio transport)
+dg mcp --transport sse               # SSE transport
+dg mcp --transport streamable-http   # HTTP transport
+```
+
+Used with Claude Code, Cursor, VS Code Copilot, and other MCP-compatible editors.
+
+---
+
+## Shell Completion
+
+```bash
+dg completion                        # Auto-detect shell
+dg completion bash                   # Output bash eval line
+dg completion zsh                    # Output zsh eval line
+dg completion fish                   # Output fish eval line
+dg completion bash --install         # Append to ~/.bashrc
+dg completion zsh --install          # Append to ~/.zshrc
+```
+
+Add to your shell profile:
+```bash
+# bash
+eval "$(_DG_COMPLETE=bash_source dg)"
+
+# zsh
+eval "$(_DG_COMPLETE=zsh_source dg)"
+
+# fish
+eval (env _DG_COMPLETE=fish_source dg)
+```
+
+---
+
+## Plugins
+
+```bash
+dg plugin install deepctl-plugin-example  # Install from PyPI
+dg plugin list                            # List installed plugins
+dg plugin update deepctl-plugin-example   # Update plugin
+dg plugin remove deepctl-plugin-example   # Uninstall
+dg plugin search <term>                   # Search registry
+```
+
+Plugins install into an isolated venv at `~/.deepctl/plugins/venv/`.
+
+---
+
+## Debug Tools
+
+```bash
+dg debug audio recording.wav         # Analyze audio file (codec, bitrate, compatibility)
+dg debug network                     # Test connectivity to Deepgram API
+dg debug browser                     # Check browser/WebRTC capabilities
+dg debug probe                       # Analyze WebSocket stream
+```
+
+---
+
+## Global Options
+
+All commands accept these global flags:
+
+| Flag | Description |
+|------|-------------|
+| `--output`, `-o` | Output format: json, yaml, table, csv |
+| `--quiet`, `-q` | Suppress non-essential output |
+| `--verbose`, `-v` | Enable verbose/debug output |
+| `--profile`, `-p` | Use named credential profile |
+| `--config`, `-c` | Path to config file |
+| `--api-key` | Explicit API key (overrides profile) |
+| `--project-id` | Explicit project ID |
+| `--timing` | Show performance timing |
+| `--agent-friendly` | Output JSON metadata for this command and exit |
+
+---
+
+## AI Agent Behavior
+
+`dg` auto-detects AI agent context and adjusts behavior automatically:
+
+**Detection signals (hard):**
+- `CLAUDECODE=1` (Claude Code)
+- `CLAUDE_CODE_ENTRYPOINT` (Claude Code CLI)
+- `CODEX_SANDBOX` (OpenAI Codex)
+- `OR_APP_NAME=Aider` (Aider)
+- `--agent-friendly` flag on command line
+
+**Detection signals (soft, 3+ = agent mode):**
+- stdin not a TTY
+- stdout not a TTY
+- `CI=true` or `CI=1`
+- `TERM=dumb` or TERM unset
+- `NO_COLOR` set
+
+**Agent mode behavior:**
+- All interactive prompts return defaults (no blocking on stdin)
+- Status messages routed to stderr
+- Data output to stdout only
+- JSON output format by default
+- Exit codes: 0 = success, 1 = error, 2 = user interrupt
+
+**`--agent-friendly` flag:**
+Available on every command. Outputs a JSON contract describing the command:
+```json
+{
+  "command": "transcribe",
+  "description": "Transcribe audio files or URLs using Deepgram",
+  "agent_hints": "...",
+  "examples": ["dg transcribe recording.wav", "..."],
+  "requires_auth": true,
+  "non_interactive": true,
+  "output_formats": ["json", "yaml", "table", "csv"],
+  "parameters": [{ "name": "source", "type": "str", "required": true, ... }]
+}
+```
+
+---
+
+## Configuration
+
+Config file location:
+- macOS: `~/Library/Application Support/deepgram/config.yaml`
+- Linux: `~/.config/deepgram/config.yaml`
+- Windows: `%APPDATA%\deepgram\config.yaml`
+
+Environment variables:
+- `DEEPGRAM_API_KEY` — API key (overrides profile)
+- `DEEPGRAM_PROJECT_ID` — Project ID (overrides profile)
+- `DEEPGRAM_CLI_BASE_URL` — Custom auth endpoint
+
+---
+
+## Output Piping Examples
+
+```bash
+# Transcribe and extract text with jq
+dg transcribe call.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'
+
+# Get all speaker segments
+dg transcribe interview.mp3 --diarize -o json | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
+
+# TTS piped to audio player
+dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -
+
+# Stream mic and log all transcripts
+dg listen --mic -o json | tee transcripts.jsonl
+
+# Create a time-limited API key for CI
+dg keys --create --comment "CI/CD" --ttl 3600 -o json | jq -r '.created_key.key'
+```
+
+---
+
+## About Deepgram
+
+Deepgram is a speech AI company providing industry-leading speech-to-text, text-to-speech, and audio intelligence APIs. The Deepgram CLI (`dg`) is the official tool for interacting with all Deepgram services from the command line.
+
+- Website: https://deepgram.com
+- Developer console: https://console.deepgram.com
+- API documentation: https://developers.deepgram.com
+- Status page: https://status.deepgram.com
+- Community Discord: https://discord.gg/deepgram

@@ -1,0 +1,21 @@
+{
+  "name": "Deepgram CLI",
+  "short_name": "dg",
+  "description": "The official CLI for Deepgram's speech AI platform. Transcribe, synthesize, and stream audio from your terminal.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#050506",
+  "theme_color": "#13ef95",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}

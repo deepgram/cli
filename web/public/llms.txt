@@ -1,0 +1,41 @@
+# Deepgram CLI
+
+> The official command-line interface for Deepgram's speech AI platform. Install with one command on macOS, Linux, and Windows.
+
+## Install
+
+- [macOS / Linux](https://deepgram.com/install.sh): `curl -fsSL deepgram.com/install.sh | sh`
+- [Windows PowerShell](https://deepgram.com/install.ps1): `iwr deepgram.com/install.ps1 | iex`
+
+## Documentation
+
+- [CLI Docs](https://developers.deepgram.com/docs/cli): Full command reference, authentication guide, and examples
+- [API Reference](https://developers.deepgram.com/reference): Deepgram REST and WebSocket API
+- [GitHub Repository](https://github.com/deepgram/cli): Source code, issues, and releases
+
+## Core Commands
+
+- `dg login` — Authenticate via browser (OIDC device flow) or `--api-key` flag
+- `dg transcribe <file|url>` — Transcribe audio files or URLs using Deepgram STT
+- `dg listen --mic` — Live speech-to-text from microphone via WebSocket
+- `dg speak "<text>"` — Text-to-speech synthesis with Aura voices
+- `dg read <text>` — Text intelligence: sentiment, summaries, topics, intents
+- `dg models` — List available Deepgram models
+- `dg projects` — Manage Deepgram projects
+- `dg keys` — Create, list, and revoke API keys
+- `dg members` — Manage project team members
+- `dg usage` — View API usage statistics
+- `dg api <endpoint>` — Direct authenticated HTTP proxy to any Deepgram endpoint
+- `dg whoami` — Show current auth status, profile, and key source
+- `dg completion bash|zsh|fish` — Generate shell completion scripts
+- `dg --agent-friendly` — Output machine-readable JSON metadata for any command
+
+## Key Features
+
+- Auto-detects AI agent context (Claude Code, Aider, Codex, Gemini) — disables prompts, outputs JSON, routes status to stderr
+- Multiple output formats: `--output json|yaml|table|csv`
+- Named credential profiles for multi-environment workflows
+- Plugin system: `dg plugin install <package>` installs community extensions in isolated venv
+- `--dry-run` on all destructive operations (key deletion, member removal)
+- Shell completion for bash, zsh, and fish
+- MCP server mode: `dg mcp` for AI editor integration (stdio/SSE/HTTP)
