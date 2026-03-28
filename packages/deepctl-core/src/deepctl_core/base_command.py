@@ -9,6 +9,7 @@ from rich.console import Console
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config
+from .output import _agentic, print_error, print_info, print_warning, stderr_console
 from .timing import TimingContext
 
 console = Console()
@@ -80,17 +81,11 @@ class BaseCommand(ABC):
                                 "explicit flags",
                                 "environment variables",
                             ]:
-                                console.print(
-                                    f"[dim]Using credentials from {source}[/dim]"
-                                )
+                                print_info(f"Using credentials from {source}")
                                 if project_id:
-                                    console.print(
-                                        f"[dim]Affecting project: {project_id}[/dim]"
-                                    )
+                                    print_info(f"Affecting project: {project_id}")
                                 else:
-                                    console.print(
-                                        "[yellow]Warning: No project ID specified[/yellow]"
-                                    )
+                                    print_warning("No project ID specified")
 
                     except Exception:
                         # guard() already printed helpful error messages;
@@ -102,12 +97,9 @@ class BaseCommand(ABC):
                 with TimingContext("project_validation"):
                     project_id = auth_manager.get_project_id()
                     if not project_id:
-                        console.print(
-                            "[red]Error:[/red] Project ID is required for this command"
-                        )
-                        console.print(
-                            "Set DEEPGRAM_PROJECT_ID environment variable or "
-                            "configure via profile"
+                        print_error(
+                            "Project ID is required for this command. "
+                            "Set DEEPGRAM_PROJECT_ID or configure via profile."
                         )
                         raise click.ClickException("Project ID required")
 
@@ -122,13 +114,13 @@ class BaseCommand(ABC):
                         self.output_result(result, config)
 
             except KeyboardInterrupt:
-                console.print("\n[yellow]Command cancelled by user[/yellow]")
+                stderr_console.print("\n[yellow]Command cancelled by user[/yellow]")
                 raise click.Abort()
 
             except Exception as e:
-                console.print(f"[red]Command failed:[/red] {e}")
+                print_error(f"Command failed: {e}")
                 if config.get("output.verbose", False):
-                    console.print_exception()
+                    stderr_console.print_exception()
                 raise click.ClickException(str(e))
 
     @abstractmethod
@@ -301,8 +293,7 @@ class BaseCommand(ABC):
         Returns:
             True if confirmed, False otherwise
         """
-        if not self.ci_friendly:
-            # In CI environments, always return the default
+        if _agentic or not self.ci_friendly:
             return default
 
         try:
@@ -326,8 +317,7 @@ class BaseCommand(ABC):
         Returns:
             User input
         """
-        if not self.ci_friendly and default is not None:
-            # In CI environments, return the default
+        if (_agentic or not self.ci_friendly) and default is not None:
             return default
 
         try:

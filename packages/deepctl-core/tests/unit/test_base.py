@@ -290,9 +290,9 @@ class TestBaseCommand:
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")
     @patch("deepctl_core.base_command.DeepgramClient")
-    @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.base_command.print_error")
     def test_execute_with_project_required_failure(
-        self, mock_console, mock_client_class, mock_auth_class, mock_context
+        self, mock_print_error, mock_client_class, mock_auth_class, mock_context
     ):
         """Test command execution with project required but no project ID."""
         # Setup mocks
@@ -321,28 +321,19 @@ class TestBaseCommand:
         with pytest.raises(click.ClickException, match="Project ID required"):
             command.execute(mock_context)
 
-        # Verify errors were printed
-        expected_calls = [
-            (
-                ("[red]Error:[/red] Project ID is required for this command",),
-                {},
-            ),
-            (
-                (
-                    "Set DEEPGRAM_PROJECT_ID environment variable or configure via profile",
-                ),
-                {},
-            ),
-        ]
-        assert mock_console.print.call_args_list == expected_calls
+        # Verify error was printed to stderr via print_error
+        mock_print_error.assert_called_once_with(
+            "Project ID is required for this command. "
+            "Set DEEPGRAM_PROJECT_ID or configure via profile."
+        )
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")
     @patch("deepctl_core.base_command.DeepgramClient")
-    @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.base_command.stderr_console")
     def test_execute_keyboard_interrupt(
         self,
-        mock_console,
+        mock_stderr_console,
         mock_client_class,
         mock_auth_class,
         mock_command_class,
@@ -375,18 +366,18 @@ class TestBaseCommand:
         with pytest.raises(click.Abort):
             command.execute(mock_context)
 
-        # Verify cancellation message was printed
-        mock_console.print.assert_called_once_with(
+        # Verify cancellation message was printed to stderr
+        mock_stderr_console.print.assert_called_once_with(
             "\n[yellow]Command cancelled by user[/yellow]"
         )
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")
     @patch("deepctl_core.base_command.DeepgramClient")
-    @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.base_command.print_error")
     def test_execute_general_exception(
         self,
-        mock_console,
+        mock_print_error,
         mock_client_class,
         mock_auth_class,
         mock_command_class,
@@ -419,18 +410,20 @@ class TestBaseCommand:
         with pytest.raises(click.ClickException, match="Something went wrong"):
             command.execute(mock_context)
 
-        # Verify error was printed
-        mock_console.print.assert_called_once_with(
-            "[red]Command failed:[/red] Something went wrong"
+        # Verify error was printed to stderr via print_error
+        mock_print_error.assert_called_once_with(
+            "Command failed: Something went wrong"
         )
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")
     @patch("deepctl_core.base_command.DeepgramClient")
-    @patch("deepctl_core.base_command.console")
+    @patch("deepctl_core.base_command.stderr_console")
+    @patch("deepctl_core.base_command.print_error")
     def test_execute_general_exception_verbose(
         self,
-        mock_console,
+        mock_print_error,
+        mock_stderr_console,
         mock_client_class,
         mock_auth_class,
         mock_command_class,
@@ -467,13 +460,11 @@ class TestBaseCommand:
         with pytest.raises(click.ClickException, match="Something went wrong"):
             command.execute(ctx)
 
-        # Verify error was printed and exception was printed
-        assert mock_console.print.call_count == 1
-        assert (
-            mock_console.print.call_args[0][0]
-            == "[red]Command failed:[/red] Something went wrong"
+        # Verify error and traceback went to stderr
+        mock_print_error.assert_called_once_with(
+            "Command failed: Something went wrong"
         )
-        mock_console.print_exception.assert_called_once()
+        mock_stderr_console.print_exception.assert_called_once()
 
     @pytest.mark.unit
     def test_output_result_none(self, mock_command_class):
@@ -727,6 +718,7 @@ class TestBaseCommand:
         assert command.confirm("Continue?", default=False) is False
 
     @pytest.mark.unit
+    @patch("deepctl_core.base_command._agentic", False)
     @patch("click.confirm")
     def test_confirm_interactive_mode_success(
         self, mock_click_confirm, mock_command_class
@@ -741,6 +733,7 @@ class TestBaseCommand:
         mock_click_confirm.assert_called_once_with("Continue?", default=False)
 
     @pytest.mark.unit
+    @patch("deepctl_core.base_command._agentic", False)
     @patch("click.confirm")
     def test_confirm_interactive_mode_declined(
         self, mock_click_confirm, mock_command_class
@@ -755,6 +748,7 @@ class TestBaseCommand:
         mock_click_confirm.assert_called_once_with("Continue?", default=True)
 
     @pytest.mark.unit
+    @patch("deepctl_core.base_command._agentic", False)
     @patch("click.confirm")
     def test_confirm_interactive_mode_abort(
         self, mock_click_confirm, mock_command_class
@@ -824,6 +818,7 @@ class TestBaseCommand:
         )
 
     @pytest.mark.unit
+    @patch("deepctl_core.base_command._agentic", False)
     @patch("click.prompt")
     def test_prompt_interactive_mode(
         self, mock_click_prompt, mock_command_class

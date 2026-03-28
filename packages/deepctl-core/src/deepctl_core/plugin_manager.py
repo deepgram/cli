@@ -1,5 +1,6 @@
 """Plugin manager for deepctl command discovery and loading."""
 
+import json
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -211,7 +212,7 @@ class PluginManager:
         command_func.__name__ = command_instance.name.replace("-", "_")
         command_func.__doc__ = command_instance.help
 
-        # Build help text with examples
+        # Build help text with examples (+ AI hint when in agentic context)
         help_text = self._build_help_text(command_instance)
 
         # Create base command
@@ -224,6 +225,27 @@ class PluginManager:
 
         # Add arguments and options
         cmd = self._add_command_arguments(cmd, command_instance)
+
+        # Add --agent-friendly as an eager option so it fires before argument
+        # validation (like --help does), allowing AI agents to query metadata
+        # without supplying required positional arguments.
+        manager_ref = self
+
+        def _agent_friendly_callback(
+            ctx: click.Context, _param: click.Parameter, value: bool
+        ) -> None:
+            if value:
+                manager_ref._output_command_ai_metadata(command_instance)
+                ctx.exit()
+
+        cmd = click.option(
+            "--agent-friendly",
+            is_flag=True,
+            is_eager=True,
+            expose_value=False,
+            help="Output machine-readable JSON metadata for this command and exit.",
+            callback=_agent_friendly_callback,
+        )(cmd)
 
         return cmd
 
@@ -242,7 +264,46 @@ class PluginManager:
             help_text += "\n\nExamples:\n"
             for ex in examples:
                 help_text += f"  {ex}\n"
+        help_text += "\n\nFor agents, use --agent-friendly."
         return help_text
+
+    def _output_command_ai_metadata(self, instance: Any) -> None:
+        """Output AI-friendly JSON metadata for a command to stdout."""
+
+        def _type_name(t: Any) -> str:
+            return t.__name__ if hasattr(t, "__name__") else str(t)
+
+        arguments = (
+            instance.get_arguments() if hasattr(instance, "get_arguments") else []
+        )
+        metadata_doc = {
+            "command": instance.name,
+            "description": instance.help,
+            "agent_hints": getattr(instance, "agent_help", "") or instance.help,
+            "examples": list(getattr(instance, "examples", [])),
+            "requires_auth": bool(getattr(instance, "requires_auth", False)),
+            "requires_project": bool(getattr(instance, "requires_project", False)),
+            "non_interactive": True,
+            "output_formats": ["json", "yaml", "table", "csv"],
+            "parameters": [
+                {
+                    "name": arg.get("name")
+                    or (arg.get("names", [""])[0] if arg.get("names") else ""),
+                    "help": arg.get("help", ""),
+                    "required": bool(
+                        arg.get("required", not arg.get("is_option", False))
+                    ),
+                    "type": "bool"
+                    if arg.get("is_flag")
+                    else _type_name(arg.get("type", str)),
+                    "is_option": bool(arg.get("is_option", False)),
+                    "is_flag": bool(arg.get("is_flag", False)),
+                    "default": arg.get("default"),
+                }
+                for arg in arguments
+            ],
+        }
+        click.echo(json.dumps(metadata_doc, indent=2, default=str))
 
     def _create_click_group(self, group_instance: BaseGroupCommand) -> click.Group:
         """Create a Click group from a BaseGroupCommand instance.

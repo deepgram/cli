@@ -22,25 +22,48 @@ from rich.table import Table
 
 # ── Agentic / non-TTY detection ──────────────────────────────────
 
-_AGENTIC_ENV_VARS = (
-    "CLAUDE_CODE",
-    "CODEX_CLI",
-    "GEMINI_CLI",
-    "AIDER",
-    "CONTINUE_GLOBAL_DIR",
-)
-
 
 def is_agentic() -> bool:
-    """Detect if running inside an AI coding tool or non-interactive pipe.
+    """Detect if running inside an AI coding tool or non-interactive context.
 
-    Returns True when stdout is not a terminal OR a known agentic
-    environment variable is set.  This lets commands produce
-    machine-friendly output automatically.
+    Uses a layered signal approach:
+    - Hard signals: known AI-tool environment variables (high confidence)
+    - Soft signals: score-based TTY/CI heuristics (3+ = probable agent)
+
+    Returns True when the context is likely non-interactive or AI-driven.
     """
-    if not sys.stdout.isatty():
+    env = os.environ
+
+    # Hard signals: explicit agent mode flag or known AI tool env vars
+    if "--agent-friendly" in sys.argv:
         return True
-    return any(os.environ.get(v) for v in _AGENTIC_ENV_VARS)
+    if env.get("CLAUDECODE"):
+        return True
+    if env.get("CLAUDE_CODE_ENTRYPOINT"):
+        return True
+    if env.get("CODEX_SANDBOX"):
+        return True
+    if env.get("CODEX_SANDBOX_NETWORK_DISABLED"):
+        return True
+    if env.get("OR_APP_NAME") == "Aider":
+        return True
+    if "aider" in env.get("OR_SITE_URL", ""):
+        return True
+
+    # Soft signals — score-based; none is conclusive alone
+    score = 0
+    if not sys.stdin.isatty():
+        score += 1
+    if not sys.stdout.isatty():
+        score += 1
+    if env.get("CI") in ("true", "1"):
+        score += 1
+    if not env.get("TERM") or env.get("TERM") == "dumb":
+        score += 1
+    if "NO_COLOR" in env:
+        score += 1
+
+    return score >= 3
 
 
 _agentic = is_agentic()
@@ -345,7 +368,10 @@ def print_debug(message: str) -> None:
         message: Debug message
     """
     if _output_config["verbose"]:
-        console.print(f"[dim]DEBUG:[/dim] {message}")
+        if _output_config["agentic"]:
+            stderr_console.print(f"DEBUG: {message}")
+        else:
+            console.print(f"[dim]DEBUG:[/dim] {message}")
 
 
 def create_progress_bar(description: str = "Processing...") -> Progress:
@@ -418,7 +444,7 @@ def confirm_action(message: str, default: bool = False) -> bool:
     Returns:
         True if confirmed, False otherwise
     """
-    if _output_config["quiet"]:
+    if _output_config["quiet"] or _output_config["agentic"]:
         return default
 
     try:
@@ -443,7 +469,7 @@ def prompt_input(message: str, default: str | None = None) -> str:
     Returns:
         User input
     """
-    if _output_config["quiet"] and default is not None:
+    if (_output_config["quiet"] or _output_config["agentic"]) and default is not None:
         return default
 
     try:
