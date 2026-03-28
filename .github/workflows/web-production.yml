@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: web-production
-      url: https://cli.deepgram.com
+      url: https://deepgram-cli.netlify.app
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
         run: npm run build
         working-directory: web
         env:
-          SITE_URL: https://cli.deepgram.com
+          SITE_URL: https://deepgram-cli.netlify.app
 
       - name: Deploy to Netlify (production)
         run: npx netlify-cli deploy --dir dist --prod

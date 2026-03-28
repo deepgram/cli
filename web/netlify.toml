@@ -4,9 +4,10 @@
   publish = "dist"
 
 [build.environment]
-  NODE_VERSION = "20"
-  SITE_URL     = "https://cli.deepgram.com"
+  NODE_VERSION = "22"
+  SITE_URL     = "https://deepgram-cli.netlify.app"
 
-[context.staging]
-  [context.staging.environment]
-    SITE_URL = "https://staging--deepgram-cli-web.netlify.app"
+# Netlify's own CI is disabled (stop_builds = true).
+# All deploys are driven by GitHub Actions:
+#   staging   → merge to main         → --alias staging
+#   production → GitHub release v*    → --prod
