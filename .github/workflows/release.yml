@@ -77,6 +77,17 @@ jobs:
           pip install --find-links "$DIST_DIR" dist/deepctl-*.whl
           deepctl --version
 
+  deploy-web:
+    name: Deploy web to production
+    needs: release-please
+    # Only fire on root-package releases (v0.2.4, v1.0.0, …).
+    # Sub-package tags look like deepctl-cmd-listen-v0.0.3 — skip those.
+    if: |
+      needs.release-please.outputs.release_created == 'true' &&
+      startsWith(needs.release-please.outputs.tag_name, 'v')
+    uses: ./.github/workflows/web-production.yml
+    secrets: inherit
+
   publish:
     name: Publish to PyPI
     needs: [build, test]

@@ -1,8 +1,11 @@
 name: Deploy web — production
 
 on:
-  release:
-    types: [published]
+  # Called from release.yml after a root-package release (v*).
+  # Using workflow_call avoids the GitHub Actions limitation where
+  # GITHUB_TOKEN-created releases do not trigger release: published
+  # in other workflows.
+  workflow_call:
   workflow_dispatch:
 
 # Only one production deploy at a time; never cancel in-progress
@@ -13,11 +16,6 @@ concurrency:
 jobs:
   deploy:
     name: Build & deploy to production
-    # Only fire on root-package releases (v0.2.4, v1.0.0, …).
-    # Sub-package tags look like deepctl-core-v0.2.3 — skip those.
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     environment:
       name: web-production
