@@ -1087,9 +1087,9 @@ class ListenCommand(BaseCommand):
         out.print(table)
         out.print()
 
-        # Transcript
+        # Transcript — markup=False so [Speaker N] labels are printed literally
         if result.transcript:
-            out.print(result.transcript.strip())
+            out.print(result.transcript.strip(), markup=False)
         else:
             out.print("[dim]No transcript in response[/dim]")
 
@@ -1099,7 +1099,7 @@ class ListenCommand(BaseCommand):
             if summary:
                 out.print()
                 out.print("[green]Summary:[/green]")
-                out.print(f"  {summary}")
+                out.print(f"  {summary}", markup=False)
 
             topics_list = extract_topics(result.full_result)
             if topics_list:
