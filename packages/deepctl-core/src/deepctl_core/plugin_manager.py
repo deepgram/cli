@@ -221,6 +221,7 @@ class PluginManager:
             callback=command_func,
             help=help_text,
             short_help=command_instance.short_help or command_instance.help,
+            hidden=command_instance.hidden,
         )
 
         # Add arguments and options

@@ -22,10 +22,12 @@ keywords = ["deepgram", "cli", "stt", "live", "streaming", "listen"]
 requires-python = ">=3.10"
 dependencies = [
     "deepctl-core>=0.1.10",
+    "deepctl-shared-utils>=0.1.10",
     "click>=8.0.0",
     "rich>=13.0.0",
     "pydantic>=2.0.0",
     "websockets>=11.0",
+    "deepgram-captions>=1.0.0",
 ]
 
 [project.optional-dependencies]

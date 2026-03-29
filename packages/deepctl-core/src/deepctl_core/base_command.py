@@ -22,6 +22,7 @@ class BaseCommand(ABC):
     name: str = ""
     help: str = ""
     short_help: str | None = None
+    hidden: bool = False  # set True to hide from dg --help (e.g. deprecated aliases)
 
     # Command requirements
     requires_auth: bool = False

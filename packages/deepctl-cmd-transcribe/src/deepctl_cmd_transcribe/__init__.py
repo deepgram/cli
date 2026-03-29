@@ -1,6 +1,5 @@
-"""Transcribe command package for deepctl."""
+"""Transcribe command package for deepctl — alias for dg listen."""
 
 from .command import TranscribeCommand
-from .models import TranscribeResult
 
-__all__ = ["TranscribeCommand", "TranscribeResult"]
+__all__ = ["TranscribeCommand"]

@@ -33,10 +33,7 @@ pipx run deepctl --help
 
 ## Dependencies
 
-- `click>=8.0.0`
-- `rich>=13.0.0`
-- `deepgram-sdk>=6.0.0rc2`
-- `pydantic>=2.0.0`
+No external dependencies.
 
 ## License
 

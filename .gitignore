@@ -158,3 +158,5 @@ Thumbs.db
 tmp_chatface/
 tmp_community-turbo/
 tmp_deepgram-cli/
+# Local Netlify folder
+.netlify

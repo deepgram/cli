@@ -1,4 +1,4 @@
-"""Tests for listen command."""
+"""Tests for the unified listen command."""
 
 from unittest.mock import Mock, patch
 
@@ -9,68 +9,61 @@ from deepctl_core import AuthManager, BaseResult, Config, DeepgramClient
 
 
 class TestListenCommand:
-    """Test cases for ListenCommand."""
+    """Test ListenCommand routing and argument configuration."""
 
     @pytest.fixture
     def command(self):
-        """Create a ListenCommand instance."""
         return ListenCommand()
 
     @pytest.fixture
     def mock_config(self):
-        """Create a mock config."""
         return Mock(spec=Config)
 
     @pytest.fixture
     def mock_auth_manager(self):
-        """Create a mock auth manager."""
         manager = Mock(spec=AuthManager)
         manager.get_api_key.return_value = "test-api-key"
         return manager
 
     @pytest.fixture
     def mock_client(self):
-        """Create a mock Deepgram client."""
         return Mock(spec=DeepgramClient)
 
     def test_command_properties(self, command):
-        """Test command basic properties."""
         assert command.name == "listen"
         assert command.requires_auth is True
         assert command.requires_project is False
         assert command.ci_friendly is True
 
     def test_get_arguments(self, command):
-        """Test command arguments configuration."""
         args = command.get_arguments()
 
-        # All arguments should be options (no positional args)
+        # One optional positional arg (source) plus many options
         positional = [a for a in args if not a.get("is_option", False)]
-        assert len(positional) == 0
+        assert len(positional) == 1
+        assert positional[0]["name"] == "source"
+        assert positional[0]["required"] is False
 
-        # Collect all option names
-        option_names = []
+        option_names: list[str] = []
         for arg in args:
             if arg.get("is_option", False):
                 option_names.extend(arg["names"])
 
-        assert "--mic" in option_names
-        assert "--model" in option_names
-        assert "-m" in option_names
-        assert "--language" in option_names
-        assert "-l" in option_names
-        assert "--encoding" in option_names
-        assert "--sample-rate" in option_names
-        assert "--channels" in option_names
-        assert "--interim" in option_names
-        assert "--punctuate" in option_names
-        assert "--smart-format" in option_names
+        for expected in [
+            "--mic", "--model", "-m", "--language", "-l",
+            "--diarize", "--smart-format", "--punctuate",
+            "--summarize", "--topics", "--sentiment",
+            "--interim", "--encoding", "--sample-rate", "--channels",
+            "--save-to", "-s", "--probe", "--no-validate", "--api-version",
+        ]:
+            assert expected in option_names, f"Missing option: {expected}"
 
+    @patch("deepctl_cmd_listen.command._agentic", True)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_handle_no_source_error(
+    def test_handle_no_source_error_in_agent_mode(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):
-        """Test error when no mic flag and stdin is a TTY."""
+        """In agent mode with no source, return an error instead of prompting."""
         mock_sys.stdin.isatty.return_value = True
 
         result = command.handle(
@@ -88,7 +81,7 @@ class TestListenCommand:
     def test_handle_mic_no_sounddevice(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):
-        """Test error when mic=True but sounddevice is not installed."""
+        """--mic without sounddevice installed returns an error."""
         mock_sys.stdin.isatty.return_value = True
 
         original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
@@ -106,20 +99,18 @@ class TestListenCommand:
                 mic=True,
             )
 
-        assert isinstance(result, BaseResult)
         assert result.status == "error"
         assert "sounddevice" in result.message
 
     @patch("deepctl_cmd_listen.command.sys")
-    def test_handle_stdin_calls_listen_stdin(
+    def test_handle_stdin_routes_to_stream_stdin(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):
-        """Test that piped stdin routes to _listen_stdin."""
+        """Piped stdin (isatty=False, no --mic) routes to _stream_stdin."""
         mock_sys.stdin.isatty.return_value = False
+        expected = ListenResult(status="success", source="stdin", mode="live")
 
-        with patch.object(
-            command, "_listen_stdin", return_value=ListenResult(status="success", source="stdin")
-        ) as mock_listen_stdin:
+        with patch.object(command, "_stream_stdin", return_value=expected) as mock_stream:
             result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -135,31 +126,21 @@ class TestListenCommand:
                 smart_format=True,
             )
 
-            mock_listen_stdin.assert_called_once_with(
-                mock_client,
-                "nova-3",
-                "en-US",
-                "linear16",
-                16000,
-                1,
-                False,
-                True,
-                True,
-            )
-            assert isinstance(result, ListenResult)
-            assert result.status == "success"
+            mock_stream.assert_called_once()
+            call_kwargs = mock_stream.call_args.kwargs
+            assert call_kwargs["model"] == "nova-3"
+            assert call_kwargs["encoding"] == "linear16"
             assert result.source == "stdin"
 
     @patch("deepctl_cmd_listen.command.sys")
-    def test_handle_mic_calls_listen_mic(
+    def test_handle_mic_routes_to_stream_mic(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):
-        """Test that --mic flag routes to _listen_mic."""
+        """--mic routes to _stream_mic."""
         mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="mic", mode="live")
 
-        with patch.object(
-            command, "_listen_mic", return_value=ListenResult(status="success", source="mic")
-        ) as mock_listen_mic:
+        with patch.object(command, "_stream_mic", return_value=expected) as mock_stream:
             result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -174,45 +155,115 @@ class TestListenCommand:
                 smart_format=True,
             )
 
-            mock_listen_mic.assert_called_once_with(
-                mock_client,
-                "nova-3",
-                "en-US",
-                16000,
-                1,
-                False,
-                True,
-                True,
-            )
-            assert isinstance(result, ListenResult)
-            assert result.status == "success"
+            mock_stream.assert_called_once()
+            call_kwargs = mock_stream.call_args.kwargs
+            assert call_kwargs["model"] == "nova-3"
             assert result.source == "mic"
+
+    @patch("deepctl_cmd_listen.command._agentic", False)
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_file_source_routes_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A file path routes to _prerecorded with is_url=False."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(
+            status="success", source="file", mode="prerecorded",
+            transcript="hello world",
+        )
+
+        with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
+            # Skip interactive feature selection
+            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+                result = command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    model="nova-3",
+                    language="en-US",
+                )
+
+            mock_pre.assert_called_once()
+            call_kwargs = mock_pre.call_args.kwargs
+            assert call_kwargs["is_url"] is False
+            assert result.source == "file"
+
+    @patch("deepctl_cmd_listen.command._agentic", False)
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_url_source_routes_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A URL routes to _prerecorded with is_url=True."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(
+            status="success", source="url", mode="prerecorded",
+            transcript="hello",
+        )
+
+        with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
+            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+                result = command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="https://example.com/audio.mp3",
+                    mic=False,
+                    model="nova-3",
+                    language="en-US",
+                )
+
+            mock_pre.assert_called_once()
+            call_kwargs = mock_pre.call_args.kwargs
+            assert call_kwargs["is_url"] is True
+            assert result.source == "url"
+
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_explicit_stdin_dash(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """source='-' forces stream_stdin mode regardless of isatty."""
+        mock_sys.stdin.isatty.return_value = True  # would normally trigger interactive
+        expected = ListenResult(status="success", source="stdin", mode="live")
+
+        with patch.object(command, "_stream_stdin", return_value=expected) as mock_stream:
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                source="-",
+                mic=False,
+            )
+
+            mock_stream.assert_called_once()
+            assert result.source == "stdin"
 
 
 class TestListenResult:
-    """Test cases for ListenResult model."""
+    """Test ListenResult model fields and defaults."""
 
     def test_create_listen_result(self):
-        """Test creating a ListenResult with all fields."""
         result = ListenResult(
             status="success",
-            message="Transcription complete",
+            message="done",
             transcript="Hello world",
             duration_seconds=5.2,
             source="mic",
+            mode="live",
         )
-
         assert result.status == "success"
-        assert result.message == "Transcription complete"
         assert result.transcript == "Hello world"
         assert result.duration_seconds == 5.2
         assert result.source == "mic"
+        assert result.mode == "live"
 
     def test_listen_result_defaults(self):
-        """Test ListenResult with default values."""
         result = ListenResult()
-
         assert result.status == "success"
         assert result.transcript == ""
         assert result.duration_seconds == 0.0
         assert result.source == ""
+        assert result.mode == ""
+        assert result.diarized is False
+        assert result.full_result is None

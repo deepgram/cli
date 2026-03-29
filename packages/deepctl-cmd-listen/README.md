@@ -37,6 +37,7 @@ pipx run deepctl --help
 - `rich>=13.0.0`
 - `pydantic>=2.0.0`
 - `websockets>=11.0`
+- `deepgram-captions>=1.0.0`
 
 ## License
 
