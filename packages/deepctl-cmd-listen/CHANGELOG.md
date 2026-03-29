@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.3](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.2...deepctl-cmd-listen-v0.0.3) (2026-03-29)
+
+
+### Features
+
+* **listen:** auto-select listen.v2 for flux-* models ([9920023](https://github.com/deepgram/cli/commit/992002379ca362a0ea62161262b282177c377c6b))
+* **listen:** unified STT command with captions and transcribe alias ([1c6e8d8](https://github.com/deepgram/cli/commit/1c6e8d896b826d2be538c637a64517288478b748))
+
 ## [0.0.2](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.1...deepctl-cmd-listen-v0.0.2) (2026-03-23)
 
 

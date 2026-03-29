@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.5](https://github.com/deepgram/cli/compare/v0.2.4...v0.2.5) (2026-03-29)
+
+
+### Features
+
+* **cli:** add whoami, --dry-run, and shell completion ([5577ef2](https://github.com/deepgram/cli/commit/5577ef2a37049cfddf227fd14d5705607ad056d0))
+* **core:** add AI agent detection and --agent-friendly flag ([a5de7e2](https://github.com/deepgram/cli/commit/a5de7e24deba1521ee838aca2264f04dd2d0a933))
+* **listen:** auto-select listen.v2 for flux-* models ([9920023](https://github.com/deepgram/cli/commit/992002379ca362a0ea62161262b282177c377c6b))
+* **listen:** unified STT command with captions and transcribe alias ([1c6e8d8](https://github.com/deepgram/cli/commit/1c6e8d896b826d2be538c637a64517288478b748))
+* **web:** add Astro landing page for deepgram CLI ([91079df](https://github.com/deepgram/cli/commit/91079df5f59d3ade5d495a516946f6b4bae89240))
+* **web:** comprehensive SEO, OG, JSON-LD, GEO, and LLM optimisation ([346625f](https://github.com/deepgram/cli/commit/346625f0fc1452e223fe7c5c2f5d981e99818054))
+* **web:** randomised terminal demo with caption examples ([7ee635c](https://github.com/deepgram/cli/commit/7ee635c2ae9c2a5d2cf51839c163e9dc2ac7ebfb))
+* **web:** switch install to deepgram.com/install.sh and install.ps1 ([d5e07ae](https://github.com/deepgram/cli/commit/d5e07ae2eba12f7747f6100f984c568a1c7a8b08))
+* **web:** use Deepgram wordmark, simplify nav and hero install CTA ([42cd42f](https://github.com/deepgram/cli/commit/42cd42f6dadc4f37a00ded16568392981ee8b04d))
+
+
+### Bug Fixes
+
+* **ci:** fix netlify deploy — add --no-build, remove silent error swallowing ([be2ff3f](https://github.com/deepgram/cli/commit/be2ff3fa6b678ed77d2144ea3bbf1d78a71fbc4f))
+* **web:** accurate terminal demo — correct model names and 14 sequences ([3b2a861](https://github.com/deepgram/cli/commit/3b2a861439a8f4c9f1e7f755c28499d47e7f4e8e))
+* **web:** generate og-image.png at build time via @resvg/resvg-js ([1897c0b](https://github.com/deepgram/cli/commit/1897c0be0ce5a882846cecfbdddb068fd80be20a))
+
 ## [0.2.4](https://github.com/deepgram/cli/compare/v0.2.3...v0.2.4) (2026-03-25)
 
 
