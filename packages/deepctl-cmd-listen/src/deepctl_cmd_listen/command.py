@@ -135,10 +135,13 @@ class ListenCommand(BaseCommand):
             },
             {
                 "names": ["--api-version"],
-                "help": "Deepgram listen API version: 1 or 2 (default: 1)",
+                "help": (
+                    "Deepgram listen API version: 1 or 2. "
+                    "Auto-selects 2 for flux-* models, 1 otherwise."
+                ),
                 "type": int,
                 "is_option": True,
-                "default": 1,
+                "default": None,
             },
             # ── Features (all modes) ──────────────────────────────────
             {
@@ -295,7 +298,16 @@ class ListenCommand(BaseCommand):
         # ── Gather options ─────────────────────────────────────────────
         model = kwargs.get("model") or "nova-3"
         language = kwargs.get("language") or "en-US"
-        api_version = kwargs.get("api_version") or 1
+
+        # Auto-select API version: flux-* models require listen.v2.
+        # Explicit --api-version always wins.
+        explicit_version = kwargs.get("api_version")
+        if explicit_version is not None:
+            api_version = explicit_version
+        elif model.startswith("flux"):
+            api_version = 2
+        else:
+            api_version = 1
         diarize = kwargs.get("diarize", False)
         smart_format = kwargs.get("smart_format", True)
         punctuate = kwargs.get("punctuate", True)
