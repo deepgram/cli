@@ -1087,11 +1087,12 @@ class ListenCommand(BaseCommand):
         out.print(table)
         out.print()
 
-        # Transcript — markup=False so [Speaker N] labels are printed literally
+        # Transcript — use plain print() so [Speaker N] labels are never
+        # interpreted as Rich markup and output always reaches the terminal.
         if result.transcript:
-            out.print(result.transcript.strip(), markup=False)
+            print(result.transcript.strip())
         else:
-            out.print("[dim]No transcript in response[/dim]")
+            print("(no transcript in response)")
 
         # Summary (if present in full_result)
         if result.full_result:
@@ -1099,7 +1100,7 @@ class ListenCommand(BaseCommand):
             if summary:
                 out.print()
                 out.print("[green]Summary:[/green]")
-                out.print(f"  {summary}", markup=False)
+                print(f"  {summary}")
 
             topics_list = extract_topics(result.full_result)
             if topics_list:

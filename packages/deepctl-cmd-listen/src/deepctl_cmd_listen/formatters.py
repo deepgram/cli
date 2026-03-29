@@ -13,10 +13,11 @@ def format_diarized_transcript(api_result: dict[str, Any]) -> str:
         [Speaker 1] This year we ship the fastest model yet.
     """
     try:
-        channels = api_result.get("results", {}).get("channels", [])
+        results = api_result.get("results") or {}
+        channels = results.get("channels") or []
         if not channels:
             return ""
-        words = channels[0].get("alternatives", [{}])[0].get("words", [])
+        words = (channels[0].get("alternatives") or [{}])[0].get("words") or []
         return _words_to_speaker_lines(words)
     except Exception:
         return ""
@@ -56,17 +57,23 @@ def _words_to_speaker_lines(words: list[dict[str, Any]]) -> str:
 
 
 def extract_plain_transcript(api_result: dict[str, Any]) -> str:
-    """Extract flat transcript text, preferring paragraphs form."""
+    """Extract flat transcript text, preferring paragraphs form.
+
+    Uses ``or`` patterns instead of ``get(key, default)`` so that Pydantic
+    ``model_dump()`` responses with ``key: None`` (key present, value None)
+    are treated the same as missing keys.
+    """
     try:
-        channels = api_result.get("results", {}).get("channels", [])
+        results = api_result.get("results") or {}
+        channels = results.get("channels") or []
         if not channels:
-            return str(api_result.get("transcript", ""))
-        alt = channels[0].get("alternatives", [{}])[0]
+            return str(api_result.get("transcript") or "")
+        alt = (channels[0].get("alternatives") or [{}])[0]
         # Paragraphs transcript is best-formatted
-        paragraphs = alt.get("paragraphs", {})
+        paragraphs = alt.get("paragraphs") or {}
         if paragraphs and "transcript" in paragraphs:
-            return str(paragraphs["transcript"])
-        return str(alt.get("transcript", ""))
+            return str(paragraphs["transcript"] or "")
+        return str(alt.get("transcript") or "")
     except Exception:
         return ""
 
@@ -74,8 +81,9 @@ def extract_plain_transcript(api_result: dict[str, Any]) -> str:
 def extract_summary(api_result: dict[str, Any]) -> str:
     """Extract summary text if present in the response."""
     try:
-        summary = api_result.get("results", {}).get("summary", {})
-        return str(summary.get("short", summary.get("text", "")))
+        results = api_result.get("results") or {}
+        summary = results.get("summary") or {}
+        return str(summary.get("short") or summary.get("text") or "")
     except Exception:
         return ""
 
