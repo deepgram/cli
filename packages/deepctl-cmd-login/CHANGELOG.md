@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.13...deepctl-cmd-login-v0.1.14) (2026-03-29)
+
+
+### Features
+
+* **cli:** add whoami, --dry-run, and shell completion ([5577ef2](https://github.com/deepgram/cli/commit/5577ef2a37049cfddf227fd14d5705607ad056d0))
+
 ## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.12...deepctl-cmd-login-v0.1.13) (2026-03-25)
 
 

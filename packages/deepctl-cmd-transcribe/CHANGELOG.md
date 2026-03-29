@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-transcribe-v0.1.11...deepctl-cmd-transcribe-v0.1.12) (2026-03-29)
+
+
+### Features
+
+* **listen:** unified STT command with captions and transcribe alias ([1c6e8d8](https://github.com/deepgram/cli/commit/1c6e8d896b826d2be538c637a64517288478b748))
+
 ## [0.1.11](https://github.com/deepgram/cli/compare/deepctl-cmd-transcribe-v0.1.10...deepctl-cmd-transcribe-v0.1.11) (2026-03-09)
 
 
