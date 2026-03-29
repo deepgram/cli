@@ -1,5 +1,12 @@
 ---
 import '../styles/global.css';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+// Read version from root pyproject.toml at build time — always in sync,
+// no manual updates needed. process.cwd() is web/ during `npm run build`.
+const _toml = readFileSync(join(process.cwd(), '..', 'pyproject.toml'), 'utf-8');
+const cliVersion = _toml.match(/^version = "([^"]+)"/m)?.[1] ?? '0.0.0';
 ---
 
 <html lang="en" prefix="og: https://ogp.me/ns#">
@@ -76,7 +83,7 @@ import '../styles/global.css';
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Speech Recognition Software",
         "operatingSystem": ["macOS", "Linux", "Windows"],
-        "softwareVersion": "0.2.4",
+        "softwareVersion": cliVersion,
         "releaseNotes": "https://github.com/deepgram/cli/releases",
         "softwareRequirements": "Python 3.10 or later",
         "programmingLanguage": "Python",
@@ -282,7 +289,7 @@ import '../styles/global.css';
             <span class="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-dg-green opacity-40"></span>
             <span class="relative inline-flex h-2 w-2 rounded-full bg-dg-green"></span>
           </span>
-          Official Deepgram Developer Tool &nbsp;·&nbsp; v0.2.4
+          Official Deepgram Developer Tool &nbsp;·&nbsp; v{cliVersion}
         </div>
 
         <!-- headline — marketing site uses 96px display -->
