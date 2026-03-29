@@ -639,18 +639,82 @@ import '../styles/global.css';
 <script>
   // ── Terminal typewriter ──────────────────────────────────────
   const LINES = [
-    { p: '❯ ', t: 'dg transcribe keynote.mp3 --diarize', c: '' },
-    { p: '',   t: '✓  Transcribing · nova-3 · 2 speakers detected', c: '#13ef95' },
-    { p: '',   t: '[Speaker 1]  "Welcome to our annual product keynote."', c: '#949498' },
-    { p: '',   t: '[Speaker 2]  "This year we ship the fastest model yet."', c: '#7a7a7e' },
+    // ── Auth check ────────────────────────────────
+    { p: '❯ ', t: 'dg whoami', c: '' },
+    { p: '',   t: '✓  Authenticated', c: '#13ef95' },
+    { p: '',   t: '  Profile:    default', c: '#949498' },
+    { p: '',   t: '  API Key:    sk-3a8f****c91b  (keyring)', c: '#7a7a7e' },
+    { p: '',   t: '  Project ID: a1b2c3d4-5e6f-7890-abcd', c: '#7a7a7e' },
     { p: '',   t: '', c: '' },
-    { p: '❯ ', t: 'dg speak "Hello from Deepgram" | ffplay -nodisp -', c: '' },
-    { p: '',   t: '✓  Synthesizing · aura-2-en-us', c: '#13ef95' },
+    // ── Projects ──────────────────────────────────
+    { p: '❯ ', t: 'dg projects --list', c: '' },
+    { p: '',   t: 'Found 2 project(s):', c: '#13ef95' },
+    { p: '',   t: '  • my-deepgram-project  a1b2c3d4-5e6f-7890', c: '#949498' },
+    { p: '',   t: '  • staging-env          b2c3d4e5-6f78-90ab', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── File transcription with diarization ───────
+    { p: '❯ ', t: 'dg transcribe keynote.mp3 --diarize --model nova-3', c: '' },
+    { p: '',   t: '✓  Transcribing · nova-3', c: '#13ef95' },
+    { p: '',   t: 'Welcome to our annual product keynote. This year', c: '#949498' },
+    { p: '',   t: 'we ship the fastest model yet.', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── URL transcription ─────────────────────────
+    { p: '❯ ', t: 'dg transcribe https://cdn.example.com/podcast.mp3', c: '' },
+    { p: '',   t: 'Fetching remote audio…', c: '#949498' },
+    { p: '',   t: '"This week on Developer Stories: the future of speech AI."', c: '#edede2' },
+    { p: '',   t: '', c: '' },
+    // ── JSON pipeline ─────────────────────────────
+    { p: '❯ ', t: "dg transcribe standup.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'", c: '' },
+    { p: '',   t: '"Blocked on auth; need a review on PR 847 by EOD."', c: '#edede2' },
+    { p: '',   t: '', c: '' },
+    // ── Text intelligence ─────────────────────────
+    { p: '❯ ', t: 'dg read earnings.txt --sentiment --summarize --topics', c: '' },
+    { p: '',   t: 'Analyzing text...', c: '#949498' },
+    { p: '',   t: 'Summary:   Revenue beat forecasts by 23%; guidance raised.', c: '#edede2' },
+    { p: '',   t: 'Sentiment: positive (0.96)', c: '#13ef95' },
+    { p: '',   t: 'Topics:    • earnings (98%)  • revenue growth (91%)', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── TTS → pipe to player ──────────────────────
+    { p: '❯ ', t: 'dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -', c: '' },
+    { p: '',   t: '✓  Synthesizing · aura-2-asteria-en', c: '#13ef95' },
     { p: '',   t: '▶  Streaming 3.2s of audio…', c: '#949498' },
     { p: '',   t: '', c: '' },
+    // ── Live mic transcription ────────────────────
     { p: '❯ ', t: 'dg listen --mic --model nova-3 --interim', c: '' },
     { p: '',   t: '✓  Listening on Built-in Microphone…', c: '#13ef95' },
     { p: '',   t: '"The quick brown fox jumps over the lazy dog."', c: '#edede2' },
+    { p: '',   t: '', c: '' },
+    // ── Explore models ────────────────────────────
+    { p: '❯ ', t: 'dg models --type stt', c: '' },
+    { p: '',   t: '  nova-3     STT  en   2024-01-24', c: '#edede2' },
+    { p: '',   t: '  nova-2     STT  en   2024-01-09', c: '#949498' },
+    { p: '',   t: '  enhanced   STT  en   2022-05-09', c: '#7a7a7e' },
+    { p: '',   t: '  24 model(s) found', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── Key management (dry run) ──────────────────
+    { p: '❯ ', t: "dg keys --create --comment 'ci-pipeline' --dry-run", c: '' },
+    { p: '',   t: 'Dry run — no changes made', c: '#949498' },
+    { p: '',   t: "  Would create key: comment='ci-pipeline'  scopes=member", c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── Usage stats ───────────────────────────────
+    { p: '❯ ', t: 'dg usage --last-month', c: '' },
+    { p: '',   t: 'Usage Summary (2026-02-01 to 2026-02-28):', c: '#13ef95' },
+    { p: '',   t: '  Total Requests: 1,247', c: '#949498' },
+    { p: '',   t: '  Total Duration: 42.30 hours', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── Debug: failed requests ────────────────────
+    { p: '❯ ', t: 'dg requests --status failed --endpoint listen', c: '' },
+    { p: '',   t: '  /v1/listen  streaming  failed  2026-03-28  a3f8c1d2…', c: '#949498' },
+    { p: '',   t: '  1 request(s) shown', c: '#7a7a7e' },
+    { p: '',   t: '', c: '' },
+    // ── Raw API call ──────────────────────────────
+    { p: '❯ ', t: "dg api /v1/projects --jq '.projects[0].name'", c: '' },
+    { p: '',   t: '"my-deepgram-project"', c: '#edede2' },
+    { p: '',   t: '', c: '' },
+    // ── MCP server for AI editors ─────────────────
+    { p: '❯ ', t: 'dg mcp --transport sse --port 8000', c: '' },
+    { p: '',   t: 'Starting MCP proxy (sse) on 127.0.0.1:8000…', c: '#13ef95' },
+    { p: '',   t: '  Add to your AI editor: http://127.0.0.1:8000/sse', c: '#949498' },
   ];
 
   const out = document.getElementById('terminal-output');
