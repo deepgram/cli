@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.4...deepctl-core-v0.2.5) (2026-03-29)
+
+
+### Bug Fixes
+
+* replace dg transcribe with dg listen across web content and skill generator ([4676d34](https://github.com/deepgram/cli/commit/4676d34dd0d5cc5603c68fd729ff7196bf8531df))
+
 ## [0.2.4](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.3...deepctl-core-v0.2.4) (2026-03-29)
 
 
