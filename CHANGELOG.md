@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.6](https://github.com/deepgram/cli/compare/v0.2.5...v0.2.6) (2026-03-29)
+
+
+### Features
+
+* **web:** add favicon from dx-design lettermark-square ([7aa290c](https://github.com/deepgram/cli/commit/7aa290c7b37708f2f279dc35e14195ddf1be2f4b))
+
+
+### Bug Fixes
+
+* **ci:** trigger web production deploy via workflow_call not release event ([5913670](https://github.com/deepgram/cli/commit/59136709a4486423e1cfee2d7d6d79f3e2c0bfc6))
+* **install:** expose dg/deepgram aliases and fix PATH after install ([bacc780](https://github.com/deepgram/cli/commit/bacc780dfb6823bcffd1d2965f65c40be7fb0794))
+* **listen:** use markup=False when printing transcript and summary ([e87f68e](https://github.com/deepgram/cli/commit/e87f68e5fb1622e515408fac4d52ae323faf1ea3))
+* replace dg transcribe with dg listen across web content and skill generator ([4676d34](https://github.com/deepgram/cli/commit/4676d34dd0d5cc5603c68fd729ff7196bf8531df))
+
+
+### Documentation
+
+* add examples section to README with captions, piping, and management ([f7fd975](https://github.com/deepgram/cli/commit/f7fd9759a6e967f5eae72920be2890bbc127e5b7))
+
 ## [0.2.5](https://github.com/deepgram/cli/compare/v0.2.4...v0.2.5) (2026-03-29)
 
 
