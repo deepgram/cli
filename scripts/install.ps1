@@ -71,19 +71,23 @@ else {
 
 Write-Host ''
 
+# Refresh PATH so the newly installed scripts are visible in this session
+$env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+
 if (Test-Command 'deepctl') {
     Write-Host 'Deepgram CLI installed successfully!'
     Write-Host ''
     & deepctl --version
     Write-Host ''
+    Write-Host 'Available as:  dg  ·  deepctl  ·  deepgram'
+    Write-Host ''
     Write-Host 'Get started:'
-    Write-Host '  deepctl login'
-    Write-Host '  deepctl --help'
+    Write-Host '  dg login'
+    Write-Host '  dg --help'
 }
 else {
-    Write-Host "Installation complete, but 'deepctl' is not in your PATH."
+    Write-Host "Installation complete, but the commands are not in your PATH."
     Write-Host ''
-    Write-Host 'You may need to restart your terminal or add the install location to your PATH.'
-    Write-Host ''
-    Write-Host 'Then run: deepctl --help'
+    Write-Host 'Restart your terminal to pick up the updated PATH, then run:'
+    Write-Host '  dg --help'
 }

@@ -130,21 +130,41 @@ fi
 
 say ""
 
+# Snapshot PATH before we modify it so we can advise the user later
+ORIGINAL_PATH="$PATH"
+
+# Ensure ~/.local/bin is on PATH for this session (covers pip --user, uv, pipx)
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
 # Verify installation
 if has deepctl; then
     say "Deepgram CLI installed successfully!"
     say ""
     deepctl --version
     say ""
+    say "Available as:  dg  ·  deepctl  ·  deepgram"
+    say ""
     say "Get started:"
-    say "  deepctl login"
-    say "  deepctl --help"
+    say "  dg login"
+    say "  dg --help"
+    say ""
+    # Advise the user to persist PATH if ~/.local/bin was not already there
+    case ":$ORIGINAL_PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *)
+            say "Note: add the following to your shell profile to make these permanent:"
+            say "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+            say ""
+            ;;
+    esac
 else
-    say "Installation complete, but 'deepctl' is not in your PATH."
+    say "Installation complete, but the commands are not in your PATH."
     say ""
-    say "You may need to restart your shell or add one of these to your PATH:"
-    say "  ~/.local/bin"
-    say "  ~/.local/share/uv/tools/${PACKAGE}/bin"
+    say "Add the following to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+    say "  export PATH=\"\$HOME/.local/bin:\$PATH\""
     say ""
-    say "Then run: deepctl --help"
+    say "Then open a new terminal and run: dg --help"
 fi
