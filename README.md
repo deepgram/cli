@@ -64,7 +64,7 @@ pipx run deepctl --help
 dg login
 
 # Transcribe an audio file
-dg transcribe recording.wav
+dg listen recording.wav
 
 # Text-to-speech
 dg speak "Hello from Deepgram" -o hello.mp3
@@ -74,6 +74,77 @@ dg listen --mic
 
 # Analyze text for sentiment and topics
 dg read "The product is amazing" --sentiment --topics
+```
+
+## Examples
+
+### Speech-to-text
+
+```bash
+# File or URL — auto-detected
+dg listen keynote.mp3 --diarize --model nova-3
+dg listen https://cdn.example.com/podcast.mp3
+
+# Pipe to jq for scripting
+dg listen standup.mp3 -o json \
+  | jq '.results.channels[0].alternatives[0].transcript'
+
+# Live microphone with interim (partial) results
+dg listen --mic --model nova-3 --interim
+
+# Raw audio stream from ffmpeg
+ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - \
+  | dg listen --encoding linear16
+```
+
+### Captions (WebVTT & SRT)
+
+```bash
+# Generate a WebVTT file
+dg listen keynote.mp3 --webvtt --save-to keynote.vtt
+
+# SRT with speaker labels
+dg listen interview.mp3 --srt --diarize --save-to interview.srt
+
+# Stream live captions from the microphone
+dg listen --mic --webvtt
+
+# Captions from a video via ffmpeg
+ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - \
+  | dg listen --encoding linear16 --srt
+```
+
+### Text intelligence
+
+```bash
+dg read earnings.txt --sentiment --summarize --topics
+```
+
+### Text-to-speech
+
+```bash
+# Stream directly to a player
+dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -
+```
+
+### Account & project management
+
+```bash
+dg whoami                                        # Auth status
+dg projects --list                               # List projects
+dg keys --create --comment 'ci-pipeline' --dry-run  # Dry-run key creation
+dg usage --last-month                            # Usage stats
+dg requests --status failed --endpoint listen   # Debug failed requests
+```
+
+### Raw API & MCP
+
+```bash
+# Hit any endpoint directly
+dg api /v1/projects --jq '.projects[0].name'
+
+# MCP server for AI editors (Claude Code, Cursor, etc.)
+dg mcp --transport sse --port 8000
 ```
 
 ## Features
