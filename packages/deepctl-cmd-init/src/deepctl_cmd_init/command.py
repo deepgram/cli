@@ -32,7 +32,7 @@ class InitCommand(BaseCommand):
         "Run with no arguments for an interactive search-and-select picker, "
         "or pass a template name directly to clone immediately."
     )
-    short_help = "Scaffold a Deepgram starter app"
+    short_help = "Scaffold a Deepgram starter app (alpha)"
 
     requires_auth = False
     requires_project = False
