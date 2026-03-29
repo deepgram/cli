@@ -54,7 +54,8 @@ class TestListenCommand:
             "--diarize", "--smart-format", "--punctuate",
             "--summarize", "--topics", "--sentiment",
             "--interim", "--encoding", "--sample-rate", "--channels",
-            "--save-to", "-s", "--probe", "--no-validate", "--api-version",
+            "--save-to", "-s", "--probe", "--no-validate",
+            "--webvtt", "--srt",
         ]:
             assert expected in option_names, f"Missing option: {expected}"
 
