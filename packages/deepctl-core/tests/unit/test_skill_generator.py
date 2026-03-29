@@ -168,7 +168,7 @@ class TestRenderDeveloperGuide:
     def test_contains_cli_section(self):
         content = render_developer_guide("1.0.0")
         assert "deepctl CLI" in content
-        assert "dg transcribe" in content
+        assert "dg listen" in content
         assert "dg login" in content
 
     def test_frontmatter(self):
