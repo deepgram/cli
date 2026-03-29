@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl"
-version = "0.2.6" # x-release-please-version
+version = "0.2.7" # x-release-please-version
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
 license = "MIT"

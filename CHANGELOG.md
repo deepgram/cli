@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/deepgram/cli/compare/v0.2.6...v0.2.7) (2026-03-29)
+
+
+### Features
+
+* **web:** read CLI version from pyproject.toml at build time ([097d1c0](https://github.com/deepgram/cli/commit/097d1c08e70d8426ce6037e8fd63503f17f65318))
+
 ## [0.2.6](https://github.com/deepgram/cli/compare/v0.2.5...v0.2.6) (2026-03-29)
 
 
