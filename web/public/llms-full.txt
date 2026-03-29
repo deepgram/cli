@@ -66,40 +66,50 @@ dg profiles --current        # Show current profile details
 
 ---
 
-## Speech-to-Text (Transcription)
+## Speech-to-Text
+
+`dg listen` handles all STT modes. Source is auto-detected from the argument or flags.
+`dg transcribe` is a hidden deprecated alias — prefer `dg listen`.
 
 ### Transcribe a local file
 ```bash
-dg transcribe recording.wav
-dg transcribe podcast.mp3 --model nova-3
-dg transcribe interview.mp4 --diarize --language en-US
-dg transcribe meeting.wav --summarize --detect-topics
-dg transcribe call.mp3 --output json --save-to transcript.json
+dg listen recording.wav
+dg listen podcast.mp3 --model nova-3
+dg listen interview.mp4 --diarize --language en-US
+dg listen meeting.wav --summarize --topics
+dg listen call.mp3 --output json --save-to transcript.json
 ```
 
 ### Transcribe a URL
 ```bash
-dg transcribe https://example.com/audio.mp3
-dg transcribe https://example.com/call.wav --diarize --model nova-3
+dg listen https://example.com/audio.mp3
+dg listen https://example.com/call.wav --diarize --model nova-3
+```
+
+### Generate captions
+```bash
+dg listen recording.wav --webvtt --save-to captions.vtt
+dg listen interview.mp3 --srt --diarize --save-to interview.srt
 ```
 
 ### Options
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--model` | STT model (nova-3, nova-2, whisper, etc.) | nova-2 |
+| `--model` | STT model (nova-3, nova-2, whisper, flux-general-en, etc.) | nova-3 |
 | `--language` | Language code (en-US, es-ES, fr-FR, etc.) | en-US |
-| `--diarize` | Enable speaker diarization | false |
+| `--diarize` | Speaker diarization — outputs `[Speaker N]` labels | false |
 | `--smart-format` | Smart formatting (punctuation, capitalization) | true |
 | `--punctuate` | Enable punctuation | true |
 | `--summarize` | Generate transcript summary | false |
-| `--detect-topics` | Topic detection | false |
-| `--save-to` | Save output to file path | — |
+| `--topics` | Topic detection | false |
+| `--sentiment` | Sentiment analysis | false |
+| `--webvtt` | Output WebVTT captions | false |
+| `--srt` | Output SRT captions | false |
+| `--save-to` | Save transcript or caption file to path | — |
 | `--no-validate` | Skip file validation | false |
 | `--probe` | Analyze audio before transcribing | false |
 
----
-
-## Live Streaming (Real-time STT)
+### Live Streaming (Real-time STT)
 
 ### Microphone input
 ```bash
@@ -326,10 +336,10 @@ All commands accept these global flags:
 Available on every command. Outputs a JSON contract describing the command:
 ```json
 {
-  "command": "transcribe",
-  "description": "Transcribe audio files or URLs using Deepgram",
+  "command": "listen",
+  "description": "Speech-to-text: files, URLs, microphone, and live streams",
   "agent_hints": "...",
-  "examples": ["dg transcribe recording.wav", "..."],
+  "examples": ["dg listen recording.wav", "dg listen --mic", "..."],
   "requires_auth": true,
   "non_interactive": true,
   "output_formats": ["json", "yaml", "table", "csv"],
@@ -357,10 +367,10 @@ Environment variables:
 
 ```bash
 # Transcribe and extract text with jq
-dg transcribe call.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'
+dg listen call.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'
 
 # Get all speaker segments
-dg transcribe interview.mp3 --diarize -o json | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
+dg listen interview.mp3 --diarize -o json | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
 
 # TTS piped to audio player
 dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -

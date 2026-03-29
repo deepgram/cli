@@ -16,8 +16,7 @@
 ## Core Commands
 
 - `dg login` — Authenticate via browser (OIDC device flow) or `--api-key` flag
-- `dg transcribe <file|url>` — Transcribe audio files or URLs using Deepgram STT
-- `dg listen --mic` — Live speech-to-text from microphone via WebSocket
+- `dg listen <file|url|->` — Transcribe files, URLs, microphone (`--mic`), or stdin. Supports `--diarize`, `--webvtt`, `--srt`, `--summarize`. (`dg transcribe` is a hidden alias)
 - `dg speak "<text>"` — Text-to-speech synthesis with Aura voices
 - `dg read <text>` — Text intelligence: sentiment, summaries, topics, intents
 - `dg models` — List available Deepgram models
