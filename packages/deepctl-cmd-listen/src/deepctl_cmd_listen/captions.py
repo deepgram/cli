@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from deepgram_captions import DeepgramConverter  # type: ignore[import-untyped]
+from deepgram_captions import DeepgramConverter
 from deepgram_captions import srt as _srt
 from deepgram_captions import webvtt as _webvtt
 

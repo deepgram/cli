@@ -128,7 +128,7 @@ class TestNestedCommandsIntegration:
         # Root level
         root_result = runner.invoke(deepctl_cli, ["--help"])
         assert "debug" in root_result.output
-        assert "transcribe" in root_result.output
+        assert "listen" in root_result.output
 
         # Group level
         group_result = runner.invoke(deepctl_cli, ["debug", "--help"])
@@ -148,7 +148,7 @@ class TestNestedCommandsIntegration:
         expected_commands = [
             "login",
             "projects",
-            "transcribe",
+            "listen",
             "usage",
             "debug",
         ]
