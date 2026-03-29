@@ -311,6 +311,7 @@ class TestInitCommand:
         tmp_path,
     ):
         mock_api.get_template.return_value = sample_detail
+        mock_lifecycle.check_prereqs.return_value = []
         mock_lifecycle.clone_template.return_value = None
         mock_lifecycle.run_lifecycle_step.return_value = True
 
@@ -375,25 +376,27 @@ class TestInitCommand:
         tmp_path,
     ):
         mock_api.get_template.return_value = sample_detail
+        mock_lifecycle.check_prereqs.return_value = []
         mock_lifecycle.clone_template.return_value = None
         mock_auth_manager.get_api_key.return_value = "sk-my-key"
 
         target = str(tmp_path / "app")
 
-        with patch.object(init_command, "confirm", return_value=False):
-            result = init_command.handle(
-                config=mock_config,
-                auth_manager=mock_auth_manager,
-                client=mock_client,
-                template="node-transcription",
-                dir=target,
-                search=None,
-                list=False,
-                install=False,
-                start=False,
-                no_install=True,
-                no_start=True,
-            )
+        with patch("deepctl_cmd_init.command._agentic", False):
+            with patch.object(init_command, "confirm", return_value=False):
+                result = init_command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    template="node-transcription",
+                    dir=target,
+                    search=None,
+                    list=False,
+                    install=False,
+                    start=False,
+                    no_install=True,
+                    no_start=True,
+                )
 
         # Clone cancelled because confirm returned False
         assert result.status == "cancelled"
