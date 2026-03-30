@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.13](https://github.com/deepgram/cli/compare/v0.2.12...v0.2.13) (2026-03-30)
+
+
+### Bug Fixes
+
+* **listen:** fix topics parameter name and add sentiment display ([8974b6c](https://github.com/deepgram/cli/commit/8974b6c9e6029b6da4bc0f109afaa4d5f7272c8f))
+
 ## [0.2.12](https://github.com/deepgram/cli/compare/v0.2.11...v0.2.12) (2026-03-30)
 
 

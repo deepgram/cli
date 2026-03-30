@@ -1,5 +1,5 @@
 {
-  ".": "0.2.12",
+  ".": "0.2.13",
   "packages/deepctl-core": "0.2.6",
   "packages/deepctl-shared-utils": "0.1.11",
   "packages/deepctl-cmd-api": "0.0.2",
@@ -22,7 +22,7 @@
   "packages/deepctl-cmd-speak": "0.0.2",
   "packages/deepctl-cmd-keys": "0.0.3",
   "packages/deepctl-cmd-read": "0.0.2",
-  "packages/deepctl-cmd-listen": "0.0.6",
+  "packages/deepctl-cmd-listen": "0.0.7",
   "packages/deepctl-cmd-requests": "0.0.2",
   "packages/deepctl-cmd-billing": "0.0.2",
   "packages/deepctl-cmd-members": "0.0.3",

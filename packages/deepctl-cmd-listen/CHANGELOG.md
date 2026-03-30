@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.7](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.6...deepctl-cmd-listen-v0.0.7) (2026-03-30)
+
+
+### Bug Fixes
+
+* **listen:** fix topics parameter name and add sentiment display ([8974b6c](https://github.com/deepgram/cli/commit/8974b6c9e6029b6da4bc0f109afaa4d5f7272c8f))
+
 ## [0.0.6](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.5...deepctl-cmd-listen-v0.0.6) (2026-03-30)
 
 
