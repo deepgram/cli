@@ -91,11 +91,13 @@ def extract_summary(api_result: dict[str, Any]) -> str:
 def extract_topics(api_result: dict[str, Any]) -> list[str]:
     """Extract detected topic strings from the response."""
     try:
-        segments = api_result.get("results", {}).get("topics", {}).get("segments", [])
+        results = api_result.get("results") or {}
+        topics_data = results.get("topics") or {}
+        segments = topics_data.get("segments") or []
         seen: set[str] = set()
         out: list[str] = []
         for seg in segments:
-            for topic in seg.get("topics", []):
+            for topic in seg.get("topics") or []:
                 name = topic.get("topic", "")
                 if name and name not in seen:
                     seen.add(name)
@@ -104,3 +106,20 @@ def extract_topics(api_result: dict[str, Any]) -> list[str]:
         return out
     except Exception:
         return []
+
+
+def extract_sentiment(api_result: dict[str, Any]) -> str:
+    """Extract the overall sentiment label and score from the response."""
+    try:
+        results = api_result.get("results") or {}
+        sentiments = results.get("sentiments") or {}
+        average = sentiments.get("average") or {}
+        label = average.get("sentiment") or ""
+        score = average.get("sentiment_score")
+        if not label:
+            return ""
+        if score is not None:
+            return f"{label} ({score:.2f})"
+        return label
+    except Exception:
+        return ""

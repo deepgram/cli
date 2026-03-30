@@ -40,6 +40,7 @@ from .captions import (
 )
 from .formatters import (
     extract_plain_transcript,
+    extract_sentiment,
     extract_summary,
     extract_topics,
     format_diarized_transcript,
@@ -533,7 +534,7 @@ class ListenCommand(BaseCommand):
         if summarize:
             options["summarize"] = "true"
         if topics:
-            options["detect_topics"] = "true"
+            options["topics"] = "true"
         if sentiment:
             options["sentiment"] = "true"
 
@@ -1111,6 +1112,12 @@ class ListenCommand(BaseCommand):
                 out.print("[green]Topics:[/green]")
                 for t in topics_list:
                     out.print(f"  • {t}")
+
+            sentiment = extract_sentiment(result.full_result)
+            if sentiment:
+                out.print()
+                out.print("[green]Sentiment:[/green]")
+                print(f"  {sentiment}")
 
     # ── Utilities ──────────────────────────────────────────────────────
 
