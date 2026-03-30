@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/deepgram/cli/compare/deepctl-cmd-init-v0.0.2...deepctl-cmd-init-v0.0.3) (2026-03-30)
+
+
+### Features
+
+* **init:** prereq checking, search-and-select picker, make init integration ([7de0189](https://github.com/deepgram/cli/commit/7de018916001a28962bee5040c5175a216458264))
+
 ## [0.0.2](https://github.com/deepgram/cli/compare/deepctl-cmd-init-v0.0.1...deepctl-cmd-init-v0.0.2) (2026-03-09)
 
 
