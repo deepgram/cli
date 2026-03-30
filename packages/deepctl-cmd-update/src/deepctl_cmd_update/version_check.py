@@ -1,6 +1,6 @@
 """Version checking functionality for deepctl."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from deepctl_core import Config
@@ -16,7 +16,9 @@ class VersionInfo(BaseModel):
     update_available: bool
     release_date: datetime | None = None
     release_notes_url: str | None = None
-    check_timestamp: datetime = Field(default_factory=datetime.now)
+    check_timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 # Mapping from config check_frequency values to timedelta
@@ -206,7 +208,10 @@ class VersionChecker:
         if last_check:
             try:
                 last_check_time = datetime.fromisoformat(last_check)
-                if datetime.now() - last_check_time < cache_duration:
+                # Ensure aware for comparison — older stored values may be naive
+                if last_check_time.tzinfo is None:
+                    last_check_time = last_check_time.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - last_check_time < cache_duration:
                     return False
             except ValueError:
                 # Invalid timestamp, proceed with check
@@ -234,7 +239,9 @@ class VersionChecker:
         Args:
             info: Version info to cache
         """
-        self.config._set_config_value("update.last_check", datetime.now().isoformat())
+        self.config._set_config_value(
+            "update.last_check", datetime.now(timezone.utc).isoformat()
+        )
         self.config._set_config_value(
             "update.cached_version_info", info.model_dump(mode="json")
         )
@@ -255,7 +262,7 @@ def format_version_message(info: VersionInfo) -> str:
 
     message = f"Update available: {info.current_version} → {info.latest_version}"
     if info.release_date:
-        days_old = (datetime.now() - info.release_date).days
+        days_old = (datetime.now(timezone.utc) - info.release_date).days
         if days_old == 0:
             message += " (released today)"
         elif days_old == 1:
