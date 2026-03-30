@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.9](https://github.com/deepgram/cli/compare/v0.2.8...v0.2.9) (2026-03-30)
+
+
+### Bug Fixes
+
+* **update:** correct command name to 'dg update' in update notification ([0a1b6af](https://github.com/deepgram/cli/commit/0a1b6af29dd48bcf4e00d7d8fd62d4d3e5c1571c))
+* **update:** use timezone-aware datetimes to fix offset comparison error ([eb9d1d3](https://github.com/deepgram/cli/commit/eb9d1d36afb3a3a0c3390459f5a83fe7a393546d))
+
 ## [0.2.8](https://github.com/deepgram/cli/compare/v0.2.7...v0.2.8) (2026-03-30)
 
 
