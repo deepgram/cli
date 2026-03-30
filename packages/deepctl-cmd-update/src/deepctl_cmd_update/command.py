@@ -157,7 +157,7 @@ class UpdateCommand(BaseCommand):
                 current_version=version_info.current_version,
                 latest_version=version_info.latest_version,
                 update_available=version_info.update_available,
-                installation_method=install_info.method,
+                installation_method=install_info.method.value,
             ).model_dump()
 
         # Show update command
@@ -173,7 +173,7 @@ class UpdateCommand(BaseCommand):
                 current_version=version_info.current_version,
                 latest_version=version_info.latest_version,
                 update_available=version_info.update_available,
-                installation_method=install_info.method,
+                installation_method=install_info.method.value,
             ).model_dump()
 
             # Execute update
@@ -201,7 +201,7 @@ class UpdateCommand(BaseCommand):
                     current_version=version_info.current_version,
                     latest_version=version_info.latest_version,
                     update_available=False,
-                    installation_method=install_info.method,
+                    installation_method=install_info.method.value,
                 ).model_dump()
             else:
                 error_msg = result.stderr if result.stderr else "Unknown error"
@@ -217,7 +217,7 @@ class UpdateCommand(BaseCommand):
                     current_version=version_info.current_version,
                     latest_version=version_info.latest_version,
                     update_available=version_info.update_available,
-                    installation_method=install_info.method,
+                    installation_method=install_info.method.value,
                 ).model_dump()
 
         except Exception as e:
@@ -233,5 +233,5 @@ class UpdateCommand(BaseCommand):
                 current_version=version_info.current_version,
                 latest_version=version_info.latest_version,
                 update_available=version_info.update_available,
-                installation_method=install_info.method,
+                installation_method=install_info.method.value,
             ).model_dump()
