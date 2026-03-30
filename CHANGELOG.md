@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12](https://github.com/deepgram/cli/compare/v0.2.11...v0.2.12) (2026-03-30)
+
+
+### Bug Fixes
+
+* **update:** serialize InstallMethod enum to string and fix command name ([8213065](https://github.com/deepgram/cli/commit/8213065d5602e24026a07fd3dc414cee01eb9699))
+
 ## [0.2.11](https://github.com/deepgram/cli/compare/v0.2.10...v0.2.11) (2026-03-30)
 
 

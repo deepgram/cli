@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.1...deepctl-cmd-update-v0.2.2) (2026-03-30)
+
+
+### Bug Fixes
+
+* **update:** serialize InstallMethod enum to string and fix command name ([8213065](https://github.com/deepgram/cli/commit/8213065d5602e24026a07fd3dc414cee01eb9699))
+
 ## [0.2.1](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.0...deepctl-cmd-update-v0.2.1) (2026-03-30)
 
 
