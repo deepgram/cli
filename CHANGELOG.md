@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.10](https://github.com/deepgram/cli/compare/v0.2.9...v0.2.10) (2026-03-30)
+
+
+### Features
+
+* **test:** add tests for check_prereqs tool detection in init lifecycle ([73eac9b](https://github.com/deepgram/cli/commit/73eac9b14f1f9b292f191a2432d4327d453d5234))
+
 ## [0.2.9](https://github.com/deepgram/cli/compare/v0.2.8...v0.2.9) (2026-03-30)
 
 
