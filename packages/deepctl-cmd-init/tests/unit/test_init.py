@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from deepctl_cmd_init.command import InitCommand
-from deepctl_cmd_init.lifecycle import inject_env
+from deepctl_cmd_init.lifecycle import check_prereqs, inject_env
 from deepctl_cmd_init.models import (
     InitResult,
     LifecycleStep,
@@ -400,3 +400,56 @@ class TestInitCommand:
 
         # Clone cancelled because confirm returned False
         assert result.status == "cancelled"
+
+
+class TestCheckPrereqs:
+    """Tests for lifecycle.check_prereqs() — prerequisite tool detection."""
+
+    def test_all_tools_present_returns_empty_list(self):
+        with patch("shutil.which", return_value="/usr/bin/tool"):
+            assert check_prereqs() == []
+
+    def test_single_missing_tool_returned(self):
+        def fake_which(cmd: str) -> str | None:
+            return None if cmd == "git" else "/usr/bin/tool"
+
+        with patch("shutil.which", side_effect=fake_which):
+            missing = check_prereqs()
+
+        assert len(missing) == 1
+        key, name, hint = missing[0]
+        assert key == "git"
+        assert "git" in name.lower()
+        assert hint  # install hint is non-empty
+
+    def test_multiple_missing_tools_all_returned(self):
+        def fake_which(cmd: str) -> str | None:
+            return None if cmd in ("node", "npm", "curl") else "/usr/bin/tool"
+
+        with patch("shutil.which", side_effect=fake_which):
+            missing = check_prereqs()
+
+        keys = [m[0] for m in missing]
+        assert "node" in keys
+        assert "npm" in keys
+        assert "curl" in keys
+
+    def test_all_tools_missing_returns_full_list(self):
+        with patch("shutil.which", return_value=None):
+            missing = check_prereqs()
+
+        from deepctl_cmd_init.lifecycle import PREREQS
+
+        assert len(missing) == len(PREREQS)
+
+    def test_missing_entry_structure(self):
+        """Each entry is a (key, display_name, install_hint) triple."""
+        with patch("shutil.which", return_value=None):
+            missing = check_prereqs()
+
+        for entry in missing:
+            assert len(entry) == 3
+            key, name, hint = entry
+            assert isinstance(key, str) and key
+            assert isinstance(name, str) and name
+            assert isinstance(hint, str) and hint
