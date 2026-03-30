@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.11](https://github.com/deepgram/cli/compare/v0.2.10...v0.2.11) (2026-03-30)
+
+
+### Bug Fixes
+
+* **listen:** fix three root causes of missing transcript output ([274aa41](https://github.com/deepgram/cli/commit/274aa41476dfce90c05f08550e3db71800ae19e3))
+
 ## [0.2.10](https://github.com/deepgram/cli/compare/v0.2.9...v0.2.10) (2026-03-30)
 
 
