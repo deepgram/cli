@@ -206,7 +206,7 @@ class TestPrintPendingNotification:
         output = stderr_capture.getvalue()
         assert "2.0.0" in output
         assert "1.0.0" in output
-        assert "deepctl update" in output
+        assert "dg update" in output
 
     def test_no_notification_when_up_to_date(self, capsys):
         """No output when no update is available."""
