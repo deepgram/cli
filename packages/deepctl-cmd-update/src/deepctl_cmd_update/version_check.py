@@ -270,5 +270,5 @@ def format_version_message(info: VersionInfo) -> str:
         else:
             message += f" (released {days_old} days ago)"
 
-    message += "\nRun 'deepctl update' to upgrade"
+    message += "\nRun 'dg update' to upgrade"
     return message

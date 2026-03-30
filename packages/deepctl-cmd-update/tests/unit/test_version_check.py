@@ -273,4 +273,4 @@ class TestFormatVersionMessage:
         msg = format_version_message(info)
         assert "1.0.0" in msg
         assert "2.0.0" in msg
-        assert "deepctl update" in msg
+        assert "dg update" in msg

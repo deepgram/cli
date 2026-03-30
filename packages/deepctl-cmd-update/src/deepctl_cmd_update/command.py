@@ -131,8 +131,10 @@ class UpdateCommand(BaseCommand):
         detector = InstallationDetector()
         install_info = detector.detect()
 
-        # Store installation info for future use
-        config._set_config_value("update.installation_method", install_info.method)
+        # Store installation info for future use — serialize enum to its string value
+        config._set_config_value(
+            "update.installation_method", install_info.method.value
+        )
         config._set_config_value("update.installation_path", install_info.path)
         config.save()
 
