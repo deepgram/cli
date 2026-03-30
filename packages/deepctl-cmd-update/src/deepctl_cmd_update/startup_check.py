@@ -197,8 +197,7 @@ def print_pending_notification() -> None:
     latest = _result.get("latest")
     current = _result.get("current")
     if latest and current:
-        # ANSI yellow text — \033[33m … \033[0m
         sys.stderr.write(
-            f"\033[33mUpdate available: {current} → {latest}"
-            f"  —  run 'deepctl update' to upgrade\033[0m\n"
+            f"\n\033[33m  Update available:  {current} → {latest}"
+            f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
         )
