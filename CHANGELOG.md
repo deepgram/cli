@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.8](https://github.com/deepgram/cli/compare/v0.2.7...v0.2.8) (2026-03-30)
+
+
+### Features
+
+* **init:** prereq checking, search-and-select picker, make init integration ([7de0189](https://github.com/deepgram/cli/commit/7de018916001a28962bee5040c5175a216458264))
+
+
+### Bug Fixes
+
+* **listen:** handle Pydantic model_dump() None values in transcript extraction ([39229b0](https://github.com/deepgram/cli/commit/39229b03b1fc2bedf38701bd3c467a0d5ef42b25))
+
 ## [0.2.7](https://github.com/deepgram/cli/compare/v0.2.6...v0.2.7) (2026-03-29)
 
 
