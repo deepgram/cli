@@ -519,11 +519,14 @@ class ListenCommand(BaseCommand):
                     )
 
         # ── Build API options ──────────────────────────────────────────
+        # Deepgram REST API requires lowercase string booleans ("true"/"false").
+        # Python booleans (True/False) serialize as "True"/"False" and are
+        # rejected with HTTP 400 INVALID_QUERY_PARAMETER.
         options: dict[str, Any] = {
             "model": model,
             "language": language,
-            "smart_format": smart_format,
-            "punctuate": punctuate,
+            "smart_format": "true" if smart_format else "false",
+            "punctuate": "true" if punctuate else "false",
         }
         if diarize:
             options["diarize"] = "true"

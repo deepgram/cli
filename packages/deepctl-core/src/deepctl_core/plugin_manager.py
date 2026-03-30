@@ -422,15 +422,22 @@ class PluginManager:
             for arg in reversed(arguments):
                 if arg.get("is_option", False):
                     # Add as option
-                    cmd = click.option(
-                        *arg.get("names", []),
-                        default=arg.get("default"),
-                        help=arg.get("help", ""),
-                        type=arg.get("type", str),
-                        required=arg.get("required", False),
-                        is_flag=arg.get("is_flag", False),
-                        multiple=arg.get("multiple", False),
-                    )(cmd)
+                    is_flag = arg.get("is_flag", False)
+                    # Flags default to False (not None) so Click passes the
+                    # right type. Also skip `type` for flags — Click manages
+                    # its own bool type for flags; passing type=str converts
+                    # the False default to the string "False" which is truthy.
+                    default_fallback = False if is_flag else None
+                    option_kwargs: dict[str, Any] = {
+                        "default": arg.get("default", default_fallback),
+                        "help": arg.get("help", ""),
+                        "required": arg.get("required", False),
+                        "is_flag": is_flag,
+                        "multiple": arg.get("multiple", False),
+                    }
+                    if not is_flag:
+                        option_kwargs["type"] = arg.get("type", str)
+                    cmd = click.option(*arg.get("names", []), **option_kwargs)(cmd)
                 else:
                     # Add as argument
                     cmd = click.argument(
