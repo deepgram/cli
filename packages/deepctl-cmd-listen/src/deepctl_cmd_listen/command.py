@@ -617,17 +617,22 @@ class ListenCommand(BaseCommand):
         caption_format: str | None,
     ) -> BaseResult:
         caption_writer: StreamingCaptionWriter | None = None
+
         if caption_format:
             caption_writer = StreamingCaptionWriter(caption_format)
-            caption_writer.print_header()
-
-        status.print(
-            f"[green]✓[/green] Listening on microphone · {model} · Ctrl+C to stop"
-        )
-        if diarize:
-            status.print("[dim]Speaker labels enabled[/dim]")
-        if caption_format:
-            status.print(f"[dim]Caption format: {caption_format.upper()}[/dim]")
+            note = f"Model: {model} · Language: {language}"
+            if diarize:
+                note += " · Speaker labels enabled"
+            note += " · Ctrl+C to stop"
+            caption_writer.print_header(
+                note=note if caption_format == "webvtt" else None
+            )
+        else:
+            status.print(
+                f"[green]✓[/green] Listening on microphone · {model} · Ctrl+C to stop"
+            )
+            if diarize:
+                status.print("[dim]Speaker labels enabled[/dim]")
 
         try:
             result = asyncio.run(
@@ -804,15 +809,20 @@ class ListenCommand(BaseCommand):
             )
 
         caption_writer: StreamingCaptionWriter | None = None
+
         if caption_format:
             caption_writer = StreamingCaptionWriter(caption_format)
-            caption_writer.print_header()
-
-        status.print(
-            f"[green]✓[/green] Streaming stdin · {model} · send EOF (Ctrl+D) to finish"
-        )
-        if caption_format:
-            status.print(f"[dim]Caption format: {caption_format.upper()}[/dim]")
+            note = f"Model: {model} · Language: {language}"
+            if diarize:
+                note += " · Speaker labels enabled"
+            note += " · Ctrl+D to finish"
+            caption_writer.print_header(
+                note=note if caption_format == "webvtt" else None
+            )
+        else:
+            status.print(
+                f"[green]✓[/green] Streaming stdin · {model} · send EOF (Ctrl+D) to finish"
+            )
 
         try:
             result = asyncio.run(

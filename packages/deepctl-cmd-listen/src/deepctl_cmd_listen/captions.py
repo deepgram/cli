@@ -100,11 +100,19 @@ class StreamingCaptionWriter:
         self._count = 0
         self._all_words: list[dict[str, Any]] = []
 
-    def print_header(self) -> None:
-        """Print the format header. Call once before any entries."""
+    def print_header(self, note: str | None = None) -> None:
+        """Print the format header. Call once before any entries.
+
+        For WebVTT, an optional NOTE block can carry metadata (model, language,
+        etc.) in a spec-compliant way. SRT has no header equivalent.
+        """
         if self.fmt == "webvtt":
             print("WEBVTT")
             print()
+            if note:
+                print("NOTE")
+                print(note)
+                print()
 
     def write_entry(
         self,
