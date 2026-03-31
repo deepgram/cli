@@ -774,6 +774,7 @@ class ListenCommand(BaseCommand):
             language=language,
             diarized=diarize,
             transcript=" ".join(full_transcript),
+            caption_format=caption_writer.fmt if caption_writer else None,
         )
 
     # ── Live stdin handler ─────────────────────────────────────────────
@@ -916,6 +917,7 @@ class ListenCommand(BaseCommand):
             language=language,
             diarized=diarize,
             transcript=" ".join(full_transcript),
+            caption_format=caption_writer.fmt if caption_writer else None,
         )
 
     # ── Shared WebSocket helpers ───────────────────────────────────────
@@ -1028,6 +1030,8 @@ class ListenCommand(BaseCommand):
 
         # Live results are printed in real-time; only show a brief summary
         if result.mode == "live":
+            if result.caption_format:
+                return  # captions were already printed incrementally
             if result.status == "success" and not result.transcript:
                 return  # nothing to add
             if fmt == "json":
