@@ -19,6 +19,21 @@ install(show_locals=True)
 console = Console()
 
 
+def _record_install_method_cb(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> None:
+    """Write the installation method to config. Called by install scripts."""
+    if not value or ctx.resilient_parsing:
+        return
+    try:
+        config = Config()
+        config._set_config_value("update.installation_method", value)
+        config.save()
+    except Exception:
+        pass
+    ctx.exit()
+
+
 def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     """Convert hyphenated commands to nested commands.
 
@@ -135,6 +150,15 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     "--timing-detailed",
     is_flag=True,
     help="Show detailed performance timing information",
+)
+@click.option(
+    "--record-install-method",
+    is_eager=True,
+    expose_value=False,
+    hidden=True,
+    callback=_record_install_method_cb,
+    metavar="METHOD",
+    help="Internal: record the installation method used by the install script",
 )
 @click.pass_context
 def cli(

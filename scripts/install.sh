@@ -12,6 +12,7 @@ set -e
 PACKAGE="deepctl"
 FORCE="${DEEPCTL_FORCE:-0}"
 VERSION="${DEEPCTL_VERSION:-}"
+METHOD=""
 
 # --- Parse arguments ---
 
@@ -110,15 +111,19 @@ fi
 if has uv; then
     say "Found uv, installing ${SPEC}..."
     uv tool install $UV_FLAGS "$SPEC"
+    METHOD="uv_tool"
 elif has pipx; then
     say "Found pipx, installing ${SPEC}..."
     pipx install $PIPX_FLAGS "$SPEC"
+    METHOD="pipx"
 elif has pip3; then
     say "Found pip3, installing ${SPEC}..."
     pip3 install --user $PIP_FLAGS "$SPEC"
+    METHOD="pip"
 elif has pip; then
     say "Found pip, installing ${SPEC}..."
     pip install --user $PIP_FLAGS "$SPEC"
+    METHOD="pip"
 else
     say "No Python package manager found. Installing uv first..."
     say ""
@@ -126,6 +131,7 @@ else
     say ""
     say "Installing ${SPEC}..."
     uv tool install $UV_FLAGS "$SPEC"
+    METHOD="uv_tool"
 fi
 
 say ""
@@ -143,6 +149,7 @@ esac
 if has deepctl; then
     say "Deepgram CLI installed successfully!"
     say ""
+    deepctl --record-install-method "$METHOD" >/dev/null 2>&1 || true
     deepctl --version
     say ""
     say "Available as:  dg  ·  deepctl  ·  deepgram"

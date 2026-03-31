@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $Package = 'deepctl'
 $Version = if ($env:DEEPCTL_VERSION) { $env:DEEPCTL_VERSION } else { '' }
 $Force = if ($env:DEEPCTL_FORCE -eq '1') { $true } else { $false }
+$Method = ''
 
 # Clean up env vars so they don't persist
 $env:DEEPCTL_VERSION = $null
@@ -47,18 +48,22 @@ $ForceFlag = if ($Force) { '--force' } else { $null }
 if (Test-Command 'uv') {
     Write-Host "Found uv, installing ${Spec}..."
     & uv tool install $ForceFlag $Spec
+    $Method = 'uv_tool'
 }
 elseif (Test-Command 'pipx') {
     Write-Host "Found pipx, installing ${Spec}..."
     & pipx install $(if ($Force) { '--force' } else { $null }) $Spec
+    $Method = 'pipx'
 }
 elseif (Test-Command 'pip3') {
     Write-Host "Found pip3, installing ${Spec}..."
     & pip3 install --user $(if ($Force) { '--force-reinstall' } else { $null }) $Spec
+    $Method = 'pip'
 }
 elseif (Test-Command 'pip') {
     Write-Host "Found pip, installing ${Spec}..."
     & pip install --user $(if ($Force) { '--force-reinstall' } else { $null }) $Spec
+    $Method = 'pip'
 }
 else {
     Write-Host 'No Python package manager found. Installing uv first...'
@@ -67,6 +72,7 @@ else {
     Write-Host ''
     Write-Host "Installing ${Spec}..."
     & uv tool install $ForceFlag $Spec
+    $Method = 'uv_tool'
 }
 
 Write-Host ''
@@ -77,6 +83,7 @@ $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'User') + ';' +
 if (Test-Command 'deepctl') {
     Write-Host 'Deepgram CLI installed successfully!'
     Write-Host ''
+    try { & deepctl --record-install-method $Method | Out-Null } catch { }
     & deepctl --version
     Write-Host ''
     Write-Host 'Available as:  dg  ·  deepctl  ·  deepgram'
