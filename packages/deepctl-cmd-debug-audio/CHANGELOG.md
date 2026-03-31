@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-debug-audio-v0.1.11...deepctl-cmd-debug-audio-v0.1.12) (2026-03-31)
+
+
+### Bug Fixes
+
+* **debug:** correct debug audio example to use --file/-f flag ([42dcdad](https://github.com/deepgram/cli/commit/42dcdad195ecf000fb1304fd79885109269739ce))
+
 ## [0.1.11](https://github.com/deepgram/cli/compare/deepctl-cmd-debug-audio-v0.1.10...deepctl-cmd-debug-audio-v0.1.11) (2026-03-09)
 
 

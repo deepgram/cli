@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.9](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.8...deepctl-cmd-listen-v0.0.9) (2026-03-31)
+
+
+### Bug Fixes
+
+* **listen:** emit metadata as WebVTT NOTE block in header, suppress status lines during caption streams ([58808e2](https://github.com/deepgram/cli/commit/58808e282090716aa0f808fa63bce82aa872813b))
+* **listen:** show captions before JSON output path so --webvtt and --srt work on pre-recorded files ([16b4445](https://github.com/deepgram/cli/commit/16b44457fb7e1a4bbc5e8452358ab1029712ee57))
+* **listen:** suppress JSON summary after live caption streams (--mic/stdin --webvtt/--srt) ([27c29e7](https://github.com/deepgram/cli/commit/27c29e759f44fb6055045a37800c099ea4f5cd8c))
+
 ## [0.0.8](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.7...deepctl-cmd-listen-v0.0.8) (2026-03-31)
 
 
