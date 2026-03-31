@@ -319,6 +319,7 @@ class SkillsCommand(BaseGroupCommand):
 
         if total_written:
             print_success(f"\nInstalled skills: {len(total_written)} file(s)")
+            print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
         else:
             print_info("No skills were installed.")
 
@@ -369,6 +370,8 @@ class SkillsCommand(BaseGroupCommand):
 
         save_skills_state(state)
         print_success(f"Updated {updated_count} skill(s)")
+        if updated_count:
+            print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
 
     def _handle_remove(
         self,
@@ -540,9 +543,6 @@ class SkillsCommand(BaseGroupCommand):
         if total_written:
             console.print()
             print_success(f"Setup complete — {len(total_written)} file(s) installed")
-            console.print(
-                "[dim]Run 'dg skills update' after installing new plugins "
-                "to keep skills current.[/dim]"
-            )
+            print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
         else:
             print_info("No skills were installed.")

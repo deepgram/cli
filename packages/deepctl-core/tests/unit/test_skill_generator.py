@@ -206,43 +206,59 @@ class TestClaudeCodeGenerator:
     def test_skill_path(self):
         gen = ClaudeCodeGenerator()
         paths = gen.get_skill_paths()
-        assert len(paths) == 1
-        assert paths[0].name == "deepctl.md"
-        assert "commands" in str(paths[0])
+        assert len(paths) > 0
+        assert all("deepgram" in str(p) for p in paths)
+        assert all("commands" in str(p) for p in paths)
+        assert all(p.suffix == ".md" for p in paths)
 
     def test_generate_includes_frontmatter(self):
         gen = ClaudeCodeGenerator()
         cmds = [_make_command()]
         result = gen.generate(cmds, "1.0.0")
-        path = gen.get_skill_paths()[0]
-        assert path in result
-        assert result[path].startswith("---\n")
+        assert len(result) == 1
+        content = list(result.values())[0]
+        assert content.startswith("---\n")
 
-    def test_install_writes_file(self, tmp_path):
+    def test_install_writes_individual_skill_files(self, tmp_path):
+        from unittest.mock import PropertyMock
         gen = ClaudeCodeGenerator()
-        target = tmp_path / "commands" / "deepctl.md"
-        with patch.object(gen, "get_skill_paths", return_value=[target]):
-            with patch.object(gen, "generate", return_value={target: "# test content\n"}):
-                with patch("deepctl_core.skill_generator.fetch_repo_skills", return_value={}):
-                    written = gen.install([_make_command()], "1.0.0")
-                    assert target in written
-                    assert target.read_text() == "# test content\n"
+        skill_dir = tmp_path / "commands" / "deepgram"
+        with patch.object(type(gen), "_skill_dir", new_callable=PropertyMock, return_value=skill_dir):
+            with patch("deepctl_core.skill_generator.fetch_repo_skills", return_value={"api": "# API\n", "docs": "# Docs\n"}):
+                written = gen.install([_make_command()], "1.0.0")
+                assert len(written) == 2
+                assert skill_dir / "api.md" in written
+                assert (skill_dir / "api.md").read_text() == "# API\n"
+                assert (skill_dir / "docs.md").read_text() == "# Docs\n"
 
-    def test_remove_deletes_file(self, tmp_path):
+    def test_install_returns_empty_when_no_repo_skills(self, tmp_path):
+        from unittest.mock import PropertyMock
         gen = ClaudeCodeGenerator()
-        target = tmp_path / "deepctl.md"
-        target.write_text("hello")
-        with patch.object(gen, "get_skill_paths", return_value=[target]):
+        skill_dir = tmp_path / "commands" / "deepgram"
+        with patch.object(type(gen), "_skill_dir", new_callable=PropertyMock, return_value=skill_dir):
+            with patch("deepctl_core.skill_generator.fetch_repo_skills", return_value={}):
+                written = gen.install([_make_command()], "1.0.0")
+                assert written == []
+
+    def test_remove_deletes_skill_dir(self, tmp_path):
+        from unittest.mock import PropertyMock
+        gen = ClaudeCodeGenerator()
+        skill_dir = tmp_path / "deepgram"
+        skill_dir.mkdir()
+        (skill_dir / "api.md").write_text("hello")
+        with patch.object(type(gen), "_skill_dir", new_callable=PropertyMock, return_value=skill_dir):
             removed = gen.remove()
-            assert target in removed
-            assert not target.exists()
+            assert len(removed) == 1
+            assert not (skill_dir / "api.md").exists()
 
     def test_is_installed(self, tmp_path):
+        from unittest.mock import PropertyMock
         gen = ClaudeCodeGenerator()
-        target = tmp_path / "deepctl.md"
-        with patch.object(gen, "get_skill_paths", return_value=[target]):
+        skill_dir = tmp_path / "deepgram"
+        with patch.object(type(gen), "_skill_dir", new_callable=PropertyMock, return_value=skill_dir):
             assert gen.is_installed() is False
-            target.write_text("hello")
+            skill_dir.mkdir()
+            (skill_dir / "api.md").write_text("hello")
             assert gen.is_installed() is True
 
 

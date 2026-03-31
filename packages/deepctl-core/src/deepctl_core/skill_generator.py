@@ -84,7 +84,7 @@ def fetch_repo_skills(force: bool = False) -> dict[str, str]:
             pass
 
     base = f"https://raw.githubusercontent.com/{_SKILLS_REPO}/{_SKILLS_BRANCH}"
-    skill_names = ["api", "docs", "starters", "mcp"]
+    skill_names = ["api", "docs", "setup-mcp", "starters"]
     skills: dict[str, str] = {}
 
     _REPO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -659,24 +659,24 @@ class SkillGenerator(ABC):
             Mapping of file path -> content string
         """
 
-    def install(self, commands: list[CommandMetadata], version: str) -> list[Path]:
-        """Generate and write skill files with latest repo skills."""
-        # Always fetch fresh skills from deepgram/skills repo
+    def install(
+        self,
+        commands: list[CommandMetadata],  # noqa: ARG002
+        version: str,  # noqa: ARG002
+    ) -> list[Path]:
+        """Fetch skills from deepgram/skills repo and install them."""
         repo_skills = fetch_repo_skills(force=True)
+        if not repo_skills:
+            return []
+        return self._write_repo_skills(repo_skills)
 
-        files = self.generate(commands, version)
+    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
+        """Write combined repo skill content to this tool's skill paths."""
+        combined = "\n\n---\n\n".join(repo_skills.values())
         written: list[Path] = []
-        for path, content in files.items():
-            # Append repo skill content to the generated file
-            if repo_skills:
-                sections = [
-                    f"\n\n## {name.title()}\n\n{body}"
-                    for name, body in repo_skills.items()
-                ]
-                content += "\n".join(sections)
-
+        for path in self.get_skill_paths():
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
+            path.write_text(combined)
             written.append(path)
         return written
 
@@ -705,6 +705,10 @@ class ClaudeCodeGenerator(SkillGenerator):
     cli_name = "claude"
     display_name = "Claude Code"
 
+    @property
+    def _skill_dir(self) -> Path:
+        return Path.home() / ".claude" / "commands" / "deepgram"
+
     def detect(self) -> bool:
         return (
             Path.home().joinpath(".claude").is_dir()
@@ -712,13 +716,37 @@ class ClaudeCodeGenerator(SkillGenerator):
         )
 
     def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".claude" / "commands" / "deepctl.md"]
+        return [
+            self._skill_dir / f"{name}.md"
+            for name in ["api", "docs", "setup-mcp", "starters"]
+        ]
 
     def generate(
         self, commands: list[CommandMetadata], version: str
     ) -> dict[Path, str]:
         content = render_skill_content(commands, version, include_frontmatter=True)
-        return {self.get_skill_paths()[0]: content}
+        return {self._skill_dir / "deepgram.md": content}
+
+    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
+        self._skill_dir.mkdir(parents=True, exist_ok=True)
+        written: list[Path] = []
+        for name, content in repo_skills.items():
+            path = self._skill_dir / f"{name}.md"
+            path.write_text(content)
+            written.append(path)
+        return written
+
+    def remove(self) -> list[Path]:
+        removed: list[Path] = []
+        if self._skill_dir.exists():
+            for f in self._skill_dir.glob("*.md"):
+                f.unlink()
+                removed.append(f)
+            try:
+                self._skill_dir.rmdir()
+            except OSError:
+                pass
+        return removed
 
 
 class CodexGenerator(SkillGenerator):
@@ -757,6 +785,14 @@ class CodexGenerator(SkillGenerator):
             after = existing[after_end + len(self._END) :] if after_end != -1 else ""
             return before + section + after.lstrip("\n")
         return existing.rstrip("\n") + "\n\n" + section
+
+    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
+        combined = "\n\n---\n\n".join(repo_skills.values())
+        wrapped = f"{self._BEGIN}\n{combined}\n{self._END}\n"
+        path = self.get_skill_paths()[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._merge(path, wrapped))
+        return [path]
 
     def remove(self) -> list[Path]:
         path = self.get_skill_paths()[0]
@@ -812,6 +848,14 @@ class GeminiGenerator(SkillGenerator):
             after = existing[after_end + len(self._END) :] if after_end != -1 else ""
             return before + section + after.lstrip("\n")
         return existing.rstrip("\n") + "\n\n" + section
+
+    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
+        combined = "\n\n---\n\n".join(repo_skills.values())
+        wrapped = f"{self._BEGIN}\n{combined}\n{self._END}\n"
+        path = self.get_skill_paths()[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._merge(path, wrapped))
+        return [path]
 
     def remove(self) -> list[Path]:
         path = self.get_skill_paths()[0]
@@ -953,6 +997,14 @@ class OpenCodeGenerator(SkillGenerator):
             after = existing[after_end + len(self._END) :] if after_end != -1 else ""
             return before + section + after.lstrip("\n")
         return existing.rstrip("\n") + "\n\n" + section
+
+    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
+        combined = "\n\n---\n\n".join(repo_skills.values())
+        wrapped = f"{self._BEGIN}\n{combined}\n{self._END}\n"
+        path = self.get_skill_paths()[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self._merge(path, wrapped))
+        return [path]
 
     def remove(self) -> list[Path]:
         path = self.get_skill_paths()[0]
