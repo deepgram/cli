@@ -1036,6 +1036,11 @@ class ListenCommand(BaseCommand):
                 )
             return
 
+        # Caption mode: print captions to stdout regardless of output format
+        if result.captions is not None:
+            print(result.captions)
+            return
+
         # Pre-recorded: full structured output
         if fmt == "json":
             payload = (
@@ -1044,11 +1049,6 @@ class ListenCommand(BaseCommand):
                 else result.model_dump(exclude_none=True)
             )
             out.print_json(_json.dumps(payload, indent=2, default=_default))
-            return
-
-        # Caption mode: print captions to stdout and skip the rich table
-        if result.captions is not None:
-            print(result.captions)
             return
 
         # Table / default: metadata + transcript
