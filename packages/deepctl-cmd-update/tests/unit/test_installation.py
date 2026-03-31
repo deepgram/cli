@@ -152,28 +152,23 @@ class TestUvToolDetection:
         "os.environ", {"UV_TOOL_DIR": "/custom/uv/tools"}, clear=False
     )
     def test_custom_uv_tool_dir(self, mock_sys):
-        """Detect uv tool with custom UV_TOOL_DIR."""
-        mock_sys.executable = "/custom/uv/tools/deepctl/bin/python3"
+        """Detect uv tool with custom UV_TOOL_DIR via sys.prefix."""
+        mock_sys.executable = "/usr/local/share/uv/python/cpython-3.11/bin/python3"
+        mock_sys.prefix = "/custom/uv/tools/deepctl"
         detector = InstallationDetector()
-        with patch.object(
-            Path,
-            "resolve",
-            return_value=Path(
-                "/custom/uv/tools/deepctl/bin/python3"
-            ),
-        ):
-            assert detector._is_uv_tool_install() is True
+        assert detector._is_uv_tool_install() is True
 
     @patch("deepctl_cmd_update.installation.sys")
     @patch.dict("os.environ", {}, clear=False)
     def test_default_uv_tool_path(self, mock_sys):
-        """Detect uv tool at default location."""
+        """Detect uv tool at default location via sys.prefix (symlinked exe)."""
         home = str(Path.home())
-        exe = f"{home}/.local/share/uv/tools/deepctl/bin/python3"
-        mock_sys.executable = exe
+        # Simulate the real scenario: exe resolves to the shared Python pool
+        # (outside tools/), but prefix correctly points into tools/
+        mock_sys.executable = f"{home}/.local/share/uv/python/cpython-3.11/bin/python3"
+        mock_sys.prefix = f"{home}/.local/share/uv/tools/deepctl"
         detector = InstallationDetector()
-        with patch.object(Path, "resolve", return_value=Path(exe)):
-            assert detector._is_uv_tool_install() is True
+        assert detector._is_uv_tool_install() is True
 
 
 class TestOneshotDetection:

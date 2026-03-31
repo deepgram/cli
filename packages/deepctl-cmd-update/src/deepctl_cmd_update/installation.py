@@ -336,17 +336,24 @@ class InstallationDetector:
         Returns:
             True if uv tool installation
         """
-        exe_path = Path(sys.executable).resolve()
-        exe_str = str(exe_path)
+        # Use sys.prefix (the venv root), not sys.executable — uv's Python
+        # interpreter is a symlink to a shared binary pool outside tools/,
+        # so resolve() on the executable breaks the path check.
+        prefix_str = str(Path(sys.prefix))
+        exe_str = str(Path(sys.executable))
 
         # Check custom UV_TOOL_DIR env var first
         uv_tool_dir = os.environ.get("UV_TOOL_DIR")
-        if uv_tool_dir and exe_str.startswith(uv_tool_dir):
+        if uv_tool_dir and (
+            prefix_str.startswith(uv_tool_dir) or exe_str.startswith(uv_tool_dir)
+        ):
             return True
 
         # Default uv tool location
         default_uv_tools = str(Path.home() / ".local" / "share" / "uv" / "tools")
-        return exe_str.startswith(default_uv_tools)
+        return prefix_str.startswith(default_uv_tools) or exe_str.startswith(
+            default_uv_tools
+        )
 
     def _detect_oneshot_execution(self) -> InstallMethod | None:
         """Detect ephemeral one-shot execution (uvx / pipx run).
