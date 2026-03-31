@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.3...deepctl-cmd-update-v0.2.4) (2026-03-31)
+
+
+### Bug Fixes
+
+* **update:** fix uv tool install detection when Python exe is a symlink ([6b8dd9c](https://github.com/deepgram/cli/commit/6b8dd9cdb8775ee0fa37d8f7c840d2da7d6017e2))
+
 ## [0.2.3](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.2...deepctl-cmd-update-v0.2.3) (2026-03-31)
 
 

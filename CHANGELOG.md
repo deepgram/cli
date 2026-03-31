@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.15](https://github.com/deepgram/cli/compare/v0.2.14...v0.2.15) (2026-03-31)
+
+
+### Features
+
+* **update:** add hidden --record-install-method flag for install scripts ([07f5035](https://github.com/deepgram/cli/commit/07f50358d2f025b3a689c64fab37c1dd1afb48bb))
+
+
+### Bug Fixes
+
+* **release:** ensure root package is always marked as latest ([869f413](https://github.com/deepgram/cli/commit/869f413bcfbfe20898b3747dfb9b9ceb3d162d10))
+* **update:** fix uv tool install detection when Python exe is a symlink ([6b8dd9c](https://github.com/deepgram/cli/commit/6b8dd9cdb8775ee0fa37d8f7c840d2da7d6017e2))
+
 ## [0.2.14](https://github.com/deepgram/cli/compare/v0.2.13...v0.2.14) (2026-03-31)
 
 
