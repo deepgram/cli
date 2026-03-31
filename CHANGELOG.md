@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.17](https://github.com/deepgram/cli/compare/v0.2.16...v0.2.17) (2026-03-31)
+
+
+### Bug Fixes
+
+* **debug:** correct debug audio example to use --file/-f flag ([42dcdad](https://github.com/deepgram/cli/commit/42dcdad195ecf000fb1304fd79885109269739ce))
+* **listen:** emit metadata as WebVTT NOTE block in header, suppress status lines during caption streams ([58808e2](https://github.com/deepgram/cli/commit/58808e282090716aa0f808fa63bce82aa872813b))
+* **listen:** show captions before JSON output path so --webvtt and --srt work on pre-recorded files ([16b4445](https://github.com/deepgram/cli/commit/16b44457fb7e1a4bbc5e8452358ab1029712ee57))
+* **listen:** suppress JSON summary after live caption streams (--mic/stdin --webvtt/--srt) ([27c29e7](https://github.com/deepgram/cli/commit/27c29e759f44fb6055045a37800c099ea4f5cd8c))
+
 ## [0.2.16](https://github.com/deepgram/cli/compare/v0.2.15...v0.2.16) (2026-03-31)
 
 
