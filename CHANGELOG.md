@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.16](https://github.com/deepgram/cli/compare/v0.2.15...v0.2.16) (2026-03-31)
+
+
+### Features
+
+* **skills:** fetch only repo skills, install as individual slash commands ([243ca0f](https://github.com/deepgram/cli/commit/243ca0fc427a580391153f47dabf27211342dd52))
+* **web:** add all-commands showcase section to landing page ([2e8c843](https://github.com/deepgram/cli/commit/2e8c84327b7f95d069bdc4ed48d906cd3591e75a))
+
+
+### Bug Fixes
+
+* **ci:** deploy staging on every push to main, not just web changes ([399ceba](https://github.com/deepgram/cli/commit/399cebaf89df3e42044e7179e74a0e97d75bfe27))
+
 ## [0.2.15](https://github.com/deepgram/cli/compare/v0.2.14...v0.2.15) (2026-03-31)
 
 
