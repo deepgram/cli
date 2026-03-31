@@ -7,6 +7,171 @@ import { join } from 'node:path';
 // no manual updates needed. process.cwd() is web/ during `npm run build`.
 const _toml = readFileSync(join(process.cwd(), '..', 'pyproject.toml'), 'utf-8');
 const cliVersion = _toml.match(/^version = "([^"]+)"/m)?.[1] ?? '0.0.0';
+
+// ── Command showcase cards ────────────────────────────────────────────────
+const ICONS = {
+  mic:      'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z',
+  speaker:  'M15.536 8.464a5 5 0 010 7.072M12 3a9 9 0 010 18M6.464 8.464a5 5 0 000 7.072',
+  doc:      'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+  key:      'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
+  building: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
+  users:    'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z',
+  chart:    'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
+  card:     'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
+  clock:    'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+  code:     'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4',
+  wrench:   'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z',
+  rocket:   'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
+  bolt:     'M13 10V3L4 14h7v7l9-11h-7z',
+  robot:    'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+  puzzle:   'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z',
+  refresh:  'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+  check:    'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+} as const;
+
+const COLOR_CONF = {
+  green:  { gbClass: 'gb-green',  iconBg: '#13ef9515', iconBorder: '#13ef9530', iconText: 'text-dg-green' },
+  blue:   { gbClass: 'gb-blue',   iconBg: '#149afb15', iconBorder: '#149afb30', iconText: 'text-dg-blue' },
+  purple: { gbClass: 'gb-purple', iconBg: '#a855f715', iconBorder: '#a855f730', iconText: 'text-purple-400' },
+  amber:  { gbClass: 'gb-amber',  iconBg: '#f59e0b15', iconBorder: '#f59e0b30', iconText: 'text-amber-400' },
+  brand:  { gbClass: 'gb-brand',  iconBg: '#13ef9515', iconBorder: '#149afb30', iconText: 'text-dg-green' },
+  subtle: { gbClass: 'gb-subtle', iconBg: '#1a1a1f',   iconBorder: '#2c2c33',   iconText: 'text-dg-muted' },
+} as const;
+
+type CardColor = keyof typeof COLOR_CONF;
+type CardIcon  = keyof typeof ICONS;
+
+interface CommandCard {
+  cmd: string;
+  icon: CardIcon;
+  color: CardColor;
+  title: string;
+  desc?: string;
+  lines: string[];
+}
+
+const commandCards: CommandCard[] = [
+  // ── dg listen ──────────────────────────────────────────────────────────
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Transcribe a local file',
+    desc: 'Smart formatting, punctuation, and speaker diarization on any audio or video file.',
+    lines: ['dg listen podcast.mp3 --smart-format --diarize'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Fetch and transcribe a URL',
+    lines: ['dg listen https://dpgr.am/spacewalk.wav'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Live microphone transcription',
+    desc: 'Real-time WebSocket stream with interim results as you speak.',
+    lines: ['dg listen --mic --smart-format'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Stream via ffmpeg',
+    desc: 'Pipe any source ffmpeg can read — HLS, RTMP, webcam, or broadcast.',
+    lines: ['ffmpeg -i stream.m3u8 -f wav - \\', '  | dg listen --srt'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Write live WebVTT captions',
+    desc: 'Pipe real-time caption output directly to a .vtt file.',
+    lines: ['dg listen --mic --webvtt > captions.vtt'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Pipe transcript to an LLM',
+    desc: 'Chain with any LLM CLI for instant summarization or Q&A.',
+    lines: ['dg listen meeting.mp3 \\', '  | llm "summarize key decisions"'] },
+
+  // ── dg speak ────────────────────────────────────────────────────────────
+  { cmd: 'speak', icon: 'speaker', color: 'purple',
+    title: 'Synthesize speech to a file',
+    lines: ['dg speak "Hello from Deepgram" -o hello.wav'] },
+  { cmd: 'speak', icon: 'speaker', color: 'purple',
+    title: 'Pipe TTS to your speaker',
+    desc: 'Any text in, audio out. Works with ffplay, aplay, or mpv.',
+    lines: ['echo "Latest headlines" | dg speak \\', '  | ffplay -nodisp -autoexit -'] },
+
+  // ── dg read ─────────────────────────────────────────────────────────────
+  { cmd: 'read', icon: 'doc', color: 'blue',
+    title: 'Analyze a text document',
+    desc: 'Topics, sentiment, and summary — all in one pass against Deepgram\'s text intelligence API.',
+    lines: ['dg read report.txt --topics --sentiment --summarize'] },
+  { cmd: 'read', icon: 'doc', color: 'blue',
+    title: 'Summarize piped text',
+    lines: ['cat transcript.txt | dg read --summarize'] },
+
+  // ── auth & keys ─────────────────────────────────────────────────────────
+  { cmd: 'login', icon: 'key', color: 'amber',
+    title: 'Authenticate the CLI',
+    desc: 'Walks through API key setup and saves it to your local profile.',
+    lines: ['dg login'] },
+  { cmd: 'keys', icon: 'key', color: 'amber',
+    title: 'Create a scoped API key',
+    lines: ['dg keys create "ci-runner"'] },
+
+  // ── account ─────────────────────────────────────────────────────────────
+  { cmd: 'projects', icon: 'building', color: 'amber',
+    title: 'List all projects',
+    lines: ['dg projects list'] },
+  { cmd: 'members', icon: 'users', color: 'amber',
+    title: 'View project members',
+    lines: ['dg members list'] },
+
+  // ── models & data ───────────────────────────────────────────────────────
+  { cmd: 'models', icon: 'chart', color: 'blue',
+    title: 'Browse available models',
+    desc: 'Filter by type, language, or tier to find the right model.',
+    lines: ['dg models list --type stt'] },
+  { cmd: 'usage', icon: 'chart', color: 'subtle',
+    title: 'Check usage and limits',
+    lines: ['dg usage'] },
+  { cmd: 'billing', icon: 'card', color: 'subtle',
+    title: 'View account balance',
+    lines: ['dg billing'] },
+  { cmd: 'requests', icon: 'clock', color: 'subtle',
+    title: 'Audit recent API calls',
+    lines: ['dg requests list --limit 20 -o json'] },
+
+  // ── raw api ─────────────────────────────────────────────────────────────
+  { cmd: 'api', icon: 'code', color: 'blue',
+    title: 'Call any Deepgram endpoint',
+    desc: 'Escape hatch for endpoints not yet covered by a dedicated command.',
+    lines: ['dg api GET /v1/projects'] },
+
+  // ── debug ───────────────────────────────────────────────────────────────
+  { cmd: 'debug audio', icon: 'wrench', color: 'amber',
+    title: 'Diagnose audio devices',
+    desc: 'Lists input devices and tests recording capability.',
+    lines: ['dg debug audio'] },
+  { cmd: 'debug network', icon: 'wrench', color: 'amber',
+    title: 'Test Deepgram connectivity',
+    desc: 'Checks DNS, TLS, and WebSocket reachability to Deepgram endpoints.',
+    lines: ['dg debug network'] },
+
+  // ── init ────────────────────────────────────────────────────────────────
+  { cmd: 'init', icon: 'rocket', color: 'green',
+    title: 'Scaffold a starter app',
+    desc: 'Clone a Deepgram starter app, pre-wired and ready to run.',
+    lines: ['dg init'] },
+
+  // ── MCP & agents ────────────────────────────────────────────────────────
+  { cmd: 'mcp', icon: 'bolt', color: 'brand',
+    title: 'Run as MCP server',
+    desc: 'Expose every CLI command to Claude, Cursor, and other MCP clients.',
+    lines: ['dg mcp'] },
+  { cmd: 'skills', icon: 'robot', color: 'brand',
+    title: 'Regenerate AI skill files',
+    desc: 'Keep your coding agent\'s context current with the latest commands.',
+    lines: ['dg skills update'] },
+
+  // ── plugins & updates ───────────────────────────────────────────────────
+  { cmd: 'plugin', icon: 'puzzle', color: 'subtle',
+    title: 'Install a community plugin',
+    lines: ['dg plugin install deepctl-cmd-studio'] },
+  { cmd: 'update', icon: 'refresh', color: 'subtle',
+    title: 'Self-update the CLI',
+    desc: 'Detects your install method and runs the right upgrade command.',
+    lines: ['dg update'] },
+
+  // ── utilities ───────────────────────────────────────────────────────────
+  { cmd: 'completion', icon: 'check', color: 'subtle',
+    title: 'Install shell tab-completion',
+    lines: ['dg completion install --shell zsh'] },
+];
 ---
 
 <html lang="en" prefix="og: https://ogp.me/ns#">
@@ -497,6 +662,67 @@ const cliVersion = _toml.match(/^version = "([^"]+)"/m)?.[1] ?? '0.0.0';
             <div class="text-dg-muted text-xs pt-3"># Stream mic → log</div>
             <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg listen --mic -o json | tee log.jsonl</span></div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ COMMANDS ══ -->
+    <section class="py-28 px-6" style="border-top: 1px solid #2c2c3330;">
+      <div class="max-w-5xl mx-auto">
+        <div class="text-center mb-16">
+          <p class="text-xs font-bold text-dg-green uppercase tracking-widest mb-5">ALL COMMANDS</p>
+          <h2 class="font-black tracking-tight mb-3" style="font-size: clamp(1.75rem, 4vw, 2.5rem); letter-spacing: -0.03em;">
+            Every workflow, covered.
+          </h2>
+          <p class="text-dg-muted text-base max-w-xl mx-auto">From a quick transcription to a full production pipeline — there's a command for that.</p>
+        </div>
+
+        <div class="columns-1 sm:columns-2 lg:columns-3 gap-4">
+          {commandCards.map((card) => {
+            const cc = COLOR_CONF[card.color];
+            return (
+              <div class:list={[cc.gbClass, 'rounded-2xl mb-4 break-inside-avoid']}>
+                <div class="rounded-2xl p-5" style="background: linear-gradient(160deg, #1a1a1f 0%, #161619 100%);">
+
+                  {/* header: icon badge + command chip */}
+                  <div class="flex items-center gap-2.5 mb-3">
+                    <div class="w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center"
+                         style={`background:${cc.iconBg}; border:1px solid ${cc.iconBorder};`}>
+                      <svg class:list={['w-4 h-4', cc.iconText]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d={ICONS[card.icon]}/>
+                      </svg>
+                    </div>
+                    <span class="font-mono text-xs px-2 py-0.5 rounded-md text-dg-muted"
+                          style="background:#0b0b0c; border:1px solid #2c2c33;">
+                      dg {card.cmd}
+                    </span>
+                  </div>
+
+                  {/* title */}
+                  <h3 class="font-semibold text-sm text-dg-text mb-1.5">{card.title}</h3>
+
+                  {/* optional description */}
+                  {card.desc && (
+                    <p class="text-xs text-dg-muted leading-relaxed mb-3">{card.desc}</p>
+                  )}
+
+                  {/* code snippet */}
+                  <div class="mt-3 px-3 py-2.5 rounded-lg font-mono text-xs leading-6"
+                       style="background:#0b0b0c; border:1px solid #2c2c33;">
+                    {card.lines.map((line, i) => (
+                      <div class:list={[i > 0 && 'pl-4']}>
+                        {i === 0
+                          ? <><span class="text-dg-green select-none">$ </span><span class="text-dg-fog">{line}</span></>
+                          : <span class="text-dg-muted">{line.trimStart()}</span>
+                        }
+                      </div>
+                    ))}
+                  </div>
+
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>
