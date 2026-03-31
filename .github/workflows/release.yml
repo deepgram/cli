@@ -77,6 +77,22 @@ jobs:
           pip install --find-links "$DIST_DIR" dist/deepctl-*.whl
           deepctl --version
 
+  mark-latest:
+    name: Mark root release as latest
+    needs: release-please
+    # Re-assert latest on the root package tag (vX.Y.Z) after all sub-package
+    # releases are created, since release-please processes them sequentially and
+    # a sub-package release created after the root tag can steal the pointer.
+    if: |
+      needs.release-please.outputs.release_created == 'true' &&
+      startsWith(needs.release-please.outputs.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark root release as latest
+        run: gh release edit "${{ needs.release-please.outputs.tag_name }}" --latest --repo "${{ github.repository }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   deploy-web:
     name: Deploy web to production
     needs: release-please

@@ -9,6 +9,7 @@
     ".": {
       "component": "deepctl",
       "include-component-in-tag": false,
+      "make-latest": true,
       "extra-files": [
         "src/deepctl/__init__.py"
       ]
