@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.8](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.7...deepctl-cmd-listen-v0.0.8) (2026-03-31)
+
+
+### Bug Fixes
+
+* **listen:** make sounddevice a hard dep and surface mic errors ([6b3b088](https://github.com/deepgram/cli/commit/6b3b0882ff28bf9959ee7c3e3dcd1f9b8ad41dcc))
+
 ## [0.0.7](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.6...deepctl-cmd-listen-v0.0.7) (2026-03-30)
 
 

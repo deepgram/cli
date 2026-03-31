@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.14](https://github.com/deepgram/cli/compare/v0.2.13...v0.2.14) (2026-03-31)
+
+
+### Bug Fixes
+
+* **listen:** make sounddevice a hard dep and surface mic errors ([6b3b088](https://github.com/deepgram/cli/commit/6b3b0882ff28bf9959ee7c3e3dcd1f9b8ad41dcc))
+* **update:** serialize InstallMethod enum to string in all UpdateResult calls ([dddba28](https://github.com/deepgram/cli/commit/dddba289d6ae0f894af8928d3644e93492e289d8))
+
 ## [0.2.13](https://github.com/deepgram/cli/compare/v0.2.12...v0.2.13) (2026-03-30)
 
 
