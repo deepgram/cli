@@ -616,17 +616,6 @@ class ListenCommand(BaseCommand):
         save_to: str | None,
         caption_format: str | None,
     ) -> BaseResult:
-        try:
-            import sounddevice  # noqa: F401
-        except ImportError:
-            return BaseResult(
-                status="error",
-                message=(
-                    "Microphone input requires sounddevice.\n"
-                    "Install with: pip install 'deepctl-cmd-listen[mic]'"
-                ),
-            )
-
         caption_writer: StreamingCaptionWriter | None = None
         if caption_format:
             caption_writer = StreamingCaptionWriter(caption_format)
@@ -659,6 +648,19 @@ class ListenCommand(BaseCommand):
         except KeyboardInterrupt:
             status.print("\n[yellow]Stopped.[/yellow]")
             result = ListenResult(status="success", source="mic", mode="live")
+        except Exception as e:
+            err = str(e)
+            msg = f"Microphone error: {err}"
+            if (
+                "Invalid input device" in err
+                or "PortAudio" in err
+                or "No Default Input" in err
+            ):
+                msg += (
+                    "\n\nOn macOS, make sure your terminal has microphone access:"
+                    "\n  System Settings → Privacy & Security → Microphone"
+                )
+            return BaseResult(status="error", message=msg)
 
         # Save captions or transcript
         if save_to:
@@ -746,17 +748,14 @@ class ListenCommand(BaseCommand):
                     await ws.send(json.dumps({"type": "CloseStream"}))
 
             async def recv_transcripts() -> None:
-                try:
-                    async for msg in ws:
-                        self._handle_ws_message(
-                            msg,
-                            full_transcript,
-                            diarize=diarize,
-                            interim=interim,
-                            caption_writer=caption_writer,
-                        )
-                except Exception:
-                    pass
+                async for msg in ws:
+                    self._handle_ws_message(
+                        msg,
+                        full_transcript,
+                        diarize=diarize,
+                        interim=interim,
+                        caption_writer=caption_writer,
+                    )
 
             send_task = asyncio.create_task(send_audio())
             recv_task = asyncio.create_task(recv_transcripts())
@@ -898,17 +897,14 @@ class ListenCommand(BaseCommand):
                 await ws.send(json.dumps({"type": "CloseStream"}))
 
             async def recv_transcripts() -> None:
-                try:
-                    async for msg in ws:
-                        self._handle_ws_message(
-                            msg,
-                            full_transcript,
-                            diarize=diarize,
-                            interim=interim,
-                            caption_writer=caption_writer,
-                        )
-                except Exception:
-                    pass
+                async for msg in ws:
+                    self._handle_ws_message(
+                        msg,
+                        full_transcript,
+                        diarize=diarize,
+                        interim=interim,
+                        caption_writer=caption_writer,
+                    )
 
             await asyncio.gather(send_audio(), recv_transcripts())
 
