@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.6...deepctl-core-v0.2.7) (2026-03-31)
+
+
+### Features
+
+* **skills:** fetch only repo skills, install as individual slash commands ([243ca0f](https://github.com/deepgram/cli/commit/243ca0fc427a580391153f47dabf27211342dd52))
+
 ## [0.2.6](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.5...deepctl-core-v0.2.6) (2026-03-30)
 
 

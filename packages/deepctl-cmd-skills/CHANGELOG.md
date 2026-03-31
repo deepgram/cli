@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.4...deepctl-cmd-skills-v0.0.5) (2026-03-31)
+
+
+### Features
+
+* **skills:** fetch only repo skills, install as individual slash commands ([243ca0f](https://github.com/deepgram/cli/commit/243ca0fc427a580391153f47dabf27211342dd52))
+
 ## [0.0.4](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.3...deepctl-cmd-skills-v0.0.4) (2026-03-25)
 
 

@@ -1,6 +1,6 @@
 {
-  ".": "0.2.15",
-  "packages/deepctl-core": "0.2.6",
+  ".": "0.2.16",
+  "packages/deepctl-core": "0.2.7",
   "packages/deepctl-shared-utils": "0.1.11",
   "packages/deepctl-cmd-api": "0.0.2",
   "packages/deepctl-cmd-login": "0.1.14",
@@ -16,7 +16,7 @@
   "packages/deepctl-cmd-mcp": "0.1.12",
   "packages/deepctl-cmd-update": "0.2.4",
   "packages/deepctl-cmd-plugin": "0.1.11",
-  "packages/deepctl-cmd-skills": "0.0.4",
+  "packages/deepctl-cmd-skills": "0.0.5",
   "packages/deepctl-cmd-init": "0.0.4",
   "packages/deepctl-cmd-models": "0.0.2",
   "packages/deepctl-cmd-speak": "0.0.2",
