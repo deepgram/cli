@@ -29,9 +29,9 @@ class AudioCommand(BaseCommand):
     short_help = "Debug audio issues"
 
     examples = [
-        "dg debug audio recording.wav",
-        "dg debug audio https://example.com/audio.mp3",
-        "dg debug audio podcast.mp3 --verbose",
+        "dg debug audio -f recording.wav",
+        "dg debug audio -f https://example.com/audio.mp3",
+        "dg debug audio -f podcast.mp3 --verbose",
     ]
     agent_help = (
         "Analyze audio files for compatibility with Deepgram's transcription "

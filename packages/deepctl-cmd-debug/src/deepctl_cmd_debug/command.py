@@ -24,7 +24,7 @@ class DebugCommand(BaseGroupCommand):
     ci_friendly = True
 
     examples = [
-        "dg debug audio recording.wav",
+        "dg debug audio -f recording.wav",
         "dg debug network",
         "dg debug browser",
         "dg debug stream",
