@@ -1,16 +1,11 @@
 """Models for the MCP command."""
 
-from enum import Enum
 from typing import Optional
 
+from deepgram_mcp import (
+    TransportType,  # noqa: F401 — re-exported for backwards compatibility
+)
 from pydantic import BaseModel
-
-
-class TransportType(str, Enum):
-    """Transport types for MCP server."""
-
-    STDIO = "stdio"
-    SSE = "sse"
 
 
 class MCPServerResult(BaseModel):

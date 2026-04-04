@@ -1,4 +1,4 @@
-"""Main entry point for running MCP proxy directly."""
+"""Main entry point for running MCP proxy directly via deepctl-cmd-mcp."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument(
         "--transport",
         default="stdio",
-        choices=["stdio", "sse", "streamable-http"],
+        choices=["stdio", "sse"],
         help="Transport mode",
     )
     parser.add_argument(
@@ -52,7 +52,7 @@ def main() -> None:
         )
         sys.exit(1)
 
-    from .command import run_proxy
+    from deepgram_mcp import run_proxy
 
     try:
         asyncio.run(
