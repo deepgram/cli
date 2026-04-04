@@ -175,8 +175,6 @@ markers = [
 # ]
 
 [tool.uv.sources]
-# External packages (separate repos, path-based during local development)
-deepgram-mcp = { path = "../mcp" }
 # Workspace dependencies
 deepctl-core = { workspace = true }
 deepctl-cmd-api = { workspace = true }
