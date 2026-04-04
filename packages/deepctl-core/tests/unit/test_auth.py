@@ -1,8 +1,10 @@
 """Tests for the authentication module."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, patch
+
 import httpx
+import pytest
 
 from deepctl_core.auth import AuthManager, AuthenticationError
 from deepctl_core.config import Config
@@ -222,7 +224,12 @@ class TestAuthManager:
         mock_response.status_code = 200
         auth_manager.client.get.return_value = mock_response
 
-        success, message, error_type = auth_manager.verify_credentials()
+        # Keyring must return None during execution so get_api_key() falls
+        # through to the env var.  The fixture only patches keyring during
+        # AuthManager construction; we need it mocked here too.
+        with patch("deepctl_core.auth.keyring") as mock_keyring:
+            mock_keyring.get_password.return_value = None
+            success, message, error_type = auth_manager.verify_credentials()
 
         assert success is True
 
@@ -593,3 +600,302 @@ class TestCredentialDetection:
                     auth_manager.is_authenticated(check_profile_only=False)
                     is True
                 )
+
+
+class TestJWTFlow:
+    """Tests for the new JWT-based device flow."""
+
+    def _make_auth(self, mock_config):
+        with patch("deepctl_core.auth.httpx.Client"):
+            with patch("deepctl_core.auth.keyring"):
+                return AuthManager(mock_config)
+
+    # ------------------------------------------------------------------
+    # _store_token — JWT path
+    # ------------------------------------------------------------------
+
+    def test_store_token_jwt_path_saves_to_keyring(self, mock_config):
+        from deepctl_core.auth import TokenResponse
+
+        token = TokenResponse(
+            access_token="jwt-abc",
+            refresh_token="rt-xyz",
+            project_id="proj-1",
+            expires_in=900,
+        )
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            auth._store_token(token)
+
+        calls = {call[0][1]: call[0][2] for call in mock_kr.set_password.call_args_list}
+        assert calls["jwt.default"] == "jwt-abc"
+        assert calls["refresh-token.default"] == "rt-xyz"
+
+    def test_store_token_jwt_path_clears_stale_dg_token(self, mock_config):
+        from deepctl_core.auth import TokenResponse
+
+        token = TokenResponse(
+            access_token="jwt-abc",
+            refresh_token="rt-xyz",
+            project_id="proj-1",
+            expires_in=900,
+        )
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            auth._store_token(token)
+
+        deleted = [c[0][1] for c in mock_kr.delete_password.call_args_list]
+        assert "api-key.default" in deleted
+
+    def test_store_token_legacy_path_saves_api_key(self, mock_config):
+        from deepctl_core.auth import TokenResponse
+
+        token = TokenResponse(
+            access_token="sk-legacy-key",
+            project_id="proj-1",
+        )
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            auth._store_token(token)
+
+        calls = {call[0][1]: call[0][2] for call in mock_kr.set_password.call_args_list}
+        assert calls.get("api-key.default") == "sk-legacy-key"
+        assert "jwt.default" not in calls
+
+    # ------------------------------------------------------------------
+    # get_api_key — JWT fast-path
+    # ------------------------------------------------------------------
+
+    def test_get_api_key_uses_jwt_path_when_jwt_present(self, mock_config):
+        mock_profile = Mock()
+        mock_profile.api_key = None
+        mock_profile.dg_token_expires_at = None
+        mock_profile.jwt_expires_at = None
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+
+        def keyring_side_effect(service, key):
+            if key == "jwt.default":
+                return "jwt-token"
+            return None
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.side_effect = keyring_side_effect
+            with patch.object(auth, "_get_dg_token_via_jwt", return_value="dg-tok") as mock_exchange:
+                result = auth.get_api_key()
+
+        assert result == "dg-tok"
+        mock_exchange.assert_called_once_with("jwt-token", "default")
+
+    def test_get_api_key_skips_jwt_path_when_no_jwt(self, mock_config):
+        mock_profile = Mock()
+        mock_profile.api_key = None
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = None
+            with patch.dict("os.environ", {"DEEPGRAM_API_KEY": "sk-env"}):
+                result = auth.get_api_key()
+
+        assert result == "sk-env"
+
+    def test_get_api_key_explicit_bypasses_jwt_path(self, mock_config):
+        auth = AuthManager(mock_config, explicit_api_key="sk-explicit")
+
+        with patch.object(auth, "_get_dg_token_via_jwt") as mock_jwt:
+            result = auth.get_api_key()
+
+        assert result == "sk-explicit"
+        mock_jwt.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # _get_dg_token_via_jwt — cache and refresh logic
+    # ------------------------------------------------------------------
+
+    def test_get_dg_token_returns_cached_token_when_valid(self, mock_config):
+        from datetime import timezone
+
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        mock_profile = Mock()
+        mock_profile.dg_token_expires_at = future
+        mock_profile.jwt_expires_at = future
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = "cached-dg-token"
+            result = auth._get_dg_token_via_jwt("any-jwt", "default")
+
+        assert result == "cached-dg-token"
+
+    def test_get_dg_token_refreshes_jwt_when_expired(self, mock_config):
+        from datetime import timezone
+
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        mock_profile = Mock()
+        mock_profile.dg_token_expires_at = None
+        mock_profile.jwt_expires_at = past
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = None
+            with patch.object(auth, "_refresh_jwt", return_value="new-jwt") as mock_refresh:
+                with patch.object(auth, "_exchange_for_dg_token", return_value="dg-tok"):
+                    auth._get_dg_token_via_jwt("old-jwt", "default")
+
+        mock_refresh.assert_called_once_with("default")
+
+    def test_get_dg_token_exchanges_when_no_cache(self, mock_config):
+        from datetime import timezone
+
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        mock_profile = Mock()
+        mock_profile.dg_token_expires_at = None
+        mock_profile.jwt_expires_at = future
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = None
+            with patch.object(auth, "_exchange_for_dg_token", return_value="dg-tok") as mock_ex:
+                result = auth._get_dg_token_via_jwt("jwt-tok", "default")
+
+        assert result == "dg-tok"
+        mock_ex.assert_called_once_with("jwt-tok", "default")
+
+    # ------------------------------------------------------------------
+    # _refresh_jwt
+    # ------------------------------------------------------------------
+
+    def test_refresh_jwt_raises_when_no_refresh_token(self, mock_config):
+        from deepctl_core.auth import AuthenticationError
+
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = None
+            with pytest.raises(AuthenticationError, match="refresh token"):
+                auth._refresh_jwt("default")
+
+    def test_refresh_jwt_updates_keyring_and_config(self, mock_config):
+        mock_profile = Mock()
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "new-jwt",
+            "expires_in": 900,
+        }
+        auth.client = Mock()
+        auth.client.post.return_value = mock_response
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = "old-refresh"
+            result = auth._refresh_jwt("default")
+
+        assert result == "new-jwt"
+        set_calls = {c[0][1]: c[0][2] for c in mock_kr.set_password.call_args_list}
+        assert set_calls["jwt.default"] == "new-jwt"
+
+    def test_refresh_jwt_raises_on_http_error(self, mock_config):
+        from deepctl_core.auth import AuthenticationError
+
+        auth = self._make_auth(mock_config)
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_response.json.return_value = {}
+        auth.client = Mock()
+        auth.client.post.return_value = mock_response
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.return_value = "old-refresh"
+            with pytest.raises(AuthenticationError, match="Token refresh failed"):
+                auth._refresh_jwt("default")
+
+    # ------------------------------------------------------------------
+    # _exchange_for_dg_token
+    # ------------------------------------------------------------------
+
+    def test_exchange_for_dg_token_returns_token_and_caches(self, mock_config):
+        mock_profile = Mock()
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"dg_token": "dg-abc", "expires_in": 86400}
+        auth.client = Mock()
+        auth.client.post.return_value = mock_response
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            result = auth._exchange_for_dg_token("jwt-tok", "default")
+
+        assert result == "dg-abc"
+        set_calls = {c[0][1]: c[0][2] for c in mock_kr.set_password.call_args_list}
+        assert set_calls["api-key.default"] == "dg-abc"
+
+    def test_exchange_for_dg_token_raises_on_http_error(self, mock_config):
+        from deepctl_core.auth import AuthenticationError
+
+        auth = self._make_auth(mock_config)
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_response.json.return_value = {}
+        auth.client = Mock()
+        auth.client.post.return_value = mock_response
+
+        with patch("deepctl_core.auth.keyring"):
+            with pytest.raises(AuthenticationError, match="Credentials exchange failed"):
+                auth._exchange_for_dg_token("jwt-tok", "default")
+
+    # ------------------------------------------------------------------
+    # logout — clears JWT entries
+    # ------------------------------------------------------------------
+
+    def test_logout_clears_jwt_and_refresh_token(self, mock_config):
+        mock_config.list_profiles.return_value = []
+        auth = self._make_auth(mock_config)
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            auth.logout(keep_config=False)
+
+        deleted = {c[0][1] for c in mock_kr.delete_password.call_args_list}
+        assert "jwt.default" in deleted
+        assert "refresh-token.default" in deleted
+        assert "api-key.default" in deleted
+
+    # ------------------------------------------------------------------
+    # has_profile_credentials — JWT counts as having credentials
+    # ------------------------------------------------------------------
+
+    def test_has_profile_credentials_true_when_jwt_in_keyring(self, mock_config):
+        mock_profile = Mock()
+        mock_profile.api_key = None
+        mock_profile.project_id = "proj-1"
+        mock_config.get_profile.return_value = mock_profile
+
+        auth = self._make_auth(mock_config)
+
+        def keyring_side_effect(service, key):
+            if key == "jwt.test-profile":
+                return "some-jwt"
+            return None
+
+        with patch("deepctl_core.auth.keyring") as mock_kr:
+            mock_kr.get_password.side_effect = keyring_side_effect
+            has_key, has_project = auth.has_profile_credentials("test-profile")
+
+        assert has_key is True
+        assert has_project is True

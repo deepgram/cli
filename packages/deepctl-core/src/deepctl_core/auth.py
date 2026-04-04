@@ -3,6 +3,7 @@
 import os
 import time
 import webbrowser
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
@@ -20,6 +21,8 @@ console = Console()
 AUTH_BASE_URL = os.getenv("DEEPGRAM_CLI_BASE_URL", "https://id.dx.deepgram.com")
 DEVICE_CODE_URL = f"{AUTH_BASE_URL}/device/code"
 TOKEN_POLL_URL = f"{AUTH_BASE_URL}/device/token"
+TOKEN_REFRESH_URL = f"{AUTH_BASE_URL}/token"
+DG_CREDENTIALS_URL = f"{AUTH_BASE_URL}/credentials/token"
 
 # Registered OIDC client ID for the CLI
 CLIENT_ID = "deepgram-cli"
@@ -43,6 +46,7 @@ class TokenResponse(BaseModel):
 
     access_token: str
     project_id: str
+    refresh_token: str | None = None  # Present in new JWT-based device flow
     token_type: str | None = None
     expires_in: int | None = None
     scope: str | None = None
@@ -105,11 +109,12 @@ class AuthManager:
         """
         profile_name = profile_name or self.config.profile or "default"
 
-        # Check keyring for API key
+        # Check keyring for direct API key or JWT (both indicate logged-in state)
         has_api_key = False
         try:
             api_key = keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
-            has_api_key = bool(api_key)
+            jwt = keyring.get_password(KEYRING_SERVICE, f"jwt.{profile_name}")
+            has_api_key = bool(api_key or jwt)
         except Exception:
             pass
 
@@ -150,32 +155,47 @@ class AuthManager:
         return bool(os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID"))
 
     def get_api_key(self, ignore_env: bool = False) -> str | None:
-        """Get API key following precedence: explicit > profile > env.
+        """Get API key following precedence: explicit > JWT flow > legacy keyring > env.
+
+        When the user logged in via device flow with the new JWT-based server,
+        this method transparently refreshes the JWT if expired and exchanges it
+        for a Deepgram API token (dg_token). All callers receive a usable
+        Deepgram token regardless of which auth path was used.
+
+        Passing --api-key (or DEEPGRAM_API_KEY) bypasses the JWT flow entirely,
+        which is the correct behaviour for CI/CD and direct key usage.
 
         Args:
             ignore_env: If True, don't check environment variables
         """
-        # Explicit credentials have highest priority
+        # Explicit credentials (--api-key flag, CI/CD) bypass the JWT flow.
         if self.explicit_api_key:
             return self.explicit_api_key
 
-        # Check profile credentials next
         profile_name = self.config.profile or "default"
 
-        # Check keyring first
+        # JWT-based flow: present when logged in via device flow with new server.
+        try:
+            jwt = keyring.get_password(KEYRING_SERVICE, f"jwt.{profile_name}")
+            if jwt:
+                return self._get_dg_token_via_jwt(jwt, profile_name)
+        except Exception:
+            pass
+
+        # Legacy path: direct API key in keyring (--api-key login, old device flow).
         try:
             api_key = keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
             if api_key:
                 return api_key
         except Exception:
-            pass  # Keyring not available or error
+            pass
 
-        # Check config file
+        # Config file fallback (keyring unavailable on this machine).
         current_profile = self.config.get_profile(profile_name)
         if current_profile.api_key:
             return current_profile.api_key
 
-        # Environment variable has lowest priority
+        # Environment variable — lowest priority.
         if not ignore_env:
             api_key = os.getenv("DEEPGRAM_API_KEY")
             if api_key:
@@ -596,29 +616,66 @@ class AuthManager:
         raise AuthenticationError("Authentication timed out")
 
     def _store_token(self, token_response: TokenResponse) -> None:
-        """Store authentication token."""
-        # The access_token from dx-id is the Deepgram API key
-        api_key = token_response.access_token
-        project_id = token_response.project_id
+        """Store authentication token.
 
+        Handles two server response shapes:
+        - New JWT flow: access_token is a short-lived JWT (expires_in=900),
+          refresh_token present. Stores JWT + refresh_token in keyring.
+        - Legacy flow: access_token is a Deepgram API key directly.
+          Stored under api-key.{profile} as before.
+        """
         profile_name = self.config.profile or "default"
-        keyring_available = False
 
-        try:
-            keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
-            # Don't store project ID in keyring - it goes in profile config only
-            console.print("[green]✓[/green] API key stored securely in system keyring")
-            keyring_available = True
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
-            console.print("API key will be stored in config file instead")
+        if token_response.refresh_token:
+            # New JWT-based device flow.
+            jwt = token_response.access_token
+            refresh_token = token_response.refresh_token
+            expires_in = token_response.expires_in or 900
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            ).isoformat()
 
-        # Update config - only store API key if keyring is not available
-        self.config.create_profile(
-            profile_name,
-            api_key=api_key if not keyring_available else None,
-            project_id=project_id,  # Always store project ID in config
-        )
+            try:
+                # Clear any stale direct API key so get_api_key() doesn't
+                # return a cached dg_token from a previous session.
+                keyring.delete_password(KEYRING_SERVICE, f"api-key.{profile_name}")
+            except Exception:
+                pass
+
+            try:
+                keyring.set_password(KEYRING_SERVICE, f"jwt.{profile_name}", jwt)
+                keyring.set_password(
+                    KEYRING_SERVICE, f"refresh-token.{profile_name}", refresh_token
+                )
+                console.print("[green]✓[/green] Session stored securely in system keyring")
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
+
+            # Store expiry timestamps and project ID in config (non-sensitive).
+            profile = self.config.get_profile(profile_name)
+            profile.jwt_expires_at = expires_at
+            profile.project_id = token_response.project_id
+            self.config.save()
+
+        else:
+            # Legacy flow: access_token is the Deepgram API key directly.
+            api_key = token_response.access_token
+            project_id = token_response.project_id
+            keyring_available = False
+
+            try:
+                keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
+                console.print("[green]✓[/green] API key stored securely in system keyring")
+                keyring_available = True
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
+                console.print("API key will be stored in config file instead")
+
+            self.config.create_profile(
+                profile_name,
+                api_key=api_key if not keyring_available else None,
+                project_id=project_id,
+            )
 
     def logout(self, keep_config: bool = False) -> None:
         """Logout user and clear credentials.
@@ -629,12 +686,17 @@ class AuthManager:
         """
         profile_name = self.config.profile or "default"
 
-        # Clear keyring (API key only)
-        try:
-            keyring.delete_password(KEYRING_SERVICE, f"api-key.{profile_name}")
-            console.print("[dim]Cleared API key from system keyring[/dim]")
-        except Exception:
-            pass  # Ignore errors if not stored
+        # Clear all credential types from keyring.
+        for keyring_key in (
+            f"api-key.{profile_name}",
+            f"jwt.{profile_name}",
+            f"refresh-token.{profile_name}",
+        ):
+            try:
+                keyring.delete_password(KEYRING_SERVICE, keyring_key)
+            except Exception:
+                pass
+        console.print("[dim]Cleared credentials from system keyring[/dim]")
 
         if keep_config:
             # Clear sensitive data from config but keep profile
@@ -686,6 +748,120 @@ class AuthManager:
             profiles=profiles,
             current_profile=self.config.profile or self.config._config.default_profile,
         )
+
+    def _get_dg_token_via_jwt(self, jwt: str, profile_name: str) -> str:
+        """Return a valid Deepgram API token, refreshing as needed.
+
+        Checks the cached dg_token first; refreshes the JWT if expired; then
+        exchanges the JWT for a fresh dg_token when the cached one is stale.
+        """
+        profile = self.config.get_profile(profile_name)
+        now = datetime.now(timezone.utc)
+
+        # Return cached dg_token if it is still valid.
+        try:
+            dg_token = keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
+            if dg_token and profile.dg_token_expires_at:
+                expires = datetime.fromisoformat(profile.dg_token_expires_at)
+                if now < expires:
+                    return dg_token
+        except Exception:
+            pass
+
+        # Refresh the JWT if it has expired.
+        current_jwt = jwt
+        if profile.jwt_expires_at:
+            jwt_expires = datetime.fromisoformat(profile.jwt_expires_at)
+            if now >= jwt_expires:
+                current_jwt = self._refresh_jwt(profile_name)
+
+        return self._exchange_for_dg_token(current_jwt, profile_name)
+
+    def _refresh_jwt(self, profile_name: str) -> str:
+        """Exchange a refresh token for a new JWT."""
+        try:
+            refresh_token = keyring.get_password(
+                KEYRING_SERVICE, f"refresh-token.{profile_name}"
+            )
+        except Exception:
+            refresh_token = None
+
+        if not refresh_token:
+            raise AuthenticationError(
+                "Session expired and no refresh token is available. "
+                "Please run 'dg login' again."
+            )
+
+        try:
+            response = self.client.post(
+                TOKEN_REFRESH_URL,
+                json={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            )
+        except httpx.RequestError as e:
+            raise AuthenticationError(f"Network error during token refresh: {e}")
+
+        if response.status_code not in (200, 201):
+            raise AuthenticationError(
+                f"Token refresh failed (HTTP {response.status_code}). "
+                "Please run 'dg login' again."
+            )
+
+        data = response.json()
+        new_jwt: str = data["access_token"]
+        new_refresh: str = data.get("refresh_token", refresh_token)
+        expires_in: int = data.get("expires_in", 900)
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        ).isoformat()
+
+        try:
+            keyring.set_password(KEYRING_SERVICE, f"jwt.{profile_name}", new_jwt)
+            if new_refresh != refresh_token:
+                keyring.set_password(
+                    KEYRING_SERVICE, f"refresh-token.{profile_name}", new_refresh
+                )
+        except Exception:
+            pass
+
+        profile = self.config.get_profile(profile_name)
+        profile.jwt_expires_at = expires_at
+        self.config.save()
+
+        return new_jwt
+
+    def _exchange_for_dg_token(self, jwt: str, profile_name: str) -> str:
+        """Exchange a JWT for a Deepgram API token (dg_token)."""
+        try:
+            response = self.client.post(
+                DG_CREDENTIALS_URL,
+                headers={"Authorization": f"Bearer {jwt}"},
+            )
+        except httpx.RequestError as e:
+            raise AuthenticationError(f"Network error during credentials exchange: {e}")
+
+        if response.status_code not in (200, 201):
+            raise AuthenticationError(
+                f"Credentials exchange failed (HTTP {response.status_code}). "
+                "Please run 'dg login' again."
+            )
+
+        data = response.json()
+        dg_token: str = data["dg_token"]
+        expires_in: int = data.get("expires_in", 86400)
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        ).isoformat()
+
+        try:
+            keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", dg_token)
+        except Exception:
+            pass  # Non-fatal: will re-exchange next time
+
+        profile = self.config.get_profile(profile_name)
+        profile.dg_token_expires_at = expires_at
+        self.config.save()
+
+        return dg_token
 
     def __del__(self) -> None:
         """Cleanup HTTP client."""
