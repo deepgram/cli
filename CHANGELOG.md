@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.18](https://github.com/deepgram/cli/compare/v0.2.17...v0.2.18) (2026-04-04)
+
+
+### Features
+
+* **auth:** implement JWT-based device flow with silent token refresh ([0817978](https://github.com/deepgram/cli/commit/08179787f87ba10ca881541495519ff6fdd8ec99))
+
+
+### Bug Fixes
+
+* **deps:** resolve deepgram-mcp from PyPI instead of local path ([dfe0030](https://github.com/deepgram/cli/commit/dfe003017f1ad436e7233277f7911502015c4d51))
+
 ## [0.2.17](https://github.com/deepgram/cli/compare/v0.2.16...v0.2.17) (2026-03-31)
 
 

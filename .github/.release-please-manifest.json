@@ -1,6 +1,6 @@
 {
-  ".": "0.2.17",
-  "packages/deepctl-core": "0.2.7",
+  ".": "0.2.18",
+  "packages/deepctl-core": "0.2.8",
   "packages/deepctl-shared-utils": "0.1.11",
   "packages/deepctl-cmd-api": "0.0.2",
   "packages/deepctl-cmd-login": "0.1.14",
