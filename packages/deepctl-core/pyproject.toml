@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-core"
-version = "0.2.7" # x-release-please-version
+version = "0.2.8" # x-release-please-version
 description = "Core components for deepctl"
 readme = "README.md"
 license = "MIT"

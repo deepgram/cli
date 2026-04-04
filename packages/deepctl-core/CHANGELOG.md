@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.7...deepctl-core-v0.2.8) (2026-04-04)
+
+
+### Features
+
+* **auth:** implement JWT-based device flow with silent token refresh ([0817978](https://github.com/deepgram/cli/commit/08179787f87ba10ca881541495519ff6fdd8ec99))
+
 ## [0.2.7](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.6...deepctl-core-v0.2.7) (2026-03-31)
 
 
