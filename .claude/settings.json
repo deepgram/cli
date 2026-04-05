@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/lukeoliff/Projects/deepgram/dx-stack/hooks/check-cross-stack.sh \"$TOOL_INPUT_file_path\" \"cli\""
+          }
+        ]
+      }
+    ]
+  }
+}
