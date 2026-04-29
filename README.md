@@ -30,7 +30,15 @@ intelligence, and project management directly into your terminal. Aliases:
 
 ### Quick Install
 
-**macOS / Linux:**
+**macOS / Linux (Homebrew):**
+
+```bash
+brew install deepgram/tap/deepgram
+```
+
+Homebrew brings in `ffmpeg` and `portaudio` automatically — `dg listen --mic`, `dg debug probe`, and raw audio piping all work without further setup. To upgrade later: `brew upgrade deepgram`.
+
+**macOS / Linux (curl):**
 
 ```bash
 curl -fsSL https://deepgram.com/install.sh | sh
