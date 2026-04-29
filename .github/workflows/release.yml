@@ -156,20 +156,11 @@ jobs:
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Mint installation token for homebrew-tap
-        id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  # v3.1.1
-        with:
-          app-id: ${{ vars.HOMEBREW_BUMP_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_BUMP_APP_KEY }}
-          owner: deepgram
-          repositories: homebrew-tap
-
       - name: Checkout homebrew-tap
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           repository: deepgram/homebrew-tap
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ secrets.CLI_TAP_SYNC_PAT }}
           path: homebrew-tap
 
       - name: Regenerate Formula/deepgram.rb
@@ -186,21 +177,21 @@ jobs:
       - name: Open bump PR against homebrew-tap
         working-directory: homebrew-tap
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.CLI_TAP_SYNC_PAT }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
-          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
           VERSION="${TAG_NAME#v}"
           BRANCH="bump-deepctl-${VERSION}"
 
-          # Resolve the App's bot user ID so the commit is correctly attributed
-          # in GitHub's UI (avatar + linkable identity). Without the ID prefix,
-          # the email is still accepted but commits show as plain text author.
-          APP_USER_ID=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
-
-          git config user.name  "${APP_SLUG}[bot]"
-          git config user.email "${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+          # Attribute the bump commit to whoever owns CLI_TAP_SYNC_PAT so the
+          # homebrew-tap PR has a clear, linkable author. Using ${{ github.actor }}
+          # would misattribute to release-please[bot] (the workflow trigger),
+          # not the credential owner who actually authorized the push.
+          PAT_LOGIN=$(gh api /user --jq .login)
+          PAT_ID=$(gh api /user --jq .id)
+          git config user.name  "${PAT_LOGIN}"
+          git config user.email "${PAT_ID}+${PAT_LOGIN}@users.noreply.github.com"
           git checkout -b "${BRANCH}"
 
           if git diff --quiet -- Formula/deepgram.rb; then
