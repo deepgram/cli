@@ -1,0 +1,51 @@
+# This formula is auto-generated from scripts/templates/deepgram.rb.template
+# in https://github.com/deepgram/cli on every root `v*` release of deepctl.
+# Manual edits to this file will be overwritten on the next release.
+# To change the formula, edit the template in deepgram/cli — not this file.
+
+class Deepgram < Formula
+  include Language::Python::Virtualenv
+
+  desc "Official Deepgram CLI for speech recognition and audio intelligence"
+  homepage "https://github.com/deepgram/cli"
+  url "{{TARBALL_URL}}"
+  sha256 "{{TARBALL_SHA256}}"
+  license "MIT"
+
+  # Used by `dg debug probe`, `dg ffprobe`, and raw-audio streaming flows
+  # (e.g. `ffmpeg ... | dg listen --encoding linear16`).
+  depends_on "ffmpeg"
+  # PortAudio backend used by `sounddevice` for `dg listen --mic`. Imported
+  # lazily, but required at runtime when capturing from the microphone.
+  depends_on "portaudio"
+  depends_on "python@3.13"
+
+{{RESOURCES}}
+
+  def install
+    virtualenv_install_with_resources
+
+    # Drive completion generation via the `dg` alias so Click derives the
+    # _DG_COMPLETE env var; using `deepctl` here would yield _DEEPCTL_COMPLETE
+    # and silently produce non-functional completions for users who type `dg`.
+    generate_completions_from_executable(
+      bin/"dg",
+      shells:                 [:bash, :zsh, :fish],
+      shell_parameter_format: :click,
+    )
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/deepctl --version")
+    assert_match version.to_s, shell_output("#{bin}/dg --version")
+    assert_match version.to_s, shell_output("#{bin}/deepgram --version")
+
+    assert_match "Usage:", shell_output("#{bin}/dg --help")
+
+    # Regression test for the IsolatedVenvStrategy plugin-discovery path that
+    # is unique to Homebrew installs (see deepctl-cmd-plugin/strategies.py).
+    # `dg plugin list` must succeed in a fresh HOME with no plugin venv.
+    ENV["HOME"] = testpath
+    assert_match(/plugin/i, shell_output("#{bin}/dg plugin list 2>&1"))
+  end
+end
