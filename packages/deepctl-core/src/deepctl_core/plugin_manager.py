@@ -12,7 +12,13 @@ from rich.console import Console
 from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
 from .models import ErrorResult, PluginInfo
-from .plugin_env import PLUGIN_VENV, get_plugin_state, get_venv_site_packages
+from .output import print_warning
+from .plugin_env import (
+    PLUGIN_VENV,
+    get_plugin_state,
+    get_venv_python_version,
+    get_venv_site_packages,
+)
 from .timing import TimingContext
 
 console = Console()
@@ -139,6 +145,8 @@ class PluginManager:
         if site_packages is None:
             return
 
+        self._warn_if_plugin_venv_python_mismatch()
+
         site_packages_str = str(site_packages)
 
         # Append to sys.path so modules inside the plugin venv can be imported.
@@ -185,6 +193,36 @@ class PluginManager:
 
         except Exception as e:
             console.print(f"[red]Error loading plugins from plugin venv:[/red] {e}")
+
+    def _warn_if_plugin_venv_python_mismatch(self) -> None:
+        """Surface a one-line warning when the plugin venv's Python differs from ours.
+
+        Triggered when the underlying interpreter is bumped (e.g. ``brew upgrade
+        python@3.13`` rebuilding deepctl against a newer Python) without the user
+        recreating ``~/.deepctl/plugins/venv/``. Pure-Python plugins keep loading
+        via :data:`sys.path` bridging; only C-extension plugins fail to load,
+        and they fail with a confusing low-level ImportError. This warning gives
+        users a clear remediation before they hit that error.
+
+        Silent when the venv version can't be determined (no ``pyvenv.cfg``,
+        unparseable cfg, etc.) — there's no useful guidance to give.
+        """
+        venv_version = get_venv_python_version()
+        if venv_version is None:
+            return
+
+        running = (sys.version_info.major, sys.version_info.minor)
+        if venv_version == running:
+            return
+
+        venv_str = f"{venv_version[0]}.{venv_version[1]}"
+        running_str = f"{running[0]}.{running[1]}"
+        print_warning(
+            f"Plugin environment was built with Python {venv_str} but you're "
+            f"running Python {running_str}. C-extension plugins may fail to "
+            f"load. To rebuild:\n"
+            f"  rm -rf {PLUGIN_VENV} && deepctl plugin install <your-plugin>"
+        )
 
     def _create_click_command(self, command_instance: Any) -> click.Command:
         """Create a Click command from a BaseCommand instance.
