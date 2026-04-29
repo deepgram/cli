@@ -96,6 +96,45 @@ def get_venv_python() -> str | None:
     return str(python) if python.exists() else None
 
 
+def get_venv_python_version() -> tuple[int, int] | None:
+    """Read the (major, minor) Python version that built the plugin venv.
+
+    Reads ``pyvenv.cfg`` from :data:`PLUGIN_VENV`. Both ``version`` (stdlib
+    ``python -m venv``) and ``version_info`` (uv-created venvs) are accepted.
+
+    Returns ``None`` when the venv doesn't exist, the cfg file is missing,
+    or the version line can't be parsed — callers should treat ``None`` as
+    "unknown" and skip ABI-mismatch checks rather than failing loudly.
+    """
+    if not PLUGIN_VENV.exists():
+        return None
+
+    cfg = PLUGIN_VENV / "pyvenv.cfg"
+    if not cfg.exists():
+        return None
+
+    try:
+        text = cfg.read_text()
+    except OSError:
+        return None
+
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        if key.strip() not in ("version", "version_info"):
+            continue
+        parts = value.strip().split(".")
+        if len(parts) < 2:
+            continue
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+
+    return None
+
+
 def get_venv_site_packages() -> Path | None:
     """Return the ``site-packages`` directory inside the plugin venv.
 

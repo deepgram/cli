@@ -18,6 +18,7 @@ from deepctl_core.plugin_env import (
     find_system_python,
     get_plugin_state,
     get_venv_python,
+    get_venv_python_version,
     get_venv_site_packages,
     is_frozen,
     save_plugin_state,
@@ -191,6 +192,70 @@ class TestGetVenvSitePackages:
                 mock_sys.platform = "win32"
                 result = get_venv_site_packages()
                 assert result == sp
+
+
+class TestGetVenvPythonVersion:
+    """Test get_venv_python_version()."""
+
+    @pytest.mark.unit
+    def test_returns_none_when_venv_missing(self, tmp_path):
+        venv = tmp_path / "missing-venv"
+        with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
+            assert get_venv_python_version() is None
+
+    @pytest.mark.unit
+    def test_returns_none_when_pyvenv_cfg_missing(self, tmp_path):
+        venv = tmp_path / "venv"
+        venv.mkdir()
+        with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
+            assert get_venv_python_version() is None
+
+    @pytest.mark.unit
+    def test_parses_stdlib_version_key(self, tmp_path):
+        venv = tmp_path / "venv"
+        venv.mkdir()
+        (venv / "pyvenv.cfg").write_text(
+            "home = /usr/bin\n"
+            "include-system-site-packages = false\n"
+            "version = 3.13.7\n"
+        )
+        with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
+            assert get_venv_python_version() == (3, 13)
+
+    @pytest.mark.unit
+    def test_parses_uv_version_info_key(self, tmp_path):
+        venv = tmp_path / "venv"
+        venv.mkdir()
+        (venv / "pyvenv.cfg").write_text(
+            "home = /Users/lukeocodes/.local/share/uv/python/cpython-3.12-macos\n"
+            "implementation = CPython\n"
+            "uv = 0.11.7\n"
+            "version_info = 3.12.4\n"
+        )
+        with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
+            assert get_venv_python_version() == (3, 12)
+
+    @pytest.mark.unit
+    def test_returns_none_on_malformed_version(self, tmp_path):
+        venv = tmp_path / "venv"
+        venv.mkdir()
+        (venv / "pyvenv.cfg").write_text(
+            "home = /usr/bin\n"
+            "version = not-a-version\n"
+        )
+        with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
+            assert get_venv_python_version() is None
+
+    @pytest.mark.unit
+    def test_returns_none_when_no_version_key(self, tmp_path):
+        venv = tmp_path / "venv"
+        venv.mkdir()
+        (venv / "pyvenv.cfg").write_text(
+            "home = /usr/bin\n"
+            "include-system-site-packages = false\n"
+        )
+        with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
+            assert get_venv_python_version() is None
 
 
 class TestGetPluginState:
