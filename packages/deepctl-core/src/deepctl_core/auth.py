@@ -647,9 +647,13 @@ class AuthManager:
                 keyring.set_password(
                     KEYRING_SERVICE, f"refresh-token.{profile_name}", refresh_token
                 )
-                console.print("[green]✓[/green] Session stored securely in system keyring")
+                console.print(
+                    "[green]✓[/green] Session stored securely in system keyring"
+                )
             except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
+                console.print(
+                    f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
+                )
 
             # Store expiry timestamps and project ID in config (non-sensitive).
             profile = self.config.get_profile(profile_name)
@@ -664,11 +668,17 @@ class AuthManager:
             keyring_available = False
 
             try:
-                keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
-                console.print("[green]✓[/green] API key stored securely in system keyring")
+                keyring.set_password(
+                    KEYRING_SERVICE, f"api-key.{profile_name}", api_key
+                )
+                console.print(
+                    "[green]✓[/green] API key stored securely in system keyring"
+                )
                 keyring_available = True
             except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
+                console.print(
+                    f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
+                )
                 console.print("API key will be stored in config file instead")
 
             self.config.create_profile(

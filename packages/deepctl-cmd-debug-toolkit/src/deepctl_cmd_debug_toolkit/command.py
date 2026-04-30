@@ -86,7 +86,9 @@ class ToolkitCommand(BaseGroupCommand):
 def _make_refresh_command() -> click.Command:
     """Static 'refresh' command — always available regardless of cache state."""
 
-    @click.command("refresh", help="Fetch the latest script list from deepgram/support-toolkit.")
+    @click.command(
+        "refresh", help="Fetch the latest script list from deepgram/support-toolkit."
+    )
     def _refresh() -> None:
         try:
             manifest = refresh_manifest(console)
