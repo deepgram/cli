@@ -516,3 +516,77 @@ class TestPluginManager:
                             )
                             # Should be in loaded_plugins
                             assert "venv-plugin" in plugin_manager.loaded_plugins
+
+    @pytest.mark.unit
+    def test_warn_if_plugin_venv_python_mismatch_silent_when_unknown(
+        self, plugin_manager
+    ):
+        """No warning when get_venv_python_version returns None."""
+        with patch(
+            "deepctl_core.plugin_manager.get_venv_python_version",
+            return_value=None,
+        ):
+            with patch("deepctl_core.plugin_manager.print_warning") as mock_warn:
+                plugin_manager._warn_if_plugin_venv_python_mismatch()
+                mock_warn.assert_not_called()
+
+    @pytest.mark.unit
+    def test_warn_if_plugin_venv_python_mismatch_silent_when_match(
+        self, plugin_manager
+    ):
+        """No warning when venv version matches running interpreter."""
+        with patch(
+            "deepctl_core.plugin_manager.get_venv_python_version",
+            return_value=(3, 13),
+        ):
+            with patch(
+                "deepctl_core.plugin_manager.sys.version_info",
+                Mock(major=3, minor=13),
+            ):
+                with patch(
+                    "deepctl_core.plugin_manager.print_warning"
+                ) as mock_warn:
+                    plugin_manager._warn_if_plugin_venv_python_mismatch()
+                    mock_warn.assert_not_called()
+
+    @pytest.mark.unit
+    def test_warn_if_plugin_venv_python_mismatch_warns_on_minor_diff(
+        self, plugin_manager
+    ):
+        """Warning fires when venv minor differs from running interpreter."""
+        with patch(
+            "deepctl_core.plugin_manager.get_venv_python_version",
+            return_value=(3, 12),
+        ):
+            with patch(
+                "deepctl_core.plugin_manager.sys.version_info",
+                Mock(major=3, minor=13),
+            ):
+                with patch(
+                    "deepctl_core.plugin_manager.print_warning"
+                ) as mock_warn:
+                    plugin_manager._warn_if_plugin_venv_python_mismatch()
+                    mock_warn.assert_called_once()
+                    msg = mock_warn.call_args[0][0]
+                    assert "3.12" in msg
+                    assert "3.13" in msg
+                    assert "rm -rf" in msg
+
+    @pytest.mark.unit
+    def test_warn_if_plugin_venv_python_mismatch_warns_on_major_diff(
+        self, plugin_manager
+    ):
+        """Warning fires when venv major differs (e.g. Python 4 someday)."""
+        with patch(
+            "deepctl_core.plugin_manager.get_venv_python_version",
+            return_value=(3, 13),
+        ):
+            with patch(
+                "deepctl_core.plugin_manager.sys.version_info",
+                Mock(major=4, minor=0),
+            ):
+                with patch(
+                    "deepctl_core.plugin_manager.print_warning"
+                ) as mock_warn:
+                    plugin_manager._warn_if_plugin_venv_python_mismatch()
+                    mock_warn.assert_called_once()
