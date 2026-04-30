@@ -2,9 +2,7 @@
 
 from typing import Optional
 
-from deepgram_mcp import (
-    TransportType,  # noqa: F401 — re-exported for backwards compatibility
-)
+from deepgram_mcp import TransportType as TransportType
 from pydantic import BaseModel
 
 
