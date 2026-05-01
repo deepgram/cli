@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.8...deepctl-core-v0.2.9) (2026-05-01)
+
+
+### Features
+
+* **deepctl-core:** use dg alias in plugin venv ABI mismatch warning ([#47](https://github.com/deepgram/cli/issues/47)) ([c7c61c0](https://github.com/deepgram/cli/commit/c7c61c04cb17889b9fbbb2d65305e685d9cb380e))
+
 ## [0.2.8](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.7...deepctl-core-v0.2.8) (2026-04-04)
 
 

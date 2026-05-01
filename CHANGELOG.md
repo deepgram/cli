@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.19](https://github.com/deepgram/cli/compare/v0.2.18...v0.2.19) (2026-05-01)
+
+
+### Features
+
+* **debug:** add toolkit subcommand for deepgram/support-toolkit scripts ([768f34f](https://github.com/deepgram/cli/commit/768f34f485a499a2433596094bc5c7bada416361))
+* **deepctl-core:** use dg alias in plugin venv ABI mismatch warning ([#47](https://github.com/deepgram/cli/issues/47)) ([c7c61c0](https://github.com/deepgram/cli/commit/c7c61c04cb17889b9fbbb2d65305e685d9cb380e))
+
+
+### Documentation
+
+* add dx-stack rules to CLAUDE.md, add cross-stack hook ([f4fbf3e](https://github.com/deepgram/cli/commit/f4fbf3e69382d47f1ac195e7a1068c658892eb93))
+
 ## [0.2.18](https://github.com/deepgram/cli/compare/v0.2.17...v0.2.18) (2026-04-04)
 
 
