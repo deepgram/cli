@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-listen"
-version = "0.0.9" # x-release-please-version
+version = "0.0.10" # x-release-please-version
 description = "Listen (live speech-to-text) command for deepctl"
 readme = "README.md"
 license = "MIT"
