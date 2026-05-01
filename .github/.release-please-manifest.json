@@ -1,5 +1,5 @@
 {
-  ".": "0.2.18",
+  ".": "0.2.19",
   "packages/deepctl-core": "0.2.8",
   "packages/deepctl-shared-utils": "0.1.11",
   "packages/deepctl-cmd-api": "0.0.2",
