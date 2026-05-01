@@ -345,6 +345,7 @@ cli/
 │   ├── deepctl-cmd-debug-browser/    # Browser debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-network/    # Network debug subcommand for deepctl
 │   ├── deepctl-cmd-debug-probe/      # Debug probe subcommand for deepctl — live ffprobe analysis during streaming
+│   ├── deepctl-cmd-debug-toolkit/    # Toolkit subcommand for dg debug — runs field support scripts from deepgram/support-toolkit
 │   ├── deepctl-cmd-ffprobe/          # FFprobe configuration command for deepctl
 │   ├── deepctl-cmd-init/             # Init command for deepctl — scaffold Deepgram starter apps
 │   ├── deepctl-cmd-keys/             # API keys management command for deepctl
@@ -382,6 +383,7 @@ cli/
 | `deepctl debug browser` | Browser debug subcommand for deepctl |
 | `deepctl debug network` | Network debug subcommand for deepctl |
 | `deepctl debug probe` | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
+| `deepctl debug toolkit` | Toolkit subcommand for dg debug — runs field support scripts from deepgram/support-toolkit |
 | `deepctl debug` | Debug command group for deepctl |
 | `deepctl ffprobe` | FFprobe configuration command for deepctl |
 | `deepctl init` | Init command for deepctl — scaffold Deepgram starter apps |
@@ -418,6 +420,7 @@ cli/
 | [`deepctl-cmd-debug-browser`](packages/deepctl-cmd-debug-browser) | Browser debug subcommand for deepctl |
 | [`deepctl-cmd-debug-network`](packages/deepctl-cmd-debug-network) | Network debug subcommand for deepctl |
 | [`deepctl-cmd-debug-probe`](packages/deepctl-cmd-debug-probe) | Debug probe subcommand for deepctl — live ffprobe analysis during streaming |
+| [`deepctl-cmd-debug-toolkit`](packages/deepctl-cmd-debug-toolkit) | Toolkit subcommand for dg debug — runs field support scripts from deepgram/support-toolkit |
 | [`deepctl-cmd-ffprobe`](packages/deepctl-cmd-ffprobe) | FFprobe configuration command for deepctl |
 | [`deepctl-cmd-init`](packages/deepctl-cmd-init) | Init command for deepctl — scaffold Deepgram starter apps |
 | [`deepctl-cmd-keys`](packages/deepctl-cmd-keys) | API keys management command for deepctl |

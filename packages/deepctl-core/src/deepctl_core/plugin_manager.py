@@ -221,7 +221,7 @@ class PluginManager:
             f"Plugin environment was built with Python {venv_str} but you're "
             f"running Python {running_str}. C-extension plugins may fail to "
             f"load. To rebuild:\n"
-            f"  rm -rf {PLUGIN_VENV} && deepctl plugin install <your-plugin>"
+            f"  rm -rf {PLUGIN_VENV} && dg plugin install <your-plugin>"
         )
 
     def _create_click_command(self, command_instance: Any) -> click.Command:
