@@ -97,8 +97,7 @@ def refresh_manifest(console: Console) -> ToolkitManifest:
         console.print(f"[dim]Loading toolkit manifest from {local}[/dim]")
     else:
         console.print(
-            "[dim]Fetching toolkit manifest from "
-            f"github.com/{GITHUB_REPO}...[/dim]"
+            f"[dim]Fetching toolkit manifest from github.com/{GITHUB_REPO}...[/dim]"
         )
         _sha, content = _fetch_github_contents("toolkit.json")
 
@@ -135,9 +134,7 @@ def get_or_fetch_script(entry: ToolkitScript, console: Console) -> Path:
 
     # Download from GitHub with integrity verification.
     script_name = Path(entry.script).name
-    console.print(
-        f"[blue]Downloading[/blue] {script_name} from support-toolkit..."
-    )
+    console.print(f"[blue]Downloading[/blue] {script_name} from support-toolkit...")
     sha, content = _fetch_github_contents(entry.script)
 
     _SCRIPTS_CACHE.mkdir(parents=True, exist_ok=True)

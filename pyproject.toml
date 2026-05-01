@@ -132,8 +132,16 @@ module = "deepctl_cmd_mcp.*"
 disable_error_code = ["call-arg", "no-untyped-call", "no-untyped-def", "untyped-decorator", "misc"]
 
 [[tool.mypy.overrides]]
-module = ["sounddevice", "sounddevice.*", "numpy", "numpy.*"]
-# Optional microphone dependencies — no type stubs available
+module = [
+    "sounddevice",
+    "sounddevice.*",
+    "numpy",
+    "numpy.*",
+    "deepgram_mcp",
+    "deepgram_mcp.*",
+]
+# Optional microphone dependencies (sounddevice, numpy) and the MCP SDK
+# (deepgram_mcp) ship without type stubs.
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
