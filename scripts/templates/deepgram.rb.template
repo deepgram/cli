@@ -12,6 +12,13 @@ class Deepgram < Formula
   sha256 "{{TARBALL_SHA256}}"
   license "MIT"
 
+  # Build-time deps for the `cryptography` and `pydantic_core` resources,
+  # which compile Rust extensions via `maturin`. Language::Python::Virtualenv
+  # defaults to --no-binary :all: so precompiled wheels are bypassed and the
+  # Rust toolchain has to be available during install.
+  depends_on "pkgconf" => :build
+  depends_on "rust" => :build
+
   # Used by `dg debug probe`, `dg ffprobe`, and raw-audio streaming flows
   # (e.g. `ffmpeg ... | dg listen --encoding linear16`).
   depends_on "ffmpeg"
