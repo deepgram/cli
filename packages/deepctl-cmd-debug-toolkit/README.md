@@ -1,8 +1,10 @@
-# deepctl-cmd-listen
+# deepctl-cmd-debug-toolkit
 
 > Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-Listen (live speech-to-text) command for deepctl
+Toolkit subcommand for dg debug — runs field support scripts from deepgram/support-toolkit
+
+This is a subcommand of `deepctl debug`.
 
 ## Installation
 
@@ -29,17 +31,15 @@ pipx run deepctl --help
 
 | Command | Entry Point |
 |---------|-------------|
-| `deepctl listen` | `deepctl_cmd_listen.command:ListenCommand` |
+| `deepctl debug toolkit` | `deepctl_cmd_debug_toolkit.command:ToolkitCommand` |
 
 ## Dependencies
 
-- `click>=8.0.0`
-- `rich>=13.0.0`
-- `pydantic>=2.0.0`
-- `websockets>=11.0`
-- `deepgram-captions>=2.0.0`
-- `sounddevice>=0.4.6`
-- `numpy>=1.24.0`
+- `httpx>=0.27.0`
+- `pydantic>=2.10.1`
+- `platformdirs>=4.0.0`
+- `rich>=13.9.4`
+- `click>=8.1.7`
 
 ## License
 

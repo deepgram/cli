@@ -140,12 +140,10 @@ deepctl mcp --transport sse --port 8000
 
 ## Dependencies
 
-- `mcp>=1.0.0`
+- `deepgram-mcp>=0.1.0`
 - `rich>=13.9.4`
 - `click>=8.1.7`
 - `pydantic>=2.10.1`
-- `uvicorn>=0.30.0`
-- `starlette>=0.37.0`
 
 ## License
 

@@ -77,6 +77,11 @@
       "include-component-in-tag": true,
       "make-latest": false
     },
+    "packages/deepctl-cmd-debug-toolkit": {
+      "component": "deepctl-cmd-debug-toolkit",
+      "include-component-in-tag": true,
+      "make-latest": false
+    },
     "packages/deepctl-cmd-ffprobe": {
       "component": "deepctl-cmd-ffprobe",
       "include-component-in-tag": true,
