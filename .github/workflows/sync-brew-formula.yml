@@ -1,0 +1,102 @@
+name: Sync Homebrew Formula
+
+# Manual sync of deepgram/homebrew-tap/Formula/deepgram.rb when the auto-bump
+# path didn't fire (e.g. no root v* release was cut, but we still need the
+# live formula updated — typically to ship a build-time deps fix that breaks
+# `brew install` for users right now).
+#
+# This is the manual escape hatch. The standard flow is:
+#   release-please opens a release PR -> merging it cuts a tag ->
+#   the bump-brew-formula job in release.yml regenerates and PRs the formula.
+# Use this workflow only when that flow can't be used.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync formula to deepgram/homebrew-tap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deepgram/homebrew-tap
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          repository: deepgram/homebrew-tap
+          token: ${{ secrets.CLI_TAP_SYNC_PAT }}
+          path: tap
+
+      - name: Apply rust + pkgconf build deps (idempotent)
+        working-directory: tap
+        run: |
+          set -euo pipefail
+
+          if grep -q 'depends_on "rust" => :build' Formula/deepgram.rb; then
+            echo "Formula already has rust build dep; nothing to do"
+            exit 0
+          fi
+
+          # Insert the build-time deps before the existing ffmpeg comment block.
+          # Hardcoded patch (not template-driven) because this workflow runs in
+          # situations where the template change has not yet shipped.
+          python3 - <<'PY'
+          path = "Formula/deepgram.rb"
+          content = open(path).read()
+          insert = (
+              '  # Build-time deps for the `cryptography` and `pydantic_core` resources,\n'
+              '  # which compile Rust extensions via `maturin`. Language::Python::Virtualenv\n'
+              '  # defaults to --no-binary :all: so precompiled wheels are bypassed and the\n'
+              '  # Rust toolchain has to be available during install.\n'
+              '  depends_on "pkgconf" => :build\n'
+              '  depends_on "rust" => :build\n'
+              '\n'
+          )
+          marker = "  # Used by `dg debug probe`"
+          if marker not in content:
+              raise SystemExit(
+                  f"Could not find expected marker {marker!r} in formula; "
+                  "tap formula may have been hand-edited. Inspect manually."
+              )
+          if content.count(marker) != 1:
+              raise SystemExit(
+                  f"Marker {marker!r} appears multiple times; refusing to patch ambiguously."
+              )
+          open(path, "w").write(content.replace(marker, insert + marker, 1))
+          print("Patched formula with rust + pkgconf build deps")
+          PY
+
+      - name: Commit and push if changed
+        working-directory: tap
+        env:
+          GH_TOKEN: ${{ secrets.CLI_TAP_SYNC_PAT }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- Formula/deepgram.rb; then
+            echo "No changes to commit; formula is already up to date"
+            exit 0
+          fi
+
+          # Attribute the commit to whoever owns CLI_TAP_SYNC_PAT so the change
+          # has a clear, linkable author. Same pattern as bump-brew-formula in
+          # release.yml — we want the credential owner, not ${{ github.actor }}
+          # (which would attribute to whoever clicked Run workflow).
+          PAT_LOGIN=$(gh api /user --jq .login)
+          PAT_ID=$(gh api /user --jq .id)
+          git config user.name  "${PAT_LOGIN}"
+          git config user.email "${PAT_ID}+${PAT_LOGIN}@users.noreply.github.com"
+
+          git add Formula/deepgram.rb
+          git commit -m "Add rust + pkgconf as build-time deps for cryptography and pydantic_core
+
+Manual sync from deepgram/cli's sync-brew-formula workflow. Fixes
+'brew install deepgram/tap/deepgram' failing during cryptography and
+pydantic_core source builds: both compile Rust extensions via maturin,
+and Language::Python::Virtualenv defaults to --no-binary :all: so the
+precompiled wheels are bypassed and the Rust toolchain has to be
+available during install.
+
+Same pattern homebrew-core's Aider, ansible, azure-cli use."
+          git push
