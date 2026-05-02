@@ -88,15 +88,21 @@ jobs:
           git config user.name  "${PAT_LOGIN}"
           git config user.email "${PAT_ID}+${PAT_LOGIN}@users.noreply.github.com"
 
+          MSG_FILE="$(mktemp)"
+          cat > "${MSG_FILE}" <<'EOF'
+          Add rust + pkgconf as build-time deps for cryptography and pydantic_core
+
+          Manual sync from deepgram/cli's sync-brew-formula workflow. Fixes
+          'brew install deepgram/tap/deepgram' failing during cryptography and
+          pydantic_core source builds: both compile Rust extensions via maturin,
+          and Language::Python::Virtualenv defaults to --no-binary :all: so the
+          precompiled wheels are bypassed and the Rust toolchain has to be
+          available during install.
+
+          Same pattern homebrew-core's Aider, ansible, azure-cli use.
+          EOF
+
           git add Formula/deepgram.rb
-          git commit -m "Add rust + pkgconf as build-time deps for cryptography and pydantic_core
-
-Manual sync from deepgram/cli's sync-brew-formula workflow. Fixes
-'brew install deepgram/tap/deepgram' failing during cryptography and
-pydantic_core source builds: both compile Rust extensions via maturin,
-and Language::Python::Virtualenv defaults to --no-binary :all: so the
-precompiled wheels are bypassed and the Rust toolchain has to be
-available during install.
-
-Same pattern homebrew-core's Aider, ansible, azure-cli use."
+          git commit -F "${MSG_FILE}"
           git push
+          rm -f "${MSG_FILE}"
