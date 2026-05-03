@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.20](https://github.com/deepgram/cli/compare/v0.2.19...v0.2.20) (2026-05-02)
+
+
+### Bug Fixes
+
+* **brew:** add rust + pkgconf as build-time deps in formula template ([#49](https://github.com/deepgram/cli/issues/49)) ([82dd473](https://github.com/deepgram/cli/commit/82dd4738d959c0f8cb6cbbb70e4933975235600d))
+
 ## [0.2.19](https://github.com/deepgram/cli/compare/v0.2.18...v0.2.19) (2026-05-01)
 
 
