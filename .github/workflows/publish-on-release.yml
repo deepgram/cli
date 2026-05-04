@@ -1,0 +1,59 @@
+name: Publish to PyPI on release
+
+# Fires when a human publishes a GitHub release with `gh release create
+# v0.X.Y` (or via the GitHub UI) to recover from a stuck release-please
+# state. Typical trigger: release-please aborts with `untagged, merged
+# release PRs outstanding` because a previous merged release PR didn't
+# get tagged, and `autorelease: pending` is stuck on it.
+#
+# Releases created by GITHUB_TOKEN (release-please's normal flow) do NOT
+# trigger this workflow because GitHub Actions intentionally blocks that
+# loop, so the standard release-please path keeps using release.yml's
+# existing publish job. This workflow ONLY fires on human-driven
+# recovery releases, so there is no double-publish race.
+#
+# Intentionally NO workflow_dispatch trigger. Manual deploys outside a
+# real release-published event have shipped landing pages and packages
+# that pointed at unreleased versions. Production publish must always
+# be anchored to a real GitHub release artifact.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    # Only fire on root-package releases (v0.2.4, v1.0.0, …).
+    # Sub-package tags look like deepctl-cmd-listen-v0.0.3, which we skip;
+    # release-please's normal flow handles those via release.yml.
+    if: startsWith(github.event.release.tag_name, 'v')
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: pip install build twine
+
+      - name: Build all packages
+        run: make build
+
+      - name: Verify built packages
+        run: make verify-packages
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: dist/
+          skip-existing: true
