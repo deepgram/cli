@@ -86,7 +86,7 @@ class ListenCommand(BaseCommand):
         "dg listen https://example.com/call.mp3 --diarize",
         "dg listen --mic --model nova-3 --interim",
         "dg listen audio.mp3 --diarize --summarize --save-to transcript.txt",
-        "dg listen audio.mp3 -o json | jq '.full_result.results.channels[0].alternatives[0].transcript'",
+        "dg -o json listen audio.mp3 | jq '.results.channels[0].alternatives[0].transcript'",
         "ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - | dg listen --encoding linear16",
         "dg listen -  # read raw audio from stdin interactively",
     ]
@@ -94,8 +94,9 @@ class ListenCommand(BaseCommand):
         "Unified speech-to-text command. Auto-detects input mode from the SOURCE "
         "argument (file path or URL), --mic flag, or stdin pipe. Supports diarization "
         "(--diarize), summarization (--summarize), topic detection (--topics), "
-        "smart formatting, and all Deepgram models. Use -o json for machine-readable "
-        "output of the full Deepgram API response. `dg transcribe` is an alias."
+        "smart formatting, and all Deepgram models. Use `dg -o json listen ...` for "
+        "machine-readable output of the full Deepgram API response. `dg transcribe` "
+        "is a hidden, deprecated alias."
     )
 
     def get_arguments(self) -> list[dict[str, Any]]:

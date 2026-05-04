@@ -370,7 +370,7 @@ const commandCards: CommandCard[] = [
             "name": "How do I transcribe an audio file with the Deepgram CLI?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "After logging in with 'dg login', run: dg transcribe recording.wav. You can also transcribe URLs (dg transcribe https://example.com/audio.mp3), enable speaker diarization (--diarize), select a model (--model nova-3), and export to JSON (--output json)."
+              "text": "After logging in with 'dg login', run: dg listen recording.wav. You can also transcribe URLs (dg listen https://example.com/audio.mp3), enable speaker diarization (--diarize), select a model (--model nova-3), and export JSON for scripting (dg -o json listen recording.wav)."
             }
           },
           {
@@ -650,7 +650,7 @@ const commandCards: CommandCard[] = [
           </div>
           <div class="p-5 font-mono text-sm leading-7 space-y-0.5">
             <div class="text-dg-muted text-xs"># Transcribe + extract with jq</div>
-            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg transcribe call.mp3 -o json \</span></div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg -o json listen call.mp3 \</span></div>
             <div class="pl-5 text-dg-fog">| jq <span class="text-amber-400">'.results.channels[0]
     .alternatives[0].transcript'</span></div>
             <div class="text-dg-muted pt-0.5 text-xs">"Hello and welcome to our Q1 review..."</div>
@@ -660,7 +660,7 @@ const commandCards: CommandCard[] = [
             <div class="pl-5 text-dg-fog">| ffplay -nodisp -autoexit -</div>
 
             <div class="text-dg-muted text-xs pt-3"># Stream mic → log</div>
-            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg listen --mic -o json | tee log.jsonl</span></div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg -o json listen --mic | tee log.jsonl</span></div>
           </div>
         </div>
       </div>
@@ -776,7 +776,7 @@ const commandCards: CommandCard[] = [
             <div class="text-dg-muted text-xs"># Authenticate</div>
             <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg login</span></div>
             <div class="text-dg-muted text-xs pt-2"># Transcribe</div>
-            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg transcribe audio.mp3</span></div>
+            <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg listen audio.mp3</span></div>
             <div class="text-dg-muted text-xs pt-2"># Explore</div>
             <div><span class="text-dg-green">$</span> <span class="text-dg-fog"> dg --help</span></div>
           </div>
@@ -812,7 +812,7 @@ const commandCards: CommandCard[] = [
               </p>
               <code class="inline-block font-mono text-xs px-4 py-2.5 rounded-xl text-dg-fog"
                     style="background:#0b0b0c; border: 1px solid #2c2c33;">
-                dg transcribe audio.mp3 --agent-friendly
+                dg listen audio.mp3 --agent-friendly
               </code>
             </div>
 
@@ -909,7 +909,7 @@ const commandCards: CommandCard[] = [
     ],
     // ── JSON pipeline ─────────────────────────────
     [
-      { p: '❯ ', t: "dg listen standup.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'", c: '' },
+      { p: '❯ ', t: "dg -o json listen standup.mp3 | jq '.results.channels[0].alternatives[0].transcript'", c: '' },
       { p: '',   t: '"Blocked on auth; need a review on PR 847 by EOD."', c: '#edede2' },
       { p: '',   t: '', c: '' },
     ],

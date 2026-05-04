@@ -95,7 +95,7 @@ dg listen keynote.mp3 --diarize --model nova-3
 dg listen https://cdn.example.com/podcast.mp3
 
 # Pipe to jq for scripting
-dg listen standup.mp3 -o json \
+dg -o json listen standup.mp3 \
   | jq '.results.channels[0].alternatives[0].transcript'
 
 # Live microphone with interim (partial) results
@@ -163,8 +163,8 @@ dg mcp --transport sse --port 8000
 Transcribe audio files, URLs, or live microphone input.
 
 ```bash
-dg transcribe meeting.wav --diarize --smart-format
-dg transcribe https://example.com/audio.mp3 --model nova-3
+dg listen meeting.wav --diarize --smart-format
+dg listen https://example.com/audio.mp3 --model nova-3
 dg listen --mic --model nova-3 --language en-US
 cat audio.raw | dg listen --encoding linear16 --sample-rate 16000
 ```
@@ -280,7 +280,7 @@ export DEEPGRAM_API_KEY="your-key"
 export DEEPGRAM_PROJECT_ID="your-project-id"
 
 # Non-interactive usage
-dg transcribe recording.wav
+dg listen recording.wav
 dg speak "Deploy complete" -o notification.mp3
 dg keys --create --comment "ci-key" --scopes member
 dg keys --delete KEY_ID --yes
