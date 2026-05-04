@@ -49,7 +49,7 @@ The CLI uses Python entry points for zero-config plugin discovery:
 ### Data Flow
 
 ```
-User runs: dg transcribe audio.wav --output json
+User runs: dg --output json listen audio.wav
   │
   ▼
 main() → preprocess_hyphenated_commands() → cli()
@@ -601,7 +601,7 @@ Each package is versioned independently via release-please.
 | `dg login` | `deepctl-cmd-login` | No | Browser-based or API key authentication |
 | `dg logout` | `deepctl-cmd-login` | No | Clear credentials |
 | `dg profiles` | `deepctl-cmd-login` | No | Manage named profiles |
-| `dg transcribe` | `deepctl-cmd-transcribe` | Yes | Speech-to-text for files and URLs |
+| `dg listen` | `deepctl-cmd-listen` | Yes | Unified speech-to-text (files, URLs, mic, stdin streaming). `dg transcribe` is a hidden, deprecated alias kept for backwards compat. |
 | `dg projects` | `deepctl-cmd-projects` | Yes | List/manage Deepgram projects |
 | `dg usage` | `deepctl-cmd-usage` | Yes | View usage statistics |
 | `dg api` | `deepctl-cmd-api` | Yes | Raw API requests (`dg api GET /v1/projects`) |
