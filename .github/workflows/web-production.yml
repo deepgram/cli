@@ -5,8 +5,13 @@ on:
   # Using workflow_call avoids the GitHub Actions limitation where
   # GITHUB_TOKEN-created releases do not trigger release: published
   # in other workflows.
+  #
+  # workflow_dispatch is intentionally omitted: deploying main outside
+  # the release pipeline can ship a landing page that advertises a
+  # version not yet published to PyPI (the cli.deepgram.com vs PyPI
+  # skew that broke installs in May 2026). Production deploys must be
+  # gated on a real root v* tag.
   workflow_call:
-  workflow_dispatch:
 
 # Only one production deploy at a time; never cancel in-progress
 concurrency:
