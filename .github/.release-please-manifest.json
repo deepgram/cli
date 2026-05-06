@@ -2,6 +2,7 @@
   ".": "0.2.20",
   "packages/deepctl-core": "0.2.9",
   "packages/deepctl-shared-utils": "0.1.11",
+  "packages/deepctl-telemetry": "0.0.1",
   "packages/deepctl-cmd-api": "0.0.2",
   "packages/deepctl-cmd-login": "0.1.14",
   "packages/deepctl-cmd-projects": "0.1.11",

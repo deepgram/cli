@@ -54,6 +54,12 @@ class ToolsConfig(BaseModel):
     ffprobe_path: str | None = None
 
 
+class TelemetryConfig(BaseModel):
+    """Phone-home telemetry configuration. Opt-out — defaults to on."""
+
+    enabled: bool = True
+
+
 class DeepgramConfig(BaseModel):
     """Main configuration model."""
 
@@ -64,6 +70,7 @@ class DeepgramConfig(BaseModel):
     plugins: PluginConfig = Field(default_factory=PluginConfig)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
 
 class Config:

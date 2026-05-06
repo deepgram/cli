@@ -233,6 +233,20 @@ def main() -> None:
         if timing_requested:
             enable_timing()
 
+        # Initialize phone-home telemetry and install the --help footer.
+        # Both are no-ops when the user has opted out via config or env.
+        try:
+            from deepctl_telemetry import (
+                init_telemetry,
+                install_help_notice,
+            )
+
+            telemetry_config = Config()
+            init_telemetry(telemetry_config)
+            install_help_notice(telemetry_config)
+        except Exception:
+            pass
+
         # Start background update checks (non-blocking)
         try:
             from deepctl_cmd_update.startup_check import (

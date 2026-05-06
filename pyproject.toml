@@ -63,6 +63,7 @@ dependencies = [
     "deepctl-cmd-members>=0.0.1",
     "deepctl-cmd-completion>=0.0.1",
     "deepctl-shared-utils>=0.1.10",
+    "deepctl-telemetry>=0.0.1",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
     "httpx>=0.24.0",
@@ -213,6 +214,7 @@ deepctl-cmd-billing = { workspace = true }
 deepctl-cmd-members = { workspace = true }
 deepctl-cmd-completion = { workspace = true }
 deepctl-shared-utils = { workspace = true }
+deepctl-telemetry = { workspace = true }
 deepctl-plugin-example = { workspace = true }
 
 [tool.uv.workspace]

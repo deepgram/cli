@@ -365,7 +365,8 @@ cli/
 │   ├── deepctl-cmd-usage/            # Usage command for deepctl
 │   ├── deepctl-core/                 # Core components for deepctl
 │   ├── deepctl-plugin-example/       # Example plugin for deepctl
-│   └── deepctl-shared-utils/         # Shared utilities for deepctl
+│   ├── deepctl-shared-utils/         # Shared utilities for deepctl
+│   └── deepctl-telemetry/            # Opt-out phone-home telemetry for deepctl
 ├── tests/                            # Integration tests
 └── Makefile                          # Development tasks
 ```
@@ -441,6 +442,7 @@ cli/
 | [`deepctl-core`](packages/deepctl-core) | Core components for deepctl |
 | [`deepctl-plugin-example`](packages/deepctl-plugin-example) | Example plugin for deepctl |
 | [`deepctl-shared-utils`](packages/deepctl-shared-utils) | Shared utilities for deepctl |
+| [`deepctl-telemetry`](packages/deepctl-telemetry) | Opt-out phone-home telemetry for deepctl |
 <!-- END:packages -->
 
 ## Release
