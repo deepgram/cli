@@ -862,10 +862,6 @@ const commandCards: CommandCard[] = [
       </div>
       <div class="pt-6 text-[11px] text-dg-pebble flex flex-col sm:flex-row justify-between gap-2" style="border-top: 1px solid #2c2c3330;">
         <span>© {new Date().getFullYear()} Deepgram, Inc. All rights reserved.</span>
-        <span>
-          Telemetry: <span id="dg-tel-state">on</span>
-          <button id="dg-tel-toggle" type="button" class="ml-2 underline hover:text-dg-text transition-colors">toggle</button>
-        </span>
       </div>
     </div>
   </footer>
@@ -1103,26 +1099,4 @@ const commandCards: CommandCard[] = [
   (window as any).switchInstall = switchInstall;
   (window as any).copyInstall = copyInstall;
   (window as any).copyCmd = copyCmd;
-
-  // ── Telemetry opt-out toggle ─────────────────────────────────
-  // Reads/writes the `dg_telemetry` localStorage flag. Sentry init
-  // in sentry.client.config.ts checks the same flag on page load.
-  (() => {
-    const STORAGE_KEY = 'dg_telemetry';
-    const stateEl = document.getElementById('dg-tel-state');
-    const toggleEl = document.getElementById('dg-tel-toggle');
-    if (!stateEl || !toggleEl) return;
-    const render = () => {
-      const off = localStorage.getItem(STORAGE_KEY) === 'off';
-      stateEl.textContent = off ? 'off' : 'on';
-    };
-    toggleEl.addEventListener('click', () => {
-      const off = localStorage.getItem(STORAGE_KEY) === 'off';
-      if (off) localStorage.removeItem(STORAGE_KEY);
-      else localStorage.setItem(STORAGE_KEY, 'off');
-      render();
-      location.reload();
-    });
-    render();
-  })();
 </script>
