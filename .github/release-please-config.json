@@ -27,6 +27,14 @@
         "src/deepctl_shared_utils/__init__.py"
       ]
     },
+    "packages/deepctl-telemetry": {
+      "component": "deepctl-telemetry",
+      "include-component-in-tag": true,
+      "make-latest": false,
+      "extra-files": [
+        "src/deepctl_telemetry/__init__.py"
+      ]
+    },
     "packages/deepctl-cmd-api": {
       "component": "deepctl-cmd-api",
       "include-component-in-tag": true,
