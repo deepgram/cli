@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.21](https://github.com/deepgram/cli/compare/v0.2.20...v0.2.21) (2026-05-07)
+
+
+### Features
+
+* delete .cursor directory ([2029795](https://github.com/deepgram/cli/commit/202979589dd86a77b73991a0a28fdce9312b4963))
+* **telemetry:** opt-out phone-home telemetry for the CLI and cli.deepgram.com ([#59](https://github.com/deepgram/cli/issues/59)) ([8e20b16](https://github.com/deepgram/cli/commit/8e20b16316c7638af42db086cde0bf27dae276ea))
+
 ## [0.2.20](https://github.com/deepgram/cli/compare/v0.2.19...v0.2.20) (2026-05-02)
 
 

@@ -10,4 +10,4 @@ __all__ = [
     "render_notice",
 ]
 
-__version__ = "0.0.1"  # x-release-please-version
+__version__ = "0.0.2"  # x-release-please-version

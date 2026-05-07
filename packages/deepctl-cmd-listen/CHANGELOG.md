@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.11](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.10...deepctl-cmd-listen-v0.0.11) (2026-05-07)
+
+
+### Documentation
+
+* fix dg listen examples and drop deprecated dg transcribe references ([#53](https://github.com/deepgram/cli/issues/53)) ([3a4e8a9](https://github.com/deepgram/cli/commit/3a4e8a93b49670030d8121fc8a658e9dc3857d5f))
+
 ## [0.0.10](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.9...deepctl-cmd-listen-v0.0.10) (2026-05-01)
 
 
