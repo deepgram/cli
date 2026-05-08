@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.11](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.10...deepctl-core-v0.2.11) (2026-05-08)
+
+
+### Bug Fixes
+
+* **non-interactive:** promote CI to hard signal, add --non-interactive flag ([8da4e21](https://github.com/deepgram/cli/commit/8da4e2155248e17d9031596be112bed7b804cbda))
+* **non-interactive:** promote CI=1 to hard signal, add --non-interactive flag ([#67](https://github.com/deepgram/cli/issues/67)) ([a25099d](https://github.com/deepgram/cli/commit/a25099d388edce7577a1ac81c7889b1eeffdd667))
+
 ## [0.2.10](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.9...deepctl-core-v0.2.10) (2026-05-07)
 
 
