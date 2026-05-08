@@ -241,6 +241,98 @@ class TestListenCommand:
             assert result.source == "stdin"
 
 
+class TestGuidedFlow:
+    """Verify the guided-flow gate: prompts only fire on bare `dg listen`."""
+
+    @pytest.fixture
+    def command(self):
+        return ListenCommand()
+
+    @pytest.fixture
+    def common_kwargs(self):
+        return {
+            "client": Mock(spec=DeepgramClient),
+            "config": Mock(spec=Config),
+            "auth_manager": Mock(spec=AuthManager),
+        }
+
+    def test_url_arg_skips_both_prompts(self, command, common_kwargs):
+        with patch.object(command, "_interactive_features") as feat, patch.object(
+            command, "_interactive_select_source"
+        ) as src, patch.object(
+            command, "_prerecorded", return_value=BaseResult(status="ok")
+        ):
+            command.handle(
+                **common_kwargs, source="https://example.com/audio.wav"
+            )
+        assert feat.call_count == 0
+        assert src.call_count == 0
+
+    def test_file_arg_skips_both_prompts(self, command, common_kwargs):
+        with patch.object(command, "_interactive_features") as feat, patch.object(
+            command, "_interactive_select_source"
+        ) as src, patch.object(
+            command, "_prerecorded", return_value=BaseResult(status="ok")
+        ):
+            command.handle(**common_kwargs, source="/tmp/audio.wav")
+        assert feat.call_count == 0
+        assert src.call_count == 0
+
+    def test_url_arg_with_diarize_skips_both_prompts(
+        self, command, common_kwargs
+    ):
+        with patch.object(command, "_interactive_features") as feat, patch.object(
+            command, "_interactive_select_source"
+        ) as src, patch.object(
+            command, "_prerecorded", return_value=BaseResult(status="ok")
+        ):
+            command.handle(
+                **common_kwargs,
+                source="https://example.com/audio.wav",
+                diarize=True,
+            )
+        assert feat.call_count == 0
+        assert src.call_count == 0
+
+    def test_bare_invocation_runs_full_guided_flow(
+        self, command, common_kwargs
+    ):
+        with patch.object(
+            command,
+            "_interactive_features",
+            return_value=(False, False, False, False),
+        ) as feat, patch.object(
+            command,
+            "_interactive_select_source",
+            return_value=("prerecorded_url", "https://x.com/a.wav"),
+        ) as src, patch.object(
+            command, "_prerecorded", return_value=BaseResult(status="ok")
+        ), patch(
+            "sys.stdin"
+        ) as mock_stdin, patch(
+            "deepctl_cmd_listen.command._agentic", False
+        ):
+            mock_stdin.isatty.return_value = True
+            command.handle(**common_kwargs)
+        assert src.call_count == 1
+        assert feat.call_count == 1
+
+    def test_cancelled_source_select_returns_cancelled(
+        self, command, common_kwargs
+    ):
+        with patch.object(
+            command, "_interactive_select_source", return_value=(None, None)
+        ), patch.object(command, "_interactive_features") as feat, patch(
+            "sys.stdin"
+        ) as mock_stdin, patch(
+            "deepctl_cmd_listen.command._agentic", False
+        ):
+            mock_stdin.isatty.return_value = True
+            result = command.handle(**common_kwargs)
+        assert result.status == "cancelled"
+        assert feat.call_count == 0
+
+
 class TestListenResult:
     """Test ListenResult model fields and defaults."""
 

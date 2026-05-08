@@ -258,6 +258,7 @@ class ListenCommand(BaseCommand):
     ) -> BaseResult:
         source: str | None = kwargs.get("source")
         use_mic: bool = kwargs.get("mic", False)
+        guided_flow = False
 
         # ── Resolve mode ───────────────────────────────────────────────
         if source == "-":
@@ -280,12 +281,12 @@ class ListenCommand(BaseCommand):
                 ),
             )
         else:
-            # Interactive: ask the user
             selected_mode, selected_source = self._interactive_select_source()
             if not selected_mode:
                 return BaseResult(status="cancelled", message="Cancelled.")
             mode = selected_mode
             source = selected_source
+            guided_flow = True
 
         # ── Gather options ─────────────────────────────────────────────
         model = kwargs.get("model") or "nova-3"
@@ -322,13 +323,7 @@ class ListenCommand(BaseCommand):
         if caption_format and not diarize:
             diarize = False  # keep explicit — user can add --diarize themselves
 
-        # Interactive feature selection when user chose source interactively
-        # (signals they want a guided experience)
-        if (
-            not _agentic
-            and mode in ("prerecorded_file", "prerecorded_url")
-            and not any([diarize, summarize, topics, sentiment])
-        ):
+        if guided_flow and mode in ("prerecorded_file", "prerecorded_url"):
             diarize, summarize, topics, sentiment = self._interactive_features()
 
         # ── Dispatch ───────────────────────────────────────────────────
