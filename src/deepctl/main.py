@@ -152,6 +152,13 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     help="Show detailed performance timing information",
 )
 @click.option(
+    "--non-interactive",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    help="Skip interactive prompts; use defaults for any optional features.",
+)
+@click.option(
     "--record-install-method",
     is_eager=True,
     expose_value=False,

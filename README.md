@@ -295,6 +295,25 @@ dg usage --last-week -o yaml
 When running in a non-TTY environment (pipes, CI, or AI coding tools), the CLI
 automatically switches to structured JSON output with plain-text status messages.
 
+### Forcing non-interactive mode
+
+Three explicit ways to skip every prompt and run with defaults — useful from a
+real terminal where auto-detection wouldn't otherwise trigger:
+
+```bash
+# Global flag (works at any position)
+dg --non-interactive listen recording.wav
+dg listen --non-interactive recording.wav
+
+# Environment variable (good for whole scripts)
+CI=1 dg listen recording.wav
+```
+
+Also recognised: `--agent-friendly` (alias intended for AI coding tools — same
+effect plus JSON metadata output), and the auto-detected env vars
+`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, and Aider's
+`OR_APP_NAME` / `OR_SITE_URL`.
+
 ## Plugins
 
 Extend the CLI with custom commands.

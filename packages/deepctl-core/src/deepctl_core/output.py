@@ -34,8 +34,12 @@ def is_agentic() -> bool:
     """
     env = os.environ
 
-    # Hard signals: explicit agent mode flag or known AI tool env vars
+    # Hard signals: explicit non-interactive intent or known AI tool env vars
+    if "--non-interactive" in sys.argv:
+        return True
     if "--agent-friendly" in sys.argv:
+        return True
+    if env.get("CI") in ("true", "1"):
         return True
     if env.get("CLAUDECODE"):
         return True
@@ -55,8 +59,6 @@ def is_agentic() -> bool:
     if not sys.stdin.isatty():
         score += 1
     if not sys.stdout.isatty():
-        score += 1
-    if env.get("CI") in ("true", "1"):
         score += 1
     if not env.get("TERM") or env.get("TERM") == "dumb":
         score += 1

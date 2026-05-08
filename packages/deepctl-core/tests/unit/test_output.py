@@ -14,7 +14,126 @@ from deepctl_core.output import (
     print_warning,
     print_info,
     get_console,
+    is_agentic,
 )
+
+
+class TestIsAgentic:
+    """Cover every signal that flips the CLI into non-interactive mode."""
+
+    @pytest.fixture
+    def baseline(self, monkeypatch):
+        """Interactive baseline: clean argv, real-looking TTY env, no AI hints."""
+        monkeypatch.setattr("sys.argv", ["dg", "listen", "foo.wav"])
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+        for var in (
+            "CI",
+            "CLAUDECODE",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CODEX_SANDBOX",
+            "CODEX_SANDBOX_NETWORK_DISABLED",
+            "OR_APP_NAME",
+            "OR_SITE_URL",
+            "NO_COLOR",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("TERM", "xterm-256color")
+
+    def test_baseline_is_interactive(self, baseline):
+        assert is_agentic() is False
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["dg", "--non-interactive", "listen", "foo.wav"],
+            ["dg", "listen", "--non-interactive", "foo.wav"],
+            ["dg", "listen", "foo.wav", "--non-interactive"],
+        ],
+    )
+    def test_non_interactive_flag_anywhere_in_argv(
+        self, baseline, monkeypatch, argv
+    ):
+        monkeypatch.setattr("sys.argv", argv)
+        assert is_agentic() is True
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["dg", "--agent-friendly", "listen", "foo.wav"],
+            ["dg", "listen", "--agent-friendly", "foo.wav"],
+        ],
+    )
+    def test_agent_friendly_flag_anywhere_in_argv(
+        self, baseline, monkeypatch, argv
+    ):
+        monkeypatch.setattr("sys.argv", argv)
+        assert is_agentic() is True
+
+    @pytest.mark.parametrize("ci_value", ["1", "true"])
+    def test_ci_env_var_is_hard_signal(self, baseline, monkeypatch, ci_value):
+        monkeypatch.setenv("CI", ci_value)
+        assert is_agentic() is True
+
+    @pytest.mark.parametrize(
+        "ci_value",
+        ["false", "0", "", "yes", "TRUE"],
+    )
+    def test_other_ci_values_do_not_count(
+        self, baseline, monkeypatch, ci_value
+    ):
+        monkeypatch.setenv("CI", ci_value)
+        assert is_agentic() is False
+
+    @pytest.mark.parametrize(
+        "env_var",
+        [
+            "CLAUDECODE",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CODEX_SANDBOX",
+            "CODEX_SANDBOX_NETWORK_DISABLED",
+        ],
+    )
+    def test_ai_tool_env_var_is_hard_signal(
+        self, baseline, monkeypatch, env_var
+    ):
+        monkeypatch.setenv(env_var, "1")
+        assert is_agentic() is True
+
+    def test_aider_via_or_app_name(self, baseline, monkeypatch):
+        monkeypatch.setenv("OR_APP_NAME", "Aider")
+        assert is_agentic() is True
+
+    def test_aider_via_or_site_url(self, baseline, monkeypatch):
+        monkeypatch.setenv("OR_SITE_URL", "https://aider.example.com")
+        assert is_agentic() is True
+
+    def test_one_soft_signal_not_enough(self, baseline, monkeypatch):
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        assert is_agentic() is False
+
+    def test_two_soft_signals_not_enough(self, baseline, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        assert is_agentic() is False
+
+    def test_three_soft_signals_trip_threshold(self, baseline, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        monkeypatch.setenv("NO_COLOR", "1")
+        assert is_agentic() is True
+
+    def test_dumb_term_counts_as_soft_signal(self, baseline, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        monkeypatch.setenv("TERM", "dumb")
+        assert is_agentic() is True
+
+    def test_unset_term_counts_as_soft_signal(self, baseline, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+        monkeypatch.delenv("TERM", raising=False)
+        assert is_agentic() is True
 
 
 class TestOutputFormatter:
