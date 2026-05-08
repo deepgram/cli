@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import platform
 import sys
@@ -62,6 +63,7 @@ def init_telemetry(config: Config) -> bool:
         release=f"deepctl@{cli_version}",
         environment="production",
         send_default_pii=False,
+        auto_session_tracking=True,
         traces_sample_rate=0.0,
         profiles_sample_rate=0.0,
         max_breadcrumbs=20,
@@ -76,8 +78,20 @@ def init_telemetry(config: Config) -> bool:
     )
     sentry_sdk.set_tag("cli.version", cli_version)
 
+    atexit.register(_flush_on_exit)
+
     _initialized = True
     return True
+
+
+def _flush_on_exit() -> None:
+    """Flush queued envelopes before process exit (best-effort, 2s budget)."""
+    try:
+        import sentry_sdk
+
+        sentry_sdk.flush(timeout=2.0)
+    except Exception:
+        pass
 
 
 def _read_cli_version() -> str:

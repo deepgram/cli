@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from deepctl_telemetry import is_enabled, render_notice
+import pytest
+
+from deepctl_telemetry import init_telemetry, is_enabled, render_notice
 from deepctl_telemetry.client import DISABLE_ENV_VAR
 
 
@@ -35,3 +37,60 @@ class TestRenderNotice:
     def test_off_message(self) -> None:
         notice = render_notice(_config(False))
         assert "Telemetry is off" in notice
+
+
+class TestSessionFlush:
+    """Verify init_telemetry enables session tracking and registers atexit flush."""
+
+    @pytest.fixture(autouse=True)
+    def reset_initialized(self) -> None:
+        from deepctl_telemetry import client
+
+        client._initialized = False
+        yield
+        client._initialized = False
+
+    def test_init_enables_auto_session_tracking(self) -> None:
+        with patch("deepctl_telemetry.client.atexit.register"), patch(
+            "sentry_sdk.init"
+        ) as mock_init, patch("sentry_sdk.set_tag"):
+            init_telemetry(_config(True))
+
+        assert mock_init.called
+        kwargs = mock_init.call_args.kwargs
+        assert kwargs["auto_session_tracking"] is True
+        assert kwargs["traces_sample_rate"] == 0.0
+        assert kwargs["profiles_sample_rate"] == 0.0
+
+    def test_init_registers_atexit_flush(self) -> None:
+        from deepctl_telemetry.client import _flush_on_exit
+
+        with patch(
+            "deepctl_telemetry.client.atexit.register"
+        ) as mock_register, patch("sentry_sdk.init"), patch("sentry_sdk.set_tag"):
+            init_telemetry(_config(True))
+
+        mock_register.assert_called_once_with(_flush_on_exit)
+
+    def test_disabled_does_not_register_atexit(self) -> None:
+        with patch(
+            "deepctl_telemetry.client.atexit.register"
+        ) as mock_register, patch("sentry_sdk.init") as mock_init:
+            init_telemetry(_config(False))
+
+        assert not mock_init.called
+        assert not mock_register.called
+
+    def test_flush_on_exit_calls_sentry_flush_with_2s_budget(self) -> None:
+        from deepctl_telemetry.client import _flush_on_exit
+
+        with patch("sentry_sdk.flush") as mock_flush:
+            _flush_on_exit()
+
+        mock_flush.assert_called_once_with(timeout=2.0)
+
+    def test_flush_on_exit_swallows_exceptions(self) -> None:
+        from deepctl_telemetry.client import _flush_on_exit
+
+        with patch("sentry_sdk.flush", side_effect=RuntimeError("boom")):
+            _flush_on_exit()
