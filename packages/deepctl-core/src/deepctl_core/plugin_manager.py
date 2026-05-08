@@ -286,6 +286,13 @@ class PluginManager:
             callback=_agent_friendly_callback,
         )(cmd)
 
+        cmd = click.option(
+            "--non-interactive",
+            is_flag=True,
+            expose_value=False,
+            help="Skip interactive prompts; use defaults for any optional features.",
+        )(cmd)
+
         return cmd
 
     def _build_help_text(self, instance: Any) -> str:
