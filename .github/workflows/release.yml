@@ -79,10 +79,12 @@ jobs:
 
   mark-latest:
     name: Mark root release as latest
-    needs: release-please
-    # Re-assert latest on the root package tag (vX.Y.Z) after all sub-package
-    # releases are created, since release-please processes them sequentially and
-    # a sub-package release created after the root tag can steal the pointer.
+    needs: [release-please, publish]
+    # Re-assert latest on the root package tag (vX.Y.Z) after PyPI publish so
+    # users clicking "latest" land on a tag whose artifact is actually
+    # installable. Also re-asserts after all sub-package releases since
+    # release-please processes them sequentially and a sub-package release
+    # created after the root tag can steal the pointer.
     if: |
       needs.release-please.outputs.release_created == 'true' &&
       startsWith(needs.release-please.outputs.tag_name, 'v')
@@ -95,9 +97,11 @@ jobs:
 
   deploy-web:
     name: Deploy web to production
-    needs: release-please
-    # Only fire on root-package releases (v0.2.4, v1.0.0, …).
-    # Sub-package tags look like deepctl-cmd-listen-v0.0.3 — skip those.
+    needs: [release-please, publish]
+    # Only fire on root-package releases (v0.2.4, v1.0.0, …) and only after
+    # PyPI publish so cli.deepgram.com never advertises a version that isn't
+    # installable yet. Sub-package tags look like deepctl-cmd-listen-v0.0.3 —
+    # skip those.
     if: |
       needs.release-please.outputs.release_created == 'true' &&
       startsWith(needs.release-please.outputs.tag_name, 'v')
