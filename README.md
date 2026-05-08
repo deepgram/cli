@@ -321,6 +321,38 @@ dg profiles --switch staging             # Switch profile
 
 Output format on any command: `--output json|yaml|table|csv`
 
+## Telemetry
+
+The CLI phones home anonymous error reports to help us catch crashes and regressions before users have to file an issue. It's **on by default** and easy to turn off.
+
+**What's collected:** Python exceptions, stack traces, the CLI version, and the Python runtime. Request bodies, headers, cookies, API keys, email addresses, IP addresses, and usernames are scrubbed before send. No performance traces, no profiling, no replays — errors only.
+
+**Where it goes:** the `dx-cli` Sentry project owned by the Deepgram DX team.
+
+### Opt out
+
+Persistent (recommended):
+
+```bash
+dg config set telemetry.enabled false
+```
+
+One-shot (CI, scripts, single command):
+
+```bash
+DEEPCTL_TELEMETRY_DISABLED=1 dg listen recording.wav
+```
+
+### Override the destination
+
+For forks or self-hosted Sentry, point telemetry at your own DSN:
+
+```bash
+export DEEPCTL_TELEMETRY_DSN='https://<key>@<your-sentry>/<project>'
+```
+
+`DEEPCTL_TELEMETRY_DISABLED` always wins. The default DSN is baked into the package and only used when the override is unset.
+
 ## Development
 
 ```bash
