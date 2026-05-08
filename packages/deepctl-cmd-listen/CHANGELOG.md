@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.12](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.11...deepctl-cmd-listen-v0.0.12) (2026-05-08)
+
+
+### Bug Fixes
+
+* **listen:** restrict feature prompt to bare-invocation guided flow ([6ea275b](https://github.com/deepgram/cli/commit/6ea275b82c639b705ce13baa2f851c16b02c8082))
+* **listen:** restrict feature prompt to bare-invocation guided flow ([#68](https://github.com/deepgram/cli/issues/68)) ([ee92d1f](https://github.com/deepgram/cli/commit/ee92d1f802277980c32ad95385c9454a679b78c2))
+
 ## [0.0.11](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.10...deepctl-cmd-listen-v0.0.11) (2026-05-07)
 
 
