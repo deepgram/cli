@@ -147,8 +147,13 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${TAG_NAME#v}"
+          # Poll the PyPI JSON API rather than `pip index versions`. The
+          # JSON endpoint flips the moment a release is published, while
+          # the simple index pip queries can lag 5-15 minutes behind a
+          # successful publish (CDN caching of project metadata).
+          URL="https://pypi.org/pypi/deepctl/${VERSION}/json"
           for i in $(seq 1 30); do
-            if pip index versions deepctl 2>&1 | grep -qE "(^|[^.0-9])${VERSION}([^.0-9]|$)"; then
+            if [ "$(curl -fsS -o /dev/null -w '%{http_code}' "${URL}")" = "200" ]; then
               echo "deepctl==${VERSION} is live on PyPI"
               exit 0
             fi
