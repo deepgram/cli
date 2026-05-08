@@ -64,8 +64,6 @@ Or manually create a package under `packages/` following the existing pattern. E
 
 Then run `make readmes` to update all READMEs.
 
-See [AGENTS.md](AGENTS.md) for detailed architecture documentation.
-
 ### Testing
 
 - Unit tests: `packages/*/tests/unit/`
