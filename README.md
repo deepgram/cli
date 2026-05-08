@@ -515,7 +515,7 @@ PyPI. Each package is versioned independently.
 3. `make dev` (formats, lints, tests)
 4. Submit a pull request
 
-See [AGENTS.md](AGENTS.md) for detailed architecture and conventions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
 
 ## Links
 
