@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.23](https://github.com/deepgram/cli/compare/v0.2.22...v0.2.23) (2026-05-08)
+
+
+### Features
+
+* **telemetry:** enable session tracking and flush envelopes on exit ([8938761](https://github.com/deepgram/cli/commit/8938761f14c47ffc985a47f90f10ce5d03895546))
+
 ## [0.2.22](https://github.com/deepgram/cli/compare/v0.2.21...v0.2.22) (2026-05-08)
 
 
