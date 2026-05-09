@@ -1,8 +1,8 @@
 """Tests for the login command."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import MagicMock, Mock, call, patch
 
+import pytest
 from deepctl_cmd_login.command import (
     LoginCommand,
     LogoutCommand,

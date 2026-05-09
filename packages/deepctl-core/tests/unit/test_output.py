@@ -1,20 +1,20 @@
 """Tests for the output utilities."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import json
-import yaml
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+import yaml
 from deepctl_core.output import (
     OutputFormatter,
-    setup_output,
-    print_output,
-    print_success,
-    print_error,
-    print_warning,
-    print_info,
     get_console,
     is_agentic,
+    print_error,
+    print_info,
+    print_output,
+    print_success,
+    print_warning,
+    setup_output,
 )
 
 

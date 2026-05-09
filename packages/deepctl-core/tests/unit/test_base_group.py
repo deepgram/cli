@@ -1,18 +1,17 @@
 """Unit tests for BaseGroupCommand class."""
 
 from typing import Any, Dict, List
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 import click
 import pytest
 from click.testing import CliRunner
-
 from deepctl_core import (
+    AuthManager,
     BaseCommand,
     BaseGroupCommand,
-    AuthManager,
-    DeepgramClient,
     Config,
+    DeepgramClient,
 )
 
 
@@ -214,7 +213,7 @@ class TestBaseGroupCommand:
             name = "testgroup"
             help = "Test group"
 
-            def get_arguments(self) -> List[Dict[str, Any]]:
+            def get_arguments(self) -> list[dict[str, Any]]:
                 return [
                     {
                         "names": ["--verbose", "-v"],
@@ -358,7 +357,7 @@ class TestBaseGroupCommand:
             name = "complex"
             help = "Complex group"
 
-            def get_arguments(self) -> List[Dict[str, Any]]:
+            def get_arguments(self) -> list[dict[str, Any]]:
                 return [
                     {
                         "name": "arg1",

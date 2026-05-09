@@ -1,17 +1,18 @@
 """Tests for network debug command models."""
 
-import pytest
 from datetime import datetime
+
+import pytest
 from deepctl_cmd_debug_network.models import (
-    EndpointTestResult,
-    DNSResult,
     CertificateInfo,
+    CommandExecutionResult,
+    DeepgramEndpoint,
+    DNSResult,
+    EndpointTestResult,
+    NetworkDebugResult,
+    PythonRequestsTest,
     RevocationEndpointTest,
     TLSTestResult,
-    PythonRequestsTest,
-    CommandExecutionResult,
-    NetworkDebugResult,
-    DeepgramEndpoint,
 )
 
 

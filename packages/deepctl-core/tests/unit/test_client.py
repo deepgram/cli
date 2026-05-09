@@ -1,13 +1,13 @@
 """Tests for the DeepgramClient class."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock, mock_open
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
-from deepgram.core.api_error import ApiError
-from deepctl_core.client import DeepgramClient
+import pytest
 from deepctl_core.auth import AuthManager
+from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
+from deepgram.core.api_error import ApiError
 
 
 def _mock_sdk_response(data: dict) -> Mock:

@@ -1,19 +1,18 @@
 """Unit tests for PluginManager class."""
 
-from typing import Any, Dict, List
-from unittest.mock import Mock, patch, MagicMock, create_autospec
 from importlib.metadata import EntryPoint
+from typing import Any, Dict, List
+from unittest.mock import MagicMock, Mock, create_autospec, patch
 
 import click
 import pytest
-
 from deepctl_core import (
+    AuthManager,
     BaseCommand,
     BaseGroupCommand,
-    PluginManager,
     Config,
-    AuthManager,
     DeepgramClient,
+    PluginManager,
 )
 
 
@@ -405,13 +404,12 @@ class TestPluginManager:
             with patch(
                 "deepctl_core.plugin_manager.get_plugin_state",
                 return_value={"plugins": {"some-plugin": {}}},
+            ), patch(
+                "deepctl_core.plugin_manager.get_venv_site_packages",
+                return_value=None,
             ):
-                with patch(
-                    "deepctl_core.plugin_manager.get_venv_site_packages",
-                    return_value=None,
-                ):
-                    plugin_manager._load_plugin_venv_entries(mock_cli_group)
-                    mock_cli_group.add_command.assert_not_called()
+                plugin_manager._load_plugin_venv_entries(mock_cli_group)
+                mock_cli_group.add_command.assert_not_called()
 
     @pytest.mark.unit
     def test_plugin_venv_deduplicates_already_loaded(
@@ -443,26 +441,23 @@ class TestPluginManager:
             with patch(
                 "deepctl_core.plugin_manager.get_plugin_state",
                 return_value={"plugins": {"my-plugin": {}}},
-            ):
-                with patch(
-                    "deepctl_core.plugin_manager.get_venv_site_packages",
-                    return_value=fake_sp,
-                ):
-                    with patch(
-                        "deepctl_core.plugin_manager.metadata.distributions",
-                        return_value=[mock_dist],
-                    ):
-                        with patch(
-                            "deepctl_core.plugin_manager.sys"
-                        ) as mock_sys:
-                            mock_sys.path = []
+            ), patch(
+                "deepctl_core.plugin_manager.get_venv_site_packages",
+                return_value=fake_sp,
+            ), patch(
+                "deepctl_core.plugin_manager.metadata.distributions",
+                return_value=[mock_dist],
+            ), patch(
+                "deepctl_core.plugin_manager.sys"
+            ) as mock_sys:
+                mock_sys.path = []
 
-                            plugin_manager._load_plugin_venv_entries(
-                                mock_cli_group
-                            )
+                plugin_manager._load_plugin_venv_entries(
+                    mock_cli_group
+                )
 
-                            # Should NOT add the command (it's a duplicate)
-                            mock_cli_group.add_command.assert_not_called()
+                # Should NOT add the command (it's a duplicate)
+                mock_cli_group.add_command.assert_not_called()
 
     @pytest.mark.unit
     def test_plugin_venv_loads_new_plugins(
@@ -489,33 +484,30 @@ class TestPluginManager:
             with patch(
                 "deepctl_core.plugin_manager.get_plugin_state",
                 return_value={"plugins": {"venv-plugin": {}}},
-            ):
-                with patch(
-                    "deepctl_core.plugin_manager.get_venv_site_packages",
-                    return_value=fake_sp,
-                ):
-                    with patch(
-                        "deepctl_core.plugin_manager.metadata.distributions",
-                        return_value=[mock_dist],
-                    ):
-                        with patch(
-                            "deepctl_core.plugin_manager.sys"
-                        ) as mock_sys:
-                            mock_sys.path = []
+            ), patch(
+                "deepctl_core.plugin_manager.get_venv_site_packages",
+                return_value=fake_sp,
+            ), patch(
+                "deepctl_core.plugin_manager.metadata.distributions",
+                return_value=[mock_dist],
+            ), patch(
+                "deepctl_core.plugin_manager.sys"
+            ) as mock_sys:
+                mock_sys.path = []
 
-                            plugin_manager._load_plugin_venv_entries(
-                                mock_cli_group
-                            )
+                plugin_manager._load_plugin_venv_entries(
+                    mock_cli_group
+                )
 
-                            # Should add the command
-                            mock_cli_group.add_command.assert_called_once()
-                            # Should track in dedup set
-                            assert (
-                                "venv_plugin.command:VenvPlugin"
-                                in plugin_manager._loaded_entry_point_values
-                            )
-                            # Should be in loaded_plugins
-                            assert "venv-plugin" in plugin_manager.loaded_plugins
+                # Should add the command
+                mock_cli_group.add_command.assert_called_once()
+                # Should track in dedup set
+                assert (
+                    "venv_plugin.command:VenvPlugin"
+                    in plugin_manager._loaded_entry_point_values
+                )
+                # Should be in loaded_plugins
+                assert "venv-plugin" in plugin_manager.loaded_plugins
 
     @pytest.mark.unit
     def test_warn_if_plugin_venv_python_mismatch_silent_when_unknown(
@@ -525,10 +517,9 @@ class TestPluginManager:
         with patch(
             "deepctl_core.plugin_manager.get_venv_python_version",
             return_value=None,
-        ):
-            with patch("deepctl_core.plugin_manager.print_warning") as mock_warn:
-                plugin_manager._warn_if_plugin_venv_python_mismatch()
-                mock_warn.assert_not_called()
+        ), patch("deepctl_core.plugin_manager.print_warning") as mock_warn:
+            plugin_manager._warn_if_plugin_venv_python_mismatch()
+            mock_warn.assert_not_called()
 
     @pytest.mark.unit
     def test_warn_if_plugin_venv_python_mismatch_silent_when_match(
@@ -538,16 +529,14 @@ class TestPluginManager:
         with patch(
             "deepctl_core.plugin_manager.get_venv_python_version",
             return_value=(3, 13),
-        ):
-            with patch(
-                "deepctl_core.plugin_manager.sys.version_info",
-                Mock(major=3, minor=13),
-            ):
-                with patch(
-                    "deepctl_core.plugin_manager.print_warning"
-                ) as mock_warn:
-                    plugin_manager._warn_if_plugin_venv_python_mismatch()
-                    mock_warn.assert_not_called()
+        ), patch(
+            "deepctl_core.plugin_manager.sys.version_info",
+            Mock(major=3, minor=13),
+        ), patch(
+            "deepctl_core.plugin_manager.print_warning"
+        ) as mock_warn:
+            plugin_manager._warn_if_plugin_venv_python_mismatch()
+            mock_warn.assert_not_called()
 
     @pytest.mark.unit
     def test_warn_if_plugin_venv_python_mismatch_warns_on_minor_diff(
@@ -557,20 +546,18 @@ class TestPluginManager:
         with patch(
             "deepctl_core.plugin_manager.get_venv_python_version",
             return_value=(3, 12),
-        ):
-            with patch(
-                "deepctl_core.plugin_manager.sys.version_info",
-                Mock(major=3, minor=13),
-            ):
-                with patch(
-                    "deepctl_core.plugin_manager.print_warning"
-                ) as mock_warn:
-                    plugin_manager._warn_if_plugin_venv_python_mismatch()
-                    mock_warn.assert_called_once()
-                    msg = mock_warn.call_args[0][0]
-                    assert "3.12" in msg
-                    assert "3.13" in msg
-                    assert "rm -rf" in msg
+        ), patch(
+            "deepctl_core.plugin_manager.sys.version_info",
+            Mock(major=3, minor=13),
+        ), patch(
+            "deepctl_core.plugin_manager.print_warning"
+        ) as mock_warn:
+            plugin_manager._warn_if_plugin_venv_python_mismatch()
+            mock_warn.assert_called_once()
+            msg = mock_warn.call_args[0][0]
+            assert "3.12" in msg
+            assert "3.13" in msg
+            assert "rm -rf" in msg
 
     @pytest.mark.unit
     def test_warn_if_plugin_venv_python_mismatch_warns_on_major_diff(
@@ -580,13 +567,11 @@ class TestPluginManager:
         with patch(
             "deepctl_core.plugin_manager.get_venv_python_version",
             return_value=(3, 13),
-        ):
-            with patch(
-                "deepctl_core.plugin_manager.sys.version_info",
-                Mock(major=4, minor=0),
-            ):
-                with patch(
-                    "deepctl_core.plugin_manager.print_warning"
-                ) as mock_warn:
-                    plugin_manager._warn_if_plugin_venv_python_mismatch()
-                    mock_warn.assert_called_once()
+        ), patch(
+            "deepctl_core.plugin_manager.sys.version_info",
+            Mock(major=4, minor=0),
+        ), patch(
+            "deepctl_core.plugin_manager.print_warning"
+        ) as mock_warn:
+            plugin_manager._warn_if_plugin_venv_python_mismatch()
+            mock_warn.assert_called_once()

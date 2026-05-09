@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from deepctl_cmd_listen.captions import (
     StreamingCaptionWriter,
     _fmt_srt,

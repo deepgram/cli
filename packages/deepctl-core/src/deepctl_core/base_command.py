@@ -161,9 +161,7 @@ class BaseCommand(ABC):
                 if src is not None and src.name == "COMMANDLINE":
                     used.append(param.name)
             scope.set_tag("cmd.flags", ",".join(sorted(used)) or "(none)")
-            scope.set_tag(
-                "cmd.output_format", ctx.params.get("output") or "default"
-            )
+            scope.set_tag("cmd.output_format", ctx.params.get("output") or "default")
         except Exception:
             pass
 

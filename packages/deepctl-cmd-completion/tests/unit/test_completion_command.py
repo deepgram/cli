@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from deepctl_cmd_completion.command import CompletionCommand
 
 

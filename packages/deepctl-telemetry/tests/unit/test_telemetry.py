@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import Mock, patch
 
 import pytest
-
 from deepctl_telemetry import init_telemetry, is_enabled, render_notice
 from deepctl_telemetry.client import DISABLE_ENV_VAR
 

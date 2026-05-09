@@ -1,7 +1,8 @@
 """Unit tests for browser debug command."""
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from aiohttp import WSMsgType
 from deepctl_cmd_debug_browser import BrowserCommand, BrowserDebugResult
 

@@ -14,16 +14,15 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
-from pydantic import ValidationError
-
 from deepctl_shared_utils import FileInfo
+from pydantic import ValidationError
 
 
 class TestFileInfo:
     """Test suite for FileInfo model."""
 
     @pytest.fixture
-    def valid_file_data(self) -> Dict[str, Any]:
+    def valid_file_data(self) -> dict[str, Any]:
         """Valid FileInfo data fixture."""
         return {
             "path": "/home/user/audio/sample.mp3",
@@ -40,13 +39,13 @@ class TestFileInfo:
         }
 
     @pytest.fixture
-    def minimal_file_data(self) -> Dict[str, Any]:
+    def minimal_file_data(self) -> dict[str, Any]:
         """Minimal required FileInfo data."""
         return {"path": "/tmp/test.txt", "exists": False}
 
     @pytest.mark.unit
     def test_file_info_creation_with_valid_data(
-        self, valid_file_data: Dict[str, Any]
+        self, valid_file_data: dict[str, Any]
     ):
         """Test FileInfo model creation with all fields."""
         # Create the model
@@ -66,7 +65,7 @@ class TestFileInfo:
 
     @pytest.mark.unit
     def test_file_info_minimal_creation(
-        self, minimal_file_data: Dict[str, Any]
+        self, minimal_file_data: dict[str, Any]
     ):
         """Test FileInfo model with minimal required fields."""
         file_info = FileInfo(**minimal_file_data)
@@ -154,7 +153,7 @@ class TestFileInfo:
 
     @pytest.mark.unit
     def test_file_info_model_serialization(
-        self, valid_file_data: Dict[str, Any]
+        self, valid_file_data: dict[str, Any]
     ):
         """Test model serialization to dict and JSON."""
         file_info = FileInfo(**valid_file_data)
@@ -230,7 +229,7 @@ class TestFileInfo:
     @pytest.mark.unit
     @pytest.mark.benchmark
     def test_file_info_creation_performance(
-        self, valid_file_data: Dict[str, Any]
+        self, valid_file_data: dict[str, Any]
     ):
         """Benchmark FileInfo model creation performance."""
         import time
@@ -250,7 +249,7 @@ class TestFileInfo:
         assert avg_time < 0.001  # Less than 1ms per creation
 
     @pytest.mark.unit
-    def test_file_info_copy_and_update(self, valid_file_data: Dict[str, Any]):
+    def test_file_info_copy_and_update(self, valid_file_data: dict[str, Any]):
         """Test model copy with update functionality."""
         original = FileInfo(**valid_file_data)
 

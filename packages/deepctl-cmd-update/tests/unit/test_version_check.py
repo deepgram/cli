@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from deepctl_cmd_update.version_check import (
+    _FREQUENCY_DURATIONS,
     VersionChecker,
     VersionInfo,
-    _FREQUENCY_DURATIONS,
     format_version_message,
 )
 

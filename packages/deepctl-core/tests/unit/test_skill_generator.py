@@ -5,15 +5,14 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from deepctl_core.skill_generator import (
+    AmazonQGenerator,
     ClaudeCodeGenerator,
+    ClineGenerator,
     CodexGenerator,
     CommandMetadata,
-    GeminiGenerator,
-    AmazonQGenerator,
     CursorGenerator,
-    ClineGenerator,
+    GeminiGenerator,
     _commands_hash,
     collect_command_metadata,
     detect_ai_clis,

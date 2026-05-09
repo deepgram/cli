@@ -17,7 +17,6 @@ from deepctl_shared_utils.ffprobe_models import (
     AudioStreamInfo,
 )
 
-
 SAMPLE_FFPROBE_OUTPUT = {
     "format": {
         "format_name": "wav",

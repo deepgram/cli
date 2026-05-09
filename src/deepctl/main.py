@@ -1,11 +1,16 @@
 """Main entry point for deepctl."""
 
+from __future__ import annotations
+
 import importlib.metadata
 import sys
 from contextlib import contextmanager
-from typing import Iterator
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 from deepctl_core import (
     Config,
     TimingContext,
@@ -231,7 +236,7 @@ load_commands()
 
 
 @contextmanager
-def _telemetry_transaction() -> "Iterator[None]":
+def _telemetry_transaction() -> Iterator[None]:
     """Wrap CLI dispatch in a Sentry transaction (no-op when telemetry is off).
 
     The transaction is named generically ('cli') here. BaseCommand.execute
@@ -317,13 +322,12 @@ def main() -> None:
                 # Preprocess arguments to handle hyphenated commands
                 processed_args = preprocess_hyphenated_commands(args)
 
-            with TimingContext("cli_execution"):
-                with _telemetry_transaction():
-                    try:
-                        cli(args=processed_args, standalone_mode=False)
-                    except SystemExit:
-                        # Click calls sys.exit() even in non-standalone mode
-                        pass
+            with TimingContext("cli_execution"), _telemetry_transaction():
+                try:
+                    cli(args=processed_args, standalone_mode=False)
+                except SystemExit:
+                    # Click calls sys.exit() even in non-standalone mode
+                    pass
 
         # Print update notifications if available (before timing summary)
         if print_pending_notification is not None:

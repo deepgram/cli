@@ -5,8 +5,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import httpx
 import pytest
-
-from deepctl_core.auth import AuthManager, AuthenticationError
+from deepctl_core.auth import AuthenticationError, AuthManager
 from deepctl_core.config import Config
 
 
@@ -186,29 +185,28 @@ class TestAuthManager:
         # Mock the get_api_key and get_project_id methods to return stored values
         with patch.object(
             auth_manager, "get_api_key", return_value="sk-stored-key"
+        ), patch.object(
+            auth_manager, "get_project_id", return_value="stored-project"
         ):
-            with patch.object(
-                auth_manager, "get_project_id", return_value="stored-project"
-            ):
-                # Mock successful response
-                mock_response = Mock()
-                mock_response.status_code = 200
-                auth_manager.client.get.return_value = mock_response
+            # Mock successful response
+            mock_response = Mock()
+            mock_response.status_code = 200
+            auth_manager.client.get.return_value = mock_response
 
-                success, message, error_type = (
-                    auth_manager.verify_credentials()
-                )
+            success, message, error_type = (
+                auth_manager.verify_credentials()
+            )
 
-                assert success is True
+            assert success is True
 
-                # Verify it used stored credentials
-                auth_manager.client.get.assert_called_once_with(
-                    "https://api.deepgram.com/v1/projects/stored-project",
-                    headers={
-                        "Authorization": "Token sk-stored-key",
-                        "Content-Type": "application/json",
-                    },
-                )
+            # Verify it used stored credentials
+            auth_manager.client.get.assert_called_once_with(
+                "https://api.deepgram.com/v1/projects/stored-project",
+                headers={
+                    "Authorization": "Token sk-stored-key",
+                    "Content-Type": "application/json",
+                },
+            )
 
     @patch.dict(
         "os.environ",
@@ -287,17 +285,15 @@ class TestAuthManager:
         """Test that guard() only checks API key, not project_id."""
         with patch.object(
             auth_manager, "get_api_key", return_value="sk-test-key"
+        ), patch.object(
+            auth_manager,
+            "verify_api_key",
+            return_value=(True, "API key verified", None),
+        ), patch.object(
+            auth_manager, "get_project_id", return_value=None
         ):
-            with patch.object(
-                auth_manager,
-                "verify_api_key",
-                return_value=(True, "API key verified", None),
-            ):
-                with patch.object(
-                    auth_manager, "get_project_id", return_value=None
-                ):
-                    # Should NOT raise even without project_id
-                    auth_manager.guard()
+            # Should NOT raise even without project_id
+            auth_manager.guard()
 
     def test_login_with_api_key_success(self, auth_manager, mock_config):
         """Test successful login with API key."""
@@ -326,13 +322,12 @@ class TestAuthManager:
             auth_manager,
             "verify_credentials",
             return_value=(False, "Invalid API key", "auth"),
+        ), pytest.raises(
+            AuthenticationError, match="Invalid API key"
         ):
-            with pytest.raises(
-                AuthenticationError, match="Invalid API key"
-            ):
-                auth_manager.login_with_api_key(
-                    "sk-invalid-key", "test-project"
-                )
+            auth_manager.login_with_api_key(
+                "sk-invalid-key", "test-project"
+            )
 
     @patch.dict(
         "os.environ",
