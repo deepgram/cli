@@ -182,7 +182,7 @@ class LoginCommand(BaseCommand):
         """After login, offer interactive skills setup for detected AI tools."""
         import sys
 
-        if not sys.stdout.isatty():
+        if not sys.stdout.isatty() or not getattr(self, "_guided", True):
             return  # Non-interactive — skip
 
         try:

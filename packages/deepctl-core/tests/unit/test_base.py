@@ -965,6 +965,68 @@ class TestBaseCommand:
         assert args[1]["default"] == 42
 
 
+class TestIsGuided:
+    """Verify is_guided() distinguishes bare invocations from scripted ones."""
+
+    @pytest.fixture
+    def command(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+
+            def handle(self, *args, **kwargs):
+                return None
+
+        return MockCommand()
+
+    @staticmethod
+    def _ctx_with_sources(sources):
+        ctx = Mock(spec=click.Context)
+        ctx.command = Mock()
+        ctx.command.params = [_param(n) for n in sources.keys()]
+
+        def get_source(name):
+            src_name = sources.get(name)
+            if src_name is None:
+                return None
+            src = Mock()
+            src.name = src_name
+            return src
+
+        ctx.get_parameter_source = get_source
+        return ctx
+
+    @pytest.mark.unit
+    def test_bare_invocation_is_guided(self, command):
+        ctx = self._ctx_with_sources(
+            {"foo": "DEFAULT", "bar": "DEFAULT", "baz": "DEFAULT_MAP"}
+        )
+        with patch("deepctl_core.base_command._agentic", False):
+            assert command.is_guided(ctx) is True
+
+    @pytest.mark.unit
+    def test_any_commandline_arg_breaks_guided(self, command):
+        ctx = self._ctx_with_sources(
+            {"foo": "DEFAULT", "bar": "COMMANDLINE", "baz": "DEFAULT"}
+        )
+        with patch("deepctl_core.base_command._agentic", False):
+            assert command.is_guided(ctx) is False
+
+    @pytest.mark.unit
+    def test_env_var_breaks_guided(self, command):
+        ctx = self._ctx_with_sources(
+            {"foo": "DEFAULT", "bar": "ENVIRONMENT"}
+        )
+        with patch("deepctl_core.base_command._agentic", False):
+            assert command.is_guided(ctx) is False
+
+    @pytest.mark.unit
+    def test_agentic_short_circuits_to_false(self, command):
+        ctx = self._ctx_with_sources({"foo": "DEFAULT", "bar": "DEFAULT"})
+        with patch("deepctl_core.base_command._agentic", True):
+            assert command.is_guided(ctx) is False
+
+
 class TestTelemetryTagging:
     """Verify _tag_telemetry_start and _tag_telemetry_status emit usage signal."""
 
