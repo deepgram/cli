@@ -230,35 +230,24 @@ def load_commands() -> None:
 load_commands()
 
 
-def _safe_command_name(args: list[str]) -> str:
-    """Extract a Sentry-safe transaction name from argv.
-
-    Returns the first short, lowercase, slash-and-dot-free positional —
-    catches command names like 'listen' or 'speak' but rejects URLs, file
-    paths, and API keys that might appear right after the command name.
-    """
-    for arg in args:
-        if arg.startswith("-"):
-            continue
-        if len(arg) > 30:
-            continue
-        if any(c in arg for c in "/.@="):
-            continue
-        return arg
-    return "(none)"
-
-
 @contextmanager
-def _telemetry_transaction(args: list[str]) -> "Iterator[None]":
-    """Wrap CLI dispatch in a Sentry transaction (no-op when telemetry is off)."""
+def _telemetry_transaction() -> "Iterator[None]":
+    """Wrap CLI dispatch in a Sentry transaction (no-op when telemetry is off).
+
+    The transaction is named generically ('cli') here. BaseCommand.execute
+    renames it to the full Click command path (e.g. 'deepctl debug audio')
+    once Click has dispatched — which is the single source of truth for
+    the name. Trying to extract a command name from raw sys.argv is unsafe
+    because flag values can look like command names ('--output json' makes
+    'json' look like a command).
+    """
     try:
         import sentry_sdk
     except ImportError:
         yield
         return
 
-    name = _safe_command_name(args)
-    with sentry_sdk.start_transaction(op="cli.command", name=name):
+    with sentry_sdk.start_transaction(op="cli.command", name="cli"):
         yield
 
 
@@ -329,7 +318,7 @@ def main() -> None:
                 processed_args = preprocess_hyphenated_commands(args)
 
             with TimingContext("cli_execution"):
-                with _telemetry_transaction(processed_args):
+                with _telemetry_transaction():
                     try:
                         cli(args=processed_args, standalone_mode=False)
                     except SystemExit:

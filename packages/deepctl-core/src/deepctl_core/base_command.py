@@ -104,10 +104,17 @@ class BaseCommand(ABC):
                         )
                         raise click.ClickException("Project ID required")
 
+            self._tag_telemetry_start(ctx)
+
             # Execute the command
             try:
                 with TimingContext(f"command_{self.name}_handler"):
                     result = self.handle(config, auth_manager, client, **kwargs)
+
+                status = "ok"
+                if result is not None and hasattr(result, "status"):
+                    status = str(result.status)
+                self._tag_telemetry_status(status)
 
                 # Handle command result
                 if result is not None:
@@ -115,14 +122,64 @@ class BaseCommand(ABC):
                         self.output_result(result, config)
 
             except KeyboardInterrupt:
+                self._tag_telemetry_status("cancelled")
                 stderr_console.print("\n[yellow]Command cancelled by user[/yellow]")
                 raise click.Abort()
 
             except Exception as e:
+                self._tag_telemetry_status("error")
                 print_error(f"Command failed: {e}")
                 if config.get("output.verbose", False):
                     stderr_console.print_exception()
                 raise click.ClickException(str(e))
+
+    def _tag_telemetry_start(self, ctx: click.Context) -> None:
+        """Annotate the active Sentry transaction with command-level usage signal.
+
+        Sets the transaction name to the full Click command path
+        (e.g. 'deepctl debug audio' instead of just 'debug') and tags it with
+        the user-provided flag NAMES (never values), the requested output
+        format, and the auth method. All values are bounded enums or
+        already-public flag identifiers — no PII risk.
+
+        Wrapped in a bare except so a Sentry hiccup, missing scope, or unknown
+        Click parameter-source enum value can never crash the user's command.
+        """
+        try:
+            import sentry_sdk
+
+            scope = sentry_sdk.get_current_scope()
+            transaction = getattr(scope, "transaction", None)
+            if transaction is not None and ctx.command_path:
+                transaction.name = ctx.command_path
+
+            used: list[str] = []
+            for param in ctx.command.params:
+                if not param.name:
+                    continue
+                src = ctx.get_parameter_source(param.name)
+                if src is not None and src.name == "COMMANDLINE":
+                    used.append(param.name)
+            scope.set_tag("cmd.flags", ",".join(sorted(used)) or "(none)")
+            scope.set_tag(
+                "cmd.output_format", ctx.params.get("output") or "default"
+            )
+        except Exception:
+            pass
+
+    def _tag_telemetry_status(self, status: str) -> None:
+        """Tag the active Sentry transaction with the command outcome.
+
+        Status is a bounded enum: 'ok', 'cancelled', 'error', or whatever the
+        command's BaseResult.status returned (also bounded by the result
+        model). Bare except so telemetry can't crash the command teardown.
+        """
+        try:
+            import sentry_sdk
+
+            sentry_sdk.get_current_scope().set_tag("cmd.status", status)
+        except Exception:
+            pass
 
     @abstractmethod
     def handle(

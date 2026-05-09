@@ -976,3 +976,99 @@ class TestBaseCommand:
         assert args[0]["type"] == str
         assert args[1]["name"] == "--option2"
         assert args[1]["default"] == 42
+
+
+class TestTelemetryTagging:
+    """Verify _tag_telemetry_start and _tag_telemetry_status emit usage signal."""
+
+    @pytest.fixture
+    def command(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+
+            def handle(self, *args, **kwargs):
+                return None
+
+        return MockCommand()
+
+    @staticmethod
+    def _ctx_with_flags(used_flags, defaulted_flags, output="json", path="deepctl listen"):
+        ctx = Mock(spec=click.Context)
+        ctx.command_path = path
+        ctx.params = {"output": output}
+        ctx.command = Mock()
+        ctx.command.params = [
+            *(_param(n) for n in used_flags),
+            *(_param(n) for n in defaulted_flags),
+        ]
+        used = set(used_flags)
+
+        def get_source(name):
+            src = Mock()
+            src.name = "COMMANDLINE" if name in used else "DEFAULT"
+            return src
+
+        ctx.get_parameter_source = get_source
+        return ctx
+
+    @pytest.mark.unit
+    def test_start_renames_transaction_to_command_path(self, command):
+        ctx = self._ctx_with_flags(["diarize"], ["model"])
+        scope = Mock()
+        scope.transaction = Mock()
+        with patch("sentry_sdk.get_current_scope", return_value=scope):
+            command._tag_telemetry_start(ctx)
+        assert scope.transaction.name == "deepctl listen"
+
+    @pytest.mark.unit
+    def test_start_records_only_user_provided_flags(self, command):
+        ctx = self._ctx_with_flags(["diarize", "summarize"], ["model", "language"])
+        scope = Mock()
+        scope.transaction = Mock()
+        with patch("sentry_sdk.get_current_scope", return_value=scope):
+            command._tag_telemetry_start(ctx)
+        scope.set_tag.assert_any_call("cmd.flags", "diarize,summarize")
+        scope.set_tag.assert_any_call("cmd.output_format", "json")
+
+    @pytest.mark.unit
+    def test_start_no_flags_records_none_sentinel(self, command):
+        ctx = self._ctx_with_flags([], [], output=None, path="deepctl whoami")
+        scope = Mock()
+        scope.transaction = Mock()
+        with patch("sentry_sdk.get_current_scope", return_value=scope):
+            command._tag_telemetry_start(ctx)
+        scope.set_tag.assert_any_call("cmd.flags", "(none)")
+        scope.set_tag.assert_any_call("cmd.output_format", "default")
+
+    @pytest.mark.unit
+    def test_start_swallows_exceptions(self, command):
+        ctx = self._ctx_with_flags(["diarize"], [])
+        with patch("sentry_sdk.get_current_scope", side_effect=RuntimeError("boom")):
+            command._tag_telemetry_start(ctx)
+
+    @pytest.mark.unit
+    def test_status_sets_cmd_status(self, command):
+        scope = Mock()
+        with patch("sentry_sdk.get_current_scope", return_value=scope):
+            command._tag_telemetry_status("ok")
+        scope.set_tag.assert_called_with("cmd.status", "ok")
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("status", ["ok", "error", "cancelled", "partial"])
+    def test_status_passes_through_status_string(self, command, status):
+        scope = Mock()
+        with patch("sentry_sdk.get_current_scope", return_value=scope):
+            command._tag_telemetry_status(status)
+        scope.set_tag.assert_called_with("cmd.status", status)
+
+    @pytest.mark.unit
+    def test_status_swallows_exceptions(self, command):
+        with patch("sentry_sdk.get_current_scope", side_effect=RuntimeError("boom")):
+            command._tag_telemetry_status("error")
+
+
+def _param(name):
+    p = Mock()
+    p.name = name
+    return p
