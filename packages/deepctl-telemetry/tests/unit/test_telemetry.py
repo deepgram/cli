@@ -53,7 +53,9 @@ class TestSessionFlush:
     def test_init_enables_auto_session_tracking(self) -> None:
         with patch("deepctl_telemetry.client.atexit.register"), patch(
             "sentry_sdk.init"
-        ) as mock_init, patch("sentry_sdk.set_tag"):
+        ) as mock_init, patch("sentry_sdk.set_tag"), patch(
+            "sentry_sdk.start_session"
+        ):
             init_telemetry(_config(True))
 
         assert mock_init.called
@@ -61,16 +63,27 @@ class TestSessionFlush:
         assert kwargs["auto_session_tracking"] is True
         assert kwargs["traces_sample_rate"] == 0.0
         assert kwargs["profiles_sample_rate"] == 0.0
+        assert "session_mode" not in kwargs
 
     def test_init_registers_atexit_flush(self) -> None:
         from deepctl_telemetry.client import _flush_on_exit
 
         with patch(
             "deepctl_telemetry.client.atexit.register"
-        ) as mock_register, patch("sentry_sdk.init"), patch("sentry_sdk.set_tag"):
+        ) as mock_register, patch("sentry_sdk.init"), patch(
+            "sentry_sdk.set_tag"
+        ), patch("sentry_sdk.start_session"):
             init_telemetry(_config(True))
 
         mock_register.assert_called_once_with(_flush_on_exit)
+
+    def test_init_starts_session(self) -> None:
+        with patch("sentry_sdk.init"), patch("sentry_sdk.set_tag"), patch(
+            "deepctl_telemetry.client.atexit.register"
+        ), patch("sentry_sdk.start_session") as mock_start:
+            init_telemetry(_config(True))
+
+        mock_start.assert_called_once_with()
 
     def test_disabled_does_not_register_atexit(self) -> None:
         with patch(

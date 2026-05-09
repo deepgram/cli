@@ -78,6 +78,7 @@ def init_telemetry(config: Config) -> bool:
     )
     sentry_sdk.set_tag("cli.version", cli_version)
 
+    sentry_sdk.start_session()
     atexit.register(_flush_on_exit)
 
     _initialized = True
