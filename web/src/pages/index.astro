@@ -401,6 +401,21 @@ const commandCards: CommandCard[] = [
       }
     ]
   })} />
+
+  <!-- Heap Analytics — product analytics for cli.deepgram.com -->
+  <script is:inline>
+    window.heap=window.heap||[],heap.load=function(e,t){window.heap.appid=e,window.heap.config=t=t||{};var r=document.createElement("script");r.type="text/javascript",r.async=!0,r.src="https://cdn.us.heap-api.com/js/heap-"+e+".js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(r,a);for(var n=function(e){return function(){heap.push([e].concat(Array.prototype.slice.call(arguments,0)))}},p=["addEventProperties","addUserProperties","clearEventProperties","identify","resetIdentity","removeEventProperty","setEventProperties","track","unsetEventProperty"],o=0;o<p.length;o++)heap[o]=n(p[o]);
+    heap.load("765739241");
+  </script>
+
+  <!-- Google Analytics 4 — *.deepgram.com property (266000242 / 372400484) -->
+  <script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-TYPC1TBCKT"></script>
+  <script is:inline>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-TYPC1TBCKT');
+  </script>
 </head>
 <body class="bg-dg-black text-dg-text font-sans overflow-x-hidden" style="font-feature-settings: 'cv02','cv03','cv04','cv11';">
 
