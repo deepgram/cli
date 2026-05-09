@@ -1,9 +1,16 @@
 """Main entry point for deepctl."""
 
+from __future__ import annotations
+
 import importlib.metadata
 import sys
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 from deepctl_core import (
     Config,
     TimingContext,
@@ -228,6 +235,27 @@ def load_commands() -> None:
 load_commands()
 
 
+@contextmanager
+def _telemetry_transaction() -> Iterator[None]:
+    """Wrap CLI dispatch in a Sentry transaction (no-op when telemetry is off).
+
+    The transaction is named generically ('cli') here. BaseCommand.execute
+    renames it to the full Click command path (e.g. 'deepctl debug audio')
+    once Click has dispatched — which is the single source of truth for
+    the name. Trying to extract a command name from raw sys.argv is unsafe
+    because flag values can look like command names ('--output json' makes
+    'json' look like a command).
+    """
+    try:
+        import sentry_sdk
+    except ImportError:
+        yield
+        return
+
+    with sentry_sdk.start_transaction(op="cli.command", name="cli"):
+        yield
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     try:
@@ -294,8 +322,7 @@ def main() -> None:
                 # Preprocess arguments to handle hyphenated commands
                 processed_args = preprocess_hyphenated_commands(args)
 
-            with TimingContext("cli_execution"):
-                # Call CLI with processed arguments
+            with TimingContext("cli_execution"), _telemetry_transaction():
                 try:
                     cli(args=processed_args, standalone_mode=False)
                 except SystemExit:

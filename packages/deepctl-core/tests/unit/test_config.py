@@ -1,11 +1,11 @@
 """Tests for the Config class."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock, mock_open
-from pathlib import Path
-import yaml
 import os
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
+import pytest
+import yaml
 from deepctl_core.config import Config
 
 

@@ -1,11 +1,11 @@
 """Tests for the example plugin command."""
 
-import pytest
-from unittest.mock import Mock, MagicMock
-from click.testing import CliRunner
+from unittest.mock import MagicMock, Mock
 
+import pytest
+from click.testing import CliRunner
+from deepctl_core import AuthManager, Config, DeepgramClient
 from deepctl_plugin_example import ExampleCommand
-from deepctl_core import Config, AuthManager, DeepgramClient
 
 
 @pytest.fixture

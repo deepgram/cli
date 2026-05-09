@@ -19,7 +19,6 @@ from deepctl_cmd_update.plugin_update_check import (
     print_pending_plugin_notifications,
 )
 
-
 # ---------------------------------------------------------------------------
 # _is_excluded
 # ---------------------------------------------------------------------------

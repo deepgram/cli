@@ -30,7 +30,7 @@ class TestConstants:
 
     @pytest.mark.unit
     def test_plugin_dir_is_under_home(self):
-        assert PLUGIN_DIR == Path.home() / ".deepctl" / "plugins"
+        assert Path.home() / ".deepctl" / "plugins" == PLUGIN_DIR
 
     @pytest.mark.unit
     def test_plugin_venv_is_under_plugin_dir(self):
@@ -120,10 +120,9 @@ class TestFindSystemPython:
             with patch(
                 "deepctl_core.plugin_env.subprocess.run",
                 side_effect=sp.TimeoutExpired("python3", 5),
-            ):
-                with patch.object(Path, "exists", return_value=False):
-                    result = find_system_python()
-                    assert result is None
+            ), patch.object(Path, "exists", return_value=False):
+                result = find_system_python()
+                assert result is None
 
 
 class TestGetVenvPython:
@@ -272,12 +271,11 @@ class TestGetPluginState:
         test_state = {
             "plugins": {"test-plugin": {"version": "1.0.0"}}
         }
-        with patch.object(Path, "exists", return_value=True):
-            with patch.object(
-                Path, "read_text", return_value=json.dumps(test_state)
-            ):
-                state = get_plugin_state()
-                assert state == test_state
+        with patch.object(Path, "exists", return_value=True), patch.object(
+            Path, "read_text", return_value=json.dumps(test_state)
+        ):
+            state = get_plugin_state()
+            assert state == test_state
 
     @pytest.mark.unit
     def test_returns_empty_on_parse_error(self):

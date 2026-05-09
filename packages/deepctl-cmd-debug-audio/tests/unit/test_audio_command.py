@@ -1,17 +1,17 @@
 """Tests for audio debug command."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import json
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
 from deepctl_cmd_debug_audio.command import AudioCommand
 from deepctl_cmd_debug_audio.models import (
     AudioDebugResult,
-    AudioInfo,
     AudioFormat,
+    AudioInfo,
     AudioStream,
 )
-from deepctl_core import Config, AuthManager, DeepgramClient
+from deepctl_core import AuthManager, Config, DeepgramClient
 
 
 class TestAudioCommand:

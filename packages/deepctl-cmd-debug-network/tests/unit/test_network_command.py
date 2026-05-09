@@ -1,25 +1,25 @@
 """Tests for the network debug command."""
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch, call
-import subprocess
-import socket
-import requests
 import json
+import socket
+import subprocess
 from datetime import datetime
+from unittest.mock import MagicMock, Mock, call, patch
 
+import pytest
+import requests
 from deepctl_cmd_debug_network import NetworkCommand
 from deepctl_cmd_debug_network.models import (
-    NetworkDebugResult,
-    DNSResult,
-    TLSTestResult,
     CertificateInfo,
-    RevocationEndpointTest,
-    PythonRequestsTest,
     CommandExecutionResult,
+    DNSResult,
     EndpointTestResult,
+    NetworkDebugResult,
+    PythonRequestsTest,
+    RevocationEndpointTest,
+    TLSTestResult,
 )
-from deepctl_core import Config, AuthManager, DeepgramClient
+from deepctl_core import AuthManager, Config, DeepgramClient
 
 
 @pytest.fixture

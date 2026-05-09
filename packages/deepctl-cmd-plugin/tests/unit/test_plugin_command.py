@@ -79,12 +79,11 @@ class TestPluginCommand:
         """Test getting plugin state from existing file."""
         test_state = {"plugins": {"test-plugin": {"version": "1.0.0"}}}
 
-        with patch.object(Path, "exists", return_value=True):
-            with patch.object(
-                Path, "read_text", return_value=json.dumps(test_state)
-            ):
-                state = self.command._get_plugin_state()
-                assert state == test_state
+        with patch.object(Path, "exists", return_value=True), patch.object(
+            Path, "read_text", return_value=json.dumps(test_state)
+        ):
+            state = self.command._get_plugin_state()
+            assert state == test_state
 
     def test_save_plugin_state(self) -> None:
         """Test saving plugin state."""
@@ -140,34 +139,32 @@ class TestPluginCommand:
                 # Mock state and version operations
                 with patch.object(
                     self.command, "_get_plugin_state"
-                ) as mock_get_state:
-                    with patch.object(
-                        self.command, "_save_plugin_state"
-                    ) as mock_save_state:
-                        with patch.object(
-                            self.command,
-                            "_get_package_version",
-                            return_value="1.0.0",
-                        ):
-                            mock_get_state.return_value = {"plugins": {}}
+                ) as mock_get_state, patch.object(
+                    self.command, "_save_plugin_state"
+                ) as mock_save_state, patch.object(
+                    self.command,
+                    "_get_package_version",
+                    return_value="1.0.0",
+                ):
+                    mock_get_state.return_value = {"plugins": {}}
 
-                            options = PluginInstallOptions(
-                                package="test-plugin"
-                            )
-                            result = self.command.install_plugin(
-                                self.config,
-                                self.auth_manager,
-                                self.client,
-                                options,
-                            )
+                    options = PluginInstallOptions(
+                        package="test-plugin"
+                    )
+                    result = self.command.install_plugin(
+                        self.config,
+                        self.auth_manager,
+                        self.client,
+                        options,
+                    )
 
-                            assert result.success is True
-                            assert "Successfully installed" in result.message
-                            # Strategy should use the plugin env python
-                            cmd = mock_strategy_run.call_args[0][0]
-                            assert cmd[0] == "/path/to/plugin/python"
-                            # Should save plugin state
-                            mock_save_state.assert_called_once()
+                    assert result.success is True
+                    assert "Successfully installed" in result.message
+                    # Strategy should use the plugin env python
+                    cmd = mock_strategy_run.call_args[0][0]
+                    assert cmd[0] == "/path/to/plugin/python"
+                    # Should save plugin state
+                    mock_save_state.assert_called_once()
 
     def test_install_plugin_git_url(self) -> None:
         """Test handling git URL in install options."""
@@ -317,32 +314,29 @@ class TestPluginCommand:
 
         with patch.object(
             self.command, "_discover_plugins", return_value=test_plugins
-        ):
-            with patch(
-                "deepctl_cmd_plugin.command.console.print"
-            ) as mock_print:
-                with patch(
-                    "deepctl_cmd_plugin.command.print_info"
-                ) as mock_print_info:
-                    with patch.object(
-                        self.command.detector, "detect"
-                    ) as mock_detect:
-                        mock_detect.return_value.method = InstallMethod.SYSTEM
+        ), patch(
+            "deepctl_cmd_plugin.command.console.print"
+        ) as mock_print, patch(
+            "deepctl_cmd_plugin.command.print_info"
+        ) as mock_print_info, patch.object(
+            self.command.detector, "detect"
+        ) as mock_detect:
+            mock_detect.return_value.method = InstallMethod.SYSTEM
 
-                        self.command.list_plugins(
-                            self.config,
-                            self.auth_manager,
-                            self.client,
-                            verbose=True,
-                        )
+            self.command.list_plugins(
+                self.config,
+                self.auth_manager,
+                self.client,
+                verbose=True,
+            )
 
-                        # Should print a table
-                        mock_print.assert_called_once()
-                        # Should show system installation info via print_info
-                        assert any(
-                            "system" in str(call).lower()
-                            for call in mock_print_info.call_args_list
-                        )
+            # Should print a table
+            mock_print.assert_called_once()
+            # Should show system installation info via print_info
+            assert any(
+                "system" in str(call).lower()
+                for call in mock_print_info.call_args_list
+            )
 
     def test_setup_commands(self) -> None:
         """Test that all subcommands are properly set up."""
@@ -396,21 +390,20 @@ class TestPluginCommand:
                 # Test search all
                 with patch(
                     "deepctl_cmd_plugin.command.console.print"
-                ) as mock_print:
-                    with patch(
-                        "deepctl_cmd_plugin.command.print_info"
-                    ) as mock_info:
-                        self.command._handle_search(
-                            self.config, self.auth_manager, self.client
-                        )
+                ) as mock_print, patch(
+                    "deepctl_cmd_plugin.command.print_info"
+                ) as mock_info:
+                    self.command._handle_search(
+                        self.config, self.auth_manager, self.client
+                    )
 
-                        # Should print a table
-                        mock_print.assert_called_once()
-                        # Should show install hint
-                        assert any(
-                            "install" in str(call)
-                            for call in mock_info.call_args_list
-                        )
+                    # Should print a table
+                    mock_print.assert_called_once()
+                    # Should show install hint
+                    assert any(
+                        "install" in str(call)
+                        for call in mock_info.call_args_list
+                    )
 
                 # Test search with query
                 with patch(

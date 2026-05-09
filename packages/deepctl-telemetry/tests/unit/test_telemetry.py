@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import Mock, patch
 
 import pytest
-
 from deepctl_telemetry import init_telemetry, is_enabled, render_notice
 from deepctl_telemetry.client import DISABLE_ENV_VAR
 
@@ -50,7 +49,7 @@ class TestSessionFlush:
         yield
         client._initialized = False
 
-    def test_init_enables_auto_session_tracking(self) -> None:
+    def test_init_enables_full_observability_stack(self) -> None:
         with patch("deepctl_telemetry.client.atexit.register"), patch(
             "sentry_sdk.init"
         ) as mock_init, patch("sentry_sdk.set_tag"), patch(
@@ -61,8 +60,12 @@ class TestSessionFlush:
         assert mock_init.called
         kwargs = mock_init.call_args.kwargs
         assert kwargs["auto_session_tracking"] is True
-        assert kwargs["traces_sample_rate"] == 0.0
-        assert kwargs["profiles_sample_rate"] == 0.0
+        assert kwargs["traces_sample_rate"] == 1.0
+        assert kwargs["profiles_sample_rate"] == 1.0
+        assert kwargs["enable_logs"] is True
+        assert kwargs["attach_stacktrace"] is True
+        assert kwargs["max_breadcrumbs"] == 100
+        assert kwargs["send_default_pii"] is False
         assert "session_mode" not in kwargs
 
     def test_init_registers_atexit_flush(self) -> None:

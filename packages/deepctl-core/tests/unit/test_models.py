@@ -1,8 +1,6 @@
 """Tests for the core models."""
 
 import pytest
-from pydantic import ValidationError
-
 from deepctl_core.models import (
     BaseResult,
     ErrorResult,
@@ -10,6 +8,7 @@ from deepctl_core.models import (
     ProfileInfo,
     ProfilesResult,
 )
+from pydantic import ValidationError
 
 
 class TestBaseResult:
