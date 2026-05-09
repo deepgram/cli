@@ -965,6 +965,215 @@ class TestBaseCommand:
         assert args[1]["default"] == 42
 
 
+class TestGuidedAttribute:
+    """Verify _guided attribute lifecycle: __init__ default + execute() wiring."""
+
+    @pytest.fixture
+    def mock_command_class(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+
+            def handle(self, *args, **kwargs):
+                MockCommand.captured_guided = self._guided
+                return None
+
+        MockCommand.captured_guided = None
+        return MockCommand
+
+    @pytest.mark.unit
+    def test_init_defaults_guided_to_true(self, mock_command_class):
+        cmd = mock_command_class()
+        assert cmd._guided is True
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_sets_guided_false_when_user_provided_args(
+        self, _client_class, _auth_class, mock_command_class
+    ):
+        cmd = mock_command_class()
+        ctx = Mock(spec=click.Context)
+        ctx.obj = {"config": Config()}
+        ctx.command_path = "deepctl test"
+        ctx.params = {}
+        ctx.command = Mock()
+        ctx.command.params = [_param("foo")]
+        src = Mock()
+        src.name = "COMMANDLINE"
+        ctx.get_parameter_source = lambda _name: src
+
+        with patch("deepctl_core.base_command._agentic", False):
+            cmd.execute(ctx)
+
+        assert mock_command_class.captured_guided is False
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_sets_guided_true_for_bare_invocation(
+        self, _client_class, _auth_class, mock_command_class
+    ):
+        cmd = mock_command_class()
+        ctx = Mock(spec=click.Context)
+        ctx.obj = {"config": Config()}
+        ctx.command_path = "deepctl test"
+        ctx.params = {}
+        ctx.command = Mock()
+        ctx.command.params = [_param("foo")]
+        src = Mock()
+        src.name = "DEFAULT"
+        ctx.get_parameter_source = lambda _name: src
+
+        with patch("deepctl_core.base_command._agentic", False):
+            cmd.execute(ctx)
+
+        assert mock_command_class.captured_guided is True
+
+
+class TestConfirmPromptGating:
+    """Verify confirm() and prompt() respect _guided alongside _agentic and ci_friendly."""
+
+    @pytest.fixture
+    def command(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+            ci_friendly = True
+
+            def handle(self, *args, **kwargs):
+                return None
+
+        return MockCommand()
+
+    @pytest.mark.unit
+    def test_confirm_calls_click_when_guided_and_not_agentic(self, command):
+        command._guided = True
+        with patch("deepctl_core.base_command._agentic", False), patch(
+            "deepctl_core.base_command.click.confirm", return_value=True
+        ) as mock:
+            assert command.confirm("OK?", default=False) is True
+        mock.assert_called_once()
+
+    @pytest.mark.unit
+    def test_confirm_returns_default_when_not_guided(self, command):
+        command._guided = False
+        with patch("deepctl_core.base_command._agentic", False), patch(
+            "deepctl_core.base_command.click.confirm"
+        ) as mock:
+            assert command.confirm("OK?", default=False) is False
+        mock.assert_not_called()
+
+    @pytest.mark.unit
+    def test_confirm_returns_default_when_agentic(self, command):
+        command._guided = True
+        with patch("deepctl_core.base_command._agentic", True), patch(
+            "deepctl_core.base_command.click.confirm"
+        ) as mock:
+            assert command.confirm("OK?", default=True) is True
+        mock.assert_not_called()
+
+    @pytest.mark.unit
+    def test_confirm_returns_default_when_not_ci_friendly(self, command):
+        command.ci_friendly = False
+        command._guided = True
+        with patch("deepctl_core.base_command._agentic", False), patch(
+            "deepctl_core.base_command.click.confirm"
+        ) as mock:
+            assert command.confirm("OK?", default=False) is False
+        mock.assert_not_called()
+
+    @pytest.mark.unit
+    def test_prompt_calls_click_when_guided(self, command):
+        command._guided = True
+        with patch("deepctl_core.base_command._agentic", False), patch(
+            "deepctl_core.base_command.click.prompt", return_value="user-input"
+        ) as mock:
+            assert command.prompt("Name?", default="alice") == "user-input"
+        mock.assert_called_once()
+
+    @pytest.mark.unit
+    def test_prompt_returns_default_when_not_guided(self, command):
+        command._guided = False
+        with patch("deepctl_core.base_command._agentic", False), patch(
+            "deepctl_core.base_command.click.prompt"
+        ) as mock:
+            assert command.prompt("Name?", default="alice") == "alice"
+        mock.assert_not_called()
+
+    @pytest.mark.unit
+    def test_prompt_with_no_default_still_prompts_when_not_guided(self, command):
+        # Pre-existing safety: prompt() only short-circuits when default is not None
+        command._guided = False
+        with patch("deepctl_core.base_command._agentic", False), patch(
+            "deepctl_core.base_command.click.prompt", return_value="typed"
+        ) as mock:
+            assert command.prompt("Name?", default=None) == "typed"
+        mock.assert_called_once()
+
+
+class TestIsGuided:
+    """Verify is_guided() distinguishes bare invocations from scripted ones."""
+
+    @pytest.fixture
+    def command(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+
+            def handle(self, *args, **kwargs):
+                return None
+
+        return MockCommand()
+
+    @staticmethod
+    def _ctx_with_sources(sources):
+        ctx = Mock(spec=click.Context)
+        ctx.command = Mock()
+        ctx.command.params = [_param(n) for n in sources.keys()]
+
+        def get_source(name):
+            src_name = sources.get(name)
+            if src_name is None:
+                return None
+            src = Mock()
+            src.name = src_name
+            return src
+
+        ctx.get_parameter_source = get_source
+        return ctx
+
+    @pytest.mark.unit
+    def test_bare_invocation_is_guided(self, command):
+        ctx = self._ctx_with_sources(
+            {"foo": "DEFAULT", "bar": "DEFAULT", "baz": "DEFAULT_MAP"}
+        )
+        with patch("deepctl_core.base_command._agentic", False):
+            assert command.is_guided(ctx) is True
+
+    @pytest.mark.unit
+    def test_any_commandline_arg_breaks_guided(self, command):
+        ctx = self._ctx_with_sources(
+            {"foo": "DEFAULT", "bar": "COMMANDLINE", "baz": "DEFAULT"}
+        )
+        with patch("deepctl_core.base_command._agentic", False):
+            assert command.is_guided(ctx) is False
+
+    @pytest.mark.unit
+    def test_env_var_breaks_guided(self, command):
+        ctx = self._ctx_with_sources(
+            {"foo": "DEFAULT", "bar": "ENVIRONMENT"}
+        )
+        with patch("deepctl_core.base_command._agentic", False):
+            assert command.is_guided(ctx) is False
+
+    @pytest.mark.unit
+    def test_agentic_short_circuits_to_false(self, command):
+        ctx = self._ctx_with_sources({"foo": "DEFAULT", "bar": "DEFAULT"})
+        with patch("deepctl_core.base_command._agentic", True):
+            assert command.is_guided(ctx) is False
+
+
 class TestTelemetryTagging:
     """Verify _tag_telemetry_start and _tag_telemetry_status emit usage signal."""
 

@@ -270,7 +270,7 @@ class SkillsCommand(BaseGroupCommand):
                 print_warning(
                     f"{generators[0].display_name} was not detected on this system."
                 )
-                if not click.confirm("Install anyway?", default=False):
+                if not self.confirm("Install anyway?", default=False):
                     return
         else:
             generators = detect_ai_clis()
@@ -296,7 +296,7 @@ class SkillsCommand(BaseGroupCommand):
             if (
                 not install_all
                 and not cli_name
-                and not click.confirm(
+                and not self.confirm(
                     f"Install deepctl skills for {gen.display_name}?",
                     default=True,
                 )
@@ -479,7 +479,7 @@ class SkillsCommand(BaseGroupCommand):
         # 2. Interactive selection (or --all for CI)
         if install_all:
             selected = list(detected)
-        elif is_tty:
+        elif is_tty and self._guided:
             console.print("\n[bold]Detected AI coding tools:[/bold]\n")
             for i, g in enumerate(detected, 1):
                 console.print(f"  [green]{i}.[/green] {g.display_name}")

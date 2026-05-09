@@ -39,6 +39,7 @@ class BaseCommand(ABC):
             raise ValueError("Command must have a name")
         if not self.help:
             raise ValueError("Command must have help text")
+        self._guided: bool = True
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
         """Execute the command with Click context.
@@ -104,6 +105,7 @@ class BaseCommand(ABC):
                         )
                         raise click.ClickException("Project ID required")
 
+            self._guided = self.is_guided(ctx)
             self._tag_telemetry_start(ctx)
 
             # Execute the command
@@ -132,6 +134,27 @@ class BaseCommand(ABC):
                 if config.get("output.verbose", False):
                     stderr_console.print_exception()
                 raise click.ClickException(str(e))
+
+    def is_guided(self, ctx: click.Context) -> bool:
+        """True only when the user invoked this command with no input at all.
+
+        'No input' = no positional arg, no flag, no option value, no env-var
+        override. The single rule for every command: any user-provided signal
+        means scripting intent — skip prompts. Only the bare invocation gets
+        the guided/interactive flow.
+
+        Returns False whenever telemetry's `_agentic` heuristic fires
+        (CI=1, --agent-friendly, --non-interactive, AI tool env vars, etc.).
+        """
+        if _agentic:
+            return False
+        for param in ctx.command.params:
+            if not param.name:
+                continue
+            src = ctx.get_parameter_source(param.name)
+            if src is not None and src.name in ("COMMANDLINE", "ENVIRONMENT"):
+                return False
+        return True
 
     def _tag_telemetry_start(self, ctx: click.Context) -> None:
         """Annotate the active Sentry transaction with command-level usage signal.
@@ -349,7 +372,7 @@ class BaseCommand(ABC):
         Returns:
             True if confirmed, False otherwise
         """
-        if _agentic or not self.ci_friendly:
+        if _agentic or not self.ci_friendly or not getattr(self, "_guided", True):
             return default
 
         try:
@@ -373,7 +396,9 @@ class BaseCommand(ABC):
         Returns:
             User input
         """
-        if (_agentic or not self.ci_friendly) and default is not None:
+        if (
+            _agentic or not self.ci_friendly or not getattr(self, "_guided", True)
+        ) and default is not None:
             return default
 
         try:

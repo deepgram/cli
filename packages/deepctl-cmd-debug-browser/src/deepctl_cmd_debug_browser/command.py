@@ -358,10 +358,15 @@ class BrowserCommand(BaseCommand):
 
         # Prompt user to open browser
         if not no_browser:
-            console.print(
-                "\n[yellow]Press Enter to open the debugger in your browser...[/yellow]"
-            )
-            input()
+            if self._guided:
+                console.print(
+                    "\n[yellow]Press Enter to open the debugger in your browser...[/yellow]"
+                )
+                input()
+            else:
+                console.print(
+                    f"\n[dim]Opening [cyan]{url}[/cyan] in your browser...[/dim]"
+                )
             webbrowser.open(url)
             browser_opened = True
         else:

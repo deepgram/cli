@@ -178,3 +178,54 @@ class TestBrowserCommand:
         assert cmd.messages[0].message == "Test message"
         assert "web_audio_api" in cmd.capabilities_data
         assert result == mock_ws
+
+
+class TestBrowserGuidedGate:
+    """Verify the press-Enter prompt only fires in guided (bare) invocations."""
+
+    def _run_handle(self, guided: bool):
+        """Run BrowserCommand.handle and capture whether input() was called."""
+        cmd = BrowserCommand()
+        cmd._guided = guided
+        called = {"input": 0, "open": 0}
+
+        with patch("builtins.input", side_effect=lambda: called.__setitem__("input", called["input"] + 1)), patch(
+            "deepctl_cmd_debug_browser.command.webbrowser.open",
+            side_effect=lambda _url: called.__setitem__("open", called["open"] + 1),
+        ), patch.object(
+            cmd, "find_available_port", return_value=3100
+        ), patch(
+            "deepctl_cmd_debug_browser.command.web.AppRunner"
+        ) as mock_runner_cls, patch(
+            "deepctl_cmd_debug_browser.command.web.TCPSite"
+        ) as mock_site_cls, patch(
+            "deepctl_cmd_debug_browser.command.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            mock_runner = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+            mock_runner.setup = AsyncMock()
+            mock_runner.cleanup = AsyncMock()
+            mock_site = AsyncMock()
+            mock_site_cls.return_value = mock_site
+            mock_site.start = AsyncMock()
+            cmd.handle(
+                config=Mock(),
+                auth_manager=Mock(),
+                client=Mock(),
+                port=None,
+                no_browser=False,
+                timeout=0,
+                save_report=None,
+            )
+        return called
+
+    def test_guided_invocation_waits_for_press_enter(self):
+        called = self._run_handle(guided=True)
+        assert called["input"] == 1
+        assert called["open"] == 1
+
+    def test_non_guided_invocation_opens_browser_immediately(self):
+        called = self._run_handle(guided=False)
+        assert called["input"] == 0
+        assert called["open"] == 1
