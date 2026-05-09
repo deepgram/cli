@@ -64,9 +64,11 @@ def init_telemetry(config: Config) -> bool:
         environment="production",
         send_default_pii=False,
         auto_session_tracking=True,
-        traces_sample_rate=0.0,
-        profiles_sample_rate=0.0,
-        max_breadcrumbs=20,
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+        enable_logs=True,
+        attach_stacktrace=True,
+        max_breadcrumbs=100,
         before_send=_scrub_event,
     )
 

@@ -2,6 +2,8 @@
 
 import importlib.metadata
 import sys
+from contextlib import contextmanager
+from typing import Iterator
 
 import click
 from deepctl_core import (
@@ -228,6 +230,38 @@ def load_commands() -> None:
 load_commands()
 
 
+def _safe_command_name(args: list[str]) -> str:
+    """Extract a Sentry-safe transaction name from argv.
+
+    Returns the first short, lowercase, slash-and-dot-free positional —
+    catches command names like 'listen' or 'speak' but rejects URLs, file
+    paths, and API keys that might appear right after the command name.
+    """
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        if len(arg) > 30:
+            continue
+        if any(c in arg for c in "/.@="):
+            continue
+        return arg
+    return "(none)"
+
+
+@contextmanager
+def _telemetry_transaction(args: list[str]) -> "Iterator[None]":
+    """Wrap CLI dispatch in a Sentry transaction (no-op when telemetry is off)."""
+    try:
+        import sentry_sdk
+    except ImportError:
+        yield
+        return
+
+    name = _safe_command_name(args)
+    with sentry_sdk.start_transaction(op="cli.command", name=name):
+        yield
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     try:
@@ -295,12 +329,12 @@ def main() -> None:
                 processed_args = preprocess_hyphenated_commands(args)
 
             with TimingContext("cli_execution"):
-                # Call CLI with processed arguments
-                try:
-                    cli(args=processed_args, standalone_mode=False)
-                except SystemExit:
-                    # Click calls sys.exit() even in non-standalone mode
-                    pass
+                with _telemetry_transaction(processed_args):
+                    try:
+                        cli(args=processed_args, standalone_mode=False)
+                    except SystemExit:
+                        # Click calls sys.exit() even in non-standalone mode
+                        pass
 
         # Print update notifications if available (before timing summary)
         if print_pending_notification is not None:
