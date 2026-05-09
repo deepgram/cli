@@ -365,3 +365,40 @@ class TestProfilesCommand:
 
         assert isinstance(result, ProfilesResult)
         assert len(result.profiles) == 2
+
+
+class TestMaybePromptSkillsSetup:
+    """Verify the post-login skills-setup prompt respects _guided + non-tty."""
+
+    def test_returns_early_when_not_guided(self):
+        cmd = LoginCommand()
+        cmd._guided = False
+        with patch("sys.stdout") as mock_stdout, patch(
+            "deepctl_core.skill_generator.detect_ai_clis"
+        ) as mock_detect:
+            mock_stdout.isatty.return_value = True
+            cmd._maybe_prompt_skills_setup()
+        mock_detect.assert_not_called()
+
+    def test_returns_early_when_not_tty(self):
+        cmd = LoginCommand()
+        cmd._guided = True
+        with patch("sys.stdout") as mock_stdout, patch(
+            "deepctl_core.skill_generator.detect_ai_clis"
+        ) as mock_detect:
+            mock_stdout.isatty.return_value = False
+            cmd._maybe_prompt_skills_setup()
+        mock_detect.assert_not_called()
+
+    def test_proceeds_when_guided_and_tty(self):
+        cmd = LoginCommand()
+        cmd._guided = True
+        with patch("sys.stdout") as mock_stdout, patch(
+            "deepctl_core.skill_generator.detect_ai_clis", return_value=[]
+        ) as mock_detect, patch(
+            "deepctl_core.skill_generator.get_skills_state",
+            return_value={"installed_skills": {}},
+        ):
+            mock_stdout.isatty.return_value = True
+            cmd._maybe_prompt_skills_setup()
+        mock_detect.assert_called_once()
