@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-debug-browser-v0.1.11...deepctl-cmd-debug-browser-v0.1.12) (2026-05-09)
+
+
+### Features
+
+* **telemetry:** full Sentry observability + per-command usage tags ([#75](https://github.com/deepgram/cli/issues/75)) ([0fe43d2](https://github.com/deepgram/cli/commit/0fe43d2e00c58d8101ef2bd4b5aaf4437db9f0cf))
+
+
+### Bug Fixes
+
+* uniform 'any arg = non-interactive' rule across all commands ([#78](https://github.com/deepgram/cli/issues/78)) ([6370f32](https://github.com/deepgram/cli/commit/6370f323fb3250e2d48dae9d0fe67907f1a09134))
+
 ## [0.1.11](https://github.com/deepgram/cli/compare/deepctl-cmd-debug-browser-v0.1.10...deepctl-cmd-debug-browser-v0.1.11) (2026-03-09)
 
 

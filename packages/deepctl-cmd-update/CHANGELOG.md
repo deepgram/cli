@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.4...deepctl-cmd-update-v0.2.5) (2026-05-09)
+
+
+### Features
+
+* **telemetry:** full Sentry observability + per-command usage tags ([#75](https://github.com/deepgram/cli/issues/75)) ([0fe43d2](https://github.com/deepgram/cli/commit/0fe43d2e00c58d8101ef2bd4b5aaf4437db9f0cf))
+
 ## [0.2.4](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.3...deepctl-cmd-update-v0.2.4) (2026-03-31)
 
 

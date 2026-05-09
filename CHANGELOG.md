@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.24](https://github.com/deepgram/cli/compare/v0.2.23...v0.2.24) (2026-05-09)
+
+
+### Features
+
+* **telemetry:** full Sentry observability + per-command usage tags ([#75](https://github.com/deepgram/cli/issues/75)) ([0fe43d2](https://github.com/deepgram/cli/commit/0fe43d2e00c58d8101ef2bd4b5aaf4437db9f0cf))
+* **telemetry:** track per-command usage via Sentry tags ([490b37e](https://github.com/deepgram/cli/commit/490b37e8787f90616ccbc37e228e5bd81fa90b6e))
+* **telemetry:** turn on full Sentry observability for the CLI ([cc2c208](https://github.com/deepgram/cli/commit/cc2c2080d8b7ea22b5cb25d954d31b6cc0fe489d))
+* **web:** swap Sentry for Heap + GA4 on cli.deepgram.com ([e736528](https://github.com/deepgram/cli/commit/e73652877b3671812f2160dcc20939d4378f50dd))
+* **web:** swap Sentry for Heap + GA4 on cli.deepgram.com ([#76](https://github.com/deepgram/cli/issues/76)) ([b12a55b](https://github.com/deepgram/cli/commit/b12a55ba74ad2b4b95d4f7d2a38a338664e052de))
+* **web:** wire real GA4 measurement ID G-TYPC1TBCKT ([a6468e4](https://github.com/deepgram/cli/commit/a6468e4a30cc87f5861ac2e203ace89567672888))
+
+
+### Bug Fixes
+
+* **telemetry:** explicitly start session after init ([8dd2843](https://github.com/deepgram/cli/commit/8dd2843c18014c8e9712768ee04e51318440da98))
+* **telemetry:** explicitly start session after init ([#74](https://github.com/deepgram/cli/issues/74)) ([ad75efa](https://github.com/deepgram/cli/commit/ad75efa541d79145e6fbd95e7eabcbc666b854d8))
+* uniform 'any arg = non-interactive' rule across all commands ([#78](https://github.com/deepgram/cli/issues/78)) ([6370f32](https://github.com/deepgram/cli/commit/6370f323fb3250e2d48dae9d0fe67907f1a09134))
+
 ## [0.2.23](https://github.com/deepgram/cli/compare/v0.2.22...v0.2.23) (2026-05-08)
 
 
