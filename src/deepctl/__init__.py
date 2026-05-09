@@ -1,7 +1,7 @@
 """deepctl - Official command-line interface for Deepgram's speech
 recognition API."""
 
-__version__ = "0.2.23"  # x-release-please-version
+__version__ = "0.2.24"  # x-release-please-version
 __author__ = "Deepgram"
 __email__ = "devrel@deepgram.com"
 __license__ = "MIT"

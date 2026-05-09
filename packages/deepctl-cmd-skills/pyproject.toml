@@ -2,7 +2,7 @@
 name = "deepctl-cmd-skills"
 description = "AI coding assistant skill management for deepctl"
 readme = "README.md"
-version = "0.0.5" # x-release-please-version
+version = "0.0.6" # x-release-please-version
 requires-python = ">=3.10"
 authors = [{ name = "Deepgram DevRel", email = "devrel@deepgram.com" }]
 dependencies = [

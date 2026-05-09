@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.4](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.3...deepctl-telemetry-v0.0.4) (2026-05-09)
+
+
+### Features
+
+* **telemetry:** full Sentry observability + per-command usage tags ([#75](https://github.com/deepgram/cli/issues/75)) ([0fe43d2](https://github.com/deepgram/cli/commit/0fe43d2e00c58d8101ef2bd4b5aaf4437db9f0cf))
+* **telemetry:** turn on full Sentry observability for the CLI ([cc2c208](https://github.com/deepgram/cli/commit/cc2c2080d8b7ea22b5cb25d954d31b6cc0fe489d))
+
+
+### Bug Fixes
+
+* **telemetry:** explicitly start session after init ([8dd2843](https://github.com/deepgram/cli/commit/8dd2843c18014c8e9712768ee04e51318440da98))
+* **telemetry:** explicitly start session after init ([#74](https://github.com/deepgram/cli/issues/74)) ([ad75efa](https://github.com/deepgram/cli/commit/ad75efa541d79145e6fbd95e7eabcbc666b854d8))
+
 ## [0.0.3](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.2...deepctl-telemetry-v0.0.3) (2026-05-08)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.5...deepctl-cmd-skills-v0.0.6) (2026-05-09)
+
+
+### Bug Fixes
+
+* uniform 'any arg = non-interactive' rule across all commands ([#78](https://github.com/deepgram/cli/issues/78)) ([6370f32](https://github.com/deepgram/cli/commit/6370f323fb3250e2d48dae9d0fe67907f1a09134))
+
 ## [0.0.5](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.4...deepctl-cmd-skills-v0.0.5) (2026-03-31)
 
 
