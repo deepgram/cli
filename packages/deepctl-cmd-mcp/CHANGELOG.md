@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.13...deepctl-cmd-mcp-v0.1.14) (2026-05-12)
+
+
+### Bug Fixes
+
+* **mcp:** survive stdio host disconnect and silence handled MCP noise ([#79](https://github.com/deepgram/cli/issues/79)) ([e95d511](https://github.com/deepgram/cli/commit/e95d5110c055eceb4717200eb12b91aa933fa38f))
+
 ## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.12...deepctl-cmd-mcp-v0.1.13) (2026-05-01)
 
 
