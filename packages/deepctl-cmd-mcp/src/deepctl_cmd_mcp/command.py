@@ -8,16 +8,19 @@ import signal
 from typing import TYPE_CHECKING, Any
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core.output import stderr_console
 from deepgram_mcp import TransportType, run_proxy
 from deepgram_mcp.proxy import DEFAULT_BASE_URL
-from rich.console import Console
 
 from .models import MCPServerResult
 
 if TYPE_CHECKING:
     pass
 
-console = Console()
+# Use stderr for all output: when `dg mcp --transport stdio` is invoked by an
+# MCP host (Claude Desktop, Codex, etc.), stdout is the JSON-RPC protocol
+# channel and must not receive any human-readable messages.
+console = stderr_console
 
 
 class McpCommand(BaseCommand):
@@ -151,12 +154,18 @@ class McpCommand(BaseCommand):
                 )
             )
 
+            if transport == "stdio":
+                # The MCP host owns stdout (JSON-RPC channel) and typically
+                # closes it on disconnect, so we return None to skip
+                # output_result rather than risk a write to a closed stream.
+                return None
+
             return MCPServerResult(
                 status="success",
                 message="MCP proxy stopped",
                 transport=TransportType(transport),
-                port=port if transport != "stdio" else None,
-                host=host if transport != "stdio" else None,
+                port=port,
+                host=host,
             )
 
         except KeyboardInterrupt:

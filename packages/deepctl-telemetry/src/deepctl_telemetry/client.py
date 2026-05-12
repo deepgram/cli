@@ -103,13 +103,46 @@ def _read_cli_version() -> str:
     return importlib.metadata.version("deepctl")
 
 
+_MCP_NOISE_LOGGERS = frozenset(
+    {
+        "mcp.client.streamable_http",
+        "mcp.server.lowlevel.server",
+    }
+)
+
+
+def _is_mcp_transient_noise(event: Event) -> bool:
+    """Identify log events from the MCP SDK that are not actionable bugs.
+
+    `dg mcp` embeds the upstream `mcp` Python SDK, which logs to Sentry via
+    the logging integration whenever the upstream MCP server returns 5xx
+    (handled by the client) or the stdio peer closes mid-message (handled by
+    the server). Both are recovered internally. Surfacing them as Sentry
+    issues just creates triage cost for the DX team and hides real CLI bugs.
+
+    Any unhandled exception is kept regardless of logger.
+    """
+    if (event.get("logger") or "") not in _MCP_NOISE_LOGGERS:
+        return False
+    for exc in (event.get("exception") or {}).get("values") or []:
+        mechanism = exc.get("mechanism") or {}
+        if mechanism.get("handled") is False:
+            return False
+    return True
+
+
 def _scrub_event(event: Event, _hint: Hint) -> Event | None:
     """Drop request bodies, headers, and any user-identifying data.
 
     Sentry SDK already filters most PII via send_default_pii=False, but
     Auth tokens, project IDs, and file paths can still leak through
     breadcrumbs and exception messages. This is a defense-in-depth scrub.
+
+    Also drops known-noise events (see ``_is_mcp_transient_noise``).
     """
+    if _is_mcp_transient_noise(event):
+        return None
+
     request: dict[str, Any] = event.get("request") or {}
     if "headers" in request:
         request["headers"] = {}

@@ -110,3 +110,121 @@ class TestSessionFlush:
 
         with patch("sentry_sdk.flush", side_effect=RuntimeError("boom")):
             _flush_on_exit()
+
+
+def _handled_log_event(logger: str, exc_type: str, value: str) -> dict:
+    return {
+        "logger": logger,
+        "exception": {
+            "values": [
+                {
+                    "type": exc_type,
+                    "value": value,
+                    "mechanism": {"type": "logging", "handled": True},
+                }
+            ]
+        },
+    }
+
+
+def _message_only_event(logger: str) -> dict:
+    return {"logger": logger}
+
+
+class TestMcpNoiseFilter:
+    """Drop handled MCP SDK log noise so Sentry stays actionable.
+
+    Anchors: DX-CLI-1 (HTTPStatusError 5xx from streamable_http) and
+    DX-CLI-3 (Invalid JSON: EOF from mcp.server.lowlevel.server).
+    Unhandled exceptions are always kept regardless of logger.
+    """
+
+    def test_drops_streamable_http_503_log(self) -> None:
+        from deepctl_telemetry.client import _is_mcp_transient_noise
+
+        event = _handled_log_event(
+            "mcp.client.streamable_http",
+            "HTTPStatusError",
+            "Server error '503 Service Unavailable' for url",
+        )
+        assert _is_mcp_transient_noise(event)
+
+    def test_drops_lowlevel_server_eof_log(self) -> None:
+        from deepctl_telemetry.client import _is_mcp_transient_noise
+
+        event = _message_only_event("mcp.server.lowlevel.server")
+        assert _is_mcp_transient_noise(event)
+
+    def test_keeps_unhandled_exception_from_mcp_logger(self) -> None:
+        """Unhandled crashes are real bugs even if the logger is MCP."""
+        from deepctl_telemetry.client import _is_mcp_transient_noise
+
+        event = {
+            "logger": "mcp.client.streamable_http",
+            "exception": {
+                "values": [
+                    {
+                        "type": "RuntimeError",
+                        "value": "boom",
+                        "mechanism": {"type": "excepthook", "handled": False},
+                    }
+                ]
+            },
+        }
+        assert not _is_mcp_transient_noise(event)
+
+    def test_keeps_non_mcp_logger_events(self) -> None:
+        from deepctl_telemetry.client import _is_mcp_transient_noise
+
+        event = _handled_log_event(
+            "deepctl_core.base_command",
+            "HTTPStatusError",
+            "Server error '503 Service Unavailable' for url",
+        )
+        assert not _is_mcp_transient_noise(event)
+
+    def test_handles_missing_fields(self) -> None:
+        from deepctl_telemetry.client import _is_mcp_transient_noise
+
+        assert not _is_mcp_transient_noise({})
+        assert not _is_mcp_transient_noise({"logger": None})
+        assert not _is_mcp_transient_noise({"logger": "deepctl"})
+        assert _is_mcp_transient_noise({"logger": "mcp.client.streamable_http"})
+
+    def test_scrub_event_returns_none_for_mcp_noise(self) -> None:
+        """The before_send hook drops MCP noise entirely."""
+        from deepctl_telemetry.client import _scrub_event
+
+        event = _handled_log_event(
+            "mcp.client.streamable_http",
+            "HTTPStatusError",
+            "Server error '503 Service Unavailable' for url",
+        )
+        assert _scrub_event(event, {}) is None
+
+    def test_scrub_event_still_scrubs_normal_request_headers(self) -> None:
+        from deepctl_telemetry.client import _scrub_event
+
+        event = {
+            "logger": "deepctl",
+            "request": {
+                "headers": {"Authorization": "Bearer secret"},
+                "cookies": {"sid": "abc"},
+                "data": "{\"raw\":\"body\"}",
+            },
+            "user": {
+                "email": "x@example.com",
+                "ip_address": "1.2.3.4",
+                "username": "x",
+                "id": "user-1",
+            },
+        }
+        result = _scrub_event(event, {})
+        assert result is not None
+        assert result["request"]["headers"] == {}
+        assert result["request"]["cookies"] == {}
+        assert result["request"]["data"] == "[Filtered]"
+        assert "email" not in result["user"]
+        assert "ip_address" not in result["user"]
+        assert "username" not in result["user"]
+        assert result["user"]["id"] == "user-1"
