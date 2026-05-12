@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.25](https://github.com/deepgram/cli/compare/v0.2.24...v0.2.25) (2026-05-12)
+
+
+### Bug Fixes
+
+* **mcp:** survive stdio host disconnect and silence handled MCP noise ([#79](https://github.com/deepgram/cli/issues/79)) ([e95d511](https://github.com/deepgram/cli/commit/e95d5110c055eceb4717200eb12b91aa933fa38f))
+
 ## [0.2.24](https://github.com/deepgram/cli/compare/v0.2.23...v0.2.24) (2026-05-09)
 
 

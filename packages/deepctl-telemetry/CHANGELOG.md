@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.4...deepctl-telemetry-v0.0.5) (2026-05-12)
+
+
+### Bug Fixes
+
+* **mcp:** survive stdio host disconnect and silence handled MCP noise ([#79](https://github.com/deepgram/cli/issues/79)) ([e95d511](https://github.com/deepgram/cli/commit/e95d5110c055eceb4717200eb12b91aa933fa38f))
+
 ## [0.0.4](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.3...deepctl-telemetry-v0.0.4) (2026-05-09)
 
 
