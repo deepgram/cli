@@ -74,8 +74,13 @@ class TestMcpCommand:
 
     @patch("deepctl_cmd_mcp.command.asyncio.run")
     @patch("signal.signal")
-    def test_handle_stdio_transport(self, mock_signal, mock_asyncio_run):
-        """Test handling stdio transport calls asyncio.run with run_proxy."""
+    def test_handle_stdio_transport_returns_none(self, mock_signal, mock_asyncio_run):
+        """stdio mode returns None so the host's owned stdout is never written to.
+
+        Returning a result would invite ``output_result`` to print to stdout,
+        which the MCP host has typically closed. See DX-CLI-4/DX-CLI-5 in
+        Sentry for the regression we're guarding against.
+        """
         command = McpCommand()
         config = MagicMock()
         auth_manager = MagicMock()
@@ -93,9 +98,7 @@ class TestMcpCommand:
         )
 
         mock_asyncio_run.assert_called_once()
-        assert isinstance(result, MCPServerResult)
-        assert result.status == "success"
-        assert result.transport == TransportType.STDIO
+        assert result is None
 
     @patch("deepctl_cmd_mcp.command.asyncio.run")
     @patch("signal.signal")
@@ -204,5 +207,5 @@ class TestMcpCommand:
                 transport="stdio",
             )
 
-        assert result.status == "success"
+        assert result is None
         mock_run.assert_called_once()

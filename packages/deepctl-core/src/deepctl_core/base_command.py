@@ -121,7 +121,16 @@ class BaseCommand(ABC):
                 # Handle command result
                 if result is not None:
                     with TimingContext("output_processing"):
-                        self.output_result(result, config)
+                        try:
+                            self.output_result(result, config)
+                        except (BrokenPipeError, OSError):
+                            # Downstream stream closed (e.g. an MCP host disconnected
+                            # stdio after `dg mcp` finished). Nothing useful to log
+                            # here because the logger writes to the same closed stream.
+                            pass
+                        except ValueError as exc:
+                            if "closed file" not in str(exc):
+                                raise
 
             except KeyboardInterrupt:
                 self._tag_telemetry_status("cancelled")

@@ -1270,3 +1270,96 @@ def _param(name):
     p = Mock()
     p.name = name
     return p
+
+
+class TestExecuteStreamSafety:
+    """The execute loop must not crash when stdout/stderr is closed.
+
+    Background: ``dg mcp --transport stdio`` runs under an MCP host (Claude
+    Desktop, Codex, etc.) which closes stdio when it disconnects. Any
+    write to the closed stream after that point raises ``ValueError:
+    I/O operation on closed file`` or ``BrokenPipeError``. We trap these
+    around the ``output_result`` call so the CLI exits cleanly instead of
+    surfacing a confusing crash to the user (or to Sentry).
+
+    See DX-CLI-4 / DX-CLI-5 in Sentry.
+    """
+
+    @pytest.fixture
+    def mock_command_class(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs: Any,
+            ) -> Any:
+                return {"result": "ok"}
+
+        return MockCommand
+
+    @pytest.fixture
+    def mock_context(self):
+        ctx = Mock(spec=click.Context)
+        ctx.obj = {"config": Config()}
+        return ctx
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_swallows_closed_stdout_value_error(
+        self,
+        _client_class,
+        _auth_class,
+        mock_command_class,
+        mock_context,
+    ):
+        command = mock_command_class()
+        with patch.object(
+            command,
+            "output_result",
+            side_effect=ValueError("I/O operation on closed file."),
+        ):
+            command.execute(mock_context)
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_swallows_broken_pipe(
+        self,
+        _client_class,
+        _auth_class,
+        mock_command_class,
+        mock_context,
+    ):
+        command = mock_command_class()
+        with patch.object(
+            command,
+            "output_result",
+            side_effect=BrokenPipeError(),
+        ):
+            command.execute(mock_context)
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_propagates_unrelated_value_error(
+        self,
+        _client_class,
+        _auth_class,
+        mock_command_class,
+        mock_context,
+    ):
+        """A ValueError that isn't about a closed stream is a real bug, surface it."""
+        command = mock_command_class()
+        with patch.object(
+            command,
+            "output_result",
+            side_effect=ValueError("totally unrelated"),
+        ):
+            with pytest.raises(click.ClickException):
+                command.execute(mock_context)
