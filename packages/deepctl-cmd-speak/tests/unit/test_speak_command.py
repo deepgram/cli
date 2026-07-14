@@ -232,6 +232,80 @@ class TestSpeakCommand:
         assert output_file.read_bytes() == b"chunk1chunk2"
 
     @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_streams_and_wraps_wav(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """flux-* models route to WebSocket streaming (v2) and wrap PCM in WAV."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        pcm = b"\x01\x00\x02\x00\x03\x00\x04\x00"  # raw 16-bit PCM
+        mock_client.speak_text_stream.return_value = iter([pcm[:4], pcm[4:]])
+
+        output_file = tmp_path / "hello.wav"
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text="Hello from Flux",
+            output=str(output_file),
+            model="flux-alexis-en",
+            encoding=None,
+            container=None,
+            sample_rate=None,
+            file=None,
+        )
+
+        assert isinstance(result, SpeakResult)
+        assert result.status == "success"
+        assert result.model == "flux-alexis-en"
+        # Routed to streaming (v2), not batch REST (v1).
+        mock_client.speak_text_stream.assert_called_once()
+        mock_client.speak_text.assert_not_called()
+        # Output is a valid WAV container wrapping the streamed PCM.
+        data = output_file.read_bytes()
+        assert data[:4] == b"RIFF"
+        assert data[8:12] == b"WAVE"
+        assert pcm in data
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_rejects_non_raw_encoding(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """flux-* with a containerized encoding errors clearly (streaming is raw)."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text="Hello",
+            output=str(tmp_path / "x.mp3"),
+            model="flux-alexis-en",
+            encoding="mp3",
+            container=None,
+            sample_rate=None,
+            file=None,
+        )
+
+        assert result.status == "error"
+        assert "not supported for Flux" in result.message
+        mock_client.speak_text_stream.assert_not_called()
+
+    @patch("deepctl_cmd_speak.command.sys")
     def test_handle_write_to_stdout(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):

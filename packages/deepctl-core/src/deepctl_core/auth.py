@@ -1,6 +1,7 @@
 """Cross-platform authentication system for deepctl using dx-id OIDC provider."""
 
 import os
+import re
 import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
@@ -273,8 +274,12 @@ class AuthManager:
                 "Content-Type": "application/json",
             }
 
+            # Verify against the configured base URL (not hardcoded prod), so a
+            # custom base (e.g. staging) validates its own keys correctly.
+            base = self.config.get_profile().base_url or "https://api.deepgram.com"
+            host = re.sub(r"^[a-z]+://", "", base).rstrip("/")
             response = self.client.get(
-                "https://api.deepgram.com/v1/projects",
+                f"https://{host}/v1/projects",
                 headers=headers,
             )
 

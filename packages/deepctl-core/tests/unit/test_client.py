@@ -113,11 +113,13 @@ class TestDeepgramClient:
         # Create client
         result = client._create_client()
 
-        # Verify environment was created with custom URL
+        # Verify environment was derived from the host: https for REST
+        # (base/agent_rest) and wss for WebSocket (production/agent).
         mock_env.assert_called_once_with(
             base="https://custom.deepgram.com",
-            production="https://custom.deepgram.com",
-            agent="https://custom.deepgram.com",
+            production="wss://custom.deepgram.com",
+            agent="wss://custom.deepgram.com",
+            agent_rest="https://custom.deepgram.com",
         )
 
         # Verify DGClient was created with environment kwarg

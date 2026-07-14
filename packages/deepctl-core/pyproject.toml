@@ -23,7 +23,7 @@ keywords = ["deepgram", "core", "auth", "config", "client"]
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
-    "deepgram-sdk>=6.0.0rc2",
+    "deepgram-sdk>=7.5.0",
     "pydantic>=2.0.0",
     "rich>=13.0.0",
     "httpx>=0.24.0",

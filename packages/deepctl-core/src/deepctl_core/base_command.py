@@ -56,7 +56,10 @@ class BaseCommand(ABC):
                     config = Config()
 
                 # Extract explicit credentials from kwargs if provided
-                explicit_api_key = kwargs.get("api_key")
+                # (or from the global --api-key option stored on ctx.obj)
+                explicit_api_key = kwargs.get("api_key") or (
+                    ctx.obj.get("api_key") if ctx.obj else None
+                )
                 explicit_project_id = kwargs.get("project_id")
 
                 # Create auth manager with explicit credentials
