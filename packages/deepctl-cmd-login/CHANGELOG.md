@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.15...deepctl-cmd-login-v0.1.16) (2026-07-15)
+
+
+### Features
+
+* **speak:** Flux TTS (Speak v2 WebSocket streaming) ([#86](https://github.com/deepgram/cli/issues/86)) ([15526ac](https://github.com/deepgram/cli/commit/15526ac08a6b931f260223123c2cfe6b5cc08ec0))
+
 ## [0.1.15](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.14...deepctl-cmd-login-v0.1.15) (2026-05-09)
 
 
