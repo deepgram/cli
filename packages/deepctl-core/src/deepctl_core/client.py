@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,6 +19,22 @@ if TYPE_CHECKING:
     from .config import Config
 
 console = Console()
+
+
+def _split_base_url(base_url: str) -> tuple[str, str, str]:
+    """Split a base URL into (rest_scheme, ws_scheme, host).
+
+    Preserves the transport implied by the input scheme so a plaintext
+    endpoint is not forced onto TLS: an ``http://`` base maps to ``http`` for
+    REST and ``ws`` for WebSocket; anything else (including a bare host) maps
+    to ``https``/``wss``. The host is returned without scheme or trailing slash.
+    """
+    match = re.match(r"^([a-z]+)://", base_url)
+    scheme = match.group(1) if match else "https"
+    host = re.sub(r"^[a-z]+://", "", base_url).rstrip("/")
+    if scheme in ("http", "ws"):
+        return "http", "ws", host
+    return "https", "wss", host
 
 
 class DeepgramClient:
@@ -64,10 +81,18 @@ class DeepgramClient:
                 current_profile.base_url
                 and current_profile.base_url != "https://api.deepgram.com"
             ):
+                # Derive both the REST and WebSocket endpoints from the
+                # configured base URL, so a custom base works for batch REST
+                # *and* streaming. Preserve the transport implied by the input
+                # scheme (http→ws, https→wss) so a plaintext local/staging
+                # endpoint isn't forced onto TLS. agent_rest is required by the
+                # SDK environment.
+                rest_scheme, ws_scheme, host = _split_base_url(current_profile.base_url)
                 kwargs["environment"] = DeepgramClientEnvironment(
-                    base=current_profile.base_url,
-                    production=current_profile.base_url,
-                    agent=current_profile.base_url,
+                    base=f"{rest_scheme}://{host}",
+                    production=f"{ws_scheme}://{host}",
+                    agent=f"{ws_scheme}://{host}",
+                    agent_rest=f"{rest_scheme}://{host}",
                 )
 
             client = DGClient(**kwargs)
@@ -157,6 +182,40 @@ class DeepgramClient:
 
         except Exception as e:
             raise ApiError(body=f"Text-to-speech failed: {e}")
+
+    def speak_text_stream(
+        self,
+        text: str,
+        model: str,
+        encoding: str | None = None,
+        sample_rate: float | None = None,
+    ) -> Iterator[bytes]:
+        """Stream TTS audio over the Flux v2 WebSocket (speak.v2.connect).
+
+        Yields raw audio chunks as they arrive. The streaming transport emits
+        raw (non-containerized) audio, so only linear16/mulaw/alaw encodings
+        apply and sample_rate is sent as the string the streaming API expects.
+        """
+        from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak
+
+        connect_kwargs: dict[str, Any] = {"model": model}
+        if encoding:
+            connect_kwargs["encoding"] = encoding
+        if sample_rate:
+            connect_kwargs["sample_rate"] = str(int(sample_rate))
+
+        try:
+            with self.client.speak.v2.connect(**connect_kwargs) as conn:
+                conn.send_speak(SpeakV2Speak(type="Speak", text=text))
+                conn.send_flush()
+                conn.send_close()
+                for message in conn:
+                    # Audio arrives as raw bytes; control messages are parsed
+                    # objects, which we skip here.
+                    if isinstance(message, bytes):
+                        yield message
+        except Exception as e:
+            raise ApiError(body=f"Text-to-speech streaming failed: {e}")
 
     # ── Text Intelligence (Read) ───────────────────────────────────
 

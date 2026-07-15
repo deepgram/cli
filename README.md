@@ -173,11 +173,22 @@ cat audio.raw | dg listen --encoding linear16 --sample-rate 16000
 
 Convert text to natural speech. Supports file output and piping.
 
+`aura-*` models use the Speak v1 batch REST API. `flux-*` (Flux TTS) models use
+the Speak v2 WebSocket API and stream by default; their raw `linear16` output is
+wrapped in a WAV container so it is directly playable.
+
 ```bash
+# Aura (v1, batch REST)
 dg speak "Welcome to Deepgram" -o welcome.mp3
 dg speak --file script.txt -o output.mp3 -m aura-2-luna-en
 echo "Hello" | dg speak -o greeting.mp3
-dg speak "Stream me" | ffplay -nodisp -    # pipe to audio player
+dg speak "Stream me" | ffplay -nodisp -            # pipe to audio player
+
+# Flux TTS (v2, WebSocket streaming)
+dg speak "Hello from Flux" -m flux-alexis-en -o hello.wav
+# Piped audio is a streaming WAV; -loglevel error hides ffmpeg's cosmetic
+# end-of-stream notice (the audio is complete).
+dg speak "Hello from Flux" -m flux-alexis-en | ffplay -loglevel error -nodisp -autoexit -
 ```
 
 ### Text Intelligence

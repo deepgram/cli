@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import struct
 import sys
+import time
+import wave
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import click
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -17,7 +22,132 @@ from rich.console import Console
 
 from .models import SpeakResult
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 console = Console(stderr=True)
+
+
+def _fmt_bytes(n: int) -> str:
+    """Human-readable byte count for progress display."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.0f} KB"
+    return f"{n / 1024 / 1024:.1f} MB"
+
+
+def _pcm_to_wav(
+    pcm: bytes, *, sample_rate: int, channels: int = 1, sample_width: int = 2
+) -> bytes:
+    """Wrap raw signed 16-bit little-endian PCM in a WAV container."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(sample_width)
+        wav.setframerate(sample_rate)
+        wav.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _streaming_wav_header(
+    *, sample_rate: int, channels: int = 1, sample_width: int = 2
+) -> bytes:
+    """A 44-byte PCM WAV header with placeholder (streaming) length fields.
+
+    stdout is not seekable, so we can't back-patch the RIFF/data sizes after
+    the audio has streamed. A player reading a piped WAV reads until EOF, so we
+    emit an oversized length up front and let the closing pipe stop playback.
+    This lets ``dg speak ... | ffplay -`` start playing on the first chunk
+    instead of waiting for the whole utterance.
+
+    The length is 0x7FFFFFFF rather than 0xFFFFFFFF (which ffmpeg treats as a
+    sentinel and warns "Ignoring maximum wav data size, file may be invalid")
+    and rather than 0 (which macOS CoreAudio trusts literally, so a redirected
+    ``dg speak ... > out.wav`` would look empty). An oversized-but-not-sentinel
+    length is read-to-EOF by ffmpeg and estimated-from-bytes by CoreAudio, so
+    both the pipe and the redirect-to-file cases work.
+    """
+    byte_rate = sample_rate * channels * sample_width
+    block_align = channels * sample_width
+    bits_per_sample = sample_width * 8
+    placeholder = 0x7FFFFFFF  # oversized "unknown / streaming" length
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        placeholder,
+        b"WAVE",
+        b"fmt ",
+        16,  # fmt chunk size
+        1,  # PCM
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        b"data",
+        placeholder,
+    )
+
+
+class _StreamProgress:
+    """Scrolling stderr progress for a Flux audio stream.
+
+    Prints a line as the first audio arrives (with its latency) and then a
+    throttled ``received N`` line as bytes accumulate, so the stream is visibly
+    arriving over time. Also tracks the byte total and time-to-first-audio for
+    the caller's final summary. Wrap the SDK stream with ``track()``.
+
+    Scrolling lines are shown only on an interactive stderr (a TTY); agent/CI
+    runs get just the caller's one-line summary. Nothing is written to stdout,
+    so a piped audio stream is never corrupted.
+    """
+
+    _INTERVAL = 0.2  # min seconds between scrolling "received N" lines
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        self.total = 0
+        self.first_audio: float | None = None
+        self._start = time.monotonic()
+        self._last_print = 0.0
+        self._live = console.is_terminal
+
+    def track(self, stream: Iterator[bytes]) -> Iterator[bytes]:
+        """Yield each chunk unchanged while emitting scrolling progress."""
+        for chunk in stream:
+            self.total += len(chunk)
+            if chunk and self.first_audio is None:
+                self.first_audio = time.monotonic() - self._start
+                self._emit(first=True)
+            elif chunk:
+                self._emit()
+            yield chunk
+
+    def _emit(self, first: bool = False) -> None:
+        if not self._live:
+            return
+        now = time.monotonic()
+        if not first and now - self._last_print < self._INTERVAL:
+            return
+        self._last_print = now
+        if first:
+            assert self.first_audio is not None  # set by the caller before first=True
+            console.print(
+                f"[dim]Streaming {self.model} — "
+                f"first audio {self.first_audio * 1000:.0f} ms[/dim]"
+            )
+        else:
+            console.print(f"[dim]  received {_fmt_bytes(self.total)}[/dim]")
+
+    def timing(self) -> str:
+        """A 'first audio X ms, Ys total' suffix for the final summary."""
+        fa = (
+            f"{self.first_audio * 1000:.0f} ms"
+            if self.first_audio is not None
+            else "n/a"
+        )
+        return f"first audio {fa}, {time.monotonic() - self._start:.1f}s total"
 
 
 class SpeakCommand(BaseCommand):
@@ -38,11 +168,19 @@ class SpeakCommand(BaseCommand):
         'echo "Hello" | dg speak -o hello.mp3',
         'dg speak "Hello" | ffplay -nodisp -',
         'dg speak "Hello" -m aura-2-luna-en -o hello.wav --encoding linear16 --container wav',
+        # Flux TTS — WebSocket streaming (flux-* models), streaming by default.
+        # Piped audio is a streaming WAV (unknown length up front), so pass
+        # `-loglevel error` to silence ffmpeg's cosmetic end-of-stream notice.
+        'dg speak "Hello from Flux" -m flux-alexis-en -o hello.wav',
+        'dg speak "Hello from Flux" -m flux-alexis-en | ffplay -loglevel error -nodisp -autoexit -',
     ]
     agent_help = (
         "Convert text to speech using Deepgram's TTS API. "
         "Text can be provided as an argument, from a file, or piped via stdin. "
         "Audio is written to a file (--output) or stdout for piping. "
+        "aura-* models use Speak v1 (batch REST). flux-* (Flux TTS) models use "
+        "Speak v2, streaming over WebSocket by default and emitting raw audio; "
+        "linear16 output is wrapped in a WAV container so it is directly playable. "
         "Supports model selection and audio format options."
     )
 
@@ -62,20 +200,31 @@ class SpeakCommand(BaseCommand):
             },
             {
                 "names": ["--model", "-m"],
-                "help": "TTS model (default: aura-2-asteria-en)",
+                "help": (
+                    "TTS model. aura-* = Speak v1 (REST batch; default "
+                    "aura-2-asteria-en); flux-* = Flux TTS / Speak v2 (WebSocket "
+                    "streaming, e.g. flux-alexis-en)."
+                ),
                 "type": str,
                 "is_option": True,
                 "default": "aura-2-asteria-en",
             },
             {
                 "names": ["--encoding"],
-                "help": "Audio encoding (mp3, linear16, flac, mulaw, alaw, opus, aac)",
+                "help": (
+                    "Audio encoding. Aura (v1): mp3, linear16, flac, mulaw, alaw, "
+                    "opus, aac. Flux (v2) streaming is raw only: linear16 "
+                    "(default), mulaw, alaw."
+                ),
                 "type": str,
                 "is_option": True,
             },
             {
                 "names": ["--container"],
-                "help": "Audio container (none, wav, ogg)",
+                "help": (
+                    "Audio container (none, wav, ogg). Aura (v1) only; ignored for "
+                    "flux-* (linear16 is auto-wrapped in WAV)."
+                ),
                 "type": str,
                 "is_option": True,
             },
@@ -99,7 +248,7 @@ class SpeakCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult:
+    ) -> BaseResult | None:
         text = kwargs.get("text")
         output_path = kwargs.get("output")
         model = kwargs.get("model") or "aura-2-asteria-en"
@@ -133,6 +282,117 @@ class SpeakCommand(BaseCommand):
                 message="No output specified. Use -o/--output to save to file, or pipe stdout.",
             )
 
+        # Flux models stream over the WebSocket (speak.v2); Aura uses REST (speak.v1).
+        is_flux = model.lower().startswith("flux")
+
+        if is_flux:
+            # WebSocket streaming path. Streaming output is raw audio, so
+            # default to linear16 @ 24kHz and wrap it in WAV for playback.
+            # These paths raise (rather than returning an error result) so a
+            # failure exits non-zero and is visible in every output format —
+            # a returned error is only printed in structured output and still
+            # exits 0.
+            eff_encoding = encoding or "linear16"
+            if eff_encoding not in ("linear16", "mulaw", "alaw"):
+                raise click.ClickException(
+                    f"Encoding '{eff_encoding}' is not supported for Flux "
+                    "(Speak v2) streaming, which emits raw audio. Use "
+                    "linear16 (default), mulaw, or alaw."
+                )
+            eff_sample_rate = sample_rate or 24000.0
+
+            # A live spinner + byte counter + time-to-first-audio on stderr, so
+            # the stream is visibly arriving rather than a single static line.
+            prog = _StreamProgress(model)
+            stream = prog.track(
+                client.speak_text_stream(
+                    text=text,
+                    model=model,
+                    encoding=eff_encoding,
+                    sample_rate=eff_sample_rate,
+                )
+            )
+
+            if output_path:
+                # A WAV file must declare its data length in the header, which
+                # we only know once the stream ends — so buffer, then wrap and
+                # write. (Streaming to disk has no user-visible benefit here.)
+                pcm = bytearray()
+                try:
+                    for chunk in stream:
+                        pcm.extend(chunk)
+                except Exception as e:
+                    raise click.ClickException(f"Flux streaming failed: {e}")
+
+                if not pcm:
+                    # No audio means the stream errored upstream or returned
+                    # nothing. Wrapping empty PCM yields a valid header-only
+                    # WAV, so guard rather than report success on a silent file.
+                    raise click.ClickException(
+                        "Flux (Speak v2) streaming returned no audio."
+                    )
+
+                if eff_encoding == "linear16":
+                    audio_bytes = _pcm_to_wav(
+                        bytes(pcm), sample_rate=int(eff_sample_rate)
+                    )
+                else:
+                    audio_bytes = bytes(pcm)
+
+                total_bytes = len(audio_bytes)
+                Path(output_path).write_bytes(audio_bytes)
+                console.print(
+                    f"[green]Audio saved to {output_path}[/green] "
+                    f"({total_bytes:,} bytes — {prog.timing()})"
+                )
+                return SpeakResult(
+                    status="success",
+                    message=f"Audio saved to {output_path}",
+                    output_path=output_path,
+                    model=model,
+                    bytes_written=total_bytes,
+                )
+
+            # Pipe path — write each chunk to stdout as it arrives so a
+            # downstream player starts on the first frame (the point of
+            # "streaming by default"). For linear16 we emit a streaming WAV
+            # header before the first frame so `| ffplay -` plays with no
+            # extra flags; raw mulaw/alaw stream as-is.
+            out = sys.stdout.buffer
+            wrote_header = False
+            try:
+                for chunk in stream:
+                    if not chunk:
+                        continue
+                    if eff_encoding == "linear16" and not wrote_header:
+                        out.write(
+                            _streaming_wav_header(sample_rate=int(eff_sample_rate))
+                        )
+                        wrote_header = True
+                    out.write(chunk)
+                    out.flush()
+            except Exception as e:
+                raise click.ClickException(f"Flux streaming failed: {e}")
+
+            if prog.total == 0:
+                # Guard before anything is written: the header is only emitted
+                # on the first frame, so a no-audio stream writes nothing.
+                raise click.ClickException(
+                    "Flux (Speak v2) streaming returned no audio."
+                )
+
+            console.print(
+                f"[green]✓ Streamed {prog.total:,} bytes to stdout[/green] "
+                f"({prog.timing()})"
+            )
+            # Return None so the framework skips output_result: in agentic/CI
+            # (or --output json) mode it would serialize the result to the
+            # stdout console — i.e. append JSON to the audio we just streamed,
+            # corrupting a `> out.wav` redirect. The summary above already went
+            # to the stderr console.
+            return None
+
+        # REST path (Aura v1) — unchanged.
         try:
             console.print(f"[blue]Generating speech with {model}...[/blue]")
 
@@ -173,12 +433,12 @@ class SpeakCommand(BaseCommand):
                     total_bytes += len(chunk)
                 stdout_buffer.flush()
 
-                return SpeakResult(
-                    status="success",
-                    message=f"Wrote {total_bytes:,} bytes to stdout",
-                    model=model,
-                    bytes_written=total_bytes,
-                )
+                console.print(f"[green]✓ Wrote {total_bytes:,} bytes to stdout[/green]")
+                # Return None so the framework skips output_result — otherwise
+                # agentic/CI (or --output json) mode serializes JSON onto the
+                # same stdout as the audio, corrupting a `> out` redirect. The
+                # summary above went to the stderr console.
+                return None
 
         except Exception as e:
             console.print(f"[red]Error generating speech:[/red] {e}")
