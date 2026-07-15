@@ -248,7 +248,7 @@ class SpeakCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult:
+    ) -> BaseResult | None:
         text = kwargs.get("text")
         output_path = kwargs.get("output")
         model = kwargs.get("model") or "aura-2-asteria-en"
@@ -385,12 +385,12 @@ class SpeakCommand(BaseCommand):
                 f"[green]✓ Streamed {prog.total:,} bytes to stdout[/green] "
                 f"({prog.timing()})"
             )
-            return SpeakResult(
-                status="success",
-                message=f"Streamed {prog.total:,} bytes to stdout",
-                model=model,
-                bytes_written=prog.total,
-            )
+            # Return None so the framework skips output_result: in agentic/CI
+            # (or --output json) mode it would serialize the result to the
+            # stdout console — i.e. append JSON to the audio we just streamed,
+            # corrupting a `> out.wav` redirect. The summary above already went
+            # to the stderr console.
+            return None
 
         # REST path (Aura v1) — unchanged.
         try:
@@ -433,12 +433,12 @@ class SpeakCommand(BaseCommand):
                     total_bytes += len(chunk)
                 stdout_buffer.flush()
 
-                return SpeakResult(
-                    status="success",
-                    message=f"Wrote {total_bytes:,} bytes to stdout",
-                    model=model,
-                    bytes_written=total_bytes,
-                )
+                console.print(f"[green]✓ Wrote {total_bytes:,} bytes to stdout[/green]")
+                # Return None so the framework skips output_result — otherwise
+                # agentic/CI (or --output json) mode serializes JSON onto the
+                # same stdout as the audio, corrupting a `> out` redirect. The
+                # summary above went to the stderr console.
+                return None
 
         except Exception as e:
             console.print(f"[red]Error generating speech:[/red] {e}")

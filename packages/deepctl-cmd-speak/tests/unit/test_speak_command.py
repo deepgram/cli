@@ -159,8 +159,8 @@ class TestSpeakCommand:
             file="test.txt",
         )
 
-        assert isinstance(result, SpeakResult)
-        assert result.status == "success"
+        # Aura stdout path returns None (audio already written to the pipe).
+        assert result is None
         mock_path_cls.assert_any_call("test.txt")
         mock_path_instance.read_text.assert_called_once()
         mock_client.speak_text.assert_called_once_with(
@@ -437,10 +437,9 @@ class TestSpeakCommand:
             file=None,
         )
 
-        assert isinstance(result, SpeakResult)
-        assert result.status == "success"
-        # bytes_written counts audio only, not the injected header.
-        assert result.bytes_written == 8
+        # Returns None so the framework never serializes a result to stdout —
+        # in agentic/json mode that JSON would corrupt the piped audio.
+        assert result is None
 
         writes = [c.args[0] for c in mock_buffer.write.call_args_list]
         # First write is a streaming WAV header; then the raw PCM chunks.
@@ -484,7 +483,12 @@ class TestSpeakCommand:
     def test_handle_write_to_stdout(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):
-        """Test writing audio output to stdout when not a TTY."""
+        """Aura piped to stdout writes audio and returns None.
+
+        Returning None keeps the framework from serializing a result to the
+        stdout console — in agentic/json mode that JSON would be appended to
+        the audio, corrupting a `> out` redirect.
+        """
         mock_sys.stdin.isatty.return_value = True
         mock_sys.stdout.isatty.return_value = False
 
@@ -506,9 +510,7 @@ class TestSpeakCommand:
             file=None,
         )
 
-        assert isinstance(result, SpeakResult)
-        assert result.status == "success"
-        assert result.bytes_written == len(b"chunk1") + len(b"chunk2")
+        assert result is None
 
         mock_stdout_buffer.write.assert_any_call(b"chunk1")
         mock_stdout_buffer.write.assert_any_call(b"chunk2")
