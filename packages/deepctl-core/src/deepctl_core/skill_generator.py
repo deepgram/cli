@@ -465,9 +465,7 @@ def render_developer_guide(
     lines.append("")
     lines.append("```python")
     lines.append("from deepgram import DeepgramClient")
-    lines.append(
-        "from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak"
-    )
+    lines.append("from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak")
     lines.append("")
     lines.append('client = DeepgramClient(api_key="DEEPGRAM_API_KEY")')
     lines.append("")
