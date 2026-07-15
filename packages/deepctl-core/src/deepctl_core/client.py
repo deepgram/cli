@@ -21,6 +21,22 @@ if TYPE_CHECKING:
 console = Console()
 
 
+def _split_base_url(base_url: str) -> tuple[str, str, str]:
+    """Split a base URL into (rest_scheme, ws_scheme, host).
+
+    Preserves the transport implied by the input scheme so a plaintext
+    endpoint is not forced onto TLS: an ``http://`` base maps to ``http`` for
+    REST and ``ws`` for WebSocket; anything else (including a bare host) maps
+    to ``https``/``wss``. The host is returned without scheme or trailing slash.
+    """
+    match = re.match(r"^([a-z]+)://", base_url)
+    scheme = match.group(1) if match else "https"
+    host = re.sub(r"^[a-z]+://", "", base_url).rstrip("/")
+    if scheme in ("http", "ws"):
+        return "http", "ws", host
+    return "https", "wss", host
+
+
 class DeepgramClient:
     """Wrapper around Deepgram SDK with authentication integration."""
 
@@ -65,17 +81,18 @@ class DeepgramClient:
                 current_profile.base_url
                 and current_profile.base_url != "https://api.deepgram.com"
             ):
-                # Derive both the REST (https) and WebSocket (wss) endpoints from
-                # the configured host, so a custom base URL works for batch REST
-                # *and* streaming. agent_rest is required by the SDK environment.
-                host = re.sub(r"^[a-z]+://", "", current_profile.base_url).rstrip(
-                    "/"
-                )
+                # Derive both the REST and WebSocket endpoints from the
+                # configured base URL, so a custom base works for batch REST
+                # *and* streaming. Preserve the transport implied by the input
+                # scheme (http→ws, https→wss) so a plaintext local/staging
+                # endpoint isn't forced onto TLS. agent_rest is required by the
+                # SDK environment.
+                rest_scheme, ws_scheme, host = _split_base_url(current_profile.base_url)
                 kwargs["environment"] = DeepgramClientEnvironment(
-                    base=f"https://{host}",
-                    production=f"wss://{host}",
-                    agent=f"wss://{host}",
-                    agent_rest=f"https://{host}",
+                    base=f"{rest_scheme}://{host}",
+                    production=f"{ws_scheme}://{host}",
+                    agent=f"{ws_scheme}://{host}",
+                    agent_rest=f"{rest_scheme}://{host}",
                 )
 
             client = DGClient(**kwargs)

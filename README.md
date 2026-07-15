@@ -186,7 +186,9 @@ dg speak "Stream me" | ffplay -nodisp -            # pipe to audio player
 
 # Flux TTS (v2, WebSocket streaming)
 dg speak "Hello from Flux" -m flux-alexis-en -o hello.wav
-dg speak "Hello from Flux" -m flux-alexis-en | ffplay -nodisp -
+# Piped audio is a streaming WAV; -loglevel error hides ffmpeg's cosmetic
+# end-of-stream notice (the audio is complete).
+dg speak "Hello from Flux" -m flux-alexis-en | ffplay -loglevel error -nodisp -autoexit -
 ```
 
 ### Text Intelligence

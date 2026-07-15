@@ -1,7 +1,6 @@
 """Cross-platform authentication system for deepctl using dx-id OIDC provider."""
 
 import os
-import re
 import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
@@ -13,6 +12,7 @@ from pydantic import BaseModel
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from .client import _split_base_url
 from .config import Config
 from .models import ProfileInfo, ProfilesResult
 
@@ -276,10 +276,12 @@ class AuthManager:
 
             # Verify against the configured base URL (not hardcoded prod), so a
             # custom base (e.g. staging) validates its own keys correctly.
+            # Preserve the input scheme so a plaintext endpoint isn't forced
+            # onto TLS.
             base = self.config.get_profile().base_url or "https://api.deepgram.com"
-            host = re.sub(r"^[a-z]+://", "", base).rstrip("/")
+            rest_scheme, _, host = _split_base_url(base)
             response = self.client.get(
-                f"https://{host}/v1/projects",
+                f"{rest_scheme}://{host}/v1/projects",
                 headers=headers,
             )
 

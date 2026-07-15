@@ -2,10 +2,43 @@
 
 from unittest.mock import Mock, patch
 
+import click
 import pytest
-from deepctl_cmd_speak.command import SpeakCommand
+from deepctl_cmd_speak.command import (
+    SpeakCommand,
+    _fmt_bytes,
+    _StreamProgress,
+)
 from deepctl_cmd_speak.models import SpeakResult
 from deepctl_core import AuthManager, BaseResult, Config, DeepgramClient
+
+
+class TestStreamProgress:
+    """The live-progress helper used by the Flux streaming path."""
+
+    def test_fmt_bytes(self):
+        assert _fmt_bytes(512) == "512 B"
+        assert _fmt_bytes(2048) == "2 KB"
+        assert _fmt_bytes(3 * 1024 * 1024) == "3.0 MB"
+
+    def test_track_passes_chunks_through_and_counts(self):
+        prog = _StreamProgress("flux-alexis-en")
+        out = list(prog.track(iter([b"ab", b"", b"cde"])))
+
+        # Chunks are yielded unchanged (including the empty one).
+        assert out == [b"ab", b"", b"cde"]
+        # Total counts every byte; the empty chunk contributes nothing.
+        assert prog.total == 5
+        # Time-to-first-audio is recorded from the first non-empty chunk.
+        assert prog.first_audio is not None
+        assert "first audio" in prog.timing()
+
+    def test_track_no_audio_leaves_first_audio_unset(self):
+        prog = _StreamProgress("flux-alexis-en")
+        assert list(prog.track(iter([]))) == []
+        assert prog.total == 0
+        assert prog.first_audio is None
+        assert "n/a" in prog.timing()
 
 
 class TestSpeakCommand:
@@ -284,26 +317,168 @@ class TestSpeakCommand:
         mock_client,
         tmp_path,
     ):
-        """flux-* with a containerized encoding errors clearly (streaming is raw)."""
+        """flux-* with a containerized encoding fails loudly (streaming is raw).
+
+        The guard raises so the process exits non-zero rather than printing
+        nothing and exiting 0 in the default output format.
+        """
         mock_sys.stdin.isatty.return_value = True
         mock_sys.stdout.isatty.return_value = True
+
+        with pytest.raises(click.ClickException, match="not supported for Flux"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "x.mp3"),
+                model="flux-alexis-en",
+                encoding="mp3",
+                container=None,
+                sample_rate=None,
+                file=None,
+            )
+
+        mock_client.speak_text_stream.assert_not_called()
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_empty_audio_fails(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """A Flux stream that yields no audio fails loudly and writes nothing."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        mock_client.speak_text_stream.return_value = iter([])
+
+        output_file = tmp_path / "empty.wav"
+        with pytest.raises(click.ClickException, match="returned no audio"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello from Flux",
+                output=str(output_file),
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+            )
+
+        # No header-only WAV is left behind on failure.
+        assert not output_file.exists()
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_streaming_failure_raises(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """A streaming error surfaces as a non-zero exit, not a success/exit-0."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        def _boom():
+            raise RuntimeError("socket closed")
+            yield  # pragma: no cover — make this a generator
+
+        mock_client.speak_text_stream.return_value = _boom()
+
+        with pytest.raises(click.ClickException, match="Flux streaming failed"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello from Flux",
+                output=str(tmp_path / "x.wav"),
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+            )
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_streams_to_stdout_incrementally(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """flux-* piped to stdout emits a WAV header then each chunk, flushing
+        per chunk so a downstream player starts on the first frame."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = False
+        mock_buffer = Mock()
+        mock_sys.stdout.buffer = mock_buffer
+
+        mock_client.speak_text_stream.return_value = iter(
+            [b"\x01\x00\x02\x00", b"\x03\x00\x04\x00"]
+        )
 
         result = command.handle(
             config=mock_config,
             auth_manager=mock_auth_manager,
             client=mock_client,
-            text="Hello",
-            output=str(tmp_path / "x.mp3"),
+            text="Hello from Flux",
+            output=None,
             model="flux-alexis-en",
-            encoding="mp3",
+            encoding=None,
             container=None,
             sample_rate=None,
             file=None,
         )
 
-        assert result.status == "error"
-        assert "not supported for Flux" in result.message
-        mock_client.speak_text_stream.assert_not_called()
+        assert isinstance(result, SpeakResult)
+        assert result.status == "success"
+        # bytes_written counts audio only, not the injected header.
+        assert result.bytes_written == 8
+
+        writes = [c.args[0] for c in mock_buffer.write.call_args_list]
+        # First write is a streaming WAV header; then the raw PCM chunks.
+        assert writes[0][:4] == b"RIFF"
+        assert writes[0][8:12] == b"WAVE"
+        assert b"\x01\x00\x02\x00" in writes
+        assert b"\x03\x00\x04\x00" in writes
+        # Flushed per chunk (low latency), not a single flush at the end.
+        assert mock_buffer.flush.call_count >= 2
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_stdout_empty_audio_fails(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """An empty Flux stream to stdout fails loudly and writes nothing —
+        no lone header, so a player never sees a valid-but-silent WAV."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = False
+        mock_buffer = Mock()
+        mock_sys.stdout.buffer = mock_buffer
+
+        mock_client.speak_text_stream.return_value = iter([])
+
+        with pytest.raises(click.ClickException, match="returned no audio"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello from Flux",
+                output=None,
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+            )
+
+        mock_buffer.write.assert_not_called()
 
     @patch("deepctl_cmd_speak.command.sys")
     def test_handle_write_to_stdout(
