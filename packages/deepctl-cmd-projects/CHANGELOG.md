@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-projects-v0.1.11...deepctl-cmd-projects-v0.1.12) (2026-07-15)
+
+
+### Features
+
+* **speak:** Flux TTS (Speak v2 WebSocket streaming) ([#86](https://github.com/deepgram/cli/issues/86)) ([15526ac](https://github.com/deepgram/cli/commit/15526ac08a6b931f260223123c2cfe6b5cc08ec0))
+
 ## [0.1.11](https://github.com/deepgram/cli/compare/deepctl-cmd-projects-v0.1.10...deepctl-cmd-projects-v0.1.11) (2026-03-09)
 
 

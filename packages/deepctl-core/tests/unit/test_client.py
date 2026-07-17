@@ -113,17 +113,42 @@ class TestDeepgramClient:
         # Create client
         result = client._create_client()
 
-        # Verify environment was created with custom URL
+        # Verify environment was derived from the host: https for REST
+        # (base/agent_rest) and wss for WebSocket (production/agent).
         mock_env.assert_called_once_with(
             base="https://custom.deepgram.com",
-            production="https://custom.deepgram.com",
-            agent="https://custom.deepgram.com",
+            production="wss://custom.deepgram.com",
+            agent="wss://custom.deepgram.com",
+            agent_rest="https://custom.deepgram.com",
         )
 
         # Verify DGClient was created with environment kwarg
         mock_dg_client.assert_called_once_with(
             api_key="sk-test",
             environment=mock_env.return_value,
+        )
+
+    @patch("deepctl_core.client.DGClient")
+    @patch("deepctl_core.client.DeepgramClientEnvironment")
+    def test_create_client_preserves_plaintext_scheme(
+        self, mock_env, mock_dg_client, mock_config, mock_auth_manager
+    ):
+        """A plaintext (http) base URL keeps http/ws — it isn't forced to TLS."""
+        mock_profile = Mock()
+        mock_profile.base_url = "http://localhost:8080"
+        mock_config.get_profile.return_value = mock_profile
+
+        client = DeepgramClient(mock_config, mock_auth_manager)
+        mock_dg_client.return_value = Mock()
+
+        client._create_client()
+
+        # http REST + ws WebSocket, so a plaintext local/staging server works.
+        mock_env.assert_called_once_with(
+            base="http://localhost:8080",
+            production="ws://localhost:8080",
+            agent="ws://localhost:8080",
+            agent_rest="http://localhost:8080",
         )
 
     def test_create_client_no_api_key(self, client, mock_auth_manager):
@@ -146,9 +171,7 @@ class TestDeepgramClient:
     @patch("deepctl_core.client.DGClient")
     @patch("deepctl_core.client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"audio data")
-    def test_transcribe_file(
-        self, mock_file, mock_exists, mock_dg_client, client
-    ):
+    def test_transcribe_file(self, mock_file, mock_exists, mock_dg_client, client):
         """Test transcribing a file."""
         # Setup mocks
         mock_exists.return_value = True
@@ -193,9 +216,7 @@ class TestDeepgramClient:
 
     @patch("deepctl_core.client.DGClient")
     @patch("deepctl_core.client.Path.exists")
-    def test_transcribe_file_not_found(
-        self, mock_exists, mock_dg_client, client
-    ):
+    def test_transcribe_file_not_found(self, mock_exists, mock_dg_client, client):
         """Test error when file not found."""
         mock_exists.return_value = False
 
@@ -213,7 +234,9 @@ class TestDeepgramClient:
                 {"project_id": "proj2", "name": "Project 2"},
             ]
         }
-        mock_instance.manage.v1.projects.list.return_value = _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.list.return_value = _mock_sdk_response(
+            mock_data
+        )
         mock_dg_client.return_value = mock_instance
 
         # Get projects
@@ -228,7 +251,9 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_data = {"project_id": "test-project", "name": "Test Project"}
-        mock_instance.manage.v1.projects.get.return_value = _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.get.return_value = _mock_sdk_response(
+            mock_data
+        )
         mock_dg_client.return_value = mock_instance
 
         # Get project
@@ -243,7 +268,9 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_data = {"minutes": 1000, "cost": 25.00}
-        mock_instance.manage.v1.projects.usage.get.return_value = _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.usage.get.return_value = _mock_sdk_response(
+            mock_data
+        )
         mock_dg_client.return_value = mock_instance
 
         # Get usage with individual date parameters
@@ -264,7 +291,9 @@ class TestDeepgramClient:
         # Setup mock
         mock_instance = Mock()
         mock_data = {"project_id": "new-proj", "name": "New Project"}
-        mock_instance.manage.v1.projects.update.return_value = _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.update.return_value = _mock_sdk_response(
+            mock_data
+        )
         mock_dg_client.return_value = mock_instance
 
         # Create project
@@ -278,9 +307,7 @@ class TestDeepgramClient:
         """Test listing models."""
         mock_instance = Mock()
         mock_data = {"stt": [], "tts": []}
-        mock_instance.manage.v1.models.list.return_value = _mock_sdk_response(
-            mock_data
-        )
+        mock_instance.manage.v1.models.list.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         result = client.list_models()
@@ -293,9 +320,7 @@ class TestDeepgramClient:
         """Test getting a specific model."""
         mock_instance = Mock()
         mock_data = {"uuid": "model-id", "name": "Nova-3"}
-        mock_instance.manage.v1.models.get.return_value = _mock_sdk_response(
-            mock_data
-        )
+        mock_instance.manage.v1.models.get.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         result = client.get_model("model-id")
@@ -323,9 +348,7 @@ class TestDeepgramClient:
         """Test analyzing text."""
         mock_instance = Mock()
         mock_data = {"results": {"summary": {"text": "hi"}}}
-        mock_instance.read.v1.text.analyze.return_value = _mock_sdk_response(
-            mock_data
-        )
+        mock_instance.read.v1.text.analyze.return_value = _mock_sdk_response(mock_data)
         mock_dg_client.return_value = mock_instance
 
         result = client.analyze_text("Hello world", summarize=True)
@@ -338,8 +361,8 @@ class TestDeepgramClient:
         """Test listing API keys."""
         mock_instance = Mock()
         mock_data = {"api_keys": []}
-        mock_instance.manage.v1.projects.keys.list.return_value = (
-            _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.keys.list.return_value = _mock_sdk_response(
+            mock_data
         )
         mock_dg_client.return_value = mock_instance
 
@@ -353,14 +376,12 @@ class TestDeepgramClient:
         """Test creating an API key."""
         mock_instance = Mock()
         mock_data = {"api_key_id": "k1", "key": "sk-xxx"}
-        mock_instance.manage.v1.projects.keys.create.return_value = (
-            _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.keys.create.return_value = _mock_sdk_response(
+            mock_data
         )
         mock_dg_client.return_value = mock_instance
 
-        result = client.create_key(
-            project_id="test-project", comment="test key"
-        )
+        result = client.create_key(project_id="test-project", comment="test key")
 
         assert result == mock_data
         mock_instance.manage.v1.projects.keys.create.assert_called_once()
@@ -370,8 +391,8 @@ class TestDeepgramClient:
         """Test getting a specific API key."""
         mock_instance = Mock()
         mock_data = {"api_key_id": "key-id"}
-        mock_instance.manage.v1.projects.keys.get.return_value = (
-            _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.keys.get.return_value = _mock_sdk_response(
+            mock_data
         )
         mock_dg_client.return_value = mock_instance
 
@@ -387,8 +408,8 @@ class TestDeepgramClient:
         """Test deleting an API key."""
         mock_instance = Mock()
         mock_data = {}
-        mock_instance.manage.v1.projects.keys.delete.return_value = (
-            _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.keys.delete.return_value = _mock_sdk_response(
+            mock_data
         )
         mock_dg_client.return_value = mock_instance
 
@@ -419,8 +440,8 @@ class TestDeepgramClient:
         """Test getting a specific API request."""
         mock_instance = Mock()
         mock_data = {"request_id": "req-id"}
-        mock_instance.manage.v1.projects.requests.get.return_value = (
-            _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.requests.get.return_value = _mock_sdk_response(
+            mock_data
         )
         mock_dg_client.return_value = mock_instance
 
@@ -466,8 +487,8 @@ class TestDeepgramClient:
         """Test listing project members."""
         mock_instance = Mock()
         mock_data = {"members": []}
-        mock_instance.manage.v1.projects.members.list.return_value = (
-            _mock_sdk_response(mock_data)
+        mock_instance.manage.v1.projects.members.list.return_value = _mock_sdk_response(
+            mock_data
         )
         mock_dg_client.return_value = mock_instance
 
@@ -518,9 +539,7 @@ class TestDeepgramClient:
         )
         mock_dg_client.return_value = mock_instance
 
-        result = client.create_invite(
-            "a@b.com", "member", project_id="test-project"
-        )
+        result = client.create_invite("a@b.com", "member", project_id="test-project")
 
         assert result == mock_data
         mock_instance.manage.v1.projects.members.invites.create.assert_called_once()

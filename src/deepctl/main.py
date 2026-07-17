@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import os
 import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -131,6 +132,21 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     help="Configuration profile to use",
 )
 @click.option(
+    "--base-url",
+    help=(
+        "Override the API base URL (e.g. https://api.staging.deepgram.com). "
+        "REST and WebSocket endpoints are derived from this host. "
+        "Also settable via the DEEPGRAM_BASE_URL environment variable."
+    ),
+)
+@click.option(
+    "--api-key",
+    help=(
+        "Deepgram API key to use, overriding login/profile/env credentials. "
+        "Intended for testing and CI."
+    ),
+)
+@click.option(
     "--output",
     "-o",
     type=click.Choice(["json", "yaml", "table", "csv"], case_sensitive=False),
@@ -179,6 +195,8 @@ def cli(
     ctx: click.Context,
     config: str | None,
     profile: str | None,
+    base_url: str | None,
+    api_key: str | None,
     output: str | None,
     quiet: bool,
     verbose: bool,
@@ -206,9 +224,16 @@ def cli(
         enable_timing()
 
     with TimingContext("cli_initialization"):
+        # A --base-url flag overrides the configured/env base URL (flag wins).
+        # Config reads DEEPGRAM_BASE_URL at init, so set it before constructing.
+        if base_url:
+            os.environ["DEEPGRAM_BASE_URL"] = base_url
+
         # Initialize configuration
         ctx.ensure_object(dict)
         ctx.obj["config"] = Config(config_path=config, profile=profile)
+        # Global --api-key passthrough (highest-precedence explicit credential).
+        ctx.obj["api_key"] = api_key
         ctx.obj["timing"] = timing or timing_detailed
         ctx.obj["timing_detailed"] = timing_detailed
 
