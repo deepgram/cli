@@ -162,26 +162,29 @@ class SpeakCommand(BaseCommand):
     ci_friendly = True
 
     examples = [
+        # Flux TTS is the default (flux-alexis-en) — WebSocket streaming,
+        # raw audio wrapped in WAV. Piped audio is a streaming WAV (unknown
+        # length up front), so pass `-loglevel error` to silence ffmpeg's
+        # cosmetic end-of-stream notice.
         'dg speak "Hello world"',
-        'dg speak "Hello world" -o hello.mp3',
-        "dg speak --file message.txt -o output.mp3",
-        'echo "Hello" | dg speak -o hello.mp3',
-        'dg speak "Hello" | ffplay -nodisp -',
+        'dg speak "Hello world" -o hello.wav',
+        "dg speak --file message.txt -o output.wav",
+        'dg speak "Hello" | ffplay -loglevel error -nodisp -autoexit -',
+        # Aura (Speak v1, batch REST) — opt in with -m aura-*; needed for
+        # containerized formats like mp3.
+        'dg speak "Hello" -m aura-2-asteria-en -o hello.mp3',
         'dg speak "Hello" -m aura-2-luna-en -o hello.wav --encoding linear16 --container wav',
-        # Flux TTS — WebSocket streaming (flux-* models), streaming by default.
-        # Piped audio is a streaming WAV (unknown length up front), so pass
-        # `-loglevel error` to silence ffmpeg's cosmetic end-of-stream notice.
-        'dg speak "Hello from Flux" -m flux-alexis-en -o hello.wav',
-        'dg speak "Hello from Flux" -m flux-alexis-en | ffplay -loglevel error -nodisp -autoexit -',
+        'echo "Hello" | dg speak -o hello.mp3 -m aura-2-asteria-en',
     ]
     agent_help = (
         "Convert text to speech using Deepgram's TTS API. "
         "Text can be provided as an argument, from a file, or piped via stdin. "
         "Audio is written to a file (--output) or stdout for piping. "
-        "aura-* models use Speak v1 (batch REST). flux-* (Flux TTS) models use "
-        "Speak v2, streaming over WebSocket by default and emitting raw audio; "
-        "linear16 output is wrapped in a WAV container so it is directly playable. "
-        "Supports model selection and audio format options."
+        "By default (flux-* models, e.g. flux-alexis-en) uses Flux TTS / Speak "
+        "v2, streaming over WebSocket and emitting raw audio; linear16 output is "
+        "wrapped in a WAV container so it is directly playable. Pass an aura-* "
+        "model to use Speak v1 (batch REST), which supports containerized "
+        "formats like mp3. Supports model selection and audio format options."
     )
 
     def get_arguments(self) -> list[dict[str, Any]]:
@@ -201,13 +204,13 @@ class SpeakCommand(BaseCommand):
             {
                 "names": ["--model", "-m"],
                 "help": (
-                    "TTS model. aura-* = Speak v1 (REST batch; default "
-                    "aura-2-asteria-en); flux-* = Flux TTS / Speak v2 (WebSocket "
-                    "streaming, e.g. flux-alexis-en)."
+                    "TTS model. flux-* = Flux TTS / Speak v2 (WebSocket "
+                    "streaming; default flux-alexis-en); aura-* = Speak v1 "
+                    "(REST batch, e.g. aura-2-asteria-en)."
                 ),
                 "type": str,
                 "is_option": True,
-                "default": "aura-2-asteria-en",
+                "default": "flux-alexis-en",
             },
             {
                 "names": ["--encoding"],
@@ -251,7 +254,7 @@ class SpeakCommand(BaseCommand):
     ) -> BaseResult | None:
         text = kwargs.get("text")
         output_path = kwargs.get("output")
-        model = kwargs.get("model") or "aura-2-asteria-en"
+        model = kwargs.get("model") or "flux-alexis-en"
         encoding = kwargs.get("encoding")
         container = kwargs.get("container")
         sample_rate = kwargs.get("sample_rate")

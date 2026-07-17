@@ -265,6 +265,38 @@ class TestSpeakCommand:
         assert output_file.read_bytes() == b"chunk1chunk2"
 
     @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_default_model_routes_to_flux(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client, tmp_path
+    ):
+        """With no -m, the default is Flux (v2 streaming), not Aura (v1 REST)."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        pcm = b"\x01\x00\x02\x00"  # raw 16-bit PCM
+        mock_client.speak_text_stream.return_value = iter([pcm])
+
+        output_file = tmp_path / "hello.wav"
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text="Hello world",
+            output=str(output_file),
+            model=None,
+            encoding=None,
+            container=None,
+            sample_rate=None,
+            file=None,
+        )
+
+        assert isinstance(result, SpeakResult)
+        assert result.model == "flux-alexis-en"
+        # Routed to streaming (v2), not batch REST (v1).
+        mock_client.speak_text_stream.assert_called_once()
+        mock_client.speak_text.assert_not_called()
+        assert output_file.read_bytes()[:4] == b"RIFF"
+
+    @patch("deepctl_cmd_speak.command.sys")
     def test_handle_flux_streams_and_wraps_wav(
         self,
         mock_sys,
