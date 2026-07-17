@@ -75,8 +75,8 @@ dg login
 # Transcribe an audio file
 dg listen recording.wav
 
-# Text-to-speech
-dg speak "Hello from Deepgram" -o hello.mp3
+# Text-to-speech (Flux TTS by default)
+dg speak "Hello from Deepgram" -o hello.wav
 
 # Live microphone transcription
 dg listen --mic
@@ -132,8 +132,9 @@ dg read earnings.txt --sentiment --summarize --topics
 ### Text-to-speech
 
 ```bash
-# Stream directly to a player
-dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -
+# Stream directly to a player (Flux TTS streams a WAV; -loglevel error hides
+# ffmpeg's cosmetic end-of-stream notice)
+dg speak "Hello from Deepgram" | ffplay -loglevel error -nodisp -autoexit -
 ```
 
 ### Account & project management
@@ -173,22 +174,22 @@ cat audio.raw | dg listen --encoding linear16 --sample-rate 16000
 
 Convert text to natural speech. Supports file output and piping.
 
-`aura-*` models use the Speak v1 batch REST API. `flux-*` (Flux TTS) models use
-the Speak v2 WebSocket API and stream by default; their raw `linear16` output is
-wrapped in a WAV container so it is directly playable.
+By default `dg speak` uses Flux TTS (`flux-alexis-en`) — the Speak v2 WebSocket
+API, which streams and emits raw audio; its `linear16` output is wrapped in a WAV
+container so it is directly playable. Pass an `aura-*` model to use the Speak v1
+batch REST API instead, which supports containerized formats like MP3.
 
 ```bash
-# Aura (v1, batch REST)
-dg speak "Welcome to Deepgram" -o welcome.mp3
-dg speak --file script.txt -o output.mp3 -m aura-2-luna-en
-echo "Hello" | dg speak -o greeting.mp3
-dg speak "Stream me" | ffplay -nodisp -            # pipe to audio player
-
-# Flux TTS (v2, WebSocket streaming)
-dg speak "Hello from Flux" -m flux-alexis-en -o hello.wav
+# Flux TTS (v2, WebSocket streaming) — the default
+dg speak "Hello from Flux" -o hello.wav
 # Piped audio is a streaming WAV; -loglevel error hides ffmpeg's cosmetic
 # end-of-stream notice (the audio is complete).
-dg speak "Hello from Flux" -m flux-alexis-en | ffplay -loglevel error -nodisp -autoexit -
+dg speak "Hello from Flux" | ffplay -loglevel error -nodisp -autoexit -
+
+# Aura (v1, batch REST) — opt in with -m aura-*; needed for MP3 output
+dg speak "Welcome to Deepgram" -o welcome.mp3 -m aura-2-asteria-en
+dg speak --file script.txt -o output.mp3 -m aura-2-luna-en
+echo "Hello" | dg speak -o greeting.mp3 -m aura-2-asteria-en
 ```
 
 ### Text Intelligence
@@ -292,7 +293,7 @@ export DEEPGRAM_PROJECT_ID="your-project-id"
 
 # Non-interactive usage
 dg listen recording.wav
-dg speak "Deploy complete" -o notification.mp3
+dg speak "Deploy complete" -o notification.mp3 -m aura-2-asteria-en
 dg keys --create --comment "ci-key" --scopes member
 dg keys --delete KEY_ID --yes
 dg read --file report.txt --summarize
