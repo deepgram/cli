@@ -185,6 +185,8 @@ class SpeakCommand(BaseCommand):
         'dg speak "Hello" -m aura-2-asteria-en -o hello.mp3',
         'dg speak "Hello" -m aura-2-luna-en -o hello.wav --encoding linear16 --container wav',
         'echo "Hello" | dg speak -o hello.mp3 -m aura-2-asteria-en',
+        # Aura-2 Spanish voice (run `dg models` for the full list).
+        'dg speak "Hola, mundo" -m aura-2-selena-es -o hola.mp3',
     ]
     agent_help = (
         "Convert text to speech using Deepgram's TTS API. "

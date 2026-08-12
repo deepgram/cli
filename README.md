@@ -198,6 +198,10 @@ dg speak "A little slower" --speed 0.9 --expressivity 1 -o slow.wav
 dg speak "Welcome to Deepgram" -o welcome.mp3 -m aura-2-asteria-en
 dg speak --file script.txt -o output.mp3 -m aura-2-luna-en
 echo "Hello" | dg speak -o greeting.mp3 -m aura-2-asteria-en
+
+# Aura-2 also has Spanish voices (e.g. aura-2-selena-es); run `dg models`
+# for the full, current list.
+dg speak "Hola, bienvenido a Deepgram" -o hola.mp3 -m aura-2-selena-es
 ```
 
 ### Text Intelligence
