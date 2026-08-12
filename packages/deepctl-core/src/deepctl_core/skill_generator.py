@@ -470,7 +470,11 @@ def render_developer_guide(
     lines.append('client = DeepgramClient(api_key="DEEPGRAM_API_KEY")')
     lines.append("")
     lines.append("with client.speak.v2.connect(")
-    lines.append('    model="flux-alexis-en", encoding="linear16", sample_rate="24000"')
+    lines.append('    model="flux-alexis-en",')
+    lines.append('    encoding="linear16",')
+    lines.append('    sample_rate="24000",')
+    lines.append("    speed=1.0,  # 0.85–1.15 in 0.05 steps (optional)")
+    lines.append("    expressivity=0,  # -2..2, 0 = nominal (optional)")
     lines.append(") as conn:")
     lines.append(
         '    conn.send_speak(SpeakV2Speak(type="Speak", text="Hello from Flux!"))'

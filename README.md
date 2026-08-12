@@ -186,6 +186,10 @@ dg speak "Hello from Flux" -o hello.wav
 # end-of-stream notice (the audio is complete).
 dg speak "Hello from Flux" | ffplay -loglevel error -nodisp -autoexit -
 
+# Flux streaming controls (Flux only): --speed 0.85–1.15 (0.05 steps),
+# --expressivity -2..2 (0 = nominal delivery)
+dg speak "A little slower" --speed 0.9 --expressivity 1 -o slow.wav
+
 # Aura (v1, batch REST) — opt in with -m aura-*; needed for MP3 output
 dg speak "Welcome to Deepgram" -o welcome.mp3 -m aura-2-asteria-en
 dg speak --file script.txt -o output.mp3 -m aura-2-luna-en

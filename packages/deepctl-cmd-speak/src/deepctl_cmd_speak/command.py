@@ -27,6 +27,13 @@ if TYPE_CHECKING:
 
 console = Console(stderr=True)
 
+# Flux (Speak v2) streaming controls, per the /v2/speak API. `speed` is a
+# 0.05-increment multiplier and `expressivity` is a small integer range; both
+# are validated up front so we fail with a clear message instead of surfacing
+# a raw SPEED_OUT_OF_RANGE / server error mid-stream.
+_FLUX_SPEEDS = (0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15)
+_FLUX_EXPRESSIVITY = (-2, -1, 0, 1, 2)
+
 
 def _fmt_bytes(n: int) -> str:
     """Human-readable byte count for progress display."""
@@ -170,6 +177,9 @@ class SpeakCommand(BaseCommand):
         'dg speak "Hello world" -o hello.wav',
         "dg speak --file message.txt -o output.wav",
         'dg speak "Hello" | ffplay -loglevel error -nodisp -autoexit -',
+        # Flux streaming controls: --speed (0.85-1.15) and --expressivity (-2..2).
+        'dg speak "A little slower, please" --speed 0.9 -o slow.wav',
+        'dg speak "So exciting!" --expressivity 2 -o lively.wav',
         # Aura (Speak v1, batch REST) — opt in with -m aura-*; needed for
         # containerized formats like mp3.
         'dg speak "Hello" -m aura-2-asteria-en -o hello.mp3',
@@ -184,7 +194,9 @@ class SpeakCommand(BaseCommand):
         "v2, streaming over WebSocket and emitting raw audio; linear16 output is "
         "wrapped in a WAV container so it is directly playable. Pass an aura-* "
         "model to use Speak v1 (batch REST), which supports containerized "
-        "formats like mp3. Supports model selection and audio format options."
+        "formats like mp3. Supports model selection and audio format options. "
+        "Flux models also accept --speed (0.85–1.15) and --expressivity "
+        "(-2..2) streaming controls; these are rejected for Aura models."
     )
 
     def get_arguments(self) -> list[dict[str, Any]]:
@@ -238,6 +250,24 @@ class SpeakCommand(BaseCommand):
                 "is_option": True,
             },
             {
+                "names": ["--speed"],
+                "help": (
+                    "Flux (v2) only. Speech-rate multiplier: 0.85, 0.90, 0.95, "
+                    "1.00, 1.05, 1.10, or 1.15 (1.00 = nominal)."
+                ),
+                "type": float,
+                "is_option": True,
+            },
+            {
+                "names": ["--expressivity"],
+                "help": (
+                    "Flux (v2) only. Expressive range: -2, -1, 0, 1, or 2 "
+                    "(0 = nominal; negative flatter, positive more animated)."
+                ),
+                "type": int,
+                "is_option": True,
+            },
+            {
                 "names": ["--file", "-f"],
                 "help": "Read text from file",
                 "type": str,
@@ -258,6 +288,8 @@ class SpeakCommand(BaseCommand):
         encoding = kwargs.get("encoding")
         container = kwargs.get("container")
         sample_rate = kwargs.get("sample_rate")
+        speed = kwargs.get("speed")
+        expressivity = kwargs.get("expressivity")
         file_path = kwargs.get("file")
 
         # Resolve text input: arg > --file > stdin
@@ -288,6 +320,26 @@ class SpeakCommand(BaseCommand):
         # Flux models stream over the WebSocket (speak.v2); Aura uses REST (speak.v1).
         is_flux = model.lower().startswith("flux")
 
+        # speed / expressivity are Flux (Speak v2) connect controls; reject them
+        # for Aura rather than silently dropping them. Raise (not return) so the
+        # failure exits non-zero in every output mode.
+        if not is_flux and (speed is not None or expressivity is not None):
+            raise click.ClickException(
+                "--speed and --expressivity are only supported for Flux "
+                "(Speak v2) models (flux-*). They are not available for Aura "
+                f"(Speak v1) model '{model}'."
+            )
+        if speed is not None and speed not in _FLUX_SPEEDS:
+            allowed = ", ".join(f"{s:.2f}" for s in _FLUX_SPEEDS)
+            raise click.ClickException(
+                f"--speed must be one of: {allowed} (got {speed})."
+            )
+        if expressivity is not None and expressivity not in _FLUX_EXPRESSIVITY:
+            allowed = ", ".join(str(e) for e in _FLUX_EXPRESSIVITY)
+            raise click.ClickException(
+                f"--expressivity must be one of: {allowed} (got {expressivity})."
+            )
+
         if is_flux:
             # WebSocket streaming path. Streaming output is raw audio, so
             # default to linear16 @ 24kHz and wrap it in WAV for playback.
@@ -313,6 +365,8 @@ class SpeakCommand(BaseCommand):
                     model=model,
                     encoding=eff_encoding,
                     sample_rate=eff_sample_rate,
+                    speed=speed,
+                    expressivity=expressivity,
                 )
             )
 

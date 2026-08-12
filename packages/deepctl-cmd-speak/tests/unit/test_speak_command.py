@@ -94,6 +94,8 @@ class TestSpeakCommand:
         assert "--encoding" in option_names
         assert "--container" in option_names
         assert "--sample-rate" in option_names
+        assert "--speed" in option_names
+        assert "--expressivity" in option_names
         assert "--file" in option_names
         assert "-f" in option_names
 
@@ -368,6 +370,138 @@ class TestSpeakCommand:
                 encoding="mp3",
                 container=None,
                 sample_rate=None,
+                file=None,
+            )
+
+        mock_client.speak_text_stream.assert_not_called()
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_forwards_speed_and_expressivity(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """--speed / --expressivity reach speak_text_stream for flux-* models."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        pcm = b"\x01\x00\x02\x00"
+        mock_client.speak_text_stream.return_value = iter([pcm])
+
+        command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text="Hello",
+            output=str(tmp_path / "hello.wav"),
+            model="flux-alexis-en",
+            encoding=None,
+            container=None,
+            sample_rate=None,
+            speed=0.9,
+            expressivity=2,
+            file=None,
+        )
+
+        _, kwargs = mock_client.speak_text_stream.call_args
+        assert kwargs["speed"] == 0.9
+        assert kwargs["expressivity"] == 2
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_speed_rejected_for_aura(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """speed / expressivity are Flux-only; using them with Aura fails loudly."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        with pytest.raises(click.ClickException, match="only supported for Flux"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "x.mp3"),
+                model="aura-2-asteria-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                speed=1.0,
+                file=None,
+            )
+
+        mock_client.speak_text_stream.assert_not_called()
+        mock_client.speak_text.assert_not_called()
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_invalid_speed_rejected(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """An off-grid --speed value fails before opening a stream."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        with pytest.raises(click.ClickException, match="--speed must be one of"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "x.wav"),
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                speed=1.3,
+                file=None,
+            )
+
+        mock_client.speak_text_stream.assert_not_called()
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_invalid_expressivity_rejected(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """An out-of-range --expressivity value fails before opening a stream."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        with pytest.raises(
+            click.ClickException, match="--expressivity must be one of"
+        ):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "x.wav"),
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                expressivity=5,
                 file=None,
             )
 
