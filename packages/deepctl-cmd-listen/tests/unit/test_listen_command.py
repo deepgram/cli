@@ -53,6 +53,7 @@ class TestListenCommand:
             "--mic", "--model", "-m", "--language", "-l",
             "--diarize", "--smart-format", "--punctuate",
             "--summarize", "--topics", "--sentiment",
+            "--redact", "--numerals",
             "--interim", "--encoding", "--sample-rate", "--channels",
             "--save-to", "-s", "--probe", "--no-validate",
             "--webvtt", "--srt",
@@ -190,6 +191,87 @@ class TestListenCommand:
             call_kwargs = mock_pre.call_args.kwargs
             assert call_kwargs["is_url"] is False
             assert result.source == "file"
+
+    @patch("deepctl_cmd_listen.command._agentic", False)
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_passes_redact_and_numerals_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """--redact / --numerals reach _prerecorded."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="file", mode="prerecorded")
+
+        with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
+            with patch.object(
+                command, "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
+                command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    model="nova-3",
+                    language="en-US",
+                    redact="numbers",
+                    numerals=True,
+                )
+
+            call_kwargs = mock_pre.call_args.kwargs
+            assert call_kwargs["redact"] == "numbers"
+            assert call_kwargs["numerals"] is True
+
+    def test_ws_url_includes_redact_and_numerals(self, command):
+        """redact / numerals become query params on the streaming URL."""
+        ws_client = Mock()
+        ws_client.config.get_profile.return_value = Mock(
+            base_url="https://api.deepgram.com"
+        )
+
+        url = command._ws_url(
+            ws_client,
+            api_version=2,
+            model="flux-general-en",
+            language="en-US",
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            redact="aggressive_numbers",
+            numerals=True,
+        )
+
+        assert url.startswith("wss://api.deepgram.com/v2/listen?")
+        assert "redact=aggressive_numbers" in url
+        assert "numerals=true" in url
+
+    def test_ws_url_omits_redact_and_numerals_when_unset(self, command):
+        """Unset redact / numerals are not sent (defaults)."""
+        ws_client = Mock()
+        ws_client.config.get_profile.return_value = Mock(
+            base_url="https://api.deepgram.com"
+        )
+
+        url = command._ws_url(
+            ws_client,
+            api_version=1,
+            model="nova-3",
+            language="en-US",
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+        )
+
+        assert "redact=" not in url
+        assert "numerals=" not in url
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
@@ -360,3 +442,93 @@ class TestListenResult:
         assert result.mode == ""
         assert result.diarized is False
         assert result.full_result is None
+
+
+class TestFluxV2TurnHandling:
+    """Flux (listen v2) TurnInfo parsing and finalization."""
+
+    @pytest.fixture
+    def command(self):
+        return ListenCommand()
+
+    def _turn(self, event, transcript, *, turn_index=0, words=None):
+        import json as _json
+
+        return _json.dumps(
+            {
+                "type": "TurnInfo",
+                "event": event,
+                "turn_index": turn_index,
+                "transcript": transcript,
+                "words": words or [],
+            }
+        )
+
+    def test_end_of_turn_finalizes_transcript(self, command, capsys):
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        command._handle_ws_message(
+            self._turn("Update", "hello"),
+            acc, diarize=False, interim=False, v2_state=state,
+        )
+        # Update alone does not finalize.
+        assert acc == []
+
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "hello world"),
+            acc, diarize=False, interim=False, v2_state=state,
+        )
+        assert acc == ["hello world"]
+        assert "hello world" in capsys.readouterr().out
+
+    def test_flush_emits_unfinalized_final_turn(self, command, capsys):
+        """A stream that closes mid-turn still yields the latest transcript."""
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        # Turn grows across Updates but never gets an EndOfTurn.
+        for text in ("my", "my account", "my account number"):
+            command._handle_ws_message(
+                self._turn("Update", text),
+                acc, diarize=False, interim=False, v2_state=state,
+            )
+        assert acc == []  # nothing finalized yet
+
+        command._flush_v2(state, acc)
+        assert acc == ["my account number"]
+
+    def test_flush_does_not_double_emit_finalized_turn(self, command):
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "done"),
+            acc, diarize=False, interim=False, v2_state=state,
+        )
+        command._flush_v2(state, acc)
+        assert acc == ["done"]  # not duplicated
+
+    def test_multiple_turns_accumulate_in_order(self, command):
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "first turn", turn_index=0),
+            acc, diarize=False, interim=False, v2_state=state,
+        )
+        command._handle_ws_message(
+            self._turn("Update", "second turn", turn_index=1),
+            acc, diarize=False, interim=False, v2_state=state,
+        )
+        command._flush_v2(state, acc)
+        assert acc == ["first turn", "second turn"]
+
+    def test_turninfo_ignored_without_state(self, command):
+        """A v2 message with no state (v1 caller) is a no-op, not a crash."""
+        acc: list[str] = []
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "ignored"),
+            acc, diarize=False, interim=False, v2_state=None,
+        )
+        assert acc == []

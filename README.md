@@ -101,6 +101,10 @@ dg -o json listen standup.mp3 \
 # Live microphone with interim (partial) results
 dg listen --mic --model nova-3 --interim
 
+# Redact sensitive numbers and spell numbers as digits (files or live)
+# Flux/v2 accepts --redact numbers|aggressive_numbers; v1 also pci, ssn, …
+dg listen call.wav --redact numbers --numerals
+
 # Raw audio stream from ffmpeg
 ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - \
   | dg listen --encoding linear16

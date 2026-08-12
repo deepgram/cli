@@ -86,6 +86,8 @@ class ListenCommand(BaseCommand):
         "dg listen https://example.com/call.mp3 --diarize",
         "dg listen --mic --model nova-3 --interim",
         "dg listen audio.mp3 --diarize --summarize --save-to transcript.txt",
+        "dg listen call.wav --redact numbers --numerals",
+        "dg listen --mic --model flux-general-en --redact aggressive_numbers",
         "dg -o json listen audio.mp3 | jq '.results.channels[0].alternatives[0].transcript'",
         "ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - | dg listen --encoding linear16",
         "dg listen -  # read raw audio from stdin interactively",
@@ -172,6 +174,25 @@ class ListenCommand(BaseCommand):
             {
                 "names": ["--sentiment"],
                 "help": "Analyse sentiment (pre-recorded only)",
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--redact"],
+                "help": (
+                    "Redact sensitive content. Flux/v2 accepts 'numbers' or "
+                    "'aggressive_numbers'; v1 models also accept 'pci', 'ssn', "
+                    "etc. Applies to files and live streams."
+                ),
+                "type": str,
+                "is_option": True,
+            },
+            {
+                "names": ["--numerals"],
+                "help": (
+                    "Convert spoken numbers to digits ('four twenty' -> '420'). "
+                    "Applies to files and live streams."
+                ),
                 "is_flag": True,
                 "is_option": True,
             },
@@ -301,6 +322,8 @@ class ListenCommand(BaseCommand):
         topics = kwargs.get("topics", False)
         sentiment = kwargs.get("sentiment", False)
         interim = kwargs.get("interim", False)
+        redact = kwargs.get("redact")
+        numerals = kwargs.get("numerals", False)
         encoding = kwargs.get("encoding")
         sample_rate = kwargs.get("sample_rate") or 16000
         channels = kwargs.get("channels") or 1
@@ -342,6 +365,8 @@ class ListenCommand(BaseCommand):
                 summarize=summarize,
                 topics=topics,
                 sentiment=sentiment,
+                redact=redact,
+                numerals=numerals,
                 save_to=save_to,
                 probe=probe,
                 no_validate=no_validate,
@@ -363,6 +388,8 @@ class ListenCommand(BaseCommand):
                 summarize=summarize,
                 topics=topics,
                 sentiment=sentiment,
+                redact=redact,
+                numerals=numerals,
                 save_to=save_to,
                 probe=False,
                 no_validate=no_validate,
@@ -379,6 +406,8 @@ class ListenCommand(BaseCommand):
                 smart_format=smart_format,
                 punctuate=punctuate,
                 interim=interim,
+                redact=redact,
+                numerals=numerals,
                 sample_rate=sample_rate,
                 channels=channels,
                 save_to=save_to,
@@ -394,6 +423,8 @@ class ListenCommand(BaseCommand):
                 smart_format=smart_format,
                 punctuate=punctuate,
                 interim=interim,
+                redact=redact,
+                numerals=numerals,
                 encoding=encoding,
                 sample_rate=sample_rate,
                 channels=channels,
@@ -465,6 +496,8 @@ class ListenCommand(BaseCommand):
         summarize: bool,
         topics: bool,
         sentiment: bool,
+        redact: str | None,
+        numerals: bool,
         save_to: str | None,
         probe: bool,
         no_validate: bool,
@@ -533,6 +566,10 @@ class ListenCommand(BaseCommand):
             options["topics"] = "true"
         if sentiment:
             options["sentiment"] = "true"
+        if redact:
+            options["redact"] = redact
+        if numerals:
+            options["numerals"] = "true"
 
         # ── Call API ───────────────────────────────────────────────────
         status.print(f"[dim]Transcribing[/dim] {source}")
@@ -607,6 +644,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: str | None,
+        numerals: bool,
         sample_rate: int,
         channels: int,
         save_to: str | None,
@@ -641,6 +680,8 @@ class ListenCommand(BaseCommand):
                     smart_format=smart_format,
                     punctuate=punctuate,
                     interim=interim,
+                    redact=redact,
+                    numerals=numerals,
                     sample_rate=sample_rate,
                     channels=channels,
                     caption_writer=caption_writer,
@@ -690,6 +731,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: str | None,
+        numerals: bool,
         sample_rate: int,
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
@@ -707,12 +750,15 @@ class ListenCommand(BaseCommand):
             smart_format=smart_format,
             punctuate=punctuate,
             interim=interim,
+            redact=redact,
+            numerals=numerals,
             encoding="linear16",
             sample_rate=sample_rate,
             channels=channels,
         )
         api_key = client.auth_manager.get_api_key()
         full_transcript: list[str] = []
+        v2_state = self._new_v2_state() if api_version >= 2 else None
         stop_event = threading.Event()
 
         async with websockets.connect(
@@ -756,6 +802,7 @@ class ListenCommand(BaseCommand):
                         diarize=diarize,
                         interim=interim,
                         caption_writer=caption_writer,
+                        v2_state=v2_state,
                     )
 
             send_task = asyncio.create_task(send_audio())
@@ -766,6 +813,10 @@ class ListenCommand(BaseCommand):
                 stop_event.set()
                 send_task.cancel()
                 recv_task.cancel()
+
+        # Flux may close mid-turn without an EndOfTurn; emit what we have.
+        if v2_state is not None:
+            self._flush_v2(v2_state, full_transcript, caption_writer=caption_writer)
 
         return ListenResult(
             status="success",
@@ -791,6 +842,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: str | None,
+        numerals: bool,
         encoding: str | None,
         sample_rate: int,
         channels: int,
@@ -831,6 +884,8 @@ class ListenCommand(BaseCommand):
                     smart_format=smart_format,
                     punctuate=punctuate,
                     interim=interim,
+                    redact=redact,
+                    numerals=numerals,
                     encoding=resolved_encoding,
                     sample_rate=sample_rate,
                     channels=channels,
@@ -867,6 +922,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: str | None,
+        numerals: bool,
         encoding: str,
         sample_rate: int,
         channels: int,
@@ -883,12 +940,15 @@ class ListenCommand(BaseCommand):
             smart_format=smart_format,
             punctuate=punctuate,
             interim=interim,
+            redact=redact,
+            numerals=numerals,
             encoding=encoding,
             sample_rate=sample_rate,
             channels=channels,
         )
         api_key = client.auth_manager.get_api_key()
         full_transcript: list[str] = []
+        v2_state = self._new_v2_state() if api_version >= 2 else None
 
         async with websockets.connect(
             url, additional_headers={"Authorization": f"Token {api_key}"}
@@ -911,9 +971,14 @@ class ListenCommand(BaseCommand):
                         diarize=diarize,
                         interim=interim,
                         caption_writer=caption_writer,
+                        v2_state=v2_state,
                     )
 
             await asyncio.gather(send_audio(), recv_transcripts())
+
+        # Flux may close mid-turn without an EndOfTurn; emit what we have.
+        if v2_state is not None:
+            self._flush_v2(v2_state, full_transcript, caption_writer=caption_writer)
 
         return ListenResult(
             status="success",
@@ -942,20 +1007,36 @@ class ListenCommand(BaseCommand):
         encoding: str,
         sample_rate: int,
         channels: int,
+        redact: str | None = None,
+        numerals: bool = False,
     ) -> str:
+        # v1 and v2 (Flux) have different query-param vocabularies. The v2
+        # endpoint rejects v1-only params (language, smart_format, punctuate,
+        # channels, diarize, interim_results) with HTTP 400, so build the
+        # param set per version rather than sending the v1 shape to both.
         params: dict[str, Any] = {
             "model": model,
-            "language": language,
-            "smart_format": "true" if smart_format else "false",
-            "punctuate": "true" if punctuate else "false",
             "encoding": encoding,
             "sample_rate": sample_rate,
-            "channels": channels,
         }
-        if diarize:
-            params["diarize"] = "true"
-        if interim:
-            params["interim_results"] = "true"
+        if api_version >= 2:
+            # Flux (listen v2): turn-based, no interim/diarize/smart_format;
+            # language is encoded in the model name (e.g. flux-general-en).
+            pass
+        else:
+            params["language"] = language
+            params["smart_format"] = "true" if smart_format else "false"
+            params["punctuate"] = "true" if punctuate else "false"
+            params["channels"] = channels
+            if diarize:
+                params["diarize"] = "true"
+            if interim:
+                params["interim_results"] = "true"
+        # redact / numerals are valid on both versions.
+        if redact:
+            params["redact"] = redact
+        if numerals:
+            params["numerals"] = "true"
         base = _ws_base(client)
         return f"{base}/v{api_version}/listen?{urlencode(params)}"
 
@@ -967,14 +1048,33 @@ class ListenCommand(BaseCommand):
         diarize: bool,
         interim: bool,
         caption_writer: StreamingCaptionWriter | None = None,
+        v2_state: dict[str, Any] | None = None,
     ) -> None:
-        """Parse one WebSocket message and print/accumulate the transcript."""
+        """Parse one WebSocket message and print/accumulate the transcript.
+
+        Handles both v1 (`Results`) and Flux/v2 (`TurnInfo`) message shapes;
+        other control frames (Connected, Metadata, …) are ignored. Flux turns
+        are stateful, so v2 callers must pass a ``v2_state`` dict (see
+        ``_new_v2_state``) and call ``_flush_v2`` once the stream closes.
+        """
         try:
             data = json.loads(raw_msg)
         except Exception:
             return
 
-        if data.get("type") != "Results":
+        msg_type = data.get("type")
+        if msg_type == "TurnInfo":
+            if v2_state is not None:
+                self._handle_v2_turn(
+                    data,
+                    transcript_acc,
+                    v2_state,
+                    interim=interim,
+                    caption_writer=caption_writer,
+                )
+            return
+
+        if msg_type != "Results":
             return
 
         channel = data.get("channel", {})
@@ -1013,6 +1113,90 @@ class ListenCommand(BaseCommand):
             transcript = alt.get("transcript", "")
             if transcript:
                 print(f"\r{transcript}          ", end="", flush=True)
+
+    @staticmethod
+    def _new_v2_state() -> dict[str, Any]:
+        """Per-stream state for Flux (v2) turn tracking. See ``_handle_v2_turn``."""
+        return {"turns": {}, "order": []}
+
+    def _handle_v2_turn(
+        self,
+        data: dict[str, Any],
+        transcript_acc: list[str],
+        v2_state: dict[str, Any],
+        *,
+        interim: bool,
+        caption_writer: StreamingCaptionWriter | None = None,
+    ) -> None:
+        """Render a Flux (listen v2) ``TurnInfo`` message.
+
+        Flux is turn-based: a turn's transcript grows across ``Update`` /
+        ``StartOfTurn`` events and is finalized by ``EndOfTurn`` (the analogue
+        of v1's ``is_final``). But a finite file/stdin stream often ends
+        mid-turn, so the final turn may never get an ``EndOfTurn`` — we keep
+        the latest transcript per turn and ``_flush_v2`` emits any turn left
+        unfinalized when the socket closes. Diarization is not a v2 feature,
+        so there are no speaker labels here.
+        """
+        turn_index = data.get("turn_index", 0)
+        transcript = data.get("transcript", "")
+        event = data.get("event")
+
+        turns = v2_state["turns"]
+        st = turns.get(turn_index)
+        if st is None:
+            st = {"transcript": "", "words": [], "final": False}
+            turns[turn_index] = st
+            v2_state["order"].append(turn_index)
+
+        # Keep the most complete transcript seen for this turn.
+        if transcript:
+            st["transcript"] = transcript
+            st["words"] = data.get("words", [])
+
+        if event == "EndOfTurn":
+            self._emit_v2_turn(st, transcript_acc, caption_writer=caption_writer)
+        elif event == "Update" and interim and not caption_writer and transcript:
+            print(f"\r{transcript}          ", end="", flush=True)
+
+    def _emit_v2_turn(
+        self,
+        st: dict[str, Any],
+        transcript_acc: list[str],
+        *,
+        caption_writer: StreamingCaptionWriter | None,
+    ) -> None:
+        """Finalize one Flux turn: print it (or route words to captions) once."""
+        if st["final"]:
+            return
+        st["final"] = True
+        transcript = st["transcript"]
+        if not transcript:
+            return
+        words = st["words"]
+        if caption_writer and words:
+            start = words[0].get("start", 0.0)
+            end = words[-1].get("end", start)
+            caption_writer.write_entry(words, start, end)
+            transcript_acc.append(transcript)
+        else:
+            transcript_acc.append(transcript)
+            print(transcript, flush=True)
+
+    def _flush_v2(
+        self,
+        v2_state: dict[str, Any],
+        transcript_acc: list[str],
+        *,
+        caption_writer: StreamingCaptionWriter | None = None,
+    ) -> None:
+        """Emit any Flux turns the stream closed without an ``EndOfTurn``."""
+        for turn_index in v2_state["order"]:
+            self._emit_v2_turn(
+                v2_state["turns"][turn_index],
+                transcript_acc,
+                caption_writer=caption_writer,
+            )
 
     # ── Output rendering ───────────────────────────────────────────────
 
