@@ -71,6 +71,50 @@ class TestWsUrl:
     def test_v2_path(self, command, mock_client):
         assert "/v2/listen?" in self._url(command, mock_client, api_version=2)
 
+    def test_v2_omits_v1_only_params(self, command, mock_client):
+        """Flux (v2) rejects v1-only params with HTTP 400, so they must not be
+        sent. This locks in the fix; a regression would silently break Flux STT.
+        """
+        url = self._url(
+            command,
+            mock_client,
+            api_version=2,
+            diarize=True,
+            interim=True,
+        )
+        for banned in (
+            "language=",
+            "smart_format=",
+            "punctuate=",
+            "channels=",
+            "diarize=",
+            "interim_results=",
+        ):
+            assert banned not in url, f"v2 URL must not contain {banned!r}: {url}"
+        # The params v2 does accept are still present.
+        assert "model=" in url
+        assert "encoding=" in url
+        assert "sample_rate=" in url
+
+    def test_v1_includes_v1_params(self, command, mock_client):
+        """v1 keeps sending the classic params (contrast with v2)."""
+        url = self._url(
+            command,
+            mock_client,
+            api_version=1,
+            diarize=True,
+            interim=True,
+        )
+        for expected in (
+            "language=",
+            "smart_format=",
+            "punctuate=",
+            "channels=",
+            "diarize=true",
+            "interim_results=true",
+        ):
+            assert expected in url, f"v1 URL should contain {expected!r}: {url}"
+
     def test_model_param(self, command, mock_client):
         assert "model=nova-3" in self._url(command, mock_client, model="nova-3")
 
