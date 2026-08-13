@@ -180,7 +180,7 @@ class ListenCommand(BaseCommand):
             {
                 "names": ["--redact"],
                 "help": (
-                    "Redact sensitive content. Flux/v2 accepts 'numbers' or "
+                    "Redact sensitive content. Flux STT (v2) accepts 'numbers' or "
                     "'aggressive_numbers'; v1 models also accept 'pci', 'ssn', "
                     "etc. Applies to files and live streams."
                 ),
@@ -327,6 +327,19 @@ class ListenCommand(BaseCommand):
         encoding = kwargs.get("encoding")
         sample_rate = kwargs.get("sample_rate") or 16000
         channels = kwargs.get("channels") or 1
+
+        # Flux STT (listen v2) is turn-based and has no diarization; --diarize
+        # is dropped from the v2 param set (sending it earns an HTTP 400). It
+        # defaults to False, so if it's set the user asked for it explicitly —
+        # say we're ignoring it rather than letting it vanish silently.
+        # (smart_format / punctuate default to True and can't be told apart
+        # from an explicit flag, so they stay silent; --interim still gates
+        # client-side display.)
+        if api_version >= 2 and diarize:
+            status.print(
+                "[yellow]Note:[/yellow] --diarize is not supported by Flux STT "
+                "(listen v2) models; ignoring it."
+            )
         save_to = kwargs.get("save_to")
         probe = kwargs.get("probe", False)
         no_validate = kwargs.get("no_validate", False)

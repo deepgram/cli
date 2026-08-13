@@ -34,7 +34,7 @@ keywords = [
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
-    "deepgram-sdk>=7.7.0",
+    "deepgram-sdk>=7.7.0,<8",
     "deepctl-core>=0.1.10",
     "deepctl-cmd-login>=0.1.10",
     "deepctl-cmd-projects>=0.1.10",

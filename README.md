@@ -102,7 +102,7 @@ dg -o json listen standup.mp3 \
 dg listen --mic --model nova-3 --interim
 
 # Redact sensitive numbers and spell numbers as digits (files or live)
-# Flux/v2 accepts --redact numbers|aggressive_numbers; v1 also pci, ssn, …
+# Flux STT (v2) accepts --redact numbers|aggressive_numbers; v1 also pci, ssn, …
 dg listen call.wav --redact numbers --numerals
 
 # Raw audio stream from ffmpeg
@@ -190,7 +190,7 @@ dg speak "Hello from Flux" -o hello.wav
 # end-of-stream notice (the audio is complete).
 dg speak "Hello from Flux" | ffplay -loglevel error -nodisp -autoexit -
 
-# Flux streaming controls (Flux only): --speed 0.85–1.15 (0.05 steps),
+# Flux TTS streaming controls (flux-* only): --speed 0.85–1.15 (0.05 steps),
 # --expressivity -2..2 (0 = nominal delivery)
 dg speak "A little slower" --speed 0.9 --expressivity 1 -o slow.wav
 

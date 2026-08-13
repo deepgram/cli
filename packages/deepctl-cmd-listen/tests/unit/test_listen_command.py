@@ -134,6 +134,54 @@ class TestListenCommand:
             assert call_kwargs["encoding"] == "linear16"
             assert result.source == "stdin"
 
+    @patch("deepctl_cmd_listen.command.status")
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_warns_diarize_ignored_on_flux(
+        self, mock_sys, mock_status, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """--diarize on a Flux STT (v2) model warns instead of vanishing silently."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="mic", mode="live")
+
+        with patch.object(command, "_stream_mic", return_value=expected):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                mic=True,
+                model="flux-general-en",
+                diarize=True,
+            )
+
+        printed = " ".join(
+            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
+        )
+        assert "not supported by Flux STT" in printed
+
+    @patch("deepctl_cmd_listen.command.status")
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_no_diarize_warning_on_v1(
+        self, mock_sys, mock_status, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """v1 models keep diarization — no spurious warning."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="mic", mode="live")
+
+        with patch.object(command, "_stream_mic", return_value=expected):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                mic=True,
+                model="nova-3",
+                diarize=True,
+            )
+
+        printed = " ".join(
+            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
+        )
+        assert "not supported by Flux STT" not in printed
+
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_mic_routes_to_stream_mic(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client

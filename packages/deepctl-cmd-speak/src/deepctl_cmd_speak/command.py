@@ -177,7 +177,7 @@ class SpeakCommand(BaseCommand):
         'dg speak "Hello world" -o hello.wav',
         "dg speak --file message.txt -o output.wav",
         'dg speak "Hello" | ffplay -loglevel error -nodisp -autoexit -',
-        # Flux streaming controls: --speed (0.85-1.15) and --expressivity (-2..2).
+        # Flux TTS streaming controls: --speed (0.85-1.15) and --expressivity (-2..2).
         'dg speak "A little slower, please" --speed 0.9 -o slow.wav',
         'dg speak "So exciting!" --expressivity 2 -o lively.wav',
         # Aura (Speak v1, batch REST) — opt in with -m aura-*; needed for
@@ -197,7 +197,7 @@ class SpeakCommand(BaseCommand):
         "wrapped in a WAV container so it is directly playable. Pass an aura-* "
         "model to use Speak v1 (batch REST), which supports containerized "
         "formats like mp3. Supports model selection and audio format options. "
-        "Flux models also accept --speed (0.85–1.15) and --expressivity "
+        "Flux TTS models also accept --speed (0.85–1.15) and --expressivity "
         "(-2..2) streaming controls; these are rejected for Aura models."
     )
 
@@ -254,7 +254,7 @@ class SpeakCommand(BaseCommand):
             {
                 "names": ["--speed"],
                 "help": (
-                    "Flux (v2) only. Speech-rate multiplier: 0.85, 0.90, 0.95, "
+                    "Flux TTS (v2) only. Speech-rate multiplier: 0.85, 0.90, 0.95, "
                     "1.00, 1.05, 1.10, or 1.15 (1.00 = nominal)."
                 ),
                 "type": float,
@@ -263,7 +263,7 @@ class SpeakCommand(BaseCommand):
             {
                 "names": ["--expressivity"],
                 "help": (
-                    "Flux (v2) only. Expressive range: -2, -1, 0, 1, or 2 "
+                    "Flux TTS (v2) only. Expressive range: -2, -1, 0, 1, or 2 "
                     "(0 = nominal; negative flatter, positive more animated)."
                 ),
                 "type": int,
@@ -327,7 +327,7 @@ class SpeakCommand(BaseCommand):
         # failure exits non-zero in every output mode.
         if not is_flux and (speed is not None or expressivity is not None):
             raise click.ClickException(
-                "--speed and --expressivity are only supported for Flux "
+                "--speed and --expressivity are only supported for Flux TTS "
                 "(Speak v2) models (flux-*). They are not available for Aura "
                 f"(Speak v1) model '{model}'."
             )
