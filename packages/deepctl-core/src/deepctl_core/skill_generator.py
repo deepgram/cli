@@ -417,7 +417,8 @@ def render_developer_guide(
     lines.append("## Text-to-Speech (TTS)")
     lines.append("")
     lines.append(
-        "Generate natural-sounding speech from text using Deepgram's Aura voices."
+        "Generate natural-sounding speech from text using Deepgram's Aura and "
+        "Flux voices."
     )
     lines.append("")
     lines.append("### Models")
@@ -463,6 +464,10 @@ def render_developer_guide(
     lines.append("")
     lines.append("### Flux TTS — Speak v2, WebSocket streaming (Python)")
     lines.append("")
+    lines.append(
+        "`expressivity` is beta and defaults to `0` (nominal delivery) when omitted."
+    )
+    lines.append("")
     lines.append("```python")
     lines.append("from deepgram import DeepgramClient")
     lines.append("from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak")
@@ -474,7 +479,7 @@ def render_developer_guide(
     lines.append('    encoding="linear16",')
     lines.append('    sample_rate="24000",')
     lines.append("    speed=1.0,  # 0.85–1.15 in 0.05 steps (optional)")
-    lines.append("    expressivity=0,  # -2..2, 0 = nominal (optional)")
+    lines.append("    expressivity=0,  # beta; -2..2, default 0 = nominal (optional)")
     lines.append(") as conn:")
     lines.append(
         '    conn.send_speak(SpeakV2Speak(type="Speak", text="Hello from Flux!"))'

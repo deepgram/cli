@@ -177,9 +177,10 @@ class SpeakCommand(BaseCommand):
         'dg speak "Hello world" -o hello.wav',
         "dg speak --file message.txt -o output.wav",
         'dg speak "Hello" | ffplay -loglevel error -nodisp -autoexit -',
-        # Flux TTS streaming controls: --speed (0.85-1.15) and --expressivity (-2..2).
+        # Flux TTS streaming controls: --speed (0.85-1.15) and beta
+        # --expressivity (-2..2, default 0).
         'dg speak "A little slower, please" --speed 0.9 -o slow.wav',
-        'dg speak "So exciting!" --expressivity 2 -o lively.wav',
+        'dg speak "So exciting!" --expressivity 2 -o lively.wav  # beta; default: 0',
         # Aura (Speak v1, batch REST) — opt in with -m aura-*; needed for
         # containerized formats like mp3.
         'dg speak "Hello" -m aura-2-asteria-en -o hello.mp3',
@@ -197,8 +198,9 @@ class SpeakCommand(BaseCommand):
         "wrapped in a WAV container so it is directly playable. Pass an aura-* "
         "model to use Speak v1 (batch REST), which supports containerized "
         "formats like mp3. Supports model selection and audio format options. "
-        "Flux TTS models also accept --speed (0.85–1.15) and --expressivity "
-        "(-2..2) streaming controls; these are rejected for Aura models."
+        "Flux TTS models also accept --speed (0.85–1.15) and beta "
+        "--expressivity (-2..2; default 0 = nominal) streaming controls; these "
+        "are rejected for other models."
     )
 
     def get_arguments(self) -> list[dict[str, Any]]:
@@ -264,8 +266,8 @@ class SpeakCommand(BaseCommand):
                 "names": ["--expressivity"],
                 "help": (
                     "Flux TTS (v2) only, beta. Expressive range: -2, -1, 0, 1, "
-                    "or 2 (0 = nominal; negative flatter, positive more animated). "
-                    "Fixed for the connection."
+                    "or 2 (default 0 = nominal; negative flatter, positive more "
+                    "animated). Fixed for the connection."
                 ),
                 "type": int,
                 "is_option": True,
@@ -320,17 +322,18 @@ class SpeakCommand(BaseCommand):
                 message="No output specified. Use -o/--output to save to file, or pipe stdout.",
             )
 
-        # Flux models stream over the WebSocket (speak.v2); Aura uses REST (speak.v1).
-        is_flux = model.lower().startswith("flux")
+        # Only the documented flux-* namespace uses speak.v2. Aura and unknown
+        # model names pass through to the REST API so the service can resolve them.
+        is_flux = model.lower().startswith("flux-")
 
         # speed / expressivity are Flux (Speak v2) connect controls; reject them
-        # for Aura rather than silently dropping them. Raise (not return) so the
-        # failure exits non-zero in every output mode.
+        # for other models rather than silently dropping them. Raise (not return)
+        # so the failure exits non-zero in every output mode.
         if not is_flux and (speed is not None or expressivity is not None):
             raise click.ClickException(
                 "--speed and --expressivity are only supported for Flux TTS "
-                "(Speak v2) models (flux-*). They are not available for Aura "
-                f"(Speak v1) model '{model}'."
+                "(Speak v2) models (flux-*). They are not available for "
+                f"Speak v1 model '{model}'."
             )
         if speed is not None and speed not in _FLUX_SPEEDS:
             allowed = ", ".join(f"{s:.2f}" for s in _FLUX_SPEEDS)
@@ -452,7 +455,7 @@ class SpeakCommand(BaseCommand):
             # to the stderr console.
             return None
 
-        # REST path (Aura v1) — unchanged.
+        # REST path (Speak v1, including Aura and unknown-model pass-through).
         try:
             console.print(f"[blue]Generating speech with {model}...[/blue]")
 

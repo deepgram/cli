@@ -343,6 +343,52 @@ class TestDeepgramClient:
             text="Hello world", model="aura-2-asteria-en"
         )
 
+    def test_speak_text_stream_forwards_flux_controls(self, client):
+        """Speed and expressivity reach the SDK's Speak v2 connect call."""
+        mock_sdk_client = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.__iter__.return_value = iter([b"audio"])
+        mock_sdk_client.speak.v2.connect.return_value.__enter__.return_value = (
+            mock_connection
+        )
+        client._client = mock_sdk_client
+
+        result = list(
+            client.speak_text_stream(
+                "Hello world",
+                model="flux-alexis-en",
+                encoding="linear16",
+                sample_rate=24000,
+                speed=0.9,
+                expressivity=2,
+            )
+        )
+
+        assert result == [b"audio"]
+        mock_sdk_client.speak.v2.connect.assert_called_once_with(
+            model="flux-alexis-en",
+            encoding="linear16",
+            sample_rate="24000",
+            speed=0.9,
+            expressivity=2,
+        )
+
+    def test_speak_text_stream_omits_unset_flux_controls(self, client):
+        """Unset controls are omitted rather than sent as null query values."""
+        mock_sdk_client = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.__iter__.return_value = iter([])
+        mock_sdk_client.speak.v2.connect.return_value.__enter__.return_value = (
+            mock_connection
+        )
+        client._client = mock_sdk_client
+
+        assert (
+            list(client.speak_text_stream("Hello world", model="flux-alexis-en")) == []
+        )
+
+        mock_sdk_client.speak.v2.connect.assert_called_once_with(model="flux-alexis-en")
+
     @patch("deepctl_core.client.DGClient")
     def test_analyze_text(self, mock_dg_client, client):
         """Test analyzing text."""

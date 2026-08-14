@@ -2,10 +2,59 @@
 
 from unittest.mock import Mock, patch
 
+import click
 import pytest
+from click.testing import CliRunner
 from deepctl_cmd_listen.command import ListenCommand
 from deepctl_cmd_listen.models import ListenResult
-from deepctl_core import AuthManager, BaseResult, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseResult,
+    Config,
+    DeepgramClient,
+    PluginManager,
+)
+
+
+def _install_flux_error_websockets(monkeypatch):
+    import json
+    import sys
+    import types
+
+    error_frame = json.dumps(
+        {
+            "type": "Error",
+            "code": "INVALID_AUDIO",
+            "description": "audio stream is invalid",
+        }
+    )
+
+    class _FakeWS:
+        def __init__(self):
+            self.messages = iter([error_frame])
+
+        async def send(self, _data):
+            return None
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.messages)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+    class _FakeConnect:
+        async def __aenter__(self):
+            return _FakeWS()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    fake_websockets = types.ModuleType("websockets")
+    fake_websockets.connect = lambda *_args, **_kwargs: _FakeConnect()
+    monkeypatch.setitem(sys.modules, "websockets", fake_websockets)
 
 
 class TestListenCommand:
@@ -28,6 +77,20 @@ class TestListenCommand:
     @pytest.fixture
     def mock_client(self):
         return Mock(spec=DeepgramClient)
+
+    def invoke_click(self, command, mock_config, args, *, input=None):
+        mock_config.get.side_effect = lambda key, default=None: (
+            True if key == "output.quiet" else default
+        )
+        mock_config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        click_command = PluginManager()._create_click_command(command)
+        with patch("deepctl_core.base_command.AuthManager.guard"):
+            return CliRunner().invoke(
+                click_command,
+                args,
+                input=input,
+                obj={"config": mock_config},
+            )
 
     def test_command_properties(self, command):
         assert command.name == "listen"
@@ -169,10 +232,17 @@ class TestListenCommand:
     ):
         """--diarize on a Flux STT (v2) model warns instead of vanishing silently."""
         mock_sys.stdin.isatty.return_value = True
-        expected = ListenResult(status="success", source="mic", mode="live")
 
-        with patch.object(command, "_stream_mic", return_value=expected):
-            command.handle(
+        async def fake_ws_mic(_client, **kwargs):
+            return ListenResult(
+                status="success",
+                source="mic",
+                mode="live",
+                diarized=kwargs["diarize"],
+            )
+
+        with patch.object(command, "_ws_mic", side_effect=fake_ws_mic) as mock_ws:
+            result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
                 client=mock_client,
@@ -185,6 +255,9 @@ class TestListenCommand:
             str(c.args[0]) for c in mock_status.print.call_args_list if c.args
         )
         assert "not supported by Flux STT" in printed
+        assert "Speaker labels enabled" not in printed
+        assert mock_ws.call_args.kwargs["diarize"] is False
+        assert result.diarized is False
 
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
@@ -216,35 +289,44 @@ class TestListenCommand:
         )
         assert "not supported by Flux STT" not in printed
 
-    def test_handle_flux_prerecorded_file_errors(
-        self, command, mock_config, mock_auth_manager, mock_client
-    ):
-        """Flux STT + a file errors up front (v2 is streaming-only)."""
-        result = command.handle(
-            config=mock_config,
-            auth_manager=mock_auth_manager,
-            client=mock_client,
-            source="call.wav",
-            model="flux-general-en",
+    @pytest.mark.parametrize("source", ["call.wav", "https://example.com/call.wav"])
+    def test_click_flux_prerecorded_source_errors(self, source, command, mock_config):
+        """Flux STT file/URL guards are visible and exit non-zero."""
+        result = self.invoke_click(
+            command,
+            mock_config,
+            [source, "--model", "flux-general-en"],
         )
-        assert result.status == "error"
-        assert "streaming-only" in result.message
+        assert result.exit_code == 1
+        assert "streaming-only" in result.stderr
 
-    def test_handle_flux_invalid_redact_errors(
-        self, command, mock_config, mock_auth_manager, mock_client
-    ):
-        """A v1-only --redact value on Flux STT errors instead of a raw 400."""
-        result = command.handle(
-            config=mock_config,
-            auth_manager=mock_auth_manager,
-            client=mock_client,
-            mic=True,
-            model="flux-general-en",
-            redact="pci",
+    def test_click_flux_invalid_redact_errors(self, command, mock_config):
+        """An invalid Flux redact guard is visible and exits non-zero."""
+        result = self.invoke_click(
+            command,
+            mock_config,
+            ["--mic", "--model", "flux-general-en", "--redact", "pci"],
         )
-        assert result.status == "error"
-        assert "pci" in result.message
-        assert "aggressive_numbers" in result.message
+        assert result.exit_code == 1
+        assert "pci" in result.stderr
+        assert "aggressive_numbers" in result.stderr
+
+    def test_click_flux_error_frame_exits_nonzero(
+        self, command, mock_config, monkeypatch
+    ):
+        """A stdin Error frame propagates through the stream and Click boundary."""
+        _install_flux_error_websockets(monkeypatch)
+
+        result = self.invoke_click(
+            command,
+            mock_config,
+            ["-", "--model", "flux-general-en", "--encoding", "linear16"],
+            input=b"",
+        )
+
+        assert result.exit_code == 1
+        assert "INVALID_AUDIO" in result.stderr
+        assert "audio stream is invalid" in result.stderr
 
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_mic_routes_to_stream_mic(
@@ -931,23 +1013,99 @@ class TestFluxV2TurnHandling:
         assert (spread[0]["start"], spread[0]["end"]) == (0.0, 1.0)
         assert (spread[1]["start"], spread[1]["end"]) == (1.0, 2.0)
 
-    def test_fatal_error_frame_is_surfaced(self, command, capsys):
-        """A Flux STT fatal error (type 'Error') is reported, not swallowed."""
+    def test_timed_v2_words_backfills_partial_and_null_timings(self, command):
+        partial = command._timed_v2_words(
+            [{"word": "a", "start": 0.1}, {"word": "b", "end": 1.8}],
+            "a b",
+            0.0,
+            2.0,
+        )
+        assert partial == [
+            {"word": "a", "start": 0.1, "end": 1.0},
+            {"word": "b", "start": 1.0, "end": 1.8},
+        ]
+
+        explicit_null = command._timed_v2_words(
+            [{"word": "a", "start": None, "end": None}],
+            "a",
+            3.0,
+            4.0,
+        )
+        assert explicit_null == [{"word": "a", "start": 3.0, "end": 4.0}]
+
+    def test_fatal_error_frame_raises_code_and_description(self, command):
+        """A Flux STT fatal error carries both server fields to the caller."""
         import json as _json
 
         acc: list[str] = []
-        command._handle_ws_message(
-            _json.dumps(
-                {
-                    "type": "Error",
-                    "code": "INTERNAL_SERVER_ERROR",
-                    "description": "something went wrong",
-                }
-            ),
-            acc,
-            diarize=False,
-            interim=False,
-            v2_state=command._new_v2_state(),
-        )
+        with pytest.raises(click.ClickException) as exc_info:
+            command._handle_ws_message(
+                _json.dumps(
+                    {
+                        "type": "Error",
+                        "code": "INTERNAL_SERVER_ERROR",
+                        "description": "something went wrong",
+                    }
+                ),
+                acc,
+                diarize=False,
+                interim=False,
+                v2_state=command._new_v2_state(),
+            )
         assert acc == []
-        assert "something went wrong" in capsys.readouterr().err
+        assert "INTERNAL_SERVER_ERROR" in exc_info.value.message
+        assert "something went wrong" in exc_info.value.message
+
+    def test_stream_mic_flux_error_frame_does_not_return_success(
+        self, command, monkeypatch
+    ):
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        _install_flux_error_websockets(monkeypatch)
+
+        class _FakeInputStream:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+            def close(self):
+                pass
+
+        fake_sounddevice = types.ModuleType("sounddevice")
+        fake_sounddevice.RawInputStream = _FakeInputStream
+        fake_numpy = types.ModuleType("numpy")
+        fake_numpy.int16 = "int16"
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
+        monkeypatch.setitem(sys.modules, "numpy", fake_numpy)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "test-key"
+
+        with pytest.raises(click.ClickException) as exc_info:
+            command._stream_mic(
+                client,
+                model="flux-general-en",
+                language="en-US",
+                api_version=2,
+                diarize=False,
+                smart_format=True,
+                punctuate=True,
+                interim=False,
+                redact=(),
+                numerals=False,
+                sample_rate=16000,
+                channels=1,
+                save_to=None,
+                caption_format=None,
+            )
+
+        assert "INVALID_AUDIO" in exc_info.value.message
+        assert "audio stream is invalid" in exc_info.value.message

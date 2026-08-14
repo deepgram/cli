@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, Mock, patch
 
+import click
 import pytest
 from deepctl_cmd_listen.captions import StreamingCaptionWriter
 from deepctl_cmd_listen.command import ListenCommand
@@ -200,10 +201,15 @@ class TestFluxModelAutoVersion:
     ):
         # Flux STT (v2) is streaming-only: a file must not reach _prerecorded.
         mock_sys.stdin.isatty.return_value = True
-        with patch.object(
-            command, "_interactive_features", return_value=(False, False, False, False)
+        with (
+            patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ),
+            pytest.raises(click.ClickException, match="streaming-only"),
         ):
-            result = command.handle(
+            command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
                 client=mock_client,
@@ -212,8 +218,6 @@ class TestFluxModelAutoVersion:
                 model="flux-general-en",
                 language="en-US",
             )
-        assert result.status == "error"
-        assert "streaming-only" in result.message
 
     @patch("deepctl_cmd_listen.command.sys")
     def test_flux_model_streaming_uses_v2(
@@ -238,6 +242,45 @@ class TestFluxModelAutoVersion:
             command, mock_config, mock_auth_manager, mock_client, model="flux-2-en"
         )
         assert mock_stream.call_args.kwargs["api_version"] == 2
+
+    @pytest.mark.parametrize("model", ["flux", "fluxfoo"])
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_bare_or_typo_flux_model_uses_v1(
+        self, mock_sys, model, command, mock_config, mock_auth_manager, mock_client
+    ):
+        mock_sys.stdin.isatty.return_value = True
+        mock_stream = self._handle_with_mic(
+            command, mock_config, mock_auth_manager, mock_client, model=model
+        )
+        assert mock_stream.call_args.kwargs["api_version"] == 1
+        assert mock_stream.call_args.kwargs["model"] == model
+
+    @pytest.mark.parametrize(
+        ("source_kwargs", "stream_method"),
+        [({"mic": True}, "_stream_mic"), ({"source": "-"}, "_stream_stdin")],
+    )
+    def test_flux_multichannel_rejected_before_streaming(
+        self,
+        source_kwargs,
+        stream_method,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+    ):
+        with (
+            patch.object(command, stream_method) as mock_stream,
+            pytest.raises(click.ClickException, match="mono audio only"),
+        ):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                model="flux-general-en",
+                channels=2,
+                **source_kwargs,
+            )
+        mock_stream.assert_not_called()
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
@@ -431,6 +474,16 @@ class TestHandleWsMessage:
         )
         assert acc == []
         assert capsys.readouterr().out == ""
+
+    def test_error_type_ignored_without_flux_state(self, command):
+        acc = []
+        command._handle_ws_message(
+            json.dumps({"type": "Error", "code": "V1_ERROR"}),
+            acc,
+            diarize=False,
+            interim=False,
+        )
+        assert acc == []
 
     def test_empty_transcript_not_accumulated(self, command, capsys):
         acc = []

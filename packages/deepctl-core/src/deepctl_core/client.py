@@ -198,8 +198,8 @@ class DeepgramClient:
         raw (non-containerized) audio, so only linear16/mulaw/alaw encodings
         apply and sample_rate is sent as the string the streaming API expects.
 
-        ``speed`` (0.85-1.15) and ``expressivity`` (-2..2) are Flux connect
-        query parameters; they are only sent when set.
+        ``speed`` (0.85-1.15) and beta ``expressivity`` (-2..2, default 0) are
+        Flux connect query parameters; they are only sent when set.
         """
         from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak
 

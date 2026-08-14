@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import click
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -321,7 +322,7 @@ class ListenCommand(BaseCommand):
         language = kwargs.get("language") or "en-US"
 
         # flux-* models require listen.v2; everything else uses v1.
-        api_version = 2 if model.startswith("flux") else 1
+        api_version = 2 if model.startswith("flux-") else 1
         diarize = kwargs.get("diarize", False)
         smart_format = kwargs.get("smart_format", True)
         punctuate = kwargs.get("punctuate", True)
@@ -356,6 +357,7 @@ class ListenCommand(BaseCommand):
                 "[yellow]Note:[/yellow] --diarize is not supported by Flux STT "
                 "(listen v2) models; ignoring it."
             )
+            diarize = False
         save_to = kwargs.get("save_to")
         probe = kwargs.get("probe", False)
         no_validate = kwargs.get("no_validate", False)
@@ -365,13 +367,16 @@ class ListenCommand(BaseCommand):
         # rejects it ("Flux models are not supported on /v1/listen") wrapped in
         # a header dump. Say so up front instead.
         if api_version >= 2 and mode in ("prerecorded_file", "prerecorded_url"):
-            return BaseResult(
-                status="error",
-                message=(
-                    f"Flux STT ({model}) is streaming-only and cannot transcribe "
-                    "a file or URL. Use a live source (--mic, stdin, or '-'), or "
-                    "pick a v1 model (e.g. nova-3) for pre-recorded audio."
-                ),
+            raise click.ClickException(
+                f"Flux STT ({model}) is streaming-only and cannot transcribe "
+                "a file or URL. Use a live source (--mic, stdin, or '-'), or "
+                "pick a v1 model (e.g. nova-3) for pre-recorded audio."
+            )
+
+        if api_version >= 2 and channels != 1:
+            raise click.ClickException(
+                f"--channels {channels} is not supported by Flux STT ({model}); "
+                "listen v2 accepts mono audio only (--channels 1)."
             )
 
         # Flux STT (listen v2) only accepts a narrow --redact vocabulary; the
@@ -381,12 +386,9 @@ class ListenCommand(BaseCommand):
             bad = [r for r in redact if r not in _FLUX_REDACT]
             if bad:
                 allowed = " or ".join(f"'{v}'" for v in _FLUX_REDACT)
-                return BaseResult(
-                    status="error",
-                    message=(
-                        f"--redact {', '.join(bad)} is not supported by Flux STT "
-                        f"({model}); listen v2 accepts only {allowed}."
-                    ),
+                raise click.ClickException(
+                    f"--redact {', '.join(bad)} is not supported by Flux STT "
+                    f"({model}); listen v2 accepts only {allowed}."
                 )
 
         # ── Caption format ─────────────────────────────────────────────
@@ -750,6 +752,8 @@ class ListenCommand(BaseCommand):
         except KeyboardInterrupt:
             status.print("\n[yellow]Stopped.[/yellow]")
             result = ListenResult(status="success", source="mic", mode="live")
+        except click.ClickException:
+            raise
         except Exception as e:
             err = str(e)
             msg = f"Microphone error: {err}"
@@ -1136,12 +1140,12 @@ class ListenCommand(BaseCommand):
                 )
             return
 
-        # Flux STT (v2) fatal errors arrive as a control frame (type "Error");
-        # surface them instead of dropping into an empty-transcript silence.
-        if msg_type == "Error":
-            detail = data.get("description") or data.get("code") or "unknown error"
-            status.print(f"[red]Flux STT error:[/red] {detail}")
-            return
+        # Flux STT (v2) fatal errors arrive as a control frame (type "Error").
+        # Raising propagates the failure through the stream and Click exit status.
+        if msg_type == "Error" and v2_state is not None:
+            code = data.get("code") or "UNKNOWN_ERROR"
+            description = data.get("description") or "No description provided"
+            raise click.ClickException(f"Flux STT error ({code}): {description}")
 
         if msg_type != "Results":
             return
@@ -1278,7 +1282,7 @@ class ListenCommand(BaseCommand):
         """
         if not words:
             return [{"word": transcript, "start": start, "end": end}]
-        if words[0].get("start") is not None and words[-1].get("end") is not None:
+        if all(w.get("start") is not None and w.get("end") is not None for w in words):
             return words
         n = len(words)
         span = max(0.0, end - start)
@@ -1286,8 +1290,10 @@ class ListenCommand(BaseCommand):
         timed: list[dict[str, Any]] = []
         for i, w in enumerate(words):
             tw = dict(w)
-            tw.setdefault("start", start + i * step)
-            tw.setdefault("end", start + (i + 1) * step)
+            if tw.get("start") is None:
+                tw["start"] = start + i * step
+            if tw.get("end") is None:
+                tw["end"] = start + (i + 1) * step
             timed.append(tw)
         return timed
 

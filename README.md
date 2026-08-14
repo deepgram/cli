@@ -190,8 +190,8 @@ dg speak "Hello from Flux" -o hello.wav
 # end-of-stream notice (the audio is complete).
 dg speak "Hello from Flux" | ffplay -loglevel error -nodisp -autoexit -
 
-# Flux TTS streaming controls (flux-* only): --speed 0.85–1.15 (0.05 steps),
-# --expressivity -2..2 (0 = nominal delivery)
+# Flux TTS streaming controls (flux-* only): --speed 0.85–1.15 (0.05 steps).
+# --expressivity -2..2 is beta; its default 0 is nominal delivery.
 dg speak "A little slower" --speed 0.9 --expressivity 1 -o slow.wav
 
 # Aura (v1, batch REST) — opt in with -m aura-*; needed for MP3 output

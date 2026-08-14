@@ -131,7 +131,10 @@ class TestRenderDeveloperGuide:
         content = render_developer_guide("1.0.0")
         assert "Text-to-Speech" in content
         assert "Aura-2" in content
+        assert "Aura and Flux voices" in content
         assert "aura-2-andromeda-en" in content
+        assert "`expressivity` is beta" in content
+        assert "defaults to `0`" in content
 
     def test_contains_audio_intelligence(self):
         content = render_developer_guide("1.0.0")

@@ -4,10 +4,13 @@ Each test calls a command's ``handle()`` in-process against the real Deepgram
 API, exercising the full transport (SDK WebSocket for Flux TTS, raw WebSocket
 for Flux/nova STT, REST for Aura) plus the CLI's own parsing and assembly.
 
-Skipped automatically unless ``DEEPGRAM_API_KEY`` is set (see conftest). ASR
-wording is non-deterministic, so assertions stay loose: transcripts must be
-non-empty and show the specific transformation under test (digits for
-numerals, ``*`` for number redaction).
+Live execution requires ``DEEPGRAM_API_KEY``, ``RUN_LIVE_E2E=1``, and an
+explicit target. Set ``DEEPGRAM_BASE_URL`` for staging/custom testing. To use
+the default production endpoint, set ``RUN_LIVE_E2E_PRODUCTION=1`` as a second
+confirmation. See conftest for the complete gate. ASR wording is
+non-deterministic, so assertions stay loose: transcripts must be non-empty and
+show the specific transformation under test (digits for numerals, ``*`` for
+number redaction).
 """
 
 from __future__ import annotations
@@ -17,14 +20,14 @@ from deepctl_cmd_listen.command import ListenCommand
 from deepctl_cmd_speak.command import SpeakCommand
 from deepctl_cmd_speak.models import SpeakResult
 
-from .conftest import requires_live_key
+from .conftest import requires_live_e2e
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_auth,
     pytest.mark.requires_network,
     pytest.mark.slow,
-    requires_live_key,
+    requires_live_e2e,
 ]
 
 # Flux TTS emits 24 kHz linear16; feed STT the same rate so no resampling is

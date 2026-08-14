@@ -71,6 +71,12 @@ class TestSpeakCommand:
         assert command.name == "speak"
         assert command.requires_auth is True
         assert command.ci_friendly is True
+        assert "beta" in command.agent_help
+        assert "default 0" in command.agent_help
+        assert any(
+            "--expressivity" in example and "beta" in example
+            for example in command.examples
+        )
 
     def test_get_arguments(self, command):
         """Test command arguments configuration."""
@@ -340,6 +346,81 @@ class TestSpeakCommand:
         assert data[:4] == b"RIFF"
         assert data[8:12] == b"WAVE"
         assert pcm in data
+
+    @pytest.mark.parametrize("model", ["flux", "fluxfoo"])
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_non_flux_prefix_uses_v1_pass_through(
+        self,
+        mock_sys,
+        model,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """Bare and typo flux names do not enter the flux-* Speak v2 route."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+        mock_client.speak_text.return_value = iter([b"audio"])
+
+        command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text="Hello",
+            output=str(tmp_path / "output.mp3"),
+            model=model,
+            encoding=None,
+            container=None,
+            sample_rate=None,
+            file=None,
+        )
+
+        mock_client.speak_text.assert_called_once_with(
+            text="Hello",
+            model=model,
+            encoding=None,
+            container=None,
+            sample_rate=None,
+        )
+        mock_client.speak_text_stream.assert_not_called()
+
+    @pytest.mark.parametrize("model", ["flux", "fluxfoo"])
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_non_flux_prefix_control_error_is_model_neutral(
+        self,
+        mock_sys,
+        model,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """Unknown models are not mislabeled as Aura in control validation."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        with pytest.raises(click.ClickException) as exc_info:
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "output.wav"),
+                model=model,
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                speed=1.0,
+                file=None,
+            )
+
+        assert model in str(exc_info.value)
+        assert "Aura" not in str(exc_info.value)
+        mock_client.speak_text.assert_not_called()
+        mock_client.speak_text_stream.assert_not_called()
 
     @patch("deepctl_cmd_speak.command.sys")
     def test_handle_flux_rejects_non_raw_encoding(
