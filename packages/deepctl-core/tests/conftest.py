@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from deepctl_core import output as _output
 
 # Snapshot the pristine output config at import time, before any test (or a
