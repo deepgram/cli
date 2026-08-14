@@ -38,6 +38,22 @@ from .conftest import _live_e2e_skip_reason
             },
             "RUN_LIVE_E2E_PRODUCTION=1 to confirm production",
         ),
+        (
+            {
+                "DEEPGRAM_API_KEY": "test-key",
+                "RUN_LIVE_E2E": "1",
+                "DEEPGRAM_BASE_URL": "https://api.deepgram.com",
+            },
+            "RUN_LIVE_E2E_PRODUCTION=1 to confirm production",
+        ),
+        (
+            {
+                "DEEPGRAM_API_KEY": "test-key",
+                "RUN_LIVE_E2E": "1",
+                "DEEPGRAM_BASE_URL": "HTTPS://API.DEEPGRAM.COM/",
+            },
+            "RUN_LIVE_E2E_PRODUCTION=1 to confirm production",
+        ),
     ],
 )
 def test_live_e2e_gate_rejects_incomplete_opt_in(environ, expected_reason):
@@ -59,6 +75,12 @@ def test_live_e2e_gate_rejects_incomplete_opt_in(environ, expected_reason):
         {
             "DEEPGRAM_API_KEY": "test-key",
             "RUN_LIVE_E2E": "1",
+            "RUN_LIVE_E2E_PRODUCTION": "1",
+        },
+        {
+            "DEEPGRAM_API_KEY": "test-key",
+            "RUN_LIVE_E2E": "1",
+            "DEEPGRAM_BASE_URL": "https://api.deepgram.com/",
             "RUN_LIVE_E2E_PRODUCTION": "1",
         },
     ],

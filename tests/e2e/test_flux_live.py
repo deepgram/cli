@@ -10,7 +10,8 @@ the default production endpoint, set ``RUN_LIVE_E2E_PRODUCTION=1`` as a second
 confirmation. See conftest for the complete gate. ASR wording is
 non-deterministic, so assertions stay loose: transcripts must be non-empty and
 show the specific transformation under test (digits for numerals, ``*`` for
-number redaction).
+number redaction). Each live case has a two-minute deadline so a stalled
+transport cannot occupy the runner indefinitely.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ pytestmark = [
     pytest.mark.requires_auth,
     pytest.mark.requires_network,
     pytest.mark.slow,
+    pytest.mark.timeout(120),
     requires_live_e2e,
 ]
 

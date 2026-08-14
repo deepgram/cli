@@ -71,6 +71,18 @@ def _ws_base(client: DeepgramClient) -> str:
     return base.replace("https://", "wss://").replace("http://", "ws://")
 
 
+async def _cancel_and_drain(*tasks: asyncio.Task[Any]) -> None:
+    """Cancel tasks and consume their terminal exceptions during teardown."""
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except BaseException:
+            pass
+
+
 class ListenCommand(BaseCommand):
     """Unified speech-to-text command supporting files, URLs, mic, and streams."""
 
@@ -343,7 +355,11 @@ class ListenCommand(BaseCommand):
         numerals = kwargs.get("numerals", False)
         encoding = kwargs.get("encoding")
         sample_rate = kwargs.get("sample_rate") or 16000
-        channels = kwargs.get("channels") or 1
+        channels = kwargs.get("channels")
+        if channels is None:
+            channels = 1
+        if channels < 1:
+            raise click.ClickException("--channels must be at least 1.")
 
         # Flux STT (listen v2) is turn-based and has no diarization; --diarize
         # is dropped from the v2 param set (sending it earns an HTTP 400). It
@@ -875,8 +891,11 @@ class ListenCommand(BaseCommand):
                 await asyncio.gather(send_task, recv_task)
             except (KeyboardInterrupt, asyncio.CancelledError):
                 stop_event.set()
-                send_task.cancel()
-                recv_task.cancel()
+                await _cancel_and_drain(send_task, recv_task)
+            except BaseException:
+                stop_event.set()
+                await _cancel_and_drain(send_task, recv_task)
+                raise
 
         # Flux may close mid-turn without an EndOfTurn; emit what we have.
         if v2_state is not None:
@@ -1017,15 +1036,50 @@ class ListenCommand(BaseCommand):
         async with websockets.connect(
             url, additional_headers={"Authorization": f"Token {api_key}"}
         ) as ws:
+            loop = asyncio.get_running_loop()
+            audio_queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue()
+            stop_reader = threading.Event()
+
+            def post_audio(item: bytes | Exception | None) -> None:
+                if stop_reader.is_set():
+                    return
+                try:
+                    loop.call_soon_threadsafe(audio_queue.put_nowait, item)
+                except RuntimeError:
+                    # The event loop already closed after a stream failure.
+                    pass
+
+            def read_stdin() -> None:
+                try:
+                    while not stop_reader.is_set():
+                        data = sys.stdin.buffer.read(4096)
+                        if stop_reader.is_set():
+                            return
+                        post_audio(data or None)
+                        if not data:
+                            return
+                except Exception as exc:
+                    post_audio(exc)
+
+            reader_thread = threading.Thread(
+                target=read_stdin,
+                name="deepctl-stdin-reader",
+                daemon=True,
+            )
 
             async def send_audio() -> None:
-                loop = asyncio.get_event_loop()
-                while True:
-                    data = await loop.run_in_executor(None, sys.stdin.buffer.read, 4096)
-                    if not data:
-                        break
-                    await ws.send(data)
-                await ws.send(json.dumps({"type": "CloseStream"}))
+                reader_thread.start()
+                try:
+                    while True:
+                        item = await audio_queue.get()
+                        if item is None:
+                            break
+                        if isinstance(item, Exception):
+                            raise item
+                        await ws.send(item)
+                    await ws.send(json.dumps({"type": "CloseStream"}))
+                finally:
+                    stop_reader.set()
 
             async def recv_transcripts() -> None:
                 async for msg in ws:
@@ -1038,7 +1092,13 @@ class ListenCommand(BaseCommand):
                         v2_state=v2_state,
                     )
 
-            await asyncio.gather(send_audio(), recv_transcripts())
+            send_task = asyncio.create_task(send_audio())
+            recv_task = asyncio.create_task(recv_transcripts())
+            try:
+                await asyncio.gather(send_task, recv_task)
+            except BaseException:
+                await _cancel_and_drain(send_task, recv_task)
+                raise
 
         # Flux may close mid-turn without an EndOfTurn; emit what we have.
         if v2_state is not None:

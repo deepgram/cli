@@ -16,7 +16,8 @@ from deepctl_core import (
 )
 
 
-def _install_flux_error_websockets(monkeypatch):
+def _install_flux_error_websockets(monkeypatch, ready=None):
+    import asyncio
     import json
     import sys
     import types
@@ -40,6 +41,8 @@ def _install_flux_error_websockets(monkeypatch):
             return self
 
         async def __anext__(self):
+            while ready is not None and not ready():
+                await asyncio.sleep(0)
             try:
                 return next(self.messages)
             except StopIteration:
@@ -1063,20 +1066,21 @@ class TestFluxV2TurnHandling:
         import types
         from unittest.mock import MagicMock
 
-        _install_flux_error_websockets(monkeypatch)
+        events = {"started": False, "stopped": False, "closed": False}
+        _install_flux_error_websockets(monkeypatch, ready=lambda: events["started"])
 
         class _FakeInputStream:
             def __init__(self, **_kwargs):
                 pass
 
             def start(self):
-                pass
+                events["started"] = True
 
             def stop(self):
-                pass
+                events["stopped"] = True
 
             def close(self):
-                pass
+                events["closed"] = True
 
         fake_sounddevice = types.ModuleType("sounddevice")
         fake_sounddevice.RawInputStream = _FakeInputStream
@@ -1109,3 +1113,105 @@ class TestFluxV2TurnHandling:
 
         assert "INVALID_AUDIO" in exc_info.value.message
         assert "audio stream is invalid" in exc_info.value.message
+        assert events == {"started": True, "stopped": True, "closed": True}
+
+    def test_stream_stdin_flux_error_does_not_wait_for_blocked_input(
+        self, command, monkeypatch
+    ):
+        import asyncio as _asyncio
+        import json as _json
+        import sys
+        import threading
+        import types
+        from unittest.mock import MagicMock
+
+        read_started = threading.Event()
+        release_read = threading.Event()
+
+        class _BlockingBuffer:
+            def read(self, _size):
+                read_started.set()
+                release_read.wait()
+                return b""
+
+        fake_stdin = types.SimpleNamespace(buffer=_BlockingBuffer())
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command.sys.stdin", fake_stdin, raising=False
+        )
+
+        error_frame = _json.dumps(
+            {
+                "type": "Error",
+                "code": "INVALID_AUDIO",
+                "description": "audio stream is invalid",
+            }
+        )
+
+        class _FakeWS:
+            def __init__(self):
+                self.sent_error = False
+
+            async def send(self, _data):
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.sent_error:
+                    raise StopAsyncIteration
+                while not read_started.is_set():
+                    await _asyncio.sleep(0)
+                self.sent_error = True
+                return error_frame
+
+        class _FakeConnect:
+            async def __aenter__(self):
+                return _FakeWS()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        fake_websockets = types.ModuleType("websockets")
+        fake_websockets.connect = lambda *_args, **_kwargs: _FakeConnect()
+        monkeypatch.setitem(sys.modules, "websockets", fake_websockets)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "test-key"
+        errors = []
+
+        def run_stream():
+            try:
+                command._stream_stdin(
+                    client,
+                    model="flux-general-en",
+                    language="en-US",
+                    api_version=2,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    encoding="linear16",
+                    sample_rate=16000,
+                    channels=1,
+                    save_to=None,
+                    caption_format=None,
+                )
+            except BaseException as exc:
+                errors.append(exc)
+
+        stream_thread = threading.Thread(target=run_stream, daemon=True)
+        stream_thread.start()
+        assert read_started.wait(timeout=1)
+        stream_thread.join(timeout=1)
+        exited_before_stdin = not stream_thread.is_alive()
+        release_read.set()
+        stream_thread.join(timeout=1)
+
+        assert exited_before_stdin
+        assert len(errors) == 1
+        assert isinstance(errors[0], click.ClickException)
+        assert "INVALID_AUDIO" in errors[0].message

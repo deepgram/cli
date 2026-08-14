@@ -282,6 +282,29 @@ class TestFluxModelAutoVersion:
             )
         mock_stream.assert_not_called()
 
+    @pytest.mark.parametrize("channels", [0, -1])
+    def test_nonpositive_channels_rejected(
+        self,
+        channels,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+    ):
+        with (
+            patch.object(command, "_stream_mic") as mock_stream,
+            pytest.raises(click.ClickException, match="at least 1"),
+        ):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                model="flux-general-en",
+                channels=channels,
+                mic=True,
+            )
+        mock_stream.assert_not_called()
+
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
     def test_nova3_uses_v1(

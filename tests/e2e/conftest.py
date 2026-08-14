@@ -15,6 +15,7 @@ import io
 import os
 import types
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import pytest
 
@@ -29,6 +30,14 @@ LIVE_API_KEY = os.environ.get("DEEPGRAM_API_KEY")
 LIVE_BASE_URL = os.environ.get("DEEPGRAM_BASE_URL")
 
 
+def _is_production_target(base_url: str | None) -> bool:
+    """Return whether the configured target resolves to Deepgram production."""
+    if not base_url:
+        return True
+    candidate = base_url if "://" in base_url else f"https://{base_url}"
+    return (urlparse(candidate).hostname or "").lower() == "api.deepgram.com"
+
+
 def _live_e2e_skip_reason(environ: Mapping[str, str]) -> str | None:
     """Return why live e2e is disabled, without exposing environment values."""
     if not environ.get("DEEPGRAM_API_KEY"):
@@ -36,7 +45,7 @@ def _live_e2e_skip_reason(environ: Mapping[str, str]) -> str | None:
     if environ.get("RUN_LIVE_E2E") != "1":
         return "RUN_LIVE_E2E must be set to 1; live e2e tests are disabled"
     if (
-        not environ.get("DEEPGRAM_BASE_URL")
+        _is_production_target(environ.get("DEEPGRAM_BASE_URL"))
         and environ.get("RUN_LIVE_E2E_PRODUCTION") != "1"
     ):
         return (
