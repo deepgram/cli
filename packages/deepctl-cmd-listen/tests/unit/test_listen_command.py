@@ -369,6 +369,42 @@ class TestListenCommand:
 
             assert mock_pre.call_args.kwargs["redact"] == ("pci", "numbers")
 
+    def test_prerecorded_builds_multi_redact_and_numerals_options(
+        self, command, mock_config
+    ):
+        """_prerecorded sends redact as a LIST (so Fern repeats the query param)
+        and numerals as the string 'true'."""
+        client = Mock()
+        client.transcribe_file.return_value = {
+            "results": {"channels": [{"alternatives": [{"transcript": "hi"}]}]}
+        }
+        result = command._prerecorded(
+            client,
+            "audio.wav",
+            is_url=False,
+            model="nova-3",
+            language="en-US",
+            api_version=1,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            summarize=False,
+            topics=False,
+            sentiment=False,
+            redact=("pci", "numbers"),
+            numerals=True,
+            save_to=None,
+            probe=False,
+            no_validate=True,
+            caption_format=None,
+            config=mock_config,
+        )
+
+        assert result.status == "success"
+        opts = client.transcribe_file.call_args.args[1]
+        assert opts["redact"] == ["pci", "numbers"]  # list, not tuple
+        assert opts["numerals"] == "true"
+
     def test_ws_url_expands_multiple_redact(self, command):
         """Repeated redact values expand to repeated query params (doseq)."""
         ws_client = Mock()
@@ -847,6 +883,53 @@ class TestFluxV2TurnHandling:
             loop.close()
 
         assert result.transcript == "hello world"
+
+    def test_end_of_turn_with_empty_transcript_is_noop(self, command, capsys):
+        """An EndOfTurn that never carried text emits nothing (no blank line)."""
+        acc: list[str] = []
+        state = command._new_v2_state()
+        command._handle_ws_message(
+            self._turn("EndOfTurn", ""),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        assert acc == []
+        assert capsys.readouterr().out == ""
+
+    def test_v2_update_prints_interim(self, command, capsys):
+        """An Update event with --interim shows a carriage-return partial."""
+        acc: list[str] = []
+        state = command._new_v2_state()
+        command._handle_ws_message(
+            self._turn("Update", "partial text"),
+            acc,
+            diarize=False,
+            interim=True,
+            v2_state=state,
+        )
+        out = capsys.readouterr().out
+        assert "partial text" in out
+        assert "\r" in out
+        assert acc == []  # interim never accumulates
+
+    def test_timed_v2_words_backfills_and_preserves(self, command):
+        """_timed_v2_words: synthesize when empty, spread the window when words
+        lack timings, and pass real per-word timings through untouched."""
+        # No words → one synthetic word spanning the whole turn window.
+        assert command._timed_v2_words([], "hello world", 1.0, 2.0) == [
+            {"word": "hello world", "start": 1.0, "end": 2.0}
+        ]
+        # Words already carrying timings are returned unchanged.
+        real = [{"word": "a", "start": 0.1, "end": 0.2}]
+        assert command._timed_v2_words(real, "a", 0.0, 5.0) is real
+        # Timing-less words get the window spread evenly across them.
+        spread = command._timed_v2_words(
+            [{"word": "a"}, {"word": "b"}], "a b", 0.0, 2.0
+        )
+        assert (spread[0]["start"], spread[0]["end"]) == (0.0, 1.0)
+        assert (spread[1]["start"], spread[1]["end"]) == (1.0, 2.0)
 
     def test_fatal_error_frame_is_surfaced(self, command, capsys):
         """A Flux STT fatal error (type 'Error') is reported, not swallowed."""
