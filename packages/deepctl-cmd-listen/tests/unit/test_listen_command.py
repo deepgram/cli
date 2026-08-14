@@ -50,13 +50,29 @@ class TestListenCommand:
                 option_names.extend(arg["names"])
 
         for expected in [
-            "--mic", "--model", "-m", "--language", "-l",
-            "--diarize", "--smart-format", "--punctuate",
-            "--summarize", "--topics", "--sentiment",
-            "--redact", "--numerals",
-            "--interim", "--encoding", "--sample-rate", "--channels",
-            "--save-to", "-s", "--probe", "--no-validate",
-            "--webvtt", "--srt",
+            "--mic",
+            "--model",
+            "-m",
+            "--language",
+            "-l",
+            "--diarize",
+            "--smart-format",
+            "--punctuate",
+            "--summarize",
+            "--topics",
+            "--sentiment",
+            "--redact",
+            "--numerals",
+            "--interim",
+            "--encoding",
+            "--sample-rate",
+            "--channels",
+            "--save-to",
+            "-s",
+            "--probe",
+            "--no-validate",
+            "--webvtt",
+            "--srt",
         ]:
             assert expected in option_names, f"Missing option: {expected}"
 
@@ -86,7 +102,11 @@ class TestListenCommand:
         """--mic without sounddevice installed returns an error."""
         mock_sys.stdin.isatty.return_value = True
 
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def mock_import(name, *args, **kwargs):
             if name == "sounddevice":
@@ -112,7 +132,9 @@ class TestListenCommand:
         mock_sys.stdin.isatty.return_value = False
         expected = ListenResult(status="success", source="stdin", mode="live")
 
-        with patch.object(command, "_stream_stdin", return_value=expected) as mock_stream:
+        with patch.object(
+            command, "_stream_stdin", return_value=expected
+        ) as mock_stream:
             result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -137,7 +159,13 @@ class TestListenCommand:
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_warns_diarize_ignored_on_flux(
-        self, mock_sys, mock_status, command, mock_config, mock_auth_manager, mock_client
+        self,
+        mock_sys,
+        mock_status,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
     ):
         """--diarize on a Flux STT (v2) model warns instead of vanishing silently."""
         mock_sys.stdin.isatty.return_value = True
@@ -161,7 +189,13 @@ class TestListenCommand:
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_no_diarize_warning_on_v1(
-        self, mock_sys, mock_status, command, mock_config, mock_auth_manager, mock_client
+        self,
+        mock_sys,
+        mock_status,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
     ):
         """v1 models keep diarization — no spurious warning."""
         mock_sys.stdin.isatty.return_value = True
@@ -181,6 +215,36 @@ class TestListenCommand:
             str(c.args[0]) for c in mock_status.print.call_args_list if c.args
         )
         assert "not supported by Flux STT" not in printed
+
+    def test_handle_flux_prerecorded_file_errors(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """Flux STT + a file errors up front (v2 is streaming-only)."""
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            source="call.wav",
+            model="flux-general-en",
+        )
+        assert result.status == "error"
+        assert "streaming-only" in result.message
+
+    def test_handle_flux_invalid_redact_errors(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A v1-only --redact value on Flux STT errors instead of a raw 400."""
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            mic=True,
+            model="flux-general-en",
+            redact="pci",
+        )
+        assert result.status == "error"
+        assert "pci" in result.message
+        assert "aggressive_numbers" in result.message
 
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_mic_routes_to_stream_mic(
@@ -218,13 +282,19 @@ class TestListenCommand:
         """A file path routes to _prerecorded with is_url=False."""
         mock_sys.stdin.isatty.return_value = True
         expected = ListenResult(
-            status="success", source="file", mode="prerecorded",
+            status="success",
+            source="file",
+            mode="prerecorded",
             transcript="hello world",
         )
 
         with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
             # Skip interactive feature selection
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 result = command.handle(
                     config=mock_config,
                     auth_manager=mock_auth_manager,
@@ -251,7 +321,8 @@ class TestListenCommand:
 
         with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
             with patch.object(
-                command, "_interactive_features",
+                command,
+                "_interactive_features",
                 return_value=(False, False, False, False),
             ):
                 command.handle(
@@ -329,12 +400,18 @@ class TestListenCommand:
         """A URL routes to _prerecorded with is_url=True."""
         mock_sys.stdin.isatty.return_value = True
         expected = ListenResult(
-            status="success", source="url", mode="prerecorded",
+            status="success",
+            source="url",
+            mode="prerecorded",
             transcript="hello",
         )
 
         with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 result = command.handle(
                     config=mock_config,
                     auth_manager=mock_auth_manager,
@@ -358,7 +435,9 @@ class TestListenCommand:
         mock_sys.stdin.isatty.return_value = True  # would normally trigger interactive
         expected = ListenResult(status="success", source="stdin", mode="live")
 
-        with patch.object(command, "_stream_stdin", return_value=expected) as mock_stream:
+        with patch.object(
+            command, "_stream_stdin", return_value=expected
+        ) as mock_stream:
             result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -387,34 +466,30 @@ class TestGuidedFlow:
         }
 
     def test_url_arg_skips_both_prompts(self, command, common_kwargs):
-        with patch.object(command, "_interactive_features") as feat, patch.object(
-            command, "_interactive_select_source"
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
+        with (
+            patch.object(command, "_interactive_features") as feat,
+            patch.object(command, "_interactive_select_source") as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
         ):
-            command.handle(
-                **common_kwargs, source="https://example.com/audio.wav"
-            )
+            command.handle(**common_kwargs, source="https://example.com/audio.wav")
         assert feat.call_count == 0
         assert src.call_count == 0
 
     def test_file_arg_skips_both_prompts(self, command, common_kwargs):
-        with patch.object(command, "_interactive_features") as feat, patch.object(
-            command, "_interactive_select_source"
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
+        with (
+            patch.object(command, "_interactive_features") as feat,
+            patch.object(command, "_interactive_select_source") as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
         ):
             command.handle(**common_kwargs, source="/tmp/audio.wav")
         assert feat.call_count == 0
         assert src.call_count == 0
 
-    def test_url_arg_with_diarize_skips_both_prompts(
-        self, command, common_kwargs
-    ):
-        with patch.object(command, "_interactive_features") as feat, patch.object(
-            command, "_interactive_select_source"
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
+    def test_url_arg_with_diarize_skips_both_prompts(self, command, common_kwargs):
+        with (
+            patch.object(command, "_interactive_features") as feat,
+            patch.object(command, "_interactive_select_source") as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
         ):
             command.handle(
                 **common_kwargs,
@@ -424,38 +499,35 @@ class TestGuidedFlow:
         assert feat.call_count == 0
         assert src.call_count == 0
 
-    def test_bare_invocation_runs_full_guided_flow(
-        self, command, common_kwargs
-    ):
-        with patch.object(
-            command,
-            "_interactive_features",
-            return_value=(False, False, False, False),
-        ) as feat, patch.object(
-            command,
-            "_interactive_select_source",
-            return_value=("prerecorded_url", "https://x.com/a.wav"),
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
-        ), patch(
-            "sys.stdin"
-        ) as mock_stdin, patch(
-            "deepctl_cmd_listen.command._agentic", False
+    def test_bare_invocation_runs_full_guided_flow(self, command, common_kwargs):
+        with (
+            patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ) as feat,
+            patch.object(
+                command,
+                "_interactive_select_source",
+                return_value=("prerecorded_url", "https://x.com/a.wav"),
+            ) as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
+            patch("sys.stdin") as mock_stdin,
+            patch("deepctl_cmd_listen.command._agentic", False),
         ):
             mock_stdin.isatty.return_value = True
             command.handle(**common_kwargs)
         assert src.call_count == 1
         assert feat.call_count == 1
 
-    def test_cancelled_source_select_returns_cancelled(
-        self, command, common_kwargs
-    ):
-        with patch.object(
-            command, "_interactive_select_source", return_value=(None, None)
-        ), patch.object(command, "_interactive_features") as feat, patch(
-            "sys.stdin"
-        ) as mock_stdin, patch(
-            "deepctl_cmd_listen.command._agentic", False
+    def test_cancelled_source_select_returns_cancelled(self, command, common_kwargs):
+        with (
+            patch.object(
+                command, "_interactive_select_source", return_value=(None, None)
+            ),
+            patch.object(command, "_interactive_features") as feat,
+            patch("sys.stdin") as mock_stdin,
+            patch("deepctl_cmd_listen.command._agentic", False),
         ):
             mock_stdin.isatty.return_value = True
             result = command.handle(**common_kwargs)
@@ -518,14 +590,20 @@ class TestFluxV2TurnHandling:
 
         command._handle_ws_message(
             self._turn("Update", "hello"),
-            acc, diarize=False, interim=False, v2_state=state,
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
         )
         # Update alone does not finalize.
         assert acc == []
 
         command._handle_ws_message(
             self._turn("EndOfTurn", "hello world"),
-            acc, diarize=False, interim=False, v2_state=state,
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
         )
         assert acc == ["hello world"]
         assert "hello world" in capsys.readouterr().out
@@ -539,7 +617,10 @@ class TestFluxV2TurnHandling:
         for text in ("my", "my account", "my account number"):
             command._handle_ws_message(
                 self._turn("Update", text),
-                acc, diarize=False, interim=False, v2_state=state,
+                acc,
+                diarize=False,
+                interim=False,
+                v2_state=state,
             )
         assert acc == []  # nothing finalized yet
 
@@ -552,7 +633,10 @@ class TestFluxV2TurnHandling:
 
         command._handle_ws_message(
             self._turn("EndOfTurn", "done"),
-            acc, diarize=False, interim=False, v2_state=state,
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
         )
         command._flush_v2(state, acc)
         assert acc == ["done"]  # not duplicated
@@ -563,11 +647,17 @@ class TestFluxV2TurnHandling:
 
         command._handle_ws_message(
             self._turn("EndOfTurn", "first turn", turn_index=0),
-            acc, diarize=False, interim=False, v2_state=state,
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
         )
         command._handle_ws_message(
             self._turn("Update", "second turn", turn_index=1),
-            acc, diarize=False, interim=False, v2_state=state,
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
         )
         command._flush_v2(state, acc)
         assert acc == ["first turn", "second turn"]
@@ -577,6 +667,9 @@ class TestFluxV2TurnHandling:
         acc: list[str] = []
         command._handle_ws_message(
             self._turn("EndOfTurn", "ignored"),
-            acc, diarize=False, interim=False, v2_state=None,
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=None,
         )
         assert acc == []

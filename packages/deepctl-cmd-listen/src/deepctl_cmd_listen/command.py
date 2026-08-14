@@ -54,6 +54,11 @@ status = Console(stderr=True)
 out = Console()
 
 
+# Flux STT (listen v2) only recognises these two --redact values; the v1 REST
+# vocabulary ("pci", "ssn", …) earns an opaque HTTP 400 from the v2 endpoint.
+_FLUX_REDACT = ("numbers", "aggressive_numbers")
+
+
 def _is_url(s: str) -> bool:
     return s.startswith(("http://", "https://"))
 
@@ -343,6 +348,33 @@ class ListenCommand(BaseCommand):
         save_to = kwargs.get("save_to")
         probe = kwargs.get("probe", False)
         no_validate = kwargs.get("no_validate", False)
+
+        # Flux STT (listen v2) is streaming-only — there is no v2 pre-recorded
+        # REST endpoint, so a file/URL routes to /v1/listen and the server
+        # rejects it ("Flux models are not supported on /v1/listen") wrapped in
+        # a header dump. Say so up front instead.
+        if api_version >= 2 and mode in ("prerecorded_file", "prerecorded_url"):
+            return BaseResult(
+                status="error",
+                message=(
+                    f"Flux STT ({model}) is streaming-only and cannot transcribe "
+                    "a file or URL. Use a live source (--mic, stdin, or '-'), or "
+                    "pick a v1 model (e.g. nova-3) for pre-recorded audio."
+                ),
+            )
+
+        # Flux STT (listen v2) only accepts a narrow --redact vocabulary; the
+        # v1 values ("pci", "ssn", …) come back as an opaque HTTP 400. Validate
+        # up front, mirroring how `speak` guards its Flux-only flags.
+        if api_version >= 2 and redact is not None and redact not in _FLUX_REDACT:
+            allowed = " or ".join(f"'{v}'" for v in _FLUX_REDACT)
+            return BaseResult(
+                status="error",
+                message=(
+                    f"--redact {redact!r} is not supported by Flux STT ({model}); "
+                    f"listen v2 accepts only {allowed}."
+                ),
+            )
 
         # ── Caption format ─────────────────────────────────────────────
         want_webvtt = kwargs.get("webvtt", False)

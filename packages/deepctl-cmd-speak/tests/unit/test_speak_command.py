@@ -488,9 +488,7 @@ class TestSpeakCommand:
         mock_sys.stdin.isatty.return_value = True
         mock_sys.stdout.isatty.return_value = True
 
-        with pytest.raises(
-            click.ClickException, match="--expressivity must be one of"
-        ):
+        with pytest.raises(click.ClickException, match="--expressivity must be one of"):
             command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
