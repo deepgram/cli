@@ -43,18 +43,18 @@ def mock_auth_manager():
 
 class TestWsUrl:
     def _url(self, command, mock_client, **overrides):
-        defaults = dict(
-            api_version=1,
-            model="nova-3",
-            language="en-US",
-            diarize=False,
-            smart_format=True,
-            punctuate=True,
-            interim=False,
-            encoding="linear16",
-            sample_rate=16000,
-            channels=1,
-        )
+        defaults = {
+            "api_version": 1,
+            "model": "nova-3",
+            "language": "en-US",
+            "diarize": False,
+            "smart_format": True,
+            "punctuate": True,
+            "interim": False,
+            "encoding": "linear16",
+            "sample_rate": 16000,
+            "channels": 1,
+        }
         defaults.update(overrides)
         return command._ws_url(mock_client, **defaults)
 
@@ -154,12 +154,12 @@ class TestFluxModelAutoVersion:
     def _handle_with_source(
         self, command, mock_config, mock_auth_manager, mock_client, **kwargs
     ):
-        defaults = dict(
-            source="audio.mp3",
-            mic=False,
-            model="nova-3",
-            language="en-US",
-        )
+        defaults = {
+            "source": "audio.mp3",
+            "mic": False,
+            "model": "nova-3",
+            "language": "en-US",
+        }
         defaults.update(kwargs)
         with patch.object(
             command, "_prerecorded", return_value=ListenResult(status="success")
@@ -180,7 +180,7 @@ class TestFluxModelAutoVersion:
     def _handle_with_mic(
         self, command, mock_config, mock_auth_manager, mock_client, **kwargs
     ):
-        defaults = dict(mic=True, model="nova-3", language="en-US")
+        defaults = {"mic": True, "model": "nova-3", "language": "en-US"}
         defaults.update(kwargs)
         with patch.object(
             command, "_stream_mic", return_value=ListenResult(status="success")
@@ -518,7 +518,7 @@ class TestHandleWsMessage:
         # Should see the caption timestamp, not a bare "Hi\n"
         assert "-->" in out
         # The bare transcript line should not appear on its own
-        lines = [l for l in out.splitlines() if l.strip() == "Hi"]
+        lines = [line for line in out.splitlines() if line.strip() == "Hi"]
         assert len(lines) == 0 or "-->" in out  # caption mode
 
     def test_interim_suppressed_in_caption_mode(self, command, capsys):
