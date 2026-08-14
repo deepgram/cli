@@ -135,7 +135,9 @@ class TestWsUrl:
 
     def test_custom_base_url(self, command):
         client = MagicMock()
-        client.config.get_profile.return_value.base_url = "https://custom.api.example.com"
+        client.config.get_profile.return_value.base_url = (
+            "https://custom.api.example.com"
+        )
         assert self._url(command, client).startswith("wss://custom.api.example.com")
 
     def test_sample_rate_param(self, command, mock_client):
@@ -149,7 +151,9 @@ class TestWsUrl:
 
 
 class TestFluxModelAutoVersion:
-    def _handle_with_source(self, command, mock_config, mock_auth_manager, mock_client, **kwargs):
+    def _handle_with_source(
+        self, command, mock_config, mock_auth_manager, mock_client, **kwargs
+    ):
         defaults = dict(
             source="audio.mp3",
             mic=False,
@@ -157,8 +161,14 @@ class TestFluxModelAutoVersion:
             language="en-US",
         )
         defaults.update(kwargs)
-        with patch.object(command, "_prerecorded", return_value=ListenResult(status="success")) as mock_pre:
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+        with patch.object(
+            command, "_prerecorded", return_value=ListenResult(status="success")
+        ) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 command.handle(
                     config=mock_config,
                     auth_manager=mock_auth_manager,
@@ -167,27 +177,73 @@ class TestFluxModelAutoVersion:
                 )
             return mock_pre
 
-    @patch("deepctl_cmd_listen.command._agentic", False)
-    @patch("deepctl_cmd_listen.command.sys")
-    def test_flux_model_uses_v2(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
-        mock_sys.stdin.isatty.return_value = True
-        mock_pre = self._handle_with_source(
-            command, mock_config, mock_auth_manager, mock_client, model="flux-general-en"
-        )
-        assert mock_pre.call_args.kwargs["api_version"] == 2
+    def _handle_with_mic(
+        self, command, mock_config, mock_auth_manager, mock_client, **kwargs
+    ):
+        defaults = dict(mic=True, model="nova-3", language="en-US")
+        defaults.update(kwargs)
+        with patch.object(
+            command, "_stream_mic", return_value=ListenResult(status="success")
+        ) as mock_stream:
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                **defaults,
+            )
+            return mock_stream
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_flux_prefix_variant_uses_v2(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_flux_model_file_is_error(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        # Flux STT (v2) is streaming-only: a file must not reach _prerecorded.
         mock_sys.stdin.isatty.return_value = True
-        mock_pre = self._handle_with_source(
+        with patch.object(
+            command, "_interactive_features", return_value=(False, False, False, False)
+        ):
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                source="audio.mp3",
+                mic=False,
+                model="flux-general-en",
+                language="en-US",
+            )
+        assert result.status == "error"
+        assert "streaming-only" in result.message
+
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_flux_model_streaming_uses_v2(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        mock_sys.stdin.isatty.return_value = True
+        mock_stream = self._handle_with_mic(
+            command,
+            mock_config,
+            mock_auth_manager,
+            mock_client,
+            model="flux-general-en",
+        )
+        assert mock_stream.call_args.kwargs["api_version"] == 2
+
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_flux_prefix_variant_streaming_uses_v2(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        mock_sys.stdin.isatty.return_value = True
+        mock_stream = self._handle_with_mic(
             command, mock_config, mock_auth_manager, mock_client, model="flux-2-en"
         )
-        assert mock_pre.call_args.kwargs["api_version"] == 2
+        assert mock_stream.call_args.kwargs["api_version"] == 2
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_nova3_uses_v1(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_nova3_uses_v1(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
         mock_sys.stdin.isatty.return_value = True
         mock_pre = self._handle_with_source(
             command, mock_config, mock_auth_manager, mock_client, model="nova-3"
@@ -196,7 +252,9 @@ class TestFluxModelAutoVersion:
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_enhanced_uses_v1(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_enhanced_uses_v1(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
         mock_sys.stdin.isatty.return_value = True
         mock_pre = self._handle_with_source(
             command, mock_config, mock_auth_manager, mock_client, model="enhanced"
@@ -209,7 +267,9 @@ class TestFluxModelAutoVersion:
 
 class TestCaptionFlagExclusivity:
     @patch("deepctl_cmd_listen.command.sys")
-    def test_both_flags_is_error(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_both_flags_is_error(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
         mock_sys.stdin.isatty.return_value = True
         result = command.handle(
             config=mock_config,
@@ -225,37 +285,74 @@ class TestCaptionFlagExclusivity:
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_webvtt_alone_passes_format_to_prerecorded(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_webvtt_alone_passes_format_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
         mock_sys.stdin.isatty.return_value = True
-        with patch.object(command, "_prerecorded", return_value=ListenResult(status="success")) as mock_pre:
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+        with patch.object(
+            command, "_prerecorded", return_value=ListenResult(status="success")
+        ) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 command.handle(
-                    config=mock_config, auth_manager=mock_auth_manager, client=mock_client,
-                    source="audio.mp3", mic=False, webvtt=True, srt=False,
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    webvtt=True,
+                    srt=False,
                 )
             assert mock_pre.call_args.kwargs["caption_format"] == "webvtt"
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_srt_alone_passes_format_to_prerecorded(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_srt_alone_passes_format_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
         mock_sys.stdin.isatty.return_value = True
-        with patch.object(command, "_prerecorded", return_value=ListenResult(status="success")) as mock_pre:
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+        with patch.object(
+            command, "_prerecorded", return_value=ListenResult(status="success")
+        ) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 command.handle(
-                    config=mock_config, auth_manager=mock_auth_manager, client=mock_client,
-                    source="audio.mp3", mic=False, webvtt=False, srt=True,
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    webvtt=False,
+                    srt=True,
                 )
             assert mock_pre.call_args.kwargs["caption_format"] == "srt"
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
-    def test_no_caption_flag_passes_none(self, mock_sys, command, mock_config, mock_auth_manager, mock_client):
+    def test_no_caption_flag_passes_none(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
         mock_sys.stdin.isatty.return_value = True
-        with patch.object(command, "_prerecorded", return_value=ListenResult(status="success")) as mock_pre:
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+        with patch.object(
+            command, "_prerecorded", return_value=ListenResult(status="success")
+        ) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 command.handle(
-                    config=mock_config, auth_manager=mock_auth_manager, client=mock_client,
-                    source="audio.mp3", mic=False,
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
                 )
             assert mock_pre.call_args.kwargs["caption_format"] is None
 
@@ -264,25 +361,39 @@ class TestCaptionFlagExclusivity:
 
 
 class TestHandleWsMessage:
-    def _msg(self, transcript, words=None, is_final=True, msg_type="Results", start=0.0, duration=1.0):
-        return json.dumps({
-            "type": msg_type,
-            "channel": {
-                "alternatives": [{"transcript": transcript, "words": words or []}]
-            },
-            "is_final": is_final,
-            "start": start,
-            "duration": duration,
-        })
+    def _msg(
+        self,
+        transcript,
+        words=None,
+        is_final=True,
+        msg_type="Results",
+        start=0.0,
+        duration=1.0,
+    ):
+        return json.dumps(
+            {
+                "type": msg_type,
+                "channel": {
+                    "alternatives": [{"transcript": transcript, "words": words or []}]
+                },
+                "is_final": is_final,
+                "start": start,
+                "duration": duration,
+            }
+        )
 
     def test_final_transcript_printed_to_stdout(self, command, capsys):
         acc = []
-        command._handle_ws_message(self._msg("Hello world"), acc, diarize=False, interim=False)
+        command._handle_ws_message(
+            self._msg("Hello world"), acc, diarize=False, interim=False
+        )
         assert "Hello world" in capsys.readouterr().out
 
     def test_final_transcript_accumulated(self, command, capsys):
         acc = []
-        command._handle_ws_message(self._msg("Hello world"), acc, diarize=False, interim=False)
+        command._handle_ws_message(
+            self._msg("Hello world"), acc, diarize=False, interim=False
+        )
         capsys.readouterr()
         assert acc == ["Hello world"]
 
@@ -313,7 +424,10 @@ class TestHandleWsMessage:
     def test_non_results_type_ignored(self, command, capsys):
         acc = []
         command._handle_ws_message(
-            json.dumps({"type": "Metadata", "data": "x"}), acc, diarize=False, interim=False
+            json.dumps({"type": "Metadata", "data": "x"}),
+            acc,
+            diarize=False,
+            interim=False,
         )
         assert acc == []
         assert capsys.readouterr().out == ""
@@ -331,8 +445,20 @@ class TestHandleWsMessage:
 
     def test_diarized_final_uses_speaker_labels(self, command, capsys):
         words = [
-            {"word": "hello", "punctuated_word": "Hello", "start": 0.0, "end": 0.5, "speaker": 0},
-            {"word": "there", "punctuated_word": "there", "start": 0.6, "end": 1.0, "speaker": 1},
+            {
+                "word": "hello",
+                "punctuated_word": "Hello",
+                "start": 0.0,
+                "end": 0.5,
+                "speaker": 0,
+            },
+            {
+                "word": "there",
+                "punctuated_word": "there",
+                "start": 0.6,
+                "end": 1.0,
+                "speaker": 1,
+            },
         ]
         acc = []
         command._handle_ws_message(
@@ -343,7 +469,13 @@ class TestHandleWsMessage:
 
     def test_diarized_line_accumulated(self, command, capsys):
         words = [
-            {"word": "hi", "punctuated_word": "Hi", "start": 0.0, "end": 0.5, "speaker": 0},
+            {
+                "word": "hi",
+                "punctuated_word": "Hi",
+                "start": 0.0,
+                "end": 0.5,
+                "speaker": 0,
+            },
         ]
         acc = []
         command._handle_ws_message(
@@ -404,7 +536,11 @@ class TestHandleWsMessage:
 
     def test_multiple_messages_accumulate(self, command, capsys):
         acc = []
-        command._handle_ws_message(self._msg("First"), acc, diarize=False, interim=False)
-        command._handle_ws_message(self._msg("Second"), acc, diarize=False, interim=False)
+        command._handle_ws_message(
+            self._msg("First"), acc, diarize=False, interim=False
+        )
+        command._handle_ws_message(
+            self._msg("Second"), acc, diarize=False, interim=False
+        )
         capsys.readouterr()
         assert acc == ["First", "Second"]
