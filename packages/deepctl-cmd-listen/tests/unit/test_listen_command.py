@@ -333,13 +333,64 @@ class TestListenCommand:
                     mic=False,
                     model="nova-3",
                     language="en-US",
-                    redact="numbers",
+                    redact=("numbers",),
                     numerals=True,
                 )
 
             call_kwargs = mock_pre.call_args.kwargs
-            assert call_kwargs["redact"] == "numbers"
+            assert call_kwargs["redact"] == ("numbers",)
             assert call_kwargs["numerals"] is True
+
+    @patch("deepctl_cmd_listen.command._agentic", False)
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_passes_multiple_redact_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A repeated --redact (v1) reaches _prerecorded as a tuple of values."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="file", mode="prerecorded")
+
+        with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
+                command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    model="nova-3",
+                    language="en-US",
+                    redact=("pci", "numbers"),
+                )
+
+            assert mock_pre.call_args.kwargs["redact"] == ("pci", "numbers")
+
+    def test_ws_url_expands_multiple_redact(self, command):
+        """Repeated redact values expand to repeated query params (doseq)."""
+        ws_client = Mock()
+        ws_client.config.get_profile.return_value = Mock(
+            base_url="https://api.deepgram.com"
+        )
+        url = command._ws_url(
+            ws_client,
+            api_version=1,
+            model="nova-3",
+            language="en-US",
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            redact=("pci", "numbers"),
+        )
+        assert "redact=pci" in url
+        assert "redact=numbers" in url
 
     def test_ws_url_includes_redact_and_numerals(self, command):
         """redact / numerals become query params on the streaming URL."""

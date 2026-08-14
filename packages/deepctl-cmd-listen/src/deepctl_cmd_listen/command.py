@@ -187,9 +187,11 @@ class ListenCommand(BaseCommand):
                 "help": (
                     "Redact sensitive content. Flux STT (v2) accepts 'numbers' or "
                     "'aggressive_numbers'; v1 models also accept 'pci', 'ssn', "
-                    "etc. Applies to files and live streams."
+                    "etc. Repeatable on v1 (e.g. --redact pci --redact numbers). "
+                    "Applies to files and live streams."
                 ),
                 "type": str,
+                "multiple": True,
                 "is_option": True,
             },
             {
@@ -327,7 +329,16 @@ class ListenCommand(BaseCommand):
         topics = kwargs.get("topics", False)
         sentiment = kwargs.get("sentiment", False)
         interim = kwargs.get("interim", False)
-        redact = kwargs.get("redact")
+        # --redact is repeatable (click multiple=True → tuple). Normalise so the
+        # rest of the flow always sees a tuple: click gives (), direct callers
+        # (tests) may pass a bare string or None.
+        _redact_raw = kwargs.get("redact")
+        if _redact_raw is None:
+            redact: tuple[str, ...] = ()
+        elif isinstance(_redact_raw, str):
+            redact = (_redact_raw,) if _redact_raw else ()
+        else:
+            redact = tuple(_redact_raw)
         numerals = kwargs.get("numerals", False)
         encoding = kwargs.get("encoding")
         sample_rate = kwargs.get("sample_rate") or 16000
@@ -366,15 +377,17 @@ class ListenCommand(BaseCommand):
         # Flux STT (listen v2) only accepts a narrow --redact vocabulary; the
         # v1 values ("pci", "ssn", …) come back as an opaque HTTP 400. Validate
         # up front, mirroring how `speak` guards its Flux-only flags.
-        if api_version >= 2 and redact is not None and redact not in _FLUX_REDACT:
-            allowed = " or ".join(f"'{v}'" for v in _FLUX_REDACT)
-            return BaseResult(
-                status="error",
-                message=(
-                    f"--redact {redact!r} is not supported by Flux STT ({model}); "
-                    f"listen v2 accepts only {allowed}."
-                ),
-            )
+        if api_version >= 2:
+            bad = [r for r in redact if r not in _FLUX_REDACT]
+            if bad:
+                allowed = " or ".join(f"'{v}'" for v in _FLUX_REDACT)
+                return BaseResult(
+                    status="error",
+                    message=(
+                        f"--redact {', '.join(bad)} is not supported by Flux STT "
+                        f"({model}); listen v2 accepts only {allowed}."
+                    ),
+                )
 
         # ── Caption format ─────────────────────────────────────────────
         want_webvtt = kwargs.get("webvtt", False)
@@ -541,7 +554,7 @@ class ListenCommand(BaseCommand):
         summarize: bool,
         topics: bool,
         sentiment: bool,
-        redact: str | None,
+        redact: tuple[str, ...],
         numerals: bool,
         save_to: str | None,
         probe: bool,
@@ -612,7 +625,9 @@ class ListenCommand(BaseCommand):
         if sentiment:
             options["sentiment"] = "true"
         if redact:
-            options["redact"] = redact
+            # Fern's query encoder expands a list into repeated params
+            # (redact=pci&redact=numbers) but leaves a tuple unexpanded.
+            options["redact"] = list(redact)
         if numerals:
             options["numerals"] = "true"
 
@@ -689,7 +704,7 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
-        redact: str | None,
+        redact: tuple[str, ...],
         numerals: bool,
         sample_rate: int,
         channels: int,
@@ -776,7 +791,7 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
-        redact: str | None,
+        redact: tuple[str, ...],
         numerals: bool,
         sample_rate: int,
         channels: int,
@@ -887,7 +902,7 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
-        redact: str | None,
+        redact: tuple[str, ...],
         numerals: bool,
         encoding: str | None,
         sample_rate: int,
@@ -967,7 +982,7 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
-        redact: str | None,
+        redact: tuple[str, ...],
         numerals: bool,
         encoding: str,
         sample_rate: int,
@@ -1052,7 +1067,7 @@ class ListenCommand(BaseCommand):
         encoding: str,
         sample_rate: int,
         channels: int,
-        redact: str | None = None,
+        redact: tuple[str, ...] = (),
         numerals: bool = False,
     ) -> str:
         # v1 and v2 (Flux) have different query-param vocabularies. The v2
@@ -1077,13 +1092,15 @@ class ListenCommand(BaseCommand):
                 params["diarize"] = "true"
             if interim:
                 params["interim_results"] = "true"
-        # redact / numerals are valid on both versions.
+        # redact / numerals are valid on both versions. redact is repeatable;
+        # doseq=True expands a sequence into redact=pci&redact=numbers (and
+        # leaves a bare string as a single scalar param).
         if redact:
             params["redact"] = redact
         if numerals:
             params["numerals"] = "true"
         base = _ws_base(client)
-        return f"{base}/v{api_version}/listen?{urlencode(params)}"
+        return f"{base}/v{api_version}/listen?{urlencode(params, doseq=True)}"
 
     def _handle_ws_message(
         self,
