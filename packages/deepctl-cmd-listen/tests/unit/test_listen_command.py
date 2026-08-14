@@ -761,6 +761,93 @@ class TestFluxV2TurnHandling:
         assert "my account" in batch
         assert "00:00:01,000 --> 00:00:02,500" in batch
 
+    def test_ws_mic_flushes_final_turn_on_keyboard_interrupt(
+        self, command, monkeypatch
+    ):
+        """Ctrl-C during a Flux mic stream must still flush the in-flight turn.
+
+        The interrupt surfaces at the ``asyncio.gather`` await; ``_ws_mic`` has
+        to catch it, run ``_flush_v2``, and return the accumulated transcript
+        (rather than letting the final turn vanish)."""
+        import asyncio as _asyncio
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        # _ws_mic imports these at call time; stub them so no hardware/net is hit.
+        for name in ("sounddevice", "numpy"):
+            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+
+        class _FakeWS:
+            async def send(self, *a):
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class _FakeConnect:
+            async def __aenter__(self):
+                return _FakeWS()
+
+            async def __aexit__(self, *a):
+                return False
+
+        fake_ws = types.ModuleType("websockets")
+        fake_ws.connect = lambda *a, **k: _FakeConnect()
+        monkeypatch.setitem(sys.modules, "websockets", fake_ws)
+
+        # A turn received but never finalized (no EndOfTurn before the interrupt).
+        seeded = {
+            "turns": {
+                0: {
+                    "transcript": "hello world",
+                    "words": [],
+                    "final": False,
+                    "start": 0.0,
+                    "end": 1.0,
+                }
+            },
+            "order": [0],
+        }
+        monkeypatch.setattr(command, "_new_v2_state", lambda: seeded)
+
+        async def _interrupt(*a, **k):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("deepctl_cmd_listen.command.asyncio.gather", _interrupt)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        # Drive on a plain loop (not asyncio.run) so the patched gather can't
+        # interfere with run()'s own shutdown machinery.
+        loop = _asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                command._ws_mic(
+                    client,
+                    model="flux-general-en",
+                    language="en-US",
+                    api_version=2,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    sample_rate=16000,
+                    channels=1,
+                )
+            )
+        finally:
+            loop.close()
+
+        assert result.transcript == "hello world"
+
     def test_fatal_error_frame_is_surfaced(self, command, capsys):
         """A Flux STT fatal error (type 'Error') is reported, not swallowed."""
         import json as _json

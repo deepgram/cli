@@ -157,3 +157,35 @@ def test_listen_nova3_v1_baseline(live_client, feed_stdin):
 
     assert result.status == "success"
     assert result.transcript.strip()
+
+
+def test_listen_flux_srt_captions_have_real_timestamps(live_client, feed_stdin, capsys):
+    """Flux STT (v2) --srt emits well-formed cues with non-zero timestamps.
+
+    Flux ``TurnInfo`` words carry no per-word timings, so captions must key off
+    the turn's ``audio_window_*``; a regression would print ``00:00:00,000`` for
+    every cue (or crash the end-of-stream save with ``KeyError: 'start'``).
+    """
+    import re
+
+    config, auth, client = live_client
+    feed_stdin(_synth_pcm(client, NUMBERS_PHRASE))
+
+    result = ListenCommand().handle(
+        config=config,
+        auth_manager=auth,
+        client=client,
+        source="-",
+        model="flux-general-en",
+        encoding="linear16",
+        sample_rate=SAMPLE_RATE,
+        srt=True,
+    )
+
+    assert result.status == "success"
+    out = capsys.readouterr().out
+    stamps = re.findall(r"\d\d:\d\d:\d\d,\d\d\d", out)
+    assert " --> " in out, out
+    assert stamps, out
+    # The audio window is real, so at least one boundary must be non-zero.
+    assert any(s != "00:00:00,000" for s in stamps), out
