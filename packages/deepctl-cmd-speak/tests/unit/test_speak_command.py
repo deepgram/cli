@@ -386,6 +386,42 @@ class TestSpeakCommand:
         )
         mock_client.speak_text_stream.assert_not_called()
 
+    @pytest.mark.parametrize("model", ["flux", "fluxfoo", "aura-2-asteria-en"])
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_rest_api_error_exits_nonzero(
+        self,
+        mock_sys,
+        model,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """A Speak v1 (REST) API failure raises ClickException so the command
+        exits non-zero. A returned error result would only print and still exit
+        0 — the sink that bare/typo `flux` names (now routed to REST, not the
+        raising v2 path) would otherwise fall into."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+        mock_client.speak_text.side_effect = Exception("model not found")
+
+        with pytest.raises(click.ClickException) as exc_info:
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "output.mp3"),
+                model=model,
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+            )
+
+        assert "model not found" in str(exc_info.value)
+
     @pytest.mark.parametrize("model", ["flux", "fluxfoo"])
     @patch("deepctl_cmd_speak.command.sys")
     def test_handle_non_flux_prefix_control_error_is_model_neutral(

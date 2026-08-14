@@ -659,7 +659,10 @@ class ListenCommand(BaseCommand):
             else:
                 result_dict = client.transcribe_file(source, options)
         except Exception as e:
-            return BaseResult(status="error", message=f"Transcription failed: {e}")
+            # Raise (not return an error result) so an API rejection — e.g. a
+            # --redact value the v1 endpoint refuses — exits non-zero and is
+            # visible, rather than printing nothing and exiting 0.
+            raise click.ClickException(f"Transcription failed: {e}")
 
         # ── Format transcript ──────────────────────────────────────────
         if diarize:
@@ -1096,6 +1099,12 @@ class ListenCommand(BaseCommand):
             recv_task = asyncio.create_task(recv_transcripts())
             try:
                 await asyncio.gather(send_task, recv_task)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                # Mirror the mic path: on Ctrl-C drain the tasks but do NOT
+                # re-raise, so we fall through to _flush_v2 + the return below
+                # and the partial transcript (and --save-to) survive. Fatal
+                # errors still propagate via the BaseException clause.
+                await _cancel_and_drain(send_task, recv_task)
             except BaseException:
                 await _cancel_and_drain(send_task, recv_task)
                 raise

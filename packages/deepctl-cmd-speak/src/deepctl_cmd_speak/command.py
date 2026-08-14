@@ -503,6 +503,11 @@ class SpeakCommand(BaseCommand):
                 # summary above went to the stderr console.
                 return None
 
+        except click.ClickException:
+            raise
         except Exception as e:
-            console.print(f"[red]Error generating speech:[/red] {e}")
-            return BaseResult(status="error", message=str(e))
+            # Raise (not return an error result) so the failure exits non-zero
+            # in every output mode — a returned BaseResult is only printed and
+            # still exits 0. Reachable now that unknown models (e.g. a bare
+            # "flux" typo) route here instead of the raising v2 path.
+            raise click.ClickException(f"Error generating speech: {e}")

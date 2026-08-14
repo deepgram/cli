@@ -490,6 +490,36 @@ class TestListenCommand:
         assert opts["redact"] == ["pci", "numbers"]  # list, not tuple
         assert opts["numerals"] == "true"
 
+    def test_prerecorded_api_error_exits_nonzero(self, command, mock_config):
+        """A v1 REST rejection (e.g. a --redact value the endpoint refuses)
+        raises ClickException so the command exits non-zero and is visible —
+        not a returned error result that prints nothing and still exits 0."""
+        client = Mock()
+        client.transcribe_file.side_effect = Exception("Bad Request: invalid redact")
+        with pytest.raises(click.ClickException) as exc_info:
+            command._prerecorded(
+                client,
+                "audio.wav",
+                is_url=False,
+                model="nova-3",
+                language="en-US",
+                api_version=1,
+                diarize=False,
+                smart_format=True,
+                punctuate=True,
+                summarize=False,
+                topics=False,
+                sentiment=False,
+                redact=("bogus",),
+                numerals=False,
+                save_to=None,
+                probe=False,
+                no_validate=True,
+                caption_format=None,
+                config=mock_config,
+            )
+        assert "Transcription failed" in str(exc_info.value)
+
     def test_ws_url_expands_multiple_redact(self, command):
         """Repeated redact values expand to repeated query params (doseq)."""
         ws_client = Mock()
@@ -1215,3 +1245,88 @@ class TestFluxV2TurnHandling:
         assert len(errors) == 1
         assert isinstance(errors[0], click.ClickException)
         assert "INVALID_AUDIO" in errors[0].message
+
+    def test_stream_stdin_keyboard_interrupt_preserves_transcript_and_save_to(
+        self, command, monkeypatch, tmp_path
+    ):
+        """Ctrl-C on `dg listen -` (stdin) keeps the partial transcript and
+        writes --save-to, mirroring the mic path. The stdin path used to
+        re-raise the interrupt and drop both."""
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        # No real stdin read: return EOF at once if the reader thread starts.
+        fake_stdin = types.SimpleNamespace(
+            buffer=types.SimpleNamespace(read=lambda _n: b"")
+        )
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command.sys.stdin", fake_stdin, raising=False
+        )
+
+        class _FakeWS:
+            async def send(self, *a):
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class _FakeConnect:
+            async def __aenter__(self):
+                return _FakeWS()
+
+            async def __aexit__(self, *a):
+                return False
+
+        fake_ws = types.ModuleType("websockets")
+        fake_ws.connect = lambda *a, **k: _FakeConnect()
+        monkeypatch.setitem(sys.modules, "websockets", fake_ws)
+
+        # A turn received but never finalized before the interrupt.
+        seeded = {
+            "turns": {
+                0: {
+                    "transcript": "hello world",
+                    "words": [],
+                    "final": False,
+                    "start": 0.0,
+                    "end": 1.0,
+                }
+            },
+            "order": [0],
+        }
+        monkeypatch.setattr(command, "_new_v2_state", lambda: seeded)
+
+        async def _interrupt(*a, **k):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("deepctl_cmd_listen.command.asyncio.gather", _interrupt)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        save_to = tmp_path / "out.txt"
+        result = command._stream_stdin(
+            client,
+            model="flux-general-en",
+            language="en-US",
+            api_version=2,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            redact=(),
+            numerals=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            save_to=str(save_to),
+            caption_format=None,
+        )
+
+        assert result.transcript == "hello world"
+        assert save_to.read_text().strip() == "hello world"
