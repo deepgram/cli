@@ -8,6 +8,17 @@ import pytest
 from click.testing import CliRunner
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 
+# Mirrors the full key set of deepctl_core.output._output_config so a patched
+# stand-in can't drift from the real global. Spread with a format override,
+# e.g. {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"}, at each patch site.
+_OUTPUT_CONFIG_DEFAULTS = {
+    "format": "default",
+    "quiet": False,
+    "verbose": False,
+    "color": True,
+    "agentic": False,
+}
+
 
 class TestBaseCommand:
     """Test suite for BaseCommand class."""
@@ -470,7 +481,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "json", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
     )
     def test_output_result_json_dict(self, mock_console, mock_command_class):
         """Test output_result with JSON format and dict result."""
@@ -489,7 +500,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "json", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
     )
     def test_output_result_json_list(self, mock_console, mock_command_class):
         """Test output_result with JSON format and list result."""
@@ -507,7 +518,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "json", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
     )
     def test_output_result_json_string(self, mock_console, mock_command_class):
         """Test output_result with JSON format and string result."""
@@ -528,7 +539,7 @@ class TestBaseCommand:
     @pytest.mark.unit
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "json", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
     )
     def test_output_result_pydantic_model(self, mock_command_class):
         """Test output_result with Pydantic model."""
@@ -552,7 +563,7 @@ class TestBaseCommand:
     @pytest.mark.unit
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "json", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
     )
     def test_output_result_list_of_pydantic_models(self, mock_command_class):
         """Test output_result with list of Pydantic models."""
@@ -582,7 +593,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "yaml", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "yaml"},
     )
     def test_output_result_yaml(self, mock_console, mock_command_class):
         """Test output_result with YAML format."""
@@ -602,7 +613,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "table", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "table"},
     )
     def test_output_result_table_list_of_dicts(self, mock_console, mock_command_class):
         """Test output_result with table format and list of dicts."""
@@ -621,7 +632,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "table", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "table"},
     )
     def test_output_result_table_dict(self, mock_console, mock_command_class):
         """Test output_result with table format and dict."""
@@ -638,7 +649,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "csv", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "csv"},
     )
     def test_output_result_csv_list_of_dicts(self, mock_console, mock_command_class):
         """Test output_result with CSV format and list of dicts."""
@@ -659,7 +670,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "csv", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "csv"},
     )
     def test_output_result_csv_dict(self, mock_console, mock_command_class):
         """Test output_result with CSV format and dict."""
@@ -680,7 +691,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "unknown", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "unknown"},
     )
     def test_output_result_unknown_format(self, mock_console, mock_command_class):
         """Test output_result with unknown format falls back to JSON."""
