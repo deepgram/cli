@@ -1136,6 +1136,13 @@ class ListenCommand(BaseCommand):
                 )
             return
 
+        # Flux STT (v2) fatal errors arrive as a control frame (type "Error");
+        # surface them instead of dropping into an empty-transcript silence.
+        if msg_type == "Error":
+            detail = data.get("description") or data.get("code") or "unknown error"
+            status.print(f"[red]Flux STT error:[/red] {detail}")
+            return
+
         if msg_type != "Results":
             return
 
@@ -1207,14 +1214,24 @@ class ListenCommand(BaseCommand):
         turns = v2_state["turns"]
         st = turns.get(turn_index)
         if st is None:
-            st = {"transcript": "", "words": [], "final": False}
+            st = {
+                "transcript": "",
+                "words": [],
+                "final": False,
+                "start": 0.0,
+                "end": 0.0,
+            }
             turns[turn_index] = st
             v2_state["order"].append(turn_index)
 
-        # Keep the most complete transcript seen for this turn.
+        # Keep the most complete transcript seen for this turn, plus the turn's
+        # audio window — the only timing Flux guarantees. Per-word start/end are
+        # optional on TurnInfo and usually absent, so captions key off the window.
         if transcript:
             st["transcript"] = transcript
             st["words"] = data.get("words", [])
+            st["start"] = data.get("audio_window_start", st["start"])
+            st["end"] = data.get("audio_window_end", st["end"])
 
         if event == "EndOfTurn":
             self._emit_v2_turn(st, transcript_acc, caption_writer=caption_writer)
@@ -1235,15 +1252,44 @@ class ListenCommand(BaseCommand):
         transcript = st["transcript"]
         if not transcript:
             return
-        words = st["words"]
-        if caption_writer and words:
-            start = words[0].get("start", 0.0)
-            end = words[-1].get("end", start)
+        if caption_writer:
+            start, end = st["start"], st["end"]
+            words = self._timed_v2_words(st["words"], transcript, start, end)
             caption_writer.write_entry(words, start, end)
             transcript_acc.append(transcript)
         else:
             transcript_acc.append(transcript)
             print(transcript, flush=True)
+
+    @staticmethod
+    def _timed_v2_words(
+        words: list[dict[str, Any]],
+        transcript: str,
+        start: float,
+        end: float,
+    ) -> list[dict[str, Any]]:
+        """Give Flux turn words the start/end the caption converter requires.
+
+        ``captions_from_words`` raises ``KeyError: 'start'`` on words without
+        timings, and Flux ``TurnInfo`` words carry only ``{word, confidence}``.
+        Spread the turn's audio window evenly across the words (keeping any real
+        per-word timings Flux does send), and synthesise a single word from the
+        transcript if the turn arrived without a word list at all.
+        """
+        if not words:
+            return [{"word": transcript, "start": start, "end": end}]
+        if words[0].get("start") is not None and words[-1].get("end") is not None:
+            return words
+        n = len(words)
+        span = max(0.0, end - start)
+        step = span / n if n else 0.0
+        timed: list[dict[str, Any]] = []
+        for i, w in enumerate(words):
+            tw = dict(w)
+            tw.setdefault("start", start + i * step)
+            tw.setdefault("end", start + (i + 1) * step)
+            timed.append(tw)
+        return timed
 
     def _flush_v2(
         self,

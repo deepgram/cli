@@ -263,8 +263,9 @@ class SpeakCommand(BaseCommand):
             {
                 "names": ["--expressivity"],
                 "help": (
-                    "Flux TTS (v2) only. Expressive range: -2, -1, 0, 1, or 2 "
-                    "(0 = nominal; negative flatter, positive more animated)."
+                    "Flux TTS (v2) only, beta. Expressive range: -2, -1, 0, 1, "
+                    "or 2 (0 = nominal; negative flatter, positive more animated). "
+                    "Fixed for the connection."
                 ),
                 "type": int,
                 "is_option": True,

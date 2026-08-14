@@ -622,7 +622,7 @@ class TestFluxV2TurnHandling:
     def command(self):
         return ListenCommand()
 
-    def _turn(self, event, transcript, *, turn_index=0, words=None):
+    def _turn(self, event, transcript, *, turn_index=0, words=None, window=(0.0, 0.0)):
         import json as _json
 
         return _json.dumps(
@@ -632,6 +632,8 @@ class TestFluxV2TurnHandling:
                 "turn_index": turn_index,
                 "transcript": transcript,
                 "words": words or [],
+                "audio_window_start": window[0],
+                "audio_window_end": window[1],
             }
         )
 
@@ -724,3 +726,58 @@ class TestFluxV2TurnHandling:
             v2_state=None,
         )
         assert acc == []
+
+    def test_captions_use_audio_window_and_survive_batch_save(self, command):
+        """Flux words lack per-word timings: captions must key off the turn's
+        audio window, and the end-of-stream batch save must not KeyError."""
+        from deepctl_cmd_listen.captions import (
+            StreamingCaptionWriter,
+            captions_from_words,
+        )
+
+        writer = StreamingCaptionWriter("srt")
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        # TurnInfo words carry only {word, confidence} — no start/end.
+        words = [
+            {"word": "my", "confidence": 0.9},
+            {"word": "account", "confidence": 0.9},
+        ]
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "my account", words=words, window=(1.0, 2.5)),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+            caption_writer=writer,
+        )
+
+        assert acc == ["my account"]
+        # Live cue span comes from the audio window, not 00:00:00.
+        assert writer.accumulated_words  # words were captured for batch save
+        # The batch save path used to raise KeyError: 'start' on Flux words.
+        batch = captions_from_words(writer.accumulated_words, "srt")
+        assert "my account" in batch
+        assert "00:00:01,000 --> 00:00:02,500" in batch
+
+    def test_fatal_error_frame_is_surfaced(self, command, capsys):
+        """A Flux STT fatal error (type 'Error') is reported, not swallowed."""
+        import json as _json
+
+        acc: list[str] = []
+        command._handle_ws_message(
+            _json.dumps(
+                {
+                    "type": "Error",
+                    "code": "INTERNAL_SERVER_ERROR",
+                    "description": "something went wrong",
+                }
+            ),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=command._new_v2_state(),
+        )
+        assert acc == []
+        assert "something went wrong" in capsys.readouterr().err
