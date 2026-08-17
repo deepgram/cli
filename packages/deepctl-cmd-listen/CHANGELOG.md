@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.14](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.13...deepctl-cmd-listen-v0.0.14) (2026-08-17)
+
+
+### Features
+
+* SDK 7.7.0 — Flux TTS controls, Flux STT fix, listen redact/numerals ([#92](https://github.com/deepgram/cli/issues/92)) ([50d96cf](https://github.com/deepgram/cli/commit/50d96cf8950c9f180619e0e2dbd41931d1a63ef6))
+
 ## [0.0.13](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.12...deepctl-cmd-listen-v0.0.13) (2026-05-09)
 
 

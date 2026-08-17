@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.5...deepctl-telemetry-v0.0.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **mcp:** swallow broken/closed-pipe on dg mcp startup notifications and error path ([#88](https://github.com/deepgram/cli/issues/88)) ([b24396e](https://github.com/deepgram/cli/commit/b24396ec3c53197b1f9e5e610c57a298926f9031))
+
 ## [0.0.5](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.4...deepctl-telemetry-v0.0.5) (2026-05-12)
 
 
