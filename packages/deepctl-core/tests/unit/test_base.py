@@ -8,6 +8,17 @@ import pytest
 from click.testing import CliRunner
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 
+# Mirrors the full key set of deepctl_core.output._output_config so a patched
+# stand-in can't drift from the real global. Spread with a format override,
+# e.g. {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"}, at each patch site.
+_OUTPUT_CONFIG_DEFAULTS = {
+    "format": "default",
+    "quiet": False,
+    "verbose": False,
+    "color": True,
+    "agentic": False,
+}
+
 
 class TestBaseCommand:
     """Test suite for BaseCommand class."""
@@ -468,11 +479,14 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch(
+        "deepctl_core.output._output_config",
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
+    )
     def test_output_result_json_dict(self, mock_console, mock_command_class):
         """Test output_result with JSON format and dict result."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "json"  # output.format returns json
 
         result = {"key": "value", "number": 42}
         command.output_result(result, config)
@@ -484,11 +498,14 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch(
+        "deepctl_core.output._output_config",
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
+    )
     def test_output_result_json_list(self, mock_console, mock_command_class):
         """Test output_result with JSON format and list result."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "json"
 
         result = [{"id": 1}, {"id": 2}]
         command.output_result(result, config)
@@ -499,11 +516,14 @@ class TestBaseCommand:
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
+    @patch(
+        "deepctl_core.output._output_config",
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
+    )
     def test_output_result_json_string(self, mock_console, mock_command_class):
         """Test output_result with JSON format and string result."""
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "json"
 
         result = "simple string"
         command.output_result(result, config)
@@ -517,6 +537,10 @@ class TestBaseCommand:
         assert json.loads(actual_output) == expected_data
 
     @pytest.mark.unit
+    @patch(
+        "deepctl_core.output._output_config",
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
+    )
     def test_output_result_pydantic_model(self, mock_command_class):
         """Test output_result with Pydantic model."""
         from pydantic import BaseModel
@@ -527,7 +551,6 @@ class TestBaseCommand:
 
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "json"
 
         result = TestModel(name="test", value=123)
 
@@ -538,6 +561,10 @@ class TestBaseCommand:
             mock_output_json.assert_called_once_with({"name": "test", "value": 123})
 
     @pytest.mark.unit
+    @patch(
+        "deepctl_core.output._output_config",
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "json"},
+    )
     def test_output_result_list_of_pydantic_models(self, mock_command_class):
         """Test output_result with list of Pydantic models."""
         from pydantic import BaseModel
@@ -548,7 +575,6 @@ class TestBaseCommand:
 
         command = mock_command_class()
         config = Mock(spec=Config)
-        config.get.return_value = "json"
 
         result = [
             TestModel(name="test1", value=1),
@@ -567,7 +593,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "yaml", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "yaml"},
     )
     def test_output_result_yaml(self, mock_console, mock_command_class):
         """Test output_result with YAML format."""
@@ -587,7 +613,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "table", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "table"},
     )
     def test_output_result_table_list_of_dicts(self, mock_console, mock_command_class):
         """Test output_result with table format and list of dicts."""
@@ -606,7 +632,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "table", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "table"},
     )
     def test_output_result_table_dict(self, mock_console, mock_command_class):
         """Test output_result with table format and dict."""
@@ -623,7 +649,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "csv", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "csv"},
     )
     def test_output_result_csv_list_of_dicts(self, mock_console, mock_command_class):
         """Test output_result with CSV format and list of dicts."""
@@ -644,7 +670,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "csv", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "csv"},
     )
     def test_output_result_csv_dict(self, mock_console, mock_command_class):
         """Test output_result with CSV format and dict."""
@@ -665,7 +691,7 @@ class TestBaseCommand:
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
-        {"format": "unknown", "quiet": False, "verbose": False, "color": True},
+        {**_OUTPUT_CONFIG_DEFAULTS, "format": "unknown"},
     )
     def test_output_result_unknown_format(self, mock_console, mock_command_class):
         """Test output_result with unknown format falls back to JSON."""
@@ -1049,27 +1075,30 @@ class TestConfirmPromptGating:
     @pytest.mark.unit
     def test_confirm_calls_click_when_guided_and_not_agentic(self, command):
         command._guided = True
-        with patch("deepctl_core.base_command._agentic", False), patch(
-            "deepctl_core.base_command.click.confirm", return_value=True
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", False),
+            patch("deepctl_core.base_command.click.confirm", return_value=True) as mock,
+        ):
             assert command.confirm("OK?", default=False) is True
         mock.assert_called_once()
 
     @pytest.mark.unit
     def test_confirm_returns_default_when_not_guided(self, command):
         command._guided = False
-        with patch("deepctl_core.base_command._agentic", False), patch(
-            "deepctl_core.base_command.click.confirm"
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", False),
+            patch("deepctl_core.base_command.click.confirm") as mock,
+        ):
             assert command.confirm("OK?", default=False) is False
         mock.assert_not_called()
 
     @pytest.mark.unit
     def test_confirm_returns_default_when_agentic(self, command):
         command._guided = True
-        with patch("deepctl_core.base_command._agentic", True), patch(
-            "deepctl_core.base_command.click.confirm"
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", True),
+            patch("deepctl_core.base_command.click.confirm") as mock,
+        ):
             assert command.confirm("OK?", default=True) is True
         mock.assert_not_called()
 
@@ -1077,27 +1106,32 @@ class TestConfirmPromptGating:
     def test_confirm_returns_default_when_not_ci_friendly(self, command):
         command.ci_friendly = False
         command._guided = True
-        with patch("deepctl_core.base_command._agentic", False), patch(
-            "deepctl_core.base_command.click.confirm"
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", False),
+            patch("deepctl_core.base_command.click.confirm") as mock,
+        ):
             assert command.confirm("OK?", default=False) is False
         mock.assert_not_called()
 
     @pytest.mark.unit
     def test_prompt_calls_click_when_guided(self, command):
         command._guided = True
-        with patch("deepctl_core.base_command._agentic", False), patch(
-            "deepctl_core.base_command.click.prompt", return_value="user-input"
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", False),
+            patch(
+                "deepctl_core.base_command.click.prompt", return_value="user-input"
+            ) as mock,
+        ):
             assert command.prompt("Name?", default="alice") == "user-input"
         mock.assert_called_once()
 
     @pytest.mark.unit
     def test_prompt_returns_default_when_not_guided(self, command):
         command._guided = False
-        with patch("deepctl_core.base_command._agentic", False), patch(
-            "deepctl_core.base_command.click.prompt"
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", False),
+            patch("deepctl_core.base_command.click.prompt") as mock,
+        ):
             assert command.prompt("Name?", default="alice") == "alice"
         mock.assert_not_called()
 
@@ -1105,9 +1139,12 @@ class TestConfirmPromptGating:
     def test_prompt_with_no_default_still_prompts_when_not_guided(self, command):
         # Pre-existing safety: prompt() only short-circuits when default is not None
         command._guided = False
-        with patch("deepctl_core.base_command._agentic", False), patch(
-            "deepctl_core.base_command.click.prompt", return_value="typed"
-        ) as mock:
+        with (
+            patch("deepctl_core.base_command._agentic", False),
+            patch(
+                "deepctl_core.base_command.click.prompt", return_value="typed"
+            ) as mock,
+        ):
             assert command.prompt("Name?", default=None) == "typed"
         mock.assert_called_once()
 
@@ -1161,9 +1198,7 @@ class TestIsGuided:
 
     @pytest.mark.unit
     def test_env_var_breaks_guided(self, command):
-        ctx = self._ctx_with_sources(
-            {"foo": "DEFAULT", "bar": "ENVIRONMENT"}
-        )
+        ctx = self._ctx_with_sources({"foo": "DEFAULT", "bar": "ENVIRONMENT"})
         with patch("deepctl_core.base_command._agentic", False):
             assert command.is_guided(ctx) is False
 
