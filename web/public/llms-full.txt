@@ -98,6 +98,8 @@ dg listen interview.mp3 --srt --diarize --save-to interview.srt
 | `--model` | STT model (nova-3, nova-2, whisper, flux-general-en, etc.) | nova-3 |
 | `--language` | Language code (en-US, es-ES, fr-FR, etc.) | en-US |
 | `--diarize` | Speaker diarization — outputs `[Speaker N]` labels | false |
+| `--redact` | Redact sensitive content — `numbers`/`aggressive_numbers` on Flux STT; `pci`, `ssn` etc. on v1 models | off |
+| `--numerals` | Convert spoken numbers to digits ("four twenty" -> "420") | false |
 | `--smart-format` | Smart formatting (punctuation, capitalization) | true |
 | `--punctuate` | Enable punctuation | true |
 | `--summarize` | Generate transcript summary | false |
@@ -153,7 +155,9 @@ dg speak --file script.txt                        # From file
 | Flag | Description |
 |------|-------------|
 | `--output` | Save to file path |
-| `--model` | Voice model (aura-2-en-us, etc.) |
+| `--model` | Voice model — `flux-alexis-en` (default, streaming) or `aura-2-asteria-en` / `aura-2-selena-es` (REST batch) |
+| `--speed` | Flux TTS only — speech-rate multiplier from 0.85 to 1.15 (1.00 = nominal) |
+| `--expressivity` | Flux TTS only (beta) — expressive range -2 to 2 (0 = nominal) |
 | `--encoding` | Output encoding (mp3, linear16, flac, wav, ogg) |
 | `--file` | Read text from file |
 
