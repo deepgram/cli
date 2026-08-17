@@ -55,6 +55,7 @@ class TestSkillsStartupCheck:
             check_and_notify,
             print_pending_notification,
         )
+
         assert callable(check_and_notify)
         assert callable(print_pending_notification)
 
@@ -70,3 +71,28 @@ class TestSkillsStartupCheck:
 
         startup_check.check_and_notify(quiet=True)
         assert startup_check._thread is None
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            BrokenPipeError(32, "Broken pipe"),
+            ValueError("I/O operation on closed file"),
+        ],
+    )
+    def test_broken_pipe_swallowed(self, error):
+        """A closed/broken stderr (e.g. `dg mcp` host disconnect) is tolerated."""
+        import sys
+        import threading
+
+        from deepctl_cmd_skills import startup_check
+
+        startup_check._result = {"should_prompt": True}
+        startup_check._thread = threading.Thread(target=lambda: None)
+        startup_check._thread.start()
+        startup_check._thread.join()
+
+        broken_stderr = MagicMock()
+        broken_stderr.write.side_effect = error
+        with patch.object(sys, "stderr", broken_stderr):
+            # Must not raise.
+            startup_check.print_pending_notification()

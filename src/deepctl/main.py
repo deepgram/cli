@@ -281,6 +281,20 @@ def _telemetry_transaction() -> Iterator[None]:
         yield
 
 
+def _safe_console_print(message: str) -> None:
+    """Print to the console, tolerating a closed/broken output stream.
+
+    When `dg` runs as an MCP server, the host can close stdio before the
+    process finishes. A write to the closed stream raises ``BrokenPipeError``
+    (or rich's ``ValueError: I/O operation on closed file``); there is nowhere
+    left to report the message, so swallow it rather than crash on exit.
+    """
+    try:
+        console.print(message)
+    except (BrokenPipeError, OSError, ValueError):
+        pass
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     try:
@@ -367,10 +381,10 @@ def main() -> None:
             print_timing_summary(detailed_timing)
 
     except KeyboardInterrupt:
-        console.print("\n[yellow]Operation cancelled by user[/yellow]")
+        _safe_console_print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(2)
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        _safe_console_print(f"[red]Error: {e}[/red]")
         sys.exit(2)
 
 

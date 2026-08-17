@@ -107,7 +107,12 @@ def print_pending_notification() -> None:
     _thread = None
 
     if _result.get("should_prompt"):
-        sys.stderr.write(
-            "\033[36mAI coding assistants detected. "
-            "Run 'deepctl skills install' to set up integration.\033[0m\n"
-        )
+        try:
+            sys.stderr.write(
+                "\033[36mAI coding assistants detected. "
+                "Run 'deepctl skills install' to set up integration.\033[0m\n"
+            )
+        except (BrokenPipeError, OSError, ValueError):
+            # The output stream closed (e.g. an MCP host disconnected stdio
+            # after `dg mcp` finished). The prompt is purely advisory.
+            pass

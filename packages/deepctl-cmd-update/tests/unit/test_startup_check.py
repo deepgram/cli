@@ -220,3 +220,25 @@ class TestPrintPendingNotification:
         print_pending_notification()
         captured = capsys.readouterr()
         assert captured.err == ""
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            BrokenPipeError(32, "Broken pipe"),
+            ValueError("I/O operation on closed file"),
+        ],
+    )
+    def test_broken_pipe_swallowed(self, error):
+        """A closed/broken stderr (e.g. `dg mcp` host disconnect) is tolerated."""
+        import deepctl_cmd_update.startup_check as mod
+
+        mod._result = {"latest": "2.0.0", "current": "1.0.0"}
+        mod._thread = threading.Thread(target=lambda: None)
+        mod._thread.start()
+        mod._thread.join()
+
+        broken_stderr = MagicMock()
+        broken_stderr.write.side_effect = error
+        with patch.object(sys, "stderr", broken_stderr):
+            # Must not raise.
+            print_pending_notification()

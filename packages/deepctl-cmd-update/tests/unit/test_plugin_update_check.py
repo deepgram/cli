@@ -66,12 +66,15 @@ class TestPluginCacheTimestamp:
 
     def test_write_then_read_roundtrip(self, tmp_path):
         cache_file = tmp_path / "last_plugin_version_check"
-        with patch(
-            "deepctl_cmd_update.plugin_update_check._PLUGIN_CACHE_FILE",
-            cache_file,
-        ), patch(
-            "deepctl_cmd_update.plugin_update_check._CACHE_DIR",
-            tmp_path,
+        with (
+            patch(
+                "deepctl_cmd_update.plugin_update_check._PLUGIN_CACHE_FILE",
+                cache_file,
+            ),
+            patch(
+                "deepctl_cmd_update.plugin_update_check._CACHE_DIR",
+                tmp_path,
+            ),
         ):
             _write_plugin_cache_timestamp()
             ts = _read_plugin_cache_timestamp()
@@ -268,9 +271,7 @@ class TestCheckPluginsAndNotify:
         check_plugins_and_notify(quiet=True)
         assert mod._thread is None
 
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._is_ci", return_value=False
-    )
+    @patch("deepctl_cmd_update.plugin_update_check._is_ci", return_value=False)
     @patch(
         "deepctl_cmd_update.plugin_update_check._is_oneshot",
         return_value=False,
@@ -299,9 +300,7 @@ class TestCheckPluginsAndNotify:
             assert mod._thread.daemon is True
             mod._thread.join(timeout=2.0)
 
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._is_ci", return_value=False
-    )
+    @patch("deepctl_cmd_update.plugin_update_check._is_ci", return_value=False)
     @patch(
         "deepctl_cmd_update.plugin_update_check._is_oneshot",
         return_value=False,
@@ -347,7 +346,11 @@ class TestPrintPendingPluginNotifications:
 
         mod._result = {
             "updates": [
-                {"name": "deepctl-plugin-whisper", "current": "0.1.0", "latest": "0.2.0"}
+                {
+                    "name": "deepctl-plugin-whisper",
+                    "current": "0.1.0",
+                    "latest": "0.2.0",
+                }
             ]
         }
         mod._thread = threading.Thread(target=lambda: None)
@@ -369,7 +372,11 @@ class TestPrintPendingPluginNotifications:
 
         mod._result = {
             "updates": [
-                {"name": "deepctl-plugin-whisper", "current": "0.1.0", "latest": "0.2.0"},
+                {
+                    "name": "deepctl-plugin-whisper",
+                    "current": "0.1.0",
+                    "latest": "0.2.0",
+                },
                 {"name": "deepctl-plugin-asr", "current": "1.0.0", "latest": "1.1.0"},
             ]
         }
@@ -386,6 +393,36 @@ class TestPrintPendingPluginNotifications:
         assert "deepctl-plugin-whisper" in output
         assert "deepctl-plugin-asr" in output
         assert "deepctl plugin update <name>" in output
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            BrokenPipeError(32, "Broken pipe"),
+            ValueError("I/O operation on closed file"),
+        ],
+    )
+    def test_broken_pipe_swallowed(self, error):
+        """A closed/broken stderr (e.g. `dg mcp` host disconnect) is tolerated."""
+        import deepctl_cmd_update.plugin_update_check as mod
+
+        mod._result = {
+            "updates": [
+                {
+                    "name": "deepctl-plugin-whisper",
+                    "current": "0.1.0",
+                    "latest": "0.2.0",
+                }
+            ]
+        }
+        mod._thread = threading.Thread(target=lambda: None)
+        mod._thread.start()
+        mod._thread.join()
+
+        broken_stderr = MagicMock()
+        broken_stderr.write.side_effect = error
+        with patch.object(sys, "stderr", broken_stderr):
+            # Must not raise.
+            print_pending_plugin_notifications()
 
     def test_no_updates_no_output(self, capsys):
         import deepctl_cmd_update.plugin_update_check as mod
@@ -405,15 +442,11 @@ class TestPrintPendingPluginNotifications:
 
         # Create a thread that would take longer than the timeout
         mod._result = {}
-        mod._thread = threading.Thread(
-            target=lambda: time.sleep(10), daemon=True
-        )
+        mod._thread = threading.Thread(target=lambda: time.sleep(10), daemon=True)
         mod._thread.start()
 
         # Should not raise — just returns with no output
-        with patch.object(
-            mod._thread, "join", side_effect=lambda timeout=None: None
-        ):
+        with patch.object(mod._thread, "join", side_effect=lambda timeout=None: None):
             stderr_capture = io.StringIO()
             with patch.object(sys, "stderr", stderr_capture):
                 print_pending_plugin_notifications()

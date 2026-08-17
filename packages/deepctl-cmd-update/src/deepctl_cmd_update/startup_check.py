@@ -197,7 +197,13 @@ def print_pending_notification() -> None:
     latest = _result.get("latest")
     current = _result.get("current")
     if latest and current:
-        sys.stderr.write(
-            f"\n\033[33m  Update available:  {current} → {latest}"
-            f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
-        )
+        try:
+            sys.stderr.write(
+                f"\n\033[33m  Update available:  {current} → {latest}"
+                f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
+            )
+        except (BrokenPipeError, OSError, ValueError):
+            # The output stream closed (e.g. an MCP host disconnected stdio
+            # after `dg mcp` finished). Nothing useful to do — the notification
+            # is purely advisory.
+            pass

@@ -131,6 +131,25 @@ def _is_mcp_transient_noise(event: Event) -> bool:
     return True
 
 
+def _is_broken_pipe(event: Event) -> bool:
+    """Identify events caused by writing to a closed/broken output stream.
+
+    When `dg mcp` runs as an MCP server, the host can close stdio while the
+    CLI is still finishing up. Any residual write (an advisory notification, a
+    console error message) then raises ``BrokenPipeError`` — or rich's
+    ``ValueError: I/O operation on closed file`` when the underlying stream is
+    already closed. Neither is an actionable CLI bug, so drop them rather than
+    page the DX team.
+    """
+    for exc in (event.get("exception") or {}).get("values") or []:
+        exc_type = exc.get("type") or ""
+        if exc_type == "BrokenPipeError":
+            return True
+        if exc_type == "ValueError" and "closed file" in (exc.get("value") or ""):
+            return True
+    return False
+
+
 def _scrub_event(event: Event, _hint: Hint) -> Event | None:
     """Drop request bodies, headers, and any user-identifying data.
 
@@ -138,9 +157,10 @@ def _scrub_event(event: Event, _hint: Hint) -> Event | None:
     Auth tokens, project IDs, and file paths can still leak through
     breadcrumbs and exception messages. This is a defense-in-depth scrub.
 
-    Also drops known-noise events (see ``_is_mcp_transient_noise``).
+    Also drops known-noise events (see ``_is_mcp_transient_noise`` and
+    ``_is_broken_pipe``).
     """
-    if _is_mcp_transient_noise(event):
+    if _is_mcp_transient_noise(event) or _is_broken_pipe(event):
         return None
 
     request: dict[str, Any] = event.get("request") or {}

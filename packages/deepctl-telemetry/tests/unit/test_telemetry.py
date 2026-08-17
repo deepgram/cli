@@ -228,3 +228,76 @@ class TestMcpNoiseFilter:
         assert "ip_address" not in result["user"]
         assert "username" not in result["user"]
         assert result["user"]["id"] == "user-1"
+
+
+class TestBrokenPipeFilter:
+    """Drop broken/closed-stream events from `dg mcp` host disconnects.
+
+    Anchor: DX-CLI-P (BrokenPipeError on the startup notification write,
+    cascading into rich's ValueError: I/O operation on closed file).
+    """
+
+    def test_drops_broken_pipe_error(self) -> None:
+        from deepctl_telemetry.client import _is_broken_pipe
+
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "type": "BrokenPipeError",
+                        "value": "[Errno 32] Broken pipe",
+                        "mechanism": {"type": "excepthook", "handled": False},
+                    }
+                ]
+            },
+        }
+        assert _is_broken_pipe(event)
+
+    def test_drops_closed_file_value_error(self) -> None:
+        from deepctl_telemetry.client import _is_broken_pipe
+
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "type": "ValueError",
+                        "value": "I/O operation on closed file",
+                        "mechanism": {"type": "excepthook", "handled": False},
+                    }
+                ]
+            },
+        }
+        assert _is_broken_pipe(event)
+
+    def test_keeps_unrelated_value_error(self) -> None:
+        from deepctl_telemetry.client import _is_broken_pipe
+
+        event = {
+            "exception": {
+                "values": [{"type": "ValueError", "value": "bad config value"}]
+            },
+        }
+        assert not _is_broken_pipe(event)
+
+    def test_handles_missing_fields(self) -> None:
+        from deepctl_telemetry.client import _is_broken_pipe
+
+        assert not _is_broken_pipe({})
+        assert not _is_broken_pipe({"exception": None})
+        assert not _is_broken_pipe({"exception": {"values": []}})
+
+    def test_scrub_event_returns_none_for_broken_pipe(self) -> None:
+        from deepctl_telemetry.client import _scrub_event
+
+        event = {
+            "exception": {
+                "values": [
+                    {
+                        "type": "BrokenPipeError",
+                        "value": "[Errno 32] Broken pipe",
+                        "mechanism": {"type": "excepthook", "handled": False},
+                    }
+                ]
+            },
+        }
+        assert _scrub_event(event, {}) is None

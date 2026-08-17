@@ -78,9 +78,7 @@ class TestMainCLI:
 
     @patch("deepctl_core.plugin_manager.console")
     @patch("deepctl_core.plugin_manager.metadata.entry_points")
-    def test_load_commands_error_handling(
-        self, mock_entry_points, mock_console
-    ):
+    def test_load_commands_error_handling(self, mock_entry_points, mock_console):
         """Test error handling during command loading."""
         # Mock entry point that raises error
         mock_entry_point = Mock()
@@ -98,8 +96,7 @@ class TestMainCLI:
         # Check that error message was printed
         error_calls = [str(call) for call in mock_console.print.call_args_list]
         assert any(
-            "Error loading plugin broken-command" in call
-            for call in error_calls
+            "Error loading plugin broken-command" in call for call in error_calls
         )
 
     def test_cli_context_setup(self, runner):
@@ -123,9 +120,7 @@ class TestMainCLI:
         # Mock sys.argv and the cli call to raise KeyboardInterrupt
         with patch("sys.argv", ["deepctl"]):
             # Patch the cli function that's already imported at module level
-            with patch.object(
-                cli, "__call__", side_effect=KeyboardInterrupt()
-            ):
+            with patch.object(cli, "__call__", side_effect=KeyboardInterrupt()):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
@@ -139,11 +134,59 @@ class TestMainCLI:
         # Mock sys.argv and the cli call to raise an exception
         with patch("sys.argv", ["deepctl"]):
             # Patch the cli function that's already imported at module level
-            with patch.object(
-                cli, "__call__", side_effect=Exception("Test error")
-            ):
+            with patch.object(cli, "__call__", side_effect=Exception("Test error")):
                 with pytest.raises(SystemExit) as exc_info:
                     main()
 
                 # Click exits with code 2 when there's an error in standalone mode
                 assert exc_info.value.code == 2
+
+
+class TestSafeConsolePrint:
+    """The closed/broken-stream guard on the error/interrupt exit path.
+
+    Anchor: DX-CLI-P — a BrokenPipeError on the startup notification write
+    cascaded into rich's `ValueError: I/O operation on closed file` when the
+    error handler tried to print to the already-closed console, crashing the
+    process through the excepthook.
+    """
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            BrokenPipeError(32, "Broken pipe"),
+            ValueError("I/O operation on closed file"),
+            OSError("stream closed"),
+        ],
+    )
+    def test_swallows_closed_stream(self, error):
+        """A broken console does not raise out of _safe_console_print."""
+        # deepctl/__init__ re-exports the `main` function as `deepctl.main`,
+        # shadowing the submodule attribute — fetch the real module directly.
+        main_mod = sys.modules["deepctl.main"]
+
+        with patch.object(main_mod.console, "print", side_effect=error):
+            # Must not raise.
+            main_mod._safe_console_print("[red]Error: boom[/red]")
+
+    def test_main_survives_broken_console_on_error(self):
+        """The full DX-CLI-P cascade: cli raises AND the console is closed.
+
+        main() must still exit(2) cleanly rather than let rich's ValueError
+        escape to the excepthook.
+        """
+        main_mod = sys.modules["deepctl.main"]
+
+        with (
+            patch("sys.argv", ["deepctl"]),
+            patch.object(cli, "__call__", side_effect=Exception("boom")),
+            patch.object(
+                main_mod.console,
+                "print",
+                side_effect=ValueError("I/O operation on closed file"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main_mod.main()
+
+        assert exc_info.value.code == 2
