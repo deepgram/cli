@@ -34,8 +34,8 @@ keywords = [
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
-    "deepgram-sdk>=7.5.0",
-    "deepctl-core>=0.1.10",
+    "deepgram-sdk>=7.7.0,<8",
+    "deepctl-core>=0.2.15",
     "deepctl-cmd-login>=0.1.10",
     "deepctl-cmd-projects>=0.1.10",
     "deepctl-cmd-transcribe>=0.1.10",
@@ -54,10 +54,10 @@ dependencies = [
     "deepctl-cmd-skills>=0.0.1",
     "deepctl-cmd-init>=0.0.1",
     "deepctl-cmd-models>=0.0.1",
-    "deepctl-cmd-speak>=0.0.1",
+    "deepctl-cmd-speak>=0.0.4",
     "deepctl-cmd-keys>=0.0.1",
     "deepctl-cmd-read>=0.0.1",
-    "deepctl-cmd-listen>=0.0.1",
+    "deepctl-cmd-listen>=0.0.14",
     "deepctl-cmd-requests>=0.0.1",
     "deepctl-cmd-billing>=0.0.1",
     "deepctl-cmd-members>=0.0.1",
@@ -82,6 +82,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
+    "pytest-timeout>=2.3.1,<3",
     "responses>=0.23.0",
     # Code Quality
     "ruff>=0.8.0",
@@ -232,6 +233,7 @@ testing = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
+    "pytest-timeout>=2.3.1,<3",
     "responses>=0.23.0",
     "deepctl-plugin-example",
 ]

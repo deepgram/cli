@@ -101,6 +101,10 @@ dg -o json listen standup.mp3 \
 # Live microphone with interim (partial) results
 dg listen --mic --model nova-3 --interim
 
+# Redact sensitive numbers and spell numbers as digits (files or live)
+# Flux STT (v2) accepts --redact numbers|aggressive_numbers; v1 also pci, ssn, …
+dg listen call.wav --redact numbers --numerals
+
 # Raw audio stream from ffmpeg
 ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - \
   | dg listen --encoding linear16
@@ -186,10 +190,18 @@ dg speak "Hello from Flux" -o hello.wav
 # end-of-stream notice (the audio is complete).
 dg speak "Hello from Flux" | ffplay -loglevel error -nodisp -autoexit -
 
+# Flux TTS streaming controls (flux-* only): --speed 0.85–1.15 (0.05 steps).
+# --expressivity -2..2 is beta; its default 0 is nominal delivery.
+dg speak "A little slower" --speed 0.9 --expressivity 1 -o slow.wav
+
 # Aura (v1, batch REST) — opt in with -m aura-*; needed for MP3 output
 dg speak "Welcome to Deepgram" -o welcome.mp3 -m aura-2-asteria-en
 dg speak --file script.txt -o output.mp3 -m aura-2-luna-en
 echo "Hello" | dg speak -o greeting.mp3 -m aura-2-asteria-en
+
+# Aura-2 also has Spanish voices (e.g. aura-2-selena-es); run `dg models`
+# for the full, current list.
+dg speak "Hola, bienvenido a Deepgram" -o hola.mp3 -m aura-2-selena-es
 ```
 
 ### Text Intelligence

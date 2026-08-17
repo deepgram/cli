@@ -2,10 +2,62 @@
 
 from unittest.mock import Mock, patch
 
+import click
 import pytest
+from click.testing import CliRunner
 from deepctl_cmd_listen.command import ListenCommand
 from deepctl_cmd_listen.models import ListenResult
-from deepctl_core import AuthManager, BaseResult, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseResult,
+    Config,
+    DeepgramClient,
+    PluginManager,
+)
+
+
+def _install_flux_error_websockets(monkeypatch, ready=None):
+    import asyncio
+    import json
+    import sys
+    import types
+
+    error_frame = json.dumps(
+        {
+            "type": "Error",
+            "code": "INVALID_AUDIO",
+            "description": "audio stream is invalid",
+        }
+    )
+
+    class _FakeWS:
+        def __init__(self):
+            self.messages = iter([error_frame])
+
+        async def send(self, _data):
+            return None
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            while ready is not None and not ready():
+                await asyncio.sleep(0)
+            try:
+                return next(self.messages)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+    class _FakeConnect:
+        async def __aenter__(self):
+            return _FakeWS()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    fake_websockets = types.ModuleType("websockets")
+    fake_websockets.connect = lambda *_args, **_kwargs: _FakeConnect()
+    monkeypatch.setitem(sys.modules, "websockets", fake_websockets)
 
 
 class TestListenCommand:
@@ -29,6 +81,20 @@ class TestListenCommand:
     def mock_client(self):
         return Mock(spec=DeepgramClient)
 
+    def invoke_click(self, command, mock_config, args, *, input=None):
+        mock_config.get.side_effect = lambda key, default=None: (
+            True if key == "output.quiet" else default
+        )
+        mock_config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        click_command = PluginManager()._create_click_command(command)
+        with patch("deepctl_core.base_command.AuthManager.guard"):
+            return CliRunner().invoke(
+                click_command,
+                args,
+                input=input,
+                obj={"config": mock_config},
+            )
+
     def test_command_properties(self, command):
         assert command.name == "listen"
         assert command.requires_auth is True
@@ -50,12 +116,29 @@ class TestListenCommand:
                 option_names.extend(arg["names"])
 
         for expected in [
-            "--mic", "--model", "-m", "--language", "-l",
-            "--diarize", "--smart-format", "--punctuate",
-            "--summarize", "--topics", "--sentiment",
-            "--interim", "--encoding", "--sample-rate", "--channels",
-            "--save-to", "-s", "--probe", "--no-validate",
-            "--webvtt", "--srt",
+            "--mic",
+            "--model",
+            "-m",
+            "--language",
+            "-l",
+            "--diarize",
+            "--smart-format",
+            "--punctuate",
+            "--summarize",
+            "--topics",
+            "--sentiment",
+            "--redact",
+            "--numerals",
+            "--interim",
+            "--encoding",
+            "--sample-rate",
+            "--channels",
+            "--save-to",
+            "-s",
+            "--probe",
+            "--no-validate",
+            "--webvtt",
+            "--srt",
         ]:
             assert expected in option_names, f"Missing option: {expected}"
 
@@ -85,7 +168,11 @@ class TestListenCommand:
         """--mic without sounddevice installed returns an error."""
         mock_sys.stdin.isatty.return_value = True
 
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def mock_import(name, *args, **kwargs):
             if name == "sounddevice":
@@ -111,7 +198,9 @@ class TestListenCommand:
         mock_sys.stdin.isatty.return_value = False
         expected = ListenResult(status="success", source="stdin", mode="live")
 
-        with patch.object(command, "_stream_stdin", return_value=expected) as mock_stream:
+        with patch.object(
+            command, "_stream_stdin", return_value=expected
+        ) as mock_stream:
             result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -132,6 +221,115 @@ class TestListenCommand:
             assert call_kwargs["model"] == "nova-3"
             assert call_kwargs["encoding"] == "linear16"
             assert result.source == "stdin"
+
+    @patch("deepctl_cmd_listen.command.status")
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_warns_diarize_ignored_on_flux(
+        self,
+        mock_sys,
+        mock_status,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+    ):
+        """--diarize on a Flux STT (v2) model warns instead of vanishing silently."""
+        mock_sys.stdin.isatty.return_value = True
+
+        async def fake_ws_mic(_client, **kwargs):
+            return ListenResult(
+                status="success",
+                source="mic",
+                mode="live",
+                diarized=kwargs["diarize"],
+            )
+
+        with patch.object(command, "_ws_mic", side_effect=fake_ws_mic) as mock_ws:
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                mic=True,
+                model="flux-general-en",
+                diarize=True,
+            )
+
+        printed = " ".join(
+            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
+        )
+        assert "not supported by Flux STT" in printed
+        assert "Speaker labels enabled" not in printed
+        assert mock_ws.call_args.kwargs["diarize"] is False
+        assert result.diarized is False
+
+    @patch("deepctl_cmd_listen.command.status")
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_no_diarize_warning_on_v1(
+        self,
+        mock_sys,
+        mock_status,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+    ):
+        """v1 models keep diarization — no spurious warning."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="mic", mode="live")
+
+        with patch.object(command, "_stream_mic", return_value=expected):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                mic=True,
+                model="nova-3",
+                diarize=True,
+            )
+
+        printed = " ".join(
+            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
+        )
+        assert "not supported by Flux STT" not in printed
+
+    @pytest.mark.parametrize("source", ["call.wav", "https://example.com/call.wav"])
+    def test_click_flux_prerecorded_source_errors(self, source, command, mock_config):
+        """Flux STT file/URL guards are visible and exit non-zero."""
+        result = self.invoke_click(
+            command,
+            mock_config,
+            [source, "--model", "flux-general-en"],
+        )
+        assert result.exit_code == 1
+        assert "streaming-only" in result.stderr
+
+    def test_click_flux_invalid_redact_errors(self, command, mock_config):
+        """An invalid Flux redact guard is visible and exits non-zero."""
+        result = self.invoke_click(
+            command,
+            mock_config,
+            ["--mic", "--model", "flux-general-en", "--redact", "pci"],
+        )
+        assert result.exit_code == 1
+        assert "pci" in result.stderr
+        assert "aggressive_numbers" in result.stderr
+
+    def test_click_flux_error_frame_exits_nonzero(
+        self, command, mock_config, monkeypatch
+    ):
+        """A stdin Error frame propagates through the stream and Click boundary."""
+        _install_flux_error_websockets(monkeypatch)
+
+        result = self.invoke_click(
+            command,
+            mock_config,
+            ["-", "--model", "flux-general-en", "--encoding", "linear16"],
+            input=b"",
+        )
+
+        assert result.exit_code == 1
+        assert "INVALID_AUDIO" in result.stderr
+        assert "audio stream is invalid" in result.stderr
 
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_mic_routes_to_stream_mic(
@@ -169,13 +367,19 @@ class TestListenCommand:
         """A file path routes to _prerecorded with is_url=False."""
         mock_sys.stdin.isatty.return_value = True
         expected = ListenResult(
-            status="success", source="file", mode="prerecorded",
+            status="success",
+            source="file",
+            mode="prerecorded",
             transcript="hello world",
         )
 
         with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
             # Skip interactive feature selection
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 result = command.handle(
                     config=mock_config,
                     auth_manager=mock_auth_manager,
@@ -193,18 +397,223 @@ class TestListenCommand:
 
     @patch("deepctl_cmd_listen.command._agentic", False)
     @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_passes_redact_and_numerals_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """--redact / --numerals reach _prerecorded."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="file", mode="prerecorded")
+
+        with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
+                command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    model="nova-3",
+                    language="en-US",
+                    redact=("numbers",),
+                    numerals=True,
+                )
+
+            call_kwargs = mock_pre.call_args.kwargs
+            assert call_kwargs["redact"] == ("numbers",)
+            assert call_kwargs["numerals"] is True
+
+    @patch("deepctl_cmd_listen.command._agentic", False)
+    @patch("deepctl_cmd_listen.command.sys")
+    def test_handle_passes_multiple_redact_to_prerecorded(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A repeated --redact (v1) reaches _prerecorded as a tuple of values."""
+        mock_sys.stdin.isatty.return_value = True
+        expected = ListenResult(status="success", source="file", mode="prerecorded")
+
+        with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
+                command.handle(
+                    config=mock_config,
+                    auth_manager=mock_auth_manager,
+                    client=mock_client,
+                    source="audio.mp3",
+                    mic=False,
+                    model="nova-3",
+                    language="en-US",
+                    redact=("pci", "numbers"),
+                )
+
+            assert mock_pre.call_args.kwargs["redact"] == ("pci", "numbers")
+
+    def test_prerecorded_builds_multi_redact_and_numerals_options(
+        self, command, mock_config
+    ):
+        """_prerecorded sends redact as a LIST (so Fern repeats the query param)
+        and numerals as the string 'true'."""
+        client = Mock()
+        client.transcribe_file.return_value = {
+            "results": {"channels": [{"alternatives": [{"transcript": "hi"}]}]}
+        }
+        result = command._prerecorded(
+            client,
+            "audio.wav",
+            is_url=False,
+            model="nova-3",
+            language="en-US",
+            api_version=1,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            summarize=False,
+            topics=False,
+            sentiment=False,
+            redact=("pci", "numbers"),
+            numerals=True,
+            save_to=None,
+            probe=False,
+            no_validate=True,
+            caption_format=None,
+            config=mock_config,
+        )
+
+        assert result.status == "success"
+        opts = client.transcribe_file.call_args.args[1]
+        assert opts["redact"] == ["pci", "numbers"]  # list, not tuple
+        assert opts["numerals"] == "true"
+
+    def test_prerecorded_api_error_exits_nonzero(self, command, mock_config):
+        """A v1 REST rejection (e.g. a --redact value the endpoint refuses)
+        raises ClickException so the command exits non-zero and is visible —
+        not a returned error result that prints nothing and still exits 0."""
+        client = Mock()
+        client.transcribe_file.side_effect = Exception("Bad Request: invalid redact")
+        with pytest.raises(click.ClickException) as exc_info:
+            command._prerecorded(
+                client,
+                "audio.wav",
+                is_url=False,
+                model="nova-3",
+                language="en-US",
+                api_version=1,
+                diarize=False,
+                smart_format=True,
+                punctuate=True,
+                summarize=False,
+                topics=False,
+                sentiment=False,
+                redact=("bogus",),
+                numerals=False,
+                save_to=None,
+                probe=False,
+                no_validate=True,
+                caption_format=None,
+                config=mock_config,
+            )
+        assert "Transcription failed" in str(exc_info.value)
+
+    def test_ws_url_expands_multiple_redact(self, command):
+        """Repeated redact values expand to repeated query params (doseq)."""
+        ws_client = Mock()
+        ws_client.config.get_profile.return_value = Mock(
+            base_url="https://api.deepgram.com"
+        )
+        url = command._ws_url(
+            ws_client,
+            api_version=1,
+            model="nova-3",
+            language="en-US",
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            redact=("pci", "numbers"),
+        )
+        assert "redact=pci" in url
+        assert "redact=numbers" in url
+
+    def test_ws_url_includes_redact_and_numerals(self, command):
+        """redact / numerals become query params on the streaming URL."""
+        ws_client = Mock()
+        ws_client.config.get_profile.return_value = Mock(
+            base_url="https://api.deepgram.com"
+        )
+
+        url = command._ws_url(
+            ws_client,
+            api_version=2,
+            model="flux-general-en",
+            language="en-US",
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            redact="aggressive_numbers",
+            numerals=True,
+        )
+
+        assert url.startswith("wss://api.deepgram.com/v2/listen?")
+        assert "redact=aggressive_numbers" in url
+        assert "numerals=true" in url
+
+    def test_ws_url_omits_redact_and_numerals_when_unset(self, command):
+        """Unset redact / numerals are not sent (defaults)."""
+        ws_client = Mock()
+        ws_client.config.get_profile.return_value = Mock(
+            base_url="https://api.deepgram.com"
+        )
+
+        url = command._ws_url(
+            ws_client,
+            api_version=1,
+            model="nova-3",
+            language="en-US",
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+        )
+
+        assert "redact=" not in url
+        assert "numerals=" not in url
+
+    @patch("deepctl_cmd_listen.command._agentic", False)
+    @patch("deepctl_cmd_listen.command.sys")
     def test_handle_url_source_routes_to_prerecorded(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):
         """A URL routes to _prerecorded with is_url=True."""
         mock_sys.stdin.isatty.return_value = True
         expected = ListenResult(
-            status="success", source="url", mode="prerecorded",
+            status="success",
+            source="url",
+            mode="prerecorded",
             transcript="hello",
         )
 
         with patch.object(command, "_prerecorded", return_value=expected) as mock_pre:
-            with patch.object(command, "_interactive_features", return_value=(False, False, False, False)):
+            with patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ):
                 result = command.handle(
                     config=mock_config,
                     auth_manager=mock_auth_manager,
@@ -228,7 +637,9 @@ class TestListenCommand:
         mock_sys.stdin.isatty.return_value = True  # would normally trigger interactive
         expected = ListenResult(status="success", source="stdin", mode="live")
 
-        with patch.object(command, "_stream_stdin", return_value=expected) as mock_stream:
+        with patch.object(
+            command, "_stream_stdin", return_value=expected
+        ) as mock_stream:
             result = command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -257,34 +668,30 @@ class TestGuidedFlow:
         }
 
     def test_url_arg_skips_both_prompts(self, command, common_kwargs):
-        with patch.object(command, "_interactive_features") as feat, patch.object(
-            command, "_interactive_select_source"
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
+        with (
+            patch.object(command, "_interactive_features") as feat,
+            patch.object(command, "_interactive_select_source") as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
         ):
-            command.handle(
-                **common_kwargs, source="https://example.com/audio.wav"
-            )
+            command.handle(**common_kwargs, source="https://example.com/audio.wav")
         assert feat.call_count == 0
         assert src.call_count == 0
 
     def test_file_arg_skips_both_prompts(self, command, common_kwargs):
-        with patch.object(command, "_interactive_features") as feat, patch.object(
-            command, "_interactive_select_source"
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
+        with (
+            patch.object(command, "_interactive_features") as feat,
+            patch.object(command, "_interactive_select_source") as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
         ):
             command.handle(**common_kwargs, source="/tmp/audio.wav")
         assert feat.call_count == 0
         assert src.call_count == 0
 
-    def test_url_arg_with_diarize_skips_both_prompts(
-        self, command, common_kwargs
-    ):
-        with patch.object(command, "_interactive_features") as feat, patch.object(
-            command, "_interactive_select_source"
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
+    def test_url_arg_with_diarize_skips_both_prompts(self, command, common_kwargs):
+        with (
+            patch.object(command, "_interactive_features") as feat,
+            patch.object(command, "_interactive_select_source") as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
         ):
             command.handle(
                 **common_kwargs,
@@ -294,38 +701,35 @@ class TestGuidedFlow:
         assert feat.call_count == 0
         assert src.call_count == 0
 
-    def test_bare_invocation_runs_full_guided_flow(
-        self, command, common_kwargs
-    ):
-        with patch.object(
-            command,
-            "_interactive_features",
-            return_value=(False, False, False, False),
-        ) as feat, patch.object(
-            command,
-            "_interactive_select_source",
-            return_value=("prerecorded_url", "https://x.com/a.wav"),
-        ) as src, patch.object(
-            command, "_prerecorded", return_value=BaseResult(status="ok")
-        ), patch(
-            "sys.stdin"
-        ) as mock_stdin, patch(
-            "deepctl_cmd_listen.command._agentic", False
+    def test_bare_invocation_runs_full_guided_flow(self, command, common_kwargs):
+        with (
+            patch.object(
+                command,
+                "_interactive_features",
+                return_value=(False, False, False, False),
+            ) as feat,
+            patch.object(
+                command,
+                "_interactive_select_source",
+                return_value=("prerecorded_url", "https://x.com/a.wav"),
+            ) as src,
+            patch.object(command, "_prerecorded", return_value=BaseResult(status="ok")),
+            patch("sys.stdin") as mock_stdin,
+            patch("deepctl_cmd_listen.command._agentic", False),
         ):
             mock_stdin.isatty.return_value = True
             command.handle(**common_kwargs)
         assert src.call_count == 1
         assert feat.call_count == 1
 
-    def test_cancelled_source_select_returns_cancelled(
-        self, command, common_kwargs
-    ):
-        with patch.object(
-            command, "_interactive_select_source", return_value=(None, None)
-        ), patch.object(command, "_interactive_features") as feat, patch(
-            "sys.stdin"
-        ) as mock_stdin, patch(
-            "deepctl_cmd_listen.command._agentic", False
+    def test_cancelled_source_select_returns_cancelled(self, command, common_kwargs):
+        with (
+            patch.object(
+                command, "_interactive_select_source", return_value=(None, None)
+            ),
+            patch.object(command, "_interactive_features") as feat,
+            patch("sys.stdin") as mock_stdin,
+            patch("deepctl_cmd_listen.command._agentic", False),
         ):
             mock_stdin.isatty.return_value = True
             result = command.handle(**common_kwargs)
@@ -360,3 +764,569 @@ class TestListenResult:
         assert result.mode == ""
         assert result.diarized is False
         assert result.full_result is None
+
+
+class TestFluxV2TurnHandling:
+    """Flux (listen v2) TurnInfo parsing and finalization."""
+
+    @pytest.fixture
+    def command(self):
+        return ListenCommand()
+
+    def _turn(self, event, transcript, *, turn_index=0, words=None, window=(0.0, 0.0)):
+        import json as _json
+
+        return _json.dumps(
+            {
+                "type": "TurnInfo",
+                "event": event,
+                "turn_index": turn_index,
+                "transcript": transcript,
+                "words": words or [],
+                "audio_window_start": window[0],
+                "audio_window_end": window[1],
+            }
+        )
+
+    def test_end_of_turn_finalizes_transcript(self, command, capsys):
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        command._handle_ws_message(
+            self._turn("Update", "hello"),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        # Update alone does not finalize.
+        assert acc == []
+
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "hello world"),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        assert acc == ["hello world"]
+        assert "hello world" in capsys.readouterr().out
+
+    def test_flush_emits_unfinalized_final_turn(self, command, capsys):
+        """A stream that closes mid-turn still yields the latest transcript."""
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        # Turn grows across Updates but never gets an EndOfTurn.
+        for text in ("my", "my account", "my account number"):
+            command._handle_ws_message(
+                self._turn("Update", text),
+                acc,
+                diarize=False,
+                interim=False,
+                v2_state=state,
+            )
+        assert acc == []  # nothing finalized yet
+
+        command._flush_v2(state, acc)
+        assert acc == ["my account number"]
+
+    def test_flush_does_not_double_emit_finalized_turn(self, command):
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "done"),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        command._flush_v2(state, acc)
+        assert acc == ["done"]  # not duplicated
+
+    def test_multiple_turns_accumulate_in_order(self, command):
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "first turn", turn_index=0),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        command._handle_ws_message(
+            self._turn("Update", "second turn", turn_index=1),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        command._flush_v2(state, acc)
+        assert acc == ["first turn", "second turn"]
+
+    def test_turninfo_ignored_without_state(self, command):
+        """A v2 message with no state (v1 caller) is a no-op, not a crash."""
+        acc: list[str] = []
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "ignored"),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=None,
+        )
+        assert acc == []
+
+    def test_captions_use_audio_window_and_survive_batch_save(self, command):
+        """Flux words lack per-word timings: captions must key off the turn's
+        audio window, and the end-of-stream batch save must not KeyError."""
+        from deepctl_cmd_listen.captions import (
+            StreamingCaptionWriter,
+            captions_from_words,
+        )
+
+        writer = StreamingCaptionWriter("srt")
+        acc: list[str] = []
+        state = command._new_v2_state()
+
+        # TurnInfo words carry only {word, confidence} — no start/end.
+        words = [
+            {"word": "my", "confidence": 0.9},
+            {"word": "account", "confidence": 0.9},
+        ]
+        command._handle_ws_message(
+            self._turn("EndOfTurn", "my account", words=words, window=(1.0, 2.5)),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+            caption_writer=writer,
+        )
+
+        assert acc == ["my account"]
+        # Live cue span comes from the audio window, not 00:00:00.
+        assert writer.accumulated_words  # words were captured for batch save
+        # The batch save path used to raise KeyError: 'start' on Flux words.
+        batch = captions_from_words(writer.accumulated_words, "srt")
+        assert "my account" in batch
+        assert "00:00:01,000 --> 00:00:02,500" in batch
+
+    def test_ws_mic_flushes_final_turn_on_keyboard_interrupt(
+        self, command, monkeypatch
+    ):
+        """Ctrl-C during a Flux mic stream must still flush the in-flight turn.
+
+        The interrupt surfaces at the ``asyncio.gather`` await; ``_ws_mic`` has
+        to catch it, run ``_flush_v2``, and return the accumulated transcript
+        (rather than letting the final turn vanish)."""
+        import asyncio as _asyncio
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        # _ws_mic imports these at call time; stub them so no hardware/net is hit.
+        for name in ("sounddevice", "numpy"):
+            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+
+        class _FakeWS:
+            async def send(self, *a):
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class _FakeConnect:
+            async def __aenter__(self):
+                return _FakeWS()
+
+            async def __aexit__(self, *a):
+                return False
+
+        fake_ws = types.ModuleType("websockets")
+        fake_ws.connect = lambda *a, **k: _FakeConnect()
+        monkeypatch.setitem(sys.modules, "websockets", fake_ws)
+
+        # A turn received but never finalized (no EndOfTurn before the interrupt).
+        seeded = {
+            "turns": {
+                0: {
+                    "transcript": "hello world",
+                    "words": [],
+                    "final": False,
+                    "start": 0.0,
+                    "end": 1.0,
+                }
+            },
+            "order": [0],
+        }
+        monkeypatch.setattr(command, "_new_v2_state", lambda: seeded)
+
+        async def _interrupt(*a, **k):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("deepctl_cmd_listen.command.asyncio.gather", _interrupt)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        # Drive on a plain loop (not asyncio.run) so the patched gather can't
+        # interfere with run()'s own shutdown machinery.
+        loop = _asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                command._ws_mic(
+                    client,
+                    model="flux-general-en",
+                    language="en-US",
+                    api_version=2,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    sample_rate=16000,
+                    channels=1,
+                )
+            )
+        finally:
+            loop.close()
+
+        assert result.transcript == "hello world"
+
+    def test_end_of_turn_with_empty_transcript_is_noop(self, command, capsys):
+        """An EndOfTurn that never carried text emits nothing (no blank line)."""
+        acc: list[str] = []
+        state = command._new_v2_state()
+        command._handle_ws_message(
+            self._turn("EndOfTurn", ""),
+            acc,
+            diarize=False,
+            interim=False,
+            v2_state=state,
+        )
+        assert acc == []
+        assert capsys.readouterr().out == ""
+
+    def test_v2_update_prints_interim(self, command, capsys):
+        """An Update event with --interim shows a carriage-return partial."""
+        acc: list[str] = []
+        state = command._new_v2_state()
+        command._handle_ws_message(
+            self._turn("Update", "partial text"),
+            acc,
+            diarize=False,
+            interim=True,
+            v2_state=state,
+        )
+        out = capsys.readouterr().out
+        assert "partial text" in out
+        assert "\r" in out
+        assert acc == []  # interim never accumulates
+
+    def test_timed_v2_words_backfills_and_preserves(self, command):
+        """_timed_v2_words: synthesize when empty, spread the window when words
+        lack timings, and pass real per-word timings through untouched."""
+        # No words → one synthetic word spanning the whole turn window.
+        assert command._timed_v2_words([], "hello world", 1.0, 2.0) == [
+            {"word": "hello world", "start": 1.0, "end": 2.0}
+        ]
+        # Words already carrying timings are returned unchanged.
+        real = [{"word": "a", "start": 0.1, "end": 0.2}]
+        assert command._timed_v2_words(real, "a", 0.0, 5.0) is real
+        # Timing-less words get the window spread evenly across them.
+        spread = command._timed_v2_words(
+            [{"word": "a"}, {"word": "b"}], "a b", 0.0, 2.0
+        )
+        assert (spread[0]["start"], spread[0]["end"]) == (0.0, 1.0)
+        assert (spread[1]["start"], spread[1]["end"]) == (1.0, 2.0)
+
+    def test_timed_v2_words_backfills_partial_and_null_timings(self, command):
+        partial = command._timed_v2_words(
+            [{"word": "a", "start": 0.1}, {"word": "b", "end": 1.8}],
+            "a b",
+            0.0,
+            2.0,
+        )
+        assert partial == [
+            {"word": "a", "start": 0.1, "end": 1.0},
+            {"word": "b", "start": 1.0, "end": 1.8},
+        ]
+
+        explicit_null = command._timed_v2_words(
+            [{"word": "a", "start": None, "end": None}],
+            "a",
+            3.0,
+            4.0,
+        )
+        assert explicit_null == [{"word": "a", "start": 3.0, "end": 4.0}]
+
+    def test_fatal_error_frame_raises_code_and_description(self, command):
+        """A Flux STT fatal error carries both server fields to the caller."""
+        import json as _json
+
+        acc: list[str] = []
+        with pytest.raises(click.ClickException) as exc_info:
+            command._handle_ws_message(
+                _json.dumps(
+                    {
+                        "type": "Error",
+                        "code": "INTERNAL_SERVER_ERROR",
+                        "description": "something went wrong",
+                    }
+                ),
+                acc,
+                diarize=False,
+                interim=False,
+                v2_state=command._new_v2_state(),
+            )
+        assert acc == []
+        assert "INTERNAL_SERVER_ERROR" in exc_info.value.message
+        assert "something went wrong" in exc_info.value.message
+
+    def test_stream_mic_flux_error_frame_does_not_return_success(
+        self, command, monkeypatch
+    ):
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        events = {"started": False, "stopped": False, "closed": False}
+        _install_flux_error_websockets(monkeypatch, ready=lambda: events["started"])
+
+        class _FakeInputStream:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                events["started"] = True
+
+            def stop(self):
+                events["stopped"] = True
+
+            def close(self):
+                events["closed"] = True
+
+        fake_sounddevice = types.ModuleType("sounddevice")
+        fake_sounddevice.RawInputStream = _FakeInputStream
+        fake_numpy = types.ModuleType("numpy")
+        fake_numpy.int16 = "int16"
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
+        monkeypatch.setitem(sys.modules, "numpy", fake_numpy)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "test-key"
+
+        with pytest.raises(click.ClickException) as exc_info:
+            command._stream_mic(
+                client,
+                model="flux-general-en",
+                language="en-US",
+                api_version=2,
+                diarize=False,
+                smart_format=True,
+                punctuate=True,
+                interim=False,
+                redact=(),
+                numerals=False,
+                sample_rate=16000,
+                channels=1,
+                save_to=None,
+                caption_format=None,
+            )
+
+        assert "INVALID_AUDIO" in exc_info.value.message
+        assert "audio stream is invalid" in exc_info.value.message
+        assert events == {"started": True, "stopped": True, "closed": True}
+
+    def test_stream_stdin_flux_error_does_not_wait_for_blocked_input(
+        self, command, monkeypatch
+    ):
+        import asyncio as _asyncio
+        import json as _json
+        import sys
+        import threading
+        import types
+        from unittest.mock import MagicMock
+
+        read_started = threading.Event()
+        release_read = threading.Event()
+
+        class _BlockingBuffer:
+            def read(self, _size):
+                read_started.set()
+                release_read.wait()
+                return b""
+
+        fake_stdin = types.SimpleNamespace(buffer=_BlockingBuffer())
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command.sys.stdin", fake_stdin, raising=False
+        )
+
+        error_frame = _json.dumps(
+            {
+                "type": "Error",
+                "code": "INVALID_AUDIO",
+                "description": "audio stream is invalid",
+            }
+        )
+
+        class _FakeWS:
+            def __init__(self):
+                self.sent_error = False
+
+            async def send(self, _data):
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.sent_error:
+                    raise StopAsyncIteration
+                while not read_started.is_set():
+                    await _asyncio.sleep(0)
+                self.sent_error = True
+                return error_frame
+
+        class _FakeConnect:
+            async def __aenter__(self):
+                return _FakeWS()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        fake_websockets = types.ModuleType("websockets")
+        fake_websockets.connect = lambda *_args, **_kwargs: _FakeConnect()
+        monkeypatch.setitem(sys.modules, "websockets", fake_websockets)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "test-key"
+        errors = []
+
+        def run_stream():
+            try:
+                command._stream_stdin(
+                    client,
+                    model="flux-general-en",
+                    language="en-US",
+                    api_version=2,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    encoding="linear16",
+                    sample_rate=16000,
+                    channels=1,
+                    save_to=None,
+                    caption_format=None,
+                )
+            except BaseException as exc:
+                errors.append(exc)
+
+        stream_thread = threading.Thread(target=run_stream, daemon=True)
+        stream_thread.start()
+        assert read_started.wait(timeout=1)
+        stream_thread.join(timeout=1)
+        exited_before_stdin = not stream_thread.is_alive()
+        release_read.set()
+        stream_thread.join(timeout=1)
+
+        assert exited_before_stdin
+        assert len(errors) == 1
+        assert isinstance(errors[0], click.ClickException)
+        assert "INVALID_AUDIO" in errors[0].message
+
+    def test_stream_stdin_keyboard_interrupt_preserves_transcript_and_save_to(
+        self, command, monkeypatch, tmp_path
+    ):
+        """Ctrl-C on `dg listen -` (stdin) keeps the partial transcript and
+        writes --save-to, mirroring the mic path. The stdin path used to
+        re-raise the interrupt and drop both."""
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        # No real stdin read: return EOF at once if the reader thread starts.
+        fake_stdin = types.SimpleNamespace(
+            buffer=types.SimpleNamespace(read=lambda _n: b"")
+        )
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command.sys.stdin", fake_stdin, raising=False
+        )
+
+        class _FakeWS:
+            async def send(self, *a):
+                return None
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class _FakeConnect:
+            async def __aenter__(self):
+                return _FakeWS()
+
+            async def __aexit__(self, *a):
+                return False
+
+        fake_ws = types.ModuleType("websockets")
+        fake_ws.connect = lambda *a, **k: _FakeConnect()
+        monkeypatch.setitem(sys.modules, "websockets", fake_ws)
+
+        # A turn received but never finalized before the interrupt.
+        seeded = {
+            "turns": {
+                0: {
+                    "transcript": "hello world",
+                    "words": [],
+                    "final": False,
+                    "start": 0.0,
+                    "end": 1.0,
+                }
+            },
+            "order": [0],
+        }
+        monkeypatch.setattr(command, "_new_v2_state", lambda: seeded)
+
+        async def _interrupt(*a, **k):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("deepctl_cmd_listen.command.asyncio.gather", _interrupt)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        save_to = tmp_path / "out.txt"
+        result = command._stream_stdin(
+            client,
+            model="flux-general-en",
+            language="en-US",
+            api_version=2,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            redact=(),
+            numerals=False,
+            encoding="linear16",
+            sample_rate=16000,
+            channels=1,
+            save_to=str(save_to),
+            caption_format=None,
+        )
+
+        assert result.transcript == "hello world"
+        assert save_to.read_text().strip() == "hello world"

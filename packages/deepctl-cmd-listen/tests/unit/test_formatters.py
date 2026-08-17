@@ -52,7 +52,13 @@ class TestFormatDiarizedWords:
 
     def test_uses_punctuated_word_when_available(self):
         words = [
-            {"word": "hello", "punctuated_word": "Hello,", "start": 0.0, "end": 0.5, "speaker": 0}
+            {
+                "word": "hello",
+                "punctuated_word": "Hello,",
+                "start": 0.0,
+                "end": 0.5,
+                "speaker": 0,
+            }
         ]
         assert "Hello," in format_diarized_words(words)
 
@@ -64,7 +70,9 @@ class TestFormatDiarizedWords:
         assert format_diarized_words([]) == ""
 
     def test_skips_words_with_no_text(self):
-        words = [{"word": "", "punctuated_word": "", "start": 0.0, "end": 0.5, "speaker": 0}]
+        words = [
+            {"word": "", "punctuated_word": "", "start": 0.0, "end": 0.5, "speaker": 0}
+        ]
         assert format_diarized_words(words) == ""
 
     def test_multiple_speaker_changes(self):
@@ -82,11 +90,7 @@ class TestFormatDiarizedWords:
 
 class TestFormatDiarizedTranscript:
     def _api_result(self, words: list[dict]) -> dict:
-        return {
-            "results": {
-                "channels": [{"alternatives": [{"words": words}]}]
-            }
-        }
+        return {"results": {"channels": [{"alternatives": [{"words": words}]}]}}
 
     def test_extracts_and_formats_speakers(self):
         words = _words(("Hello", 0.0, 0.5, 0), ("Hi", 0.6, 1.0, 1))
@@ -111,7 +115,9 @@ class TestExtractPlainTranscript:
     def test_extracts_from_channel_alternatives(self):
         result = {
             "results": {
-                "channels": [{"alternatives": [{"transcript": "Hello world", "words": []}]}]
+                "channels": [
+                    {"alternatives": [{"transcript": "Hello world", "words": []}]}
+                ]
             }
         }
         assert extract_plain_transcript(result) == "Hello world"

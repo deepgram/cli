@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import click
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -54,6 +55,11 @@ status = Console(stderr=True)
 out = Console()
 
 
+# Flux STT (listen v2) only recognises these two --redact values; the v1 REST
+# vocabulary ("pci", "ssn", …) earns an opaque HTTP 400 from the v2 endpoint.
+_FLUX_REDACT = ("numbers", "aggressive_numbers")
+
+
 def _is_url(s: str) -> bool:
     return s.startswith(("http://", "https://"))
 
@@ -63,6 +69,18 @@ def _ws_base(client: DeepgramClient) -> str:
     profile = client.config.get_profile()
     base = (profile.base_url or "https://api.deepgram.com").rstrip("/")
     return base.replace("https://", "wss://").replace("http://", "ws://")
+
+
+async def _cancel_and_drain(*tasks: asyncio.Task[Any]) -> None:
+    """Cancel tasks and consume their terminal exceptions during teardown."""
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except BaseException:
+            pass
 
 
 class ListenCommand(BaseCommand):
@@ -86,6 +104,8 @@ class ListenCommand(BaseCommand):
         "dg listen https://example.com/call.mp3 --diarize",
         "dg listen --mic --model nova-3 --interim",
         "dg listen audio.mp3 --diarize --summarize --save-to transcript.txt",
+        "dg listen call.wav --redact numbers --numerals",
+        "dg listen --mic --model flux-general-en --redact aggressive_numbers",
         "dg -o json listen audio.mp3 | jq '.results.channels[0].alternatives[0].transcript'",
         "ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - | dg listen --encoding linear16",
         "dg listen -  # read raw audio from stdin interactively",
@@ -172,6 +192,27 @@ class ListenCommand(BaseCommand):
             {
                 "names": ["--sentiment"],
                 "help": "Analyse sentiment (pre-recorded only)",
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--redact"],
+                "help": (
+                    "Redact sensitive content. Flux STT (v2) accepts 'numbers' or "
+                    "'aggressive_numbers'; v1 models also accept 'pci', 'ssn', "
+                    "etc. Repeatable on v1 (e.g. --redact pci --redact numbers). "
+                    "Applies to files and live streams."
+                ),
+                "type": str,
+                "multiple": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--numerals"],
+                "help": (
+                    "Convert spoken numbers to digits ('four twenty' -> '420'). "
+                    "Applies to files and live streams."
+                ),
                 "is_flag": True,
                 "is_option": True,
             },
@@ -293,7 +334,7 @@ class ListenCommand(BaseCommand):
         language = kwargs.get("language") or "en-US"
 
         # flux-* models require listen.v2; everything else uses v1.
-        api_version = 2 if model.startswith("flux") else 1
+        api_version = 2 if model.startswith("flux-") else 1
         diarize = kwargs.get("diarize", False)
         smart_format = kwargs.get("smart_format", True)
         punctuate = kwargs.get("punctuate", True)
@@ -301,12 +342,70 @@ class ListenCommand(BaseCommand):
         topics = kwargs.get("topics", False)
         sentiment = kwargs.get("sentiment", False)
         interim = kwargs.get("interim", False)
+        # --redact is repeatable (click multiple=True → tuple). Normalise so the
+        # rest of the flow always sees a tuple: click gives (), direct callers
+        # (tests) may pass a bare string or None.
+        _redact_raw = kwargs.get("redact")
+        if _redact_raw is None:
+            redact: tuple[str, ...] = ()
+        elif isinstance(_redact_raw, str):
+            redact = (_redact_raw,) if _redact_raw else ()
+        else:
+            redact = tuple(_redact_raw)
+        numerals = kwargs.get("numerals", False)
         encoding = kwargs.get("encoding")
         sample_rate = kwargs.get("sample_rate") or 16000
-        channels = kwargs.get("channels") or 1
+        channels = kwargs.get("channels")
+        if channels is None:
+            channels = 1
+        if channels < 1:
+            raise click.ClickException("--channels must be at least 1.")
+
+        # Flux STT (listen v2) is turn-based and has no diarization; --diarize
+        # is dropped from the v2 param set (sending it earns an HTTP 400). It
+        # defaults to False, so if it's set the user asked for it explicitly —
+        # say we're ignoring it rather than letting it vanish silently.
+        # (smart_format / punctuate default to True and can't be told apart
+        # from an explicit flag, so they stay silent; --interim still gates
+        # client-side display.)
+        if api_version >= 2 and diarize:
+            status.print(
+                "[yellow]Note:[/yellow] --diarize is not supported by Flux STT "
+                "(listen v2) models; ignoring it."
+            )
+            diarize = False
         save_to = kwargs.get("save_to")
         probe = kwargs.get("probe", False)
         no_validate = kwargs.get("no_validate", False)
+
+        # Flux STT (listen v2) is streaming-only — there is no v2 pre-recorded
+        # REST endpoint, so a file/URL routes to /v1/listen and the server
+        # rejects it ("Flux models are not supported on /v1/listen") wrapped in
+        # a header dump. Say so up front instead.
+        if api_version >= 2 and mode in ("prerecorded_file", "prerecorded_url"):
+            raise click.ClickException(
+                f"Flux STT ({model}) is streaming-only and cannot transcribe "
+                "a file or URL. Use a live source (--mic, stdin, or '-'), or "
+                "pick a v1 model (e.g. nova-3) for pre-recorded audio."
+            )
+
+        if api_version >= 2 and channels != 1:
+            raise click.ClickException(
+                f"--channels {channels} is not supported by Flux STT ({model}); "
+                "listen v2 accepts mono audio only (--channels 1)."
+            )
+
+        # Flux STT (listen v2) only accepts a narrow --redact vocabulary; the
+        # v1 values ("pci", "ssn", …) come back as an opaque HTTP 400. Validate
+        # up front, mirroring how `speak` guards its Flux-only flags.
+        if api_version >= 2:
+            bad = [r for r in redact if r not in _FLUX_REDACT]
+            if bad:
+                allowed = " or ".join(f"'{v}'" for v in _FLUX_REDACT)
+                raise click.ClickException(
+                    f"--redact {', '.join(bad)} is not supported by Flux STT "
+                    f"({model}); listen v2 accepts only {allowed}."
+                )
 
         # ── Caption format ─────────────────────────────────────────────
         want_webvtt = kwargs.get("webvtt", False)
@@ -342,6 +441,8 @@ class ListenCommand(BaseCommand):
                 summarize=summarize,
                 topics=topics,
                 sentiment=sentiment,
+                redact=redact,
+                numerals=numerals,
                 save_to=save_to,
                 probe=probe,
                 no_validate=no_validate,
@@ -363,6 +464,8 @@ class ListenCommand(BaseCommand):
                 summarize=summarize,
                 topics=topics,
                 sentiment=sentiment,
+                redact=redact,
+                numerals=numerals,
                 save_to=save_to,
                 probe=False,
                 no_validate=no_validate,
@@ -379,6 +482,8 @@ class ListenCommand(BaseCommand):
                 smart_format=smart_format,
                 punctuate=punctuate,
                 interim=interim,
+                redact=redact,
+                numerals=numerals,
                 sample_rate=sample_rate,
                 channels=channels,
                 save_to=save_to,
@@ -394,6 +499,8 @@ class ListenCommand(BaseCommand):
                 smart_format=smart_format,
                 punctuate=punctuate,
                 interim=interim,
+                redact=redact,
+                numerals=numerals,
                 encoding=encoding,
                 sample_rate=sample_rate,
                 channels=channels,
@@ -465,6 +572,8 @@ class ListenCommand(BaseCommand):
         summarize: bool,
         topics: bool,
         sentiment: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
         save_to: str | None,
         probe: bool,
         no_validate: bool,
@@ -533,6 +642,12 @@ class ListenCommand(BaseCommand):
             options["topics"] = "true"
         if sentiment:
             options["sentiment"] = "true"
+        if redact:
+            # Fern's query encoder expands a list into repeated params
+            # (redact=pci&redact=numbers) but leaves a tuple unexpanded.
+            options["redact"] = list(redact)
+        if numerals:
+            options["numerals"] = "true"
 
         # ── Call API ───────────────────────────────────────────────────
         status.print(f"[dim]Transcribing[/dim] {source}")
@@ -544,7 +659,10 @@ class ListenCommand(BaseCommand):
             else:
                 result_dict = client.transcribe_file(source, options)
         except Exception as e:
-            return BaseResult(status="error", message=f"Transcription failed: {e}")
+            # Raise (not return an error result) so an API rejection — e.g. a
+            # --redact value the v1 endpoint refuses — exits non-zero and is
+            # visible, rather than printing nothing and exiting 0.
+            raise click.ClickException(f"Transcription failed: {e}")
 
         # ── Format transcript ──────────────────────────────────────────
         if diarize:
@@ -607,6 +725,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
         sample_rate: int,
         channels: int,
         save_to: str | None,
@@ -641,6 +761,8 @@ class ListenCommand(BaseCommand):
                     smart_format=smart_format,
                     punctuate=punctuate,
                     interim=interim,
+                    redact=redact,
+                    numerals=numerals,
                     sample_rate=sample_rate,
                     channels=channels,
                     caption_writer=caption_writer,
@@ -649,6 +771,8 @@ class ListenCommand(BaseCommand):
         except KeyboardInterrupt:
             status.print("\n[yellow]Stopped.[/yellow]")
             result = ListenResult(status="success", source="mic", mode="live")
+        except click.ClickException:
+            raise
         except Exception as e:
             err = str(e)
             msg = f"Microphone error: {err}"
@@ -690,6 +814,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
         sample_rate: int,
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
@@ -707,12 +833,15 @@ class ListenCommand(BaseCommand):
             smart_format=smart_format,
             punctuate=punctuate,
             interim=interim,
+            redact=redact,
+            numerals=numerals,
             encoding="linear16",
             sample_rate=sample_rate,
             channels=channels,
         )
         api_key = client.auth_manager.get_api_key()
         full_transcript: list[str] = []
+        v2_state = self._new_v2_state() if api_version >= 2 else None
         stop_event = threading.Event()
 
         async with websockets.connect(
@@ -756,6 +885,7 @@ class ListenCommand(BaseCommand):
                         diarize=diarize,
                         interim=interim,
                         caption_writer=caption_writer,
+                        v2_state=v2_state,
                     )
 
             send_task = asyncio.create_task(send_audio())
@@ -764,8 +894,15 @@ class ListenCommand(BaseCommand):
                 await asyncio.gather(send_task, recv_task)
             except (KeyboardInterrupt, asyncio.CancelledError):
                 stop_event.set()
-                send_task.cancel()
-                recv_task.cancel()
+                await _cancel_and_drain(send_task, recv_task)
+            except BaseException:
+                stop_event.set()
+                await _cancel_and_drain(send_task, recv_task)
+                raise
+
+        # Flux may close mid-turn without an EndOfTurn; emit what we have.
+        if v2_state is not None:
+            self._flush_v2(v2_state, full_transcript, caption_writer=caption_writer)
 
         return ListenResult(
             status="success",
@@ -791,6 +928,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
         encoding: str | None,
         sample_rate: int,
         channels: int,
@@ -831,6 +970,8 @@ class ListenCommand(BaseCommand):
                     smart_format=smart_format,
                     punctuate=punctuate,
                     interim=interim,
+                    redact=redact,
+                    numerals=numerals,
                     encoding=resolved_encoding,
                     sample_rate=sample_rate,
                     channels=channels,
@@ -867,6 +1008,8 @@ class ListenCommand(BaseCommand):
         smart_format: bool,
         punctuate: bool,
         interim: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
         encoding: str,
         sample_rate: int,
         channels: int,
@@ -883,25 +1026,63 @@ class ListenCommand(BaseCommand):
             smart_format=smart_format,
             punctuate=punctuate,
             interim=interim,
+            redact=redact,
+            numerals=numerals,
             encoding=encoding,
             sample_rate=sample_rate,
             channels=channels,
         )
         api_key = client.auth_manager.get_api_key()
         full_transcript: list[str] = []
+        v2_state = self._new_v2_state() if api_version >= 2 else None
 
         async with websockets.connect(
             url, additional_headers={"Authorization": f"Token {api_key}"}
         ) as ws:
+            loop = asyncio.get_running_loop()
+            audio_queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue()
+            stop_reader = threading.Event()
+
+            def post_audio(item: bytes | Exception | None) -> None:
+                if stop_reader.is_set():
+                    return
+                try:
+                    loop.call_soon_threadsafe(audio_queue.put_nowait, item)
+                except RuntimeError:
+                    # The event loop already closed after a stream failure.
+                    pass
+
+            def read_stdin() -> None:
+                try:
+                    while not stop_reader.is_set():
+                        data = sys.stdin.buffer.read(4096)
+                        if stop_reader.is_set():
+                            return
+                        post_audio(data or None)
+                        if not data:
+                            return
+                except Exception as exc:
+                    post_audio(exc)
+
+            reader_thread = threading.Thread(
+                target=read_stdin,
+                name="deepctl-stdin-reader",
+                daemon=True,
+            )
 
             async def send_audio() -> None:
-                loop = asyncio.get_event_loop()
-                while True:
-                    data = await loop.run_in_executor(None, sys.stdin.buffer.read, 4096)
-                    if not data:
-                        break
-                    await ws.send(data)
-                await ws.send(json.dumps({"type": "CloseStream"}))
+                reader_thread.start()
+                try:
+                    while True:
+                        item = await audio_queue.get()
+                        if item is None:
+                            break
+                        if isinstance(item, Exception):
+                            raise item
+                        await ws.send(item)
+                    await ws.send(json.dumps({"type": "CloseStream"}))
+                finally:
+                    stop_reader.set()
 
             async def recv_transcripts() -> None:
                 async for msg in ws:
@@ -911,9 +1092,26 @@ class ListenCommand(BaseCommand):
                         diarize=diarize,
                         interim=interim,
                         caption_writer=caption_writer,
+                        v2_state=v2_state,
                     )
 
-            await asyncio.gather(send_audio(), recv_transcripts())
+            send_task = asyncio.create_task(send_audio())
+            recv_task = asyncio.create_task(recv_transcripts())
+            try:
+                await asyncio.gather(send_task, recv_task)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                # Mirror the mic path: on Ctrl-C drain the tasks but do NOT
+                # re-raise, so we fall through to _flush_v2 + the return below
+                # and the partial transcript (and --save-to) survive. Fatal
+                # errors still propagate via the BaseException clause.
+                await _cancel_and_drain(send_task, recv_task)
+            except BaseException:
+                await _cancel_and_drain(send_task, recv_task)
+                raise
+
+        # Flux may close mid-turn without an EndOfTurn; emit what we have.
+        if v2_state is not None:
+            self._flush_v2(v2_state, full_transcript, caption_writer=caption_writer)
 
         return ListenResult(
             status="success",
@@ -942,22 +1140,40 @@ class ListenCommand(BaseCommand):
         encoding: str,
         sample_rate: int,
         channels: int,
+        redact: tuple[str, ...] = (),
+        numerals: bool = False,
     ) -> str:
+        # v1 and v2 (Flux) have different query-param vocabularies. The v2
+        # endpoint rejects v1-only params (language, smart_format, punctuate,
+        # channels, diarize, interim_results) with HTTP 400, so build the
+        # param set per version rather than sending the v1 shape to both.
         params: dict[str, Any] = {
             "model": model,
-            "language": language,
-            "smart_format": "true" if smart_format else "false",
-            "punctuate": "true" if punctuate else "false",
             "encoding": encoding,
             "sample_rate": sample_rate,
-            "channels": channels,
         }
-        if diarize:
-            params["diarize"] = "true"
-        if interim:
-            params["interim_results"] = "true"
+        if api_version >= 2:
+            # Flux (listen v2): turn-based, no interim/diarize/smart_format;
+            # language is encoded in the model name (e.g. flux-general-en).
+            pass
+        else:
+            params["language"] = language
+            params["smart_format"] = "true" if smart_format else "false"
+            params["punctuate"] = "true" if punctuate else "false"
+            params["channels"] = channels
+            if diarize:
+                params["diarize"] = "true"
+            if interim:
+                params["interim_results"] = "true"
+        # redact / numerals are valid on both versions. redact is repeatable;
+        # doseq=True expands a sequence into redact=pci&redact=numbers (and
+        # leaves a bare string as a single scalar param).
+        if redact:
+            params["redact"] = redact
+        if numerals:
+            params["numerals"] = "true"
         base = _ws_base(client)
-        return f"{base}/v{api_version}/listen?{urlencode(params)}"
+        return f"{base}/v{api_version}/listen?{urlencode(params, doseq=True)}"
 
     def _handle_ws_message(
         self,
@@ -967,14 +1183,40 @@ class ListenCommand(BaseCommand):
         diarize: bool,
         interim: bool,
         caption_writer: StreamingCaptionWriter | None = None,
+        v2_state: dict[str, Any] | None = None,
     ) -> None:
-        """Parse one WebSocket message and print/accumulate the transcript."""
+        """Parse one WebSocket message and print/accumulate the transcript.
+
+        Handles both v1 (`Results`) and Flux/v2 (`TurnInfo`) message shapes;
+        other control frames (Connected, Metadata, …) are ignored. Flux turns
+        are stateful, so v2 callers must pass a ``v2_state`` dict (see
+        ``_new_v2_state``) and call ``_flush_v2`` once the stream closes.
+        """
         try:
             data = json.loads(raw_msg)
         except Exception:
             return
 
-        if data.get("type") != "Results":
+        msg_type = data.get("type")
+        if msg_type == "TurnInfo":
+            if v2_state is not None:
+                self._handle_v2_turn(
+                    data,
+                    transcript_acc,
+                    v2_state,
+                    interim=interim,
+                    caption_writer=caption_writer,
+                )
+            return
+
+        # Flux STT (v2) fatal errors arrive as a control frame (type "Error").
+        # Raising propagates the failure through the stream and Click exit status.
+        if msg_type == "Error" and v2_state is not None:
+            code = data.get("code") or "UNKNOWN_ERROR"
+            description = data.get("description") or "No description provided"
+            raise click.ClickException(f"Flux STT error ({code}): {description}")
+
+        if msg_type != "Results":
             return
 
         channel = data.get("channel", {})
@@ -1013,6 +1255,131 @@ class ListenCommand(BaseCommand):
             transcript = alt.get("transcript", "")
             if transcript:
                 print(f"\r{transcript}          ", end="", flush=True)
+
+    @staticmethod
+    def _new_v2_state() -> dict[str, Any]:
+        """Per-stream state for Flux (v2) turn tracking. See ``_handle_v2_turn``."""
+        return {"turns": {}, "order": []}
+
+    def _handle_v2_turn(
+        self,
+        data: dict[str, Any],
+        transcript_acc: list[str],
+        v2_state: dict[str, Any],
+        *,
+        interim: bool,
+        caption_writer: StreamingCaptionWriter | None = None,
+    ) -> None:
+        """Render a Flux (listen v2) ``TurnInfo`` message.
+
+        Flux is turn-based: a turn's transcript grows across ``Update`` /
+        ``StartOfTurn`` events and is finalized by ``EndOfTurn`` (the analogue
+        of v1's ``is_final``). But a finite file/stdin stream often ends
+        mid-turn, so the final turn may never get an ``EndOfTurn`` — we keep
+        the latest transcript per turn and ``_flush_v2`` emits any turn left
+        unfinalized when the socket closes. Diarization is not a v2 feature,
+        so there are no speaker labels here.
+        """
+        turn_index = data.get("turn_index", 0)
+        transcript = data.get("transcript", "")
+        event = data.get("event")
+
+        turns = v2_state["turns"]
+        st = turns.get(turn_index)
+        if st is None:
+            st = {
+                "transcript": "",
+                "words": [],
+                "final": False,
+                "start": 0.0,
+                "end": 0.0,
+            }
+            turns[turn_index] = st
+            v2_state["order"].append(turn_index)
+
+        # Keep the most complete transcript seen for this turn, plus the turn's
+        # audio window — the only timing Flux guarantees. Per-word start/end are
+        # optional on TurnInfo and usually absent, so captions key off the window.
+        if transcript:
+            st["transcript"] = transcript
+            st["words"] = data.get("words", [])
+            st["start"] = data.get("audio_window_start", st["start"])
+            st["end"] = data.get("audio_window_end", st["end"])
+
+        if event == "EndOfTurn":
+            self._emit_v2_turn(st, transcript_acc, caption_writer=caption_writer)
+        elif event == "Update" and interim and not caption_writer and transcript:
+            print(f"\r{transcript}          ", end="", flush=True)
+
+    def _emit_v2_turn(
+        self,
+        st: dict[str, Any],
+        transcript_acc: list[str],
+        *,
+        caption_writer: StreamingCaptionWriter | None,
+    ) -> None:
+        """Finalize one Flux turn: print it (or route words to captions) once."""
+        if st["final"]:
+            return
+        st["final"] = True
+        transcript = st["transcript"]
+        if not transcript:
+            return
+        if caption_writer:
+            start, end = st["start"], st["end"]
+            words = self._timed_v2_words(st["words"], transcript, start, end)
+            caption_writer.write_entry(words, start, end)
+            transcript_acc.append(transcript)
+        else:
+            transcript_acc.append(transcript)
+            print(transcript, flush=True)
+
+    @staticmethod
+    def _timed_v2_words(
+        words: list[dict[str, Any]],
+        transcript: str,
+        start: float,
+        end: float,
+    ) -> list[dict[str, Any]]:
+        """Give Flux turn words the start/end the caption converter requires.
+
+        ``captions_from_words`` raises ``KeyError: 'start'`` on words without
+        timings, and Flux ``TurnInfo`` words carry only ``{word, confidence}``.
+        Spread the turn's audio window evenly across the words (keeping any real
+        per-word timings Flux does send), and synthesise a single word from the
+        transcript if the turn arrived without a word list at all.
+        """
+        if not words:
+            return [{"word": transcript, "start": start, "end": end}]
+        if all(w.get("start") is not None and w.get("end") is not None for w in words):
+            return words
+        n = len(words)
+        span = max(0.0, end - start)
+        step = span / n if n else 0.0
+        timed: list[dict[str, Any]] = []
+        for i, w in enumerate(words):
+            tw = dict(w)
+            if tw.get("start") is None:
+                tw["start"] = start + i * step
+            if tw.get("end") is None:
+                tw["end"] = start + (i + 1) * step
+            timed.append(tw)
+        return timed
+
+    def _flush_v2(
+        self,
+        v2_state: dict[str, Any],
+        transcript_acc: list[str],
+        *,
+        caption_writer: StreamingCaptionWriter | None = None,
+    ) -> None:
+        """Emit any Flux turns the stream closed without an ``EndOfTurn``."""
+        for turn_index in v2_state["order"]:
+            self._emit_v2_turn(
+                v2_state["turns"][turn_index],
+                transcript_acc,
+                caption_writer=caption_writer,
+            )
 
     # ── Output rendering ───────────────────────────────────────────────
 

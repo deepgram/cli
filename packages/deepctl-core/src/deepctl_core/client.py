@@ -189,12 +189,17 @@ class DeepgramClient:
         model: str,
         encoding: str | None = None,
         sample_rate: float | None = None,
+        speed: float | None = None,
+        expressivity: int | None = None,
     ) -> Iterator[bytes]:
         """Stream TTS audio over the Flux v2 WebSocket (speak.v2.connect).
 
         Yields raw audio chunks as they arrive. The streaming transport emits
         raw (non-containerized) audio, so only linear16/mulaw/alaw encodings
         apply and sample_rate is sent as the string the streaming API expects.
+
+        ``speed`` (0.85-1.15) and beta ``expressivity`` (-2..2, default 0) are
+        Flux connect query parameters; they are only sent when set.
         """
         from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak
 
@@ -203,6 +208,10 @@ class DeepgramClient:
             connect_kwargs["encoding"] = encoding
         if sample_rate:
             connect_kwargs["sample_rate"] = str(int(sample_rate))
+        if speed is not None:
+            connect_kwargs["speed"] = speed
+        if expressivity is not None:
+            connect_kwargs["expressivity"] = expressivity
 
         try:
             with self.client.speak.v2.connect(**connect_kwargs) as conn:

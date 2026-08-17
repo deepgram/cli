@@ -30,7 +30,7 @@ pipx run deepctl --help
 ## Dependencies
 
 - `click>=8.0.0`
-- `deepgram-sdk>=6.0.0rc2`
+- `deepgram-sdk>=7.7.0,<8`
 - `pydantic>=2.0.0`
 - `rich>=13.0.0`
 - `httpx>=0.24.0`

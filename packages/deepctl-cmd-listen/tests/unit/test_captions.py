@@ -14,8 +14,7 @@ from deepctl_cmd_listen.captions import (
 def _words(*entries: tuple[str, float, float]) -> list[dict]:
     """Build word dicts from (text, start, end) tuples."""
     return [
-        {"word": t, "punctuated_word": t, "start": s, "end": e}
-        for t, s, e in entries
+        {"word": t, "punctuated_word": t, "start": s, "end": e} for t, s, e in entries
     ]
 
 
