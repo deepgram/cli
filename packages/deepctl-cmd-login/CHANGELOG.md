@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.16...deepctl-cmd-login-v0.1.17) (2026-08-17)
+
+
+### Features
+
+* SDK 7.7.0 — Flux TTS controls, Flux STT fix, listen redact/numerals ([#92](https://github.com/deepgram/cli/issues/92)) ([50d96cf](https://github.com/deepgram/cli/commit/50d96cf8950c9f180619e0e2dbd41931d1a63ef6))
+
 ## [0.1.16](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.15...deepctl-cmd-login-v0.1.16) (2026-07-15)
 
 

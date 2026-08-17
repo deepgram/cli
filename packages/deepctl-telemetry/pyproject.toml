@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-telemetry"
-version = "0.0.5" # x-release-please-version
+version = "0.0.6" # x-release-please-version
 description = "Opt-out phone-home telemetry for deepctl"
 readme = "README.md"
 license = "MIT"

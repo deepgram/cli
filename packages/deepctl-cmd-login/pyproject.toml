@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-login"
-version = "0.1.16" # x-release-please-version
+version = "0.1.17" # x-release-please-version
 description = "Login command for deepctl"
 readme = "README.md"
 license = "MIT"
