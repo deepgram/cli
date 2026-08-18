@@ -11,6 +11,7 @@ from deepctl_core import (
     Config,
     DeepgramClient,
     get_output_format,
+    get_status_console,
 )
 from rich.console import Console
 from rich.table import Table
@@ -20,7 +21,7 @@ from .models import BalanceInfo, BillingResult
 console = Console()
 # Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
 # output that callers pipe into jq and friends.
-status_console = Console(stderr=True)
+status_console = get_status_console()
 
 
 class BillingCommand(BaseCommand):

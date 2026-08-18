@@ -505,3 +505,19 @@ def get_console() -> Console:
         Console instance
     """
     return console
+
+
+def get_status_console() -> Console:
+    """Get the console for status/progress chrome.
+
+    Always writes to stderr, so anything printed through it can never corrupt
+    the machine-readable payload a command writes to stdout. Commands should
+    use this rather than declaring their own ``Console(stderr=True)`` — a
+    per-command console silently misses the agentic no-color settings, and a
+    command that reaches for a bare ``Console()`` reintroduces the stdout
+    pollution this exists to prevent.
+
+    Returns:
+        Console instance writing to stderr
+    """
+    return stderr_console

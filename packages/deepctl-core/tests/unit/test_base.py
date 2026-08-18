@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, Mock, patch
 import click
 import pytest
 from click.testing import CliRunner
-from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseCommand,
+    BaseResult,
+    Config,
+    DeepgramClient,
+)
 
 # Mirrors the full key set of deepctl_core.output._output_config so a patched
 # stand-in can't drift from the real global. Spread with a format override,
@@ -607,7 +613,11 @@ class TestBaseCommand:
         import yaml
 
         expected_yaml = yaml.dump(result, default_flow_style=False)
-        mock_console.print.assert_called_once_with(expected_yaml)
+        # Machine-readable payloads go out verbatim: Rich must not interpret
+        # markup, highlight, or wrap them.
+        mock_console.print.assert_called_once_with(
+            expected_yaml, markup=False, highlight=False, soft_wrap=True
+        )
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.console")
@@ -688,12 +698,15 @@ class TestBaseCommand:
         assert "age,30" in output
 
     @pytest.mark.unit
+    @patch("deepctl_core.base_command.stderr_console")
     @patch("deepctl_core.base_command.console")
     @patch(
         "deepctl_core.output._output_config",
         {**_OUTPUT_CONFIG_DEFAULTS, "format": "unknown"},
     )
-    def test_output_result_unknown_format(self, mock_console, mock_command_class):
+    def test_output_result_unknown_format(
+        self, mock_console, mock_stderr_console, mock_command_class
+    ):
         """Test output_result with unknown format falls back to JSON."""
         command = mock_command_class()
         config = Mock(spec=Config)
@@ -703,10 +716,12 @@ class TestBaseCommand:
         with patch.object(command, "_output_json") as mock_output_json:
             command.output_result(result, config)
 
-        # Verify error message and fallback to JSON
-        mock_console.print.assert_called_once_with(
+        # The complaint goes to stderr so it cannot corrupt the JSON we fall
+        # back to on stdout.
+        mock_stderr_console.print.assert_called_once_with(
             "[red]Unknown output format:[/red] unknown"
         )
+        mock_console.print.assert_not_called()
         mock_output_json.assert_called_once_with(result)
 
     @pytest.mark.unit
@@ -1055,6 +1070,146 @@ class TestGuidedAttribute:
             cmd.execute(ctx)
 
         assert mock_command_class.captured_guided is True
+
+
+class TestExitCodes:
+    """A command that reports failure must not exit 0 (#98).
+
+    Scripts and CI branch on the exit code, not on the "status" field buried in
+    the payload, so `if dg -o json keys; then` took the success branch on a
+    failed call.
+    """
+
+    @pytest.fixture
+    def command(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+            result: Any = None
+
+            def handle(self, *args, **kwargs):
+                return MockCommand.result
+
+        return MockCommand
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            ("error", 1),
+            ("cancelled", 130),
+            ("success", 0),
+            ("succeeded", 0),
+            ("info", 0),
+            ("dry_run", 0),
+            ("warning", 0),
+            ("anything-unrecognised", 0),
+        ],
+    )
+    def test_exit_code_for_status(self, command, status, expected):
+        assert command().exit_code_for(BaseResult(status=status)) == expected
+
+    @pytest.mark.unit
+    def test_exit_code_for_result_without_status(self, command):
+        assert command().exit_code_for(None) == 0
+        assert command().exit_code_for({"not": "a result"}) == 0
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_exits_nonzero_on_error_result(
+        self, _client_class, _auth_class, command
+    ):
+        cmd = command()
+        command.result = BaseResult(status="error", message="API connection failed")
+
+        with pytest.raises(SystemExit) as exc:
+            cmd.execute(_exit_code_ctx())
+
+        assert exc.value.code == 1
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_exits_zero_on_success_result(
+        self, _client_class, _auth_class, command
+    ):
+        cmd = command()
+        command.result = BaseResult(status="success", message="done")
+
+        # No SystemExit at all — a successful command must fall through.
+        cmd.execute(_exit_code_ctx())
+
+
+class TestMachineReadablePayloads:
+    """yaml/csv payloads must reach stdout byte-for-byte.
+
+    Rich's default print treats square brackets as style markup and deletes
+    them, and hard-wraps at the console width; both silently corrupt user data
+    such as an API key comment of "[ci] runner".
+    """
+
+    @pytest.fixture
+    def command(self):
+        class MockCommand(BaseCommand):
+            name = "test"
+            help = "Test command"
+
+            def handle(self, *args, **kwargs):
+                return None
+
+        return MockCommand()
+
+    @staticmethod
+    def _capture(command, method, payload):
+        import io
+
+        from rich.console import Console
+
+        buffer = io.StringIO()
+        # Deliberately narrow: a wrapping console would break the long value.
+        with patch(
+            "deepctl_core.base_command.console",
+            Console(file=buffer, width=40, no_color=True),
+        ):
+            getattr(command, method)(payload)
+        return buffer.getvalue()
+
+    @pytest.mark.unit
+    def test_yaml_preserves_brackets_and_does_not_wrap(self, command):
+        comment = "[bold red]staging[/bold red] key " + "x" * 60
+        out = self._capture(command, "_output_yaml", {"comment": comment})
+
+        assert "[bold red]staging[/bold red] key" in out
+        assert "x" * 60 in out
+
+    @pytest.mark.unit
+    def test_csv_preserves_brackets_and_does_not_wrap(self, command):
+        comment = "[ci] runner " + "y" * 60
+        out = self._capture(command, "_output_csv", {"comment": comment})
+
+        assert "[ci] runner" in out
+        assert "y" * 60 in out
+
+    @pytest.mark.unit
+    def test_json_preserves_brackets(self, command):
+        out = self._capture(command, "_output_json", {"comment": "[ci] runner"})
+
+        assert "[ci] runner" in out
+
+
+def _exit_code_ctx():
+    """A minimal Click context good enough to drive BaseCommand.execute."""
+    ctx = Mock(spec=click.Context)
+    ctx.obj = {"config": Config()}
+    ctx.command_path = "deepctl test"
+    ctx.params = {}
+    ctx.command = Mock()
+    ctx.command.params = []
+    src = Mock()
+    src.name = "DEFAULT"
+    ctx.get_parameter_source = lambda _name: src
+    return ctx
 
 
 class TestConfirmPromptGating:
