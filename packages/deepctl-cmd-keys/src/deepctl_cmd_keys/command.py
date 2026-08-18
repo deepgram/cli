@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
+import click
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -11,6 +13,8 @@ from deepctl_core import (
     Config,
     DeepgramClient,
     get_output_format,
+    get_status_console,
+    is_agentic,
 )
 from rich.console import Console
 from rich.table import Table
@@ -20,7 +24,7 @@ from .models import KeyCreatedInfo, KeyInfo, KeysResult
 console = Console()
 # Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
 # output that callers pipe into jq and friends.
-status_console = Console(stderr=True)
+status_console = get_status_console()
 
 
 class KeysCommand(BaseCommand):
@@ -141,9 +145,11 @@ class KeysCommand(BaseCommand):
         create_key = kwargs.get("create", False)
         show_key = kwargs.get("show")
         delete_key = kwargs.get("delete")
-        project_id = kwargs.get("project_id")
-
-        dry_run = kwargs.get("dry_run", False)
+        # Popped, not read: both are forwarded explicitly to _create_key, which
+        # also receives **kwargs. Leaving them in the dict passes each argument
+        # twice and raises TypeError before the body runs.
+        project_id = kwargs.pop("project_id", None)
+        dry_run = kwargs.pop("dry_run", False)
 
         try:
             if create_key:
@@ -336,12 +342,45 @@ class KeysCommand(BaseCommand):
                 status="dry_run", message=f"Dry run: key {key_id} would be deleted"
             )
 
-        if not yes and not self.confirm(
-            f"Delete API key {key_id}? This cannot be undone.", default=False
-        ):
-            return BaseResult(status="cancelled", message="Cancelled by user")
+        if not yes:
+            aborted = self._confirm_delete(key_id)
+            if aborted is not None:
+                return aborted
 
         status_console.print(f"[blue]Deleting API key:[/blue] {key_id}")
         client.delete_key(key_id, project_id=project_id)
         status_console.print(f"[green]API key {key_id} deleted[/green]")
         return BaseResult(status="success", message=f"Key {key_id} deleted")
+
+    def _confirm_delete(self, key_id: str) -> BaseResult | None:
+        """Gate a delete behind confirmation; return a result to abort with.
+
+        `BaseCommand.confirm` cannot be used here. It returns its default
+        (False) whenever any parameter came from the command line, and
+        `--delete KEY_ID` is itself such a parameter — so the prompt never
+        appeared and every `dg keys --delete ID` reported "Cancelled by user"
+        without asking and without deleting. Prompting on stderr keeps stdout
+        parseable under `-o json`.
+
+        Returns:
+            None to proceed with the delete, or the result to return instead
+        """
+        if is_agentic() or not sys.stdin.isatty():
+            # No one is there to answer. Refusing is right, but it is a usage
+            # error rather than something the user chose to cancel.
+            return BaseResult(
+                status="error",
+                message=(
+                    f"Refusing to delete key {key_id} without confirmation. "
+                    "Pass --yes to confirm."
+                ),
+            )
+
+        if not click.confirm(
+            f"Delete API key {key_id}? This cannot be undone.",
+            default=False,
+            err=True,
+        ):
+            return BaseResult(status="cancelled", message="Delete cancelled")
+
+        return None

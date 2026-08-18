@@ -315,6 +315,187 @@ class TestKeysOutputFormat:
         assert result.keys[0].key_id == "key1"
 
 
+class TestKeysDryRun:
+    """`--dry-run` must reach its own code, not a TypeError.
+
+    `handle` read `project_id` and `dry_run` off kwargs with `.get()` and then
+    forwarded `**kwargs` alongside them, so every argument arrived twice and
+    `--create --dry-run` failed with "got multiple values for argument" before
+    the dry-run body ran.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return KeysCommand()
+
+    @pytest.fixture
+    def mock_client(self):
+        return Mock(spec=DeepgramClient)
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_create_dry_run_reports_dry_run_and_calls_nothing(
+        self, mock_console, _status, _fmt, command, mock_client
+    ):
+        result = command.handle(
+            Mock(spec=Config),
+            Mock(spec=AuthManager),
+            mock_client,
+            create=True,
+            dry_run=True,
+            project_id=None,
+            comment="probe",
+            scopes="member",
+            ttl=3600,
+            tags="a,b",
+        )
+
+        assert result.status == "dry_run"
+        mock_client.create_key.assert_not_called()
+        mock_console.print.assert_not_called()
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_create_dry_run_renders_summary_for_humans(
+        self, mock_console, _status, _fmt, command, mock_client
+    ):
+        result = command.handle(
+            Mock(spec=Config),
+            Mock(spec=AuthManager),
+            mock_client,
+            create=True,
+            dry_run=True,
+            project_id=None,
+            comment="probe",
+            scopes="member",
+        )
+
+        assert result.status == "dry_run"
+        printed = " ".join(
+            str(c.args[0]) for c in mock_console.print.call_args_list if c.args
+        )
+        assert "Dry run" in printed
+        assert "probe" in printed
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_delete_dry_run_reports_dry_run_and_calls_nothing(
+        self, mock_console, _status, _fmt, command, mock_client
+    ):
+        result = command.handle(
+            Mock(spec=Config),
+            Mock(spec=AuthManager),
+            mock_client,
+            delete="key-id",
+            dry_run=True,
+            project_id=None,
+        )
+
+        assert result.status == "dry_run"
+        assert "key-id" in result.message
+        mock_client.delete_key.assert_not_called()
+        mock_console.print.assert_not_called()
+
+
+class TestKeysDeleteConfirmation:
+    """`--delete` without `--yes` must not silently no-op.
+
+    `BaseCommand.confirm` returns its default whenever any parameter came from
+    the command line, and `--delete KEY_ID` is itself such a parameter — so the
+    prompt never appeared and the command reported "Cancelled by user" without
+    asking anyone and without deleting anything.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return KeysCommand()
+
+    @pytest.fixture
+    def mock_client(self):
+        return Mock(spec=DeepgramClient)
+
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.is_agentic", return_value=True)
+    def test_non_interactive_without_yes_errors_and_deletes_nothing(
+        self, _agentic, _status, command, mock_client
+    ):
+        result = command._delete_key(mock_client, "key-id", None, yes=False)
+
+        assert result.status == "error"
+        assert "--yes" in result.message
+        mock_client.delete_key.assert_not_called()
+
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.is_agentic", return_value=False)
+    def test_interactive_declined_cancels_and_deletes_nothing(
+        self, _agentic, _status, command, mock_client
+    ):
+        with (
+            patch("deepctl_cmd_keys.command.sys.stdin.isatty", return_value=True),
+            patch("click.confirm", return_value=False) as mock_confirm,
+        ):
+            result = command._delete_key(mock_client, "key-id", None, yes=False)
+
+        assert result.status == "cancelled"
+        mock_client.delete_key.assert_not_called()
+        # The prompt goes to stderr, so stdout stays parseable under -o json.
+        assert mock_confirm.call_args.kwargs["err"] is True
+
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.is_agentic", return_value=False)
+    def test_interactive_accepted_deletes(
+        self, _agentic, _status, command, mock_client
+    ):
+        with (
+            patch("deepctl_cmd_keys.command.sys.stdin.isatty", return_value=True),
+            patch("click.confirm", return_value=True),
+        ):
+            result = command._delete_key(mock_client, "key-id", None, yes=False)
+
+        assert result.status == "success"
+        mock_client.delete_key.assert_called_once_with("key-id", project_id=None)
+
+    @patch("deepctl_cmd_keys.command.status_console")
+    def test_yes_skips_confirmation_entirely(self, _status, command, mock_client):
+        with patch("click.confirm", side_effect=AssertionError("prompted anyway")):
+            result = command._delete_key(mock_client, "key-id", None, yes=True)
+
+        assert result.status == "success"
+        mock_client.delete_key.assert_called_once_with("key-id", project_id=None)
+
+
+class TestKeysErrorPath:
+    """Errors are chrome, not payload: stderr, and a non-zero exit code."""
+
+    @pytest.fixture
+    def command(self):
+        return KeysCommand()
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_error_goes_to_stderr_and_maps_to_exit_1(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.list_keys.side_effect = Exception("API connection failed")
+
+        result = command.handle(
+            Mock(spec=Config), Mock(spec=AuthManager), client, project_id=None
+        )
+
+        assert result.status == "error"
+        mock_console.print.assert_not_called()
+        stderr_text = " ".join(
+            str(c.args[0]) for c in mock_status_console.print.call_args_list if c.args
+        )
+        assert "API connection failed" in stderr_text
+        assert command.exit_code_for(result) == 1
+
+
 class TestKeysModels:
     """Test cases for keys models."""
 
