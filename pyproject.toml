@@ -93,7 +93,9 @@ dev = [
     # Development Tools
     "pre-commit>=3.0.0",
     # Publishing
-    "twine>=4.0.0",
+    # twine <7 rejects Metadata-Version 2.5 (emitted by hatchling), which
+    # silently broke the 0.2.27 publish. Keep local verify == what publishes.
+    "twine>=7.0.0",
     "build>=0.10.0",
 ]
 
@@ -248,7 +250,9 @@ dev = [
     # Development Tools
     "pre-commit>=3.0.0",
     # Publishing
-    "twine>=4.0.0",
+    # twine <7 rejects Metadata-Version 2.5 (emitted by hatchling), which
+    # silently broke the 0.2.27 publish. Keep local verify == what publishes.
+    "twine>=7.0.0",
     "build>=0.10.0",
 ]
 

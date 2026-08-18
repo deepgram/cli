@@ -129,7 +129,8 @@ dmypy.json
 
 # uv
 .uv_cache/
-uv.lock
+# uv.lock IS committed: it pins the dev/CI environment so every run tests
+# the same versions and dependency drift arrives as a reviewable PR.
 
 # IDEs
 .vscode/
