@@ -12,12 +12,16 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from rich.console import Console
 
 from .models import ReadResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class ReadCommand(BaseCommand):
@@ -129,7 +133,7 @@ class ReadCommand(BaseCommand):
             intents = True
 
         try:
-            console.print("[blue]Analyzing text...[/blue]")
+            status_console.print("[blue]Analyzing text...[/blue]")
 
             result = client.analyze_text(
                 text=text,
@@ -143,7 +147,7 @@ class ReadCommand(BaseCommand):
             return self._display_results(result, sentiment, summarize, topics, intents)
 
         except Exception as e:
-            console.print(f"[red]Error analyzing text:[/red] {e}")
+            status_console.print(f"[red]Error analyzing text:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _display_results(
@@ -157,6 +161,11 @@ class ReadCommand(BaseCommand):
         results = result.get("results", {})
         read_result = ReadResult(status="success")
 
+        # Human display only in default mode. For json/yaml/csv the framework
+        # serialises the returned result to stdout, so anything printed here
+        # would corrupt output that callers pipe into jq.
+        show = get_output_format() == "default"
+
         # Summary
         if show_summary:
             summaries = results.get("summary", {})
@@ -164,8 +173,9 @@ class ReadCommand(BaseCommand):
                 summaries.get("text", "") if isinstance(summaries, dict) else ""
             )
             if summary_text:
-                console.print("\n[green]Summary:[/green]")
-                console.print(f"  {summary_text}")
+                if show:
+                    console.print("\n[green]Summary:[/green]")
+                    console.print(f"  {summary_text}")
                 read_result.summary = summary_text
 
         # Sentiment
@@ -175,9 +185,11 @@ class ReadCommand(BaseCommand):
                 average = sentiments.get("average", {})
                 sentiment_val = average.get("sentiment", "")
                 sentiment_score = average.get("sentiment_score", 0.0)
-                console.print(
-                    f"\n[green]Sentiment:[/green] {sentiment_val} ({sentiment_score:.2f})"
-                )
+                if show:
+                    console.print(
+                        f"\n[green]Sentiment:[/green] "
+                        f"{sentiment_val} ({sentiment_score:.2f})"
+                    )
                 read_result.sentiment = sentiment_val
                 read_result.sentiment_score = float(sentiment_score)
 
@@ -188,7 +200,8 @@ class ReadCommand(BaseCommand):
                 topics_data.get("segments", []) if isinstance(topics_data, dict) else []
             )
             if segments:
-                console.print("\n[green]Topics:[/green]")
+                if show:
+                    console.print("\n[green]Topics:[/green]")
                 seen_topics: set[str] = set()
                 for seg in segments:
                     for topic in seg.get("topics", []):
@@ -196,7 +209,8 @@ class ReadCommand(BaseCommand):
                         if topic_name and topic_name not in seen_topics:
                             seen_topics.add(topic_name)
                             confidence = topic.get("confidence_score", 0.0)
-                            console.print(f"  • {topic_name} ({confidence:.0%})")
+                            if show:
+                                console.print(f"  • {topic_name} ({confidence:.0%})")
                 read_result.topics = segments
 
         # Intents
@@ -208,7 +222,8 @@ class ReadCommand(BaseCommand):
                 else []
             )
             if segments:
-                console.print("\n[green]Intents:[/green]")
+                if show:
+                    console.print("\n[green]Intents:[/green]")
                 seen_intents: set[str] = set()
                 for seg in segments:
                     for intent in seg.get("intents", []):
@@ -216,7 +231,8 @@ class ReadCommand(BaseCommand):
                         if intent_name and intent_name not in seen_intents:
                             seen_intents.add(intent_name)
                             confidence = intent.get("confidence_score", 0.0)
-                            console.print(f"  • {intent_name} ({confidence:.0%})")
+                            if show:
+                                console.print(f"  • {intent_name} ({confidence:.0%})")
                 read_result.intents = segments
 
         return read_result

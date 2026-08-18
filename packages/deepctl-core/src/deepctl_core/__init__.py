@@ -50,6 +50,7 @@ __all__ = [
     "TimingContext",
     "enable_timing",
     "get_console",
+    "get_output_format",
     "get_timing_summary",
     "is_agentic",
     "is_timing_enabled",

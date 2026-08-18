@@ -9,6 +9,7 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from deepctl_shared_utils import validate_date_format
 from rich.console import Console
@@ -16,6 +17,9 @@ from rich.console import Console
 from .models import UsageBucket, UsageResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class UsageCommand(BaseCommand):
@@ -108,13 +112,15 @@ class UsageCommand(BaseCommand):
             # Determine date range
             if last_week:
                 start_date, end_date = self._get_last_week_range()
-                console.print("[blue]Fetching usage for last week...[/blue]")
+                status_console.print("[blue]Fetching usage for last week...[/blue]")
             elif last_month:
                 start_date, end_date = self._get_last_month_range()
-                console.print("[blue]Fetching usage for last month...[/blue]")
+                status_console.print("[blue]Fetching usage for last month...[/blue]")
             elif current_month:
                 start_date, end_date = self._get_current_month_range()
-                console.print("[blue]Fetching usage for current month...[/blue]")
+                status_console.print(
+                    "[blue]Fetching usage for current month...[/blue]"
+                )
             elif start_date or end_date:
                 # Validate custom date range
                 if start_date and not validate_date_format(start_date):
@@ -128,7 +134,7 @@ class UsageCommand(BaseCommand):
                         message=f"Invalid end date format: {end_date}",
                     )
 
-                console.print(
+                status_console.print(
                     f"[blue]Fetching usage from "
                     f"{start_date or 'beginning'} to "
                     f"{end_date or 'now'}...[/blue]"
@@ -136,7 +142,9 @@ class UsageCommand(BaseCommand):
             else:
                 # Default to current month
                 start_date, end_date = self._get_current_month_range()
-                console.print("[blue]Fetching usage for current month...[/blue]")
+                status_console.print(
+                    "[blue]Fetching usage for current month...[/blue]"
+                )
 
             # Get usage data
             result = client.get_usage(project_id, start_date, end_date)
@@ -147,7 +155,7 @@ class UsageCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Error fetching usage:[/red] {e}")
+            status_console.print(f"[red]Error fetching usage:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _get_last_week_range(self) -> tuple[str, str]:
@@ -233,44 +241,50 @@ class UsageCommand(BaseCommand):
                         )
                     )
 
-                # Display summary
-                console.print(
-                    f"\n[green]Usage Summary ({start_date} to {end_date}):[/green]"
-                )
-                console.print(f"  Total Hours: {total_hours:,.1f}")
-                console.print(f"  Total Requests: {total_requests:,}")
+                # Human summary/breakdown only in default mode. For
+                # json/yaml/csv the framework serialises the returned result
+                # to stdout, so printing here would corrupt that output.
+                if get_output_format() == "default":
+                    console.print(
+                        f"\n[green]Usage Summary "
+                        f"({start_date} to {end_date}):[/green]"
+                    )
+                    console.print(f"  Total Hours: {total_hours:,.1f}")
+                    console.print(f"  Total Requests: {total_requests:,}")
 
-                if total_tts_characters > 0:
-                    console.print(f"  TTS Characters: {total_tts_characters:,}")
+                    if total_tts_characters > 0:
+                        console.print(f"  TTS Characters: {total_tts_characters:,}")
 
-                if total_tokens_out > 0:
-                    console.print(f"  Tokens Out: {total_tokens_out:,}")
+                    if total_tokens_out > 0:
+                        console.print(f"  Tokens Out: {total_tokens_out:,}")
 
-                # Display detailed breakdown if not summary only
-                if not summary_only and result_dict["results"]:
-                    console.print("\n[blue]Daily Breakdown:[/blue]")
-                    for item in result_dict["results"]:
-                        item_date = item.get("start", "Unknown")
-                        hours = item.get("total_hours", 0)
-                        requests = item.get("requests", 0)
+                    # Display detailed breakdown if not summary only
+                    if not summary_only and result_dict["results"]:
+                        console.print("\n[blue]Daily Breakdown:[/blue]")
+                        for item in result_dict["results"]:
+                            item_date = item.get("start", "Unknown")
+                            hours = item.get("total_hours", 0)
+                            requests = item.get("requests", 0)
 
-                        console.print(f"\n  {item_date}:")
-                        console.print(f"    Hours: {hours}")
-                        console.print(f"    Requests: {requests}")
+                            console.print(f"\n  {item_date}:")
+                            console.print(f"    Hours: {hours}")
+                            console.print(f"    Requests: {requests}")
 
-                        if "tts" in item:
-                            console.print(
-                                f"    TTS Characters: "
-                                f"{item['tts'].get('characters', 0):,}"
-                            )
-                            console.print(
-                                f"    TTS Requests: {item['tts'].get('requests', 0):,}"
-                            )
+                            if "tts" in item:
+                                console.print(
+                                    f"    TTS Characters: "
+                                    f"{item['tts'].get('characters', 0):,}"
+                                )
+                                console.print(
+                                    f"    TTS Requests: "
+                                    f"{item['tts'].get('requests', 0):,}"
+                                )
 
-                        if "tokens" in item and item["tokens"].get("out", 0) > 0:
-                            console.print(
-                                f"    Tokens Out: {item['tokens'].get('out', 0):,}"
-                            )
+                            if "tokens" in item and item["tokens"].get("out", 0) > 0:
+                                console.print(
+                                    f"    Tokens Out: "
+                                    f"{item['tokens'].get('out', 0):,}"
+                                )
 
                 project_id = result_dict.get("project_id", "")
                 return UsageResult(
@@ -280,13 +294,13 @@ class UsageCommand(BaseCommand):
                     total_hours=float(total_hours),
                 )
             else:
-                console.print(
+                status_console.print(
                     "[yellow]No usage data found for the specified period[/yellow]"
                 )
                 return BaseResult(status="info", message="No usage data found")
 
         except Exception as e:
-            console.print(f"[red]Error processing usage data:[/red] {e}")
+            status_console.print(f"[red]Error processing usage data:[/red] {e}")
             import traceback
 
             traceback.print_exc()

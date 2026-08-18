@@ -10,6 +10,7 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from rich.console import Console
 from rich.table import Table
@@ -17,6 +18,9 @@ from rich.table import Table
 from .models import ModelInfo, ModelsResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class ModelsCommand(BaseCommand):
@@ -101,26 +105,29 @@ class ModelsCommand(BaseCommand):
                     )
 
             if not all_models:
-                console.print("[yellow]No models found[/yellow]")
+                status_console.print("[yellow]No models found[/yellow]")
                 return ModelsResult(status="info", message="No models found")
 
-            # Display as table
-            table = Table(
-                title="Deepgram Models", show_header=True, header_style="bold blue"
-            )
-            table.add_column("Name", style="green")
-            table.add_column("Type", style="cyan")
-            table.add_column("Language")
-            table.add_column("Version")
-            table.add_column("ID", style="dim")
-
-            for m in all_models:
-                table.add_row(
-                    m.name, m.model_type.upper(), m.language, m.version, m.model_id
+            # Render the human table only in default mode. For json/yaml/csv
+            # the framework serialises the returned result to stdout, so
+            # printing the table here would corrupt that output for piping.
+            if get_output_format() == "default":
+                table = Table(
+                    title="Deepgram Models", show_header=True, header_style="bold blue"
                 )
+                table.add_column("Name", style="green")
+                table.add_column("Type", style="cyan")
+                table.add_column("Language")
+                table.add_column("Version")
+                table.add_column("ID", style="dim")
 
-            console.print(table)
-            console.print(f"\n[dim]{len(all_models)} model(s) found[/dim]")
+                for m in all_models:
+                    table.add_row(
+                        m.name, m.model_type.upper(), m.language, m.version, m.model_id
+                    )
+
+                console.print(table)
+                console.print(f"\n[dim]{len(all_models)} model(s) found[/dim]")
 
             return ModelsResult(
                 status="success",
@@ -129,5 +136,5 @@ class ModelsCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Error listing models:[/red] {e}")
+            status_console.print(f"[red]Error listing models:[/red] {e}")
             return BaseResult(status="error", message=str(e))

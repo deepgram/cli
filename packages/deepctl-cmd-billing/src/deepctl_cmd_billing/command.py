@@ -10,6 +10,7 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from rich.console import Console
 from rich.table import Table
@@ -17,6 +18,9 @@ from rich.table import Table
 from .models import BalanceInfo, BillingResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class BillingCommand(BaseCommand):
@@ -116,7 +120,7 @@ class BillingCommand(BaseCommand):
             return result
 
         except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+            status_console.print(f"[red]Error:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _show_balances(
@@ -125,21 +129,16 @@ class BillingCommand(BaseCommand):
         project_id: str | None,
         result: BillingResult,
     ) -> None:
-        console.print("[blue]Fetching balances...[/blue]")
+        status_console.print("[blue]Fetching balances...[/blue]")
         data = client.get_balances(project_id=project_id)
 
         balances_raw = data.get("balances", [])
         if not balances_raw:
-            console.print("[yellow]No balances found[/yellow]")
+            status_console.print("[yellow]No balances found[/yellow]")
             return
 
-        table = Table(
-            title="Account Balances", show_header=True, header_style="bold blue"
-        )
-        table.add_column("Balance ID", style="dim")
-        table.add_column("Amount", justify="right", style="green")
-        table.add_column("Units")
-
+        # Always populate the returned result; only the human table render
+        # is gated on default mode (json/yaml/csv are emitted by the framework).
         for b in balances_raw:
             b_data = (
                 b
@@ -152,9 +151,19 @@ class BillingCommand(BaseCommand):
                 units=b_data.get("units", ""),
             )
             result.balances.append(info)
-            table.add_row(info.balance_id, f"{info.amount:,.2f}", info.units)
 
-        console.print(table)
+        if get_output_format() == "default":
+            table = Table(
+                title="Account Balances", show_header=True, header_style="bold blue"
+            )
+            table.add_column("Balance ID", style="dim")
+            table.add_column("Amount", justify="right", style="green")
+            table.add_column("Units")
+
+            for info in result.balances:
+                table.add_row(info.balance_id, f"{info.amount:,.2f}", info.units)
+
+            console.print(table)
 
     def _show_breakdown(
         self,
@@ -166,7 +175,7 @@ class BillingCommand(BaseCommand):
         grouping: str | None = None,
     ) -> None:
 
-        console.print("[blue]Fetching billing breakdown...[/blue]")
+        status_console.print("[blue]Fetching billing breakdown...[/blue]")
         data = client.get_billing_breakdown(
             project_id=project_id,
             start=start,
@@ -176,13 +185,18 @@ class BillingCommand(BaseCommand):
 
         result.breakdown = data
 
+        # Human display only in default mode; json/yaml/csv are emitted by the
+        # framework from result.breakdown.
+        if get_output_format() != "default":
+            return
+
         # Display breakdown summary
         resolution = data.get("resolution", {})
         if resolution:
             period = resolution.get("period", "")
             amount = resolution.get("amount", 0)
             if period:
-                console.print(
+                status_console.print(
                     f"\n[green]Billing Period:[/green] {period} ({amount} units)"
                 )
 
@@ -205,6 +219,6 @@ class BillingCommand(BaseCommand):
 
             console.print(table)
         else:
-            console.print(
+            status_console.print(
                 "[dim]No breakdown data available for the specified period[/dim]"
             )

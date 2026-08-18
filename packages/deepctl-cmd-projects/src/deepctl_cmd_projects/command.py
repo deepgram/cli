@@ -8,12 +8,16 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from rich.console import Console
 
 from .models import ProjectInfo, ProjectsResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class ProjectsCommand(BaseCommand):
@@ -110,12 +114,12 @@ class ProjectsCommand(BaseCommand):
                 return self._list_projects(client)
 
         except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+            status_console.print(f"[red]Error:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _list_projects(self, client: DeepgramClient) -> ProjectsResult | BaseResult:
         """List all projects."""
-        console.print("[blue]Fetching projects...[/blue]")
+        status_console.print("[blue]Fetching projects...[/blue]")
 
         try:
             result = client.get_projects()
@@ -134,7 +138,7 @@ class ProjectsCommand(BaseCommand):
                 projects_raw = result.get("projects", [])
 
             if not projects_raw:
-                console.print("[yellow]No projects found[/yellow]")
+                status_console.print("[yellow]No projects found[/yellow]")
                 return ProjectsResult(
                     status="info",
                     message="No projects found",
@@ -143,8 +147,6 @@ class ProjectsCommand(BaseCommand):
                 )
 
             project_models: list[ProjectInfo] = []
-            console.print(f"[green]Found {len(projects_raw)} project(s):[/green]")
-
             for proj in projects_raw:
                 # Handle project objects that might not be dicts
                 project_data = proj
@@ -162,10 +164,18 @@ class ProjectsCommand(BaseCommand):
                 )
                 project_models.append(info)
 
-                console.print(f"  • {info.name}")
-                console.print(f"    ID: {info.project_id}")
-                console.print(f"    Company: {info.company or 'N/A'}")
-                console.print()
+            # Human list only in default mode; json/yaml/csv are emitted by the
+            # framework from the returned result, so printing here would prepend
+            # non-parseable text to that output.
+            if get_output_format() == "default":
+                console.print(
+                    f"[green]Found {len(project_models)} project(s):[/green]"
+                )
+                for info in project_models:
+                    console.print(f"  • {info.name}")
+                    console.print(f"    ID: {info.project_id}")
+                    console.print(f"    Company: {info.company or 'N/A'}")
+                    console.print()
 
             return ProjectsResult(
                 status="success",
@@ -174,17 +184,17 @@ class ProjectsCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Failed to list projects:[/red] {e}")
+            status_console.print(f"[red]Failed to list projects:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _create_project(
         self, client: DeepgramClient, name: str, company: str | None
     ) -> ProjectsResult | BaseResult:
         """Create a new project."""
-        console.print(f"[blue]Creating project:[/blue] {name}")
+        status_console.print(f"[blue]Creating project:[/blue] {name}")
 
         if company:
-            console.print(f"[dim]Company:[/dim] {company}")
+            status_console.print(f"[dim]Company:[/dim] {company}")
 
         try:
             result = client.create_project(name, company)
@@ -200,8 +210,8 @@ class ProjectsCommand(BaseCommand):
 
             if isinstance(result_dict, dict) and "project_id" in result_dict:
                 project_id = result_dict["project_id"]
-                console.print("[green]✓[/green] Project created successfully")
-                console.print(f"[dim]Project ID:[/dim] {project_id}")
+                status_console.print("[green]✓[/green] Project created successfully")
+                status_console.print(f"[dim]Project ID:[/dim] {project_id}")
 
                 proj = ProjectInfo(project_id=project_id, name=name, company=company)
                 return ProjectsResult(
@@ -211,7 +221,7 @@ class ProjectsCommand(BaseCommand):
                     count=1,
                 )
             else:
-                console.print(
+                status_console.print(
                     "[yellow]Project creation response missing project_id[/yellow]"
                 )
                 return ProjectsResult(
@@ -222,14 +232,14 @@ class ProjectsCommand(BaseCommand):
                 )
 
         except Exception as e:
-            console.print(f"[red]Failed to create project:[/red] {e}")
+            status_console.print(f"[red]Failed to create project:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _show_project(
         self, client: DeepgramClient, project_id: str
     ) -> ProjectsResult | BaseResult:
         """Show details for a specific project."""
-        console.print(f"[blue]Fetching project details:[/blue] {project_id}")
+        status_console.print(f"[blue]Fetching project details:[/blue] {project_id}")
 
         try:
             result = client.get_project(project_id)
@@ -247,15 +257,16 @@ class ProjectsCommand(BaseCommand):
                 name = result_dict.get("name", "N/A")
                 company = result_dict.get("company", "N/A")
 
-                console.print("[green]Project Details:[/green]")
-                console.print(f"  Name: {name}")
-                console.print(f"  ID: {project_id}")
-                console.print(f"  Company: {company}")
+                if get_output_format() == "default":
+                    console.print("[green]Project Details:[/green]")
+                    console.print(f"  Name: {name}")
+                    console.print(f"  ID: {project_id}")
+                    console.print(f"  Company: {company}")
 
                 proj = ProjectInfo(project_id=project_id, name=name, company=company)
                 return ProjectsResult(status="success", projects=[proj], count=1)
             else:
-                console.print("[yellow]Project details incomplete[/yellow]")
+                status_console.print("[yellow]Project details incomplete[/yellow]")
                 # Still try to create a project info with what we have
                 name = (
                     result_dict.get("name", "Unknown")
@@ -276,7 +287,7 @@ class ProjectsCommand(BaseCommand):
                 )
 
         except Exception as e:
-            console.print(f"[red]Failed to get project details:[/red] {e}")
+            status_console.print(f"[red]Failed to get project details:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _show_current_project(
@@ -286,21 +297,21 @@ class ProjectsCommand(BaseCommand):
         project_id = auth_manager.get_project_id()
 
         if not project_id:
-            console.print("[yellow]No current project set[/yellow]")
-            console.print(
+            status_console.print("[yellow]No current project set[/yellow]")
+            status_console.print(
                 "Set a project ID with: deepctl login --project-id <project_id>"
             )
-            console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
+            status_console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
             return BaseResult(status="info", message="No current project set")
 
-        console.print(f"[blue]Current project ID:[/blue] {project_id}")
+        status_console.print(f"[blue]Current project ID:[/blue] {project_id}")
         return self._show_project(client, project_id)
 
     def _set_default_project(
         self, config: Config, auth_manager: AuthManager, project_id: str
     ) -> BaseResult:
         """Set default project ID."""
-        console.print(f"[blue]Setting default project:[/blue] {project_id}")
+        status_console.print(f"[blue]Setting default project:[/blue] {project_id}")
 
         try:
             # Update current profile
@@ -311,9 +322,9 @@ class ProjectsCommand(BaseCommand):
             client = DeepgramClient(config, auth_manager)
             try:
                 client.get_project(project_id)
-                console.print("[green]✓[/green] Project ID validated")
+                status_console.print("[green]✓[/green] Project ID validated")
             except Exception as e:
-                console.print(
+                status_console.print(
                     f"[yellow]Warning:[/yellow] Could not validate project: {e}"
                 )
                 if not self.confirm("Continue anyway?", default=False):
@@ -327,7 +338,9 @@ class ProjectsCommand(BaseCommand):
                 base_url=current_profile.base_url,
             )
 
-            console.print(f"[green]✓[/green] Default project set to: {project_id}")
+            status_console.print(
+                f"[green]✓[/green] Default project set to: {project_id}"
+            )
 
             return BaseResult(
                 status="success",
@@ -335,5 +348,5 @@ class ProjectsCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Failed to set default project:[/red] {e}")
+            status_console.print(f"[red]Failed to set default project:[/red] {e}")
             return BaseResult(status="error", message=str(e))
