@@ -10,6 +10,7 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from rich.console import Console
 from rich.table import Table
@@ -17,6 +18,9 @@ from rich.table import Table
 from .models import KeyCreatedInfo, KeyInfo, KeysResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class KeysCommand(BaseCommand):
@@ -159,7 +163,7 @@ class KeysCommand(BaseCommand):
                 return self._list_keys(client, project_id, kwargs.get("status"))
 
         except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+            status_console.print(f"[red]Error:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _list_keys(
@@ -168,12 +172,12 @@ class KeysCommand(BaseCommand):
         project_id: str | None,
         status: str | None,
     ) -> BaseResult:
-        console.print("[blue]Fetching API keys...[/blue]")
+        status_console.print("[blue]Fetching API keys...[/blue]")
         result = client.list_keys(project_id=project_id, status=status)
 
         keys_raw = result.get("api_keys", result.get("keys", []))
         if not keys_raw:
-            console.print("[yellow]No API keys found[/yellow]")
+            status_console.print("[yellow]No API keys found[/yellow]")
             return KeysResult(status="info", message="No keys found")
 
         key_models: list[KeyInfo] = []
@@ -208,8 +212,12 @@ class KeysCommand(BaseCommand):
                 info.expiration_date[:10] if info.expiration_date else "never",
             )
 
-        console.print(table)
-        console.print(f"\n[dim]{len(key_models)} key(s) found[/dim]")
+        # Human table only in default mode; json/yaml/csv are emitted by the
+        # framework from the returned result, so printing here would prepend
+        # non-parseable text to that output.
+        if get_output_format() == "default":
+            console.print(table)
+            console.print(f"\n[dim]{len(key_models)} key(s) found[/dim]")
 
         return KeysResult(status="success", keys=key_models, count=len(key_models))
 
@@ -231,18 +239,19 @@ class KeysCommand(BaseCommand):
         tags = [t.strip() for t in tags_str.split(",")] if tags_str else None
 
         if dry_run:
-            console.print("[yellow]Dry run — no changes made[/yellow]")
-            console.print(f"  Would create key: comment='{comment or '(none)'}'")
-            console.print(f"  Scopes:  {', '.join(scopes)}")
-            if expiration:
-                console.print(f"  Expires: {expiration}")
-            if ttl:
-                console.print(f"  TTL:     {ttl}s")
-            if tags:
-                console.print(f"  Tags:    {', '.join(tags)}")
+            if get_output_format() == "default":
+                console.print("[yellow]Dry run — no changes made[/yellow]")
+                console.print(f"  Would create key: comment='{comment or '(none)'}'")
+                console.print(f"  Scopes:  {', '.join(scopes)}")
+                if expiration:
+                    console.print(f"  Expires: {expiration}")
+                if ttl:
+                    console.print(f"  TTL:     {ttl}s")
+                if tags:
+                    console.print(f"  Tags:    {', '.join(tags)}")
             return BaseResult(status="dry_run", message="Dry run: key would be created")
 
-        console.print("[blue]Creating API key...[/blue]")
+        status_console.print("[blue]Creating API key...[/blue]")
 
         result = client.create_key(
             project_id=project_id,
@@ -256,13 +265,18 @@ class KeysCommand(BaseCommand):
         key_id = result.get("api_key_id", "")
         key_value = result.get("key", "")
 
-        console.print("[green]API key created successfully[/green]")
-        console.print(f"  Key ID:  {key_id}")
-        console.print(f"  Comment: {comment or '(none)'}")
-        console.print(f"  Scopes:  {', '.join(scopes)}")
-        if key_value:
-            console.print(f"\n  [bold yellow]Key: {key_value}[/bold yellow]")
-            console.print("[dim]  Save this key now — it won't be shown again.[/dim]")
+        # The created key (secret included) is carried in the result for
+        # json/yaml/csv, so only render it for humans in default mode.
+        if get_output_format() == "default":
+            console.print("[green]API key created successfully[/green]")
+            console.print(f"  Key ID:  {key_id}")
+            console.print(f"  Comment: {comment or '(none)'}")
+            console.print(f"  Scopes:  {', '.join(scopes)}")
+            if key_value:
+                console.print(f"\n  [bold yellow]Key: {key_value}[/bold yellow]")
+                console.print(
+                    "[dim]  Save this key now — it won't be shown again.[/dim]"
+                )
 
         created = KeyCreatedInfo(
             key_id=key_id,
@@ -278,7 +292,7 @@ class KeysCommand(BaseCommand):
         key_id: str,
         project_id: str | None,
     ) -> BaseResult:
-        console.print(f"[blue]Fetching key details:[/blue] {key_id}")
+        status_console.print(f"[blue]Fetching key details:[/blue] {key_id}")
         result = client.get_key(key_id, project_id=project_id)
 
         key_data = result.get("api_key", result) if isinstance(result, dict) else result
@@ -292,14 +306,17 @@ class KeysCommand(BaseCommand):
             tags=key_data.get("tags", []),
         )
 
-        console.print("[green]Key Details:[/green]")
-        console.print(f"  Key ID:     {info.key_id}")
-        console.print(f"  Comment:    {info.comment or '(none)'}")
-        console.print(f"  Scopes:     {', '.join(info.scopes) if info.scopes else '-'}")
-        console.print(f"  Created:    {info.created or '-'}")
-        console.print(f"  Expires:    {info.expiration_date or 'never'}")
-        if info.tags:
-            console.print(f"  Tags:       {', '.join(info.tags)}")
+        if get_output_format() == "default":
+            console.print("[green]Key Details:[/green]")
+            console.print(f"  Key ID:     {info.key_id}")
+            console.print(f"  Comment:    {info.comment or '(none)'}")
+            console.print(
+                f"  Scopes:     {', '.join(info.scopes) if info.scopes else '-'}"
+            )
+            console.print(f"  Created:    {info.created or '-'}")
+            console.print(f"  Expires:    {info.expiration_date or 'never'}")
+            if info.tags:
+                console.print(f"  Tags:       {', '.join(info.tags)}")
 
         return KeysResult(status="success", keys=[info], count=1)
 
@@ -312,8 +329,9 @@ class KeysCommand(BaseCommand):
         dry_run: bool = False,
     ) -> BaseResult:
         if dry_run:
-            console.print("[yellow]Dry run — no changes made[/yellow]")
-            console.print(f"  Would delete key: {key_id}")
+            if get_output_format() == "default":
+                console.print("[yellow]Dry run — no changes made[/yellow]")
+                console.print(f"  Would delete key: {key_id}")
             return BaseResult(
                 status="dry_run", message=f"Dry run: key {key_id} would be deleted"
             )
@@ -323,7 +341,7 @@ class KeysCommand(BaseCommand):
         ):
             return BaseResult(status="cancelled", message="Cancelled by user")
 
-        console.print(f"[blue]Deleting API key:[/blue] {key_id}")
+        status_console.print(f"[blue]Deleting API key:[/blue] {key_id}")
         client.delete_key(key_id, project_id=project_id)
-        console.print(f"[green]API key {key_id} deleted[/green]")
+        status_console.print(f"[green]API key {key_id} deleted[/green]")
         return BaseResult(status="success", message=f"Key {key_id} deleted")

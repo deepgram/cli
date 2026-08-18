@@ -1,6 +1,6 @@
 """Tests for keys command."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from deepctl_cmd_keys.command import KeysCommand
@@ -99,9 +99,7 @@ class TestKeysCommand:
         assert result.keys[0].key_id == "key1"
         assert result.keys[0].comment == "test"
         assert result.keys[0].scopes == ["member"]
-        mock_client.list_keys.assert_called_once_with(
-            project_id=None, status=None
-        )
+        mock_client.list_keys.assert_called_once_with(project_id=None, status=None)
 
     def test_handle_list_keys_empty(
         self, command, mock_config, mock_auth_manager, mock_client
@@ -184,9 +182,7 @@ class TestKeysCommand:
         assert result.keys[0].comment == "production key"
         assert result.keys[0].scopes == ["admin"]
         assert result.keys[0].tags == ["prod"]
-        mock_client.get_key.assert_called_once_with(
-            "key-id", project_id=None
-        )
+        mock_client.get_key.assert_called_once_with("key-id", project_id=None)
 
     def test_handle_delete_key(
         self, command, mock_config, mock_auth_manager, mock_client
@@ -204,13 +200,9 @@ class TestKeysCommand:
         assert result.status == "success"
         assert "key-id" in result.message
         assert "deleted" in result.message.lower()
-        mock_client.delete_key.assert_called_once_with(
-            "key-id", project_id=None
-        )
+        mock_client.delete_key.assert_called_once_with("key-id", project_id=None)
 
-    def test_handle_error(
-        self, command, mock_config, mock_auth_manager, mock_client
-    ):
+    def test_handle_error(self, command, mock_config, mock_auth_manager, mock_client):
         """Test client raises exception, returns error."""
         mock_client.list_keys.side_effect = Exception("API connection failed")
 
@@ -222,6 +214,105 @@ class TestKeysCommand:
 
         assert result.status == "error"
         assert "API connection failed" in result.message
+
+
+class TestKeysOutputFormat:
+    """`-o json` must leave stdout parseable (#98).
+
+    `keys` was the one account command missed when the other seven were fixed,
+    so `dg -o json keys | jq` still failed on "Fetching API keys..." arriving
+    ahead of the JSON.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return KeysCommand()
+
+    @staticmethod
+    def _keys_response():
+        return {
+            "api_keys": [
+                {
+                    "api_key": {
+                        "api_key_id": "key1",
+                        "comment": "ci-runner",
+                        "scopes": ["member"],
+                        "created": "2026-01-01",
+                        "expiration_date": "",
+                    }
+                }
+            ]
+        }
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_default_mode_table_on_stdout_chrome_on_stderr(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.list_keys.return_value = self._keys_response()
+
+        command._list_keys(client, None, None)
+
+        stderr_text = " ".join(
+            str(c.args[0]) for c in mock_status_console.print.call_args_list if c.args
+        )
+        # The table rides stdout for humans...
+        mock_console.print.assert_called()
+        # ...while progress chrome only ever goes to stderr.
+        assert "Fetching API keys" in stderr_text
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_json_mode_renders_no_human_output(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.list_keys.return_value = self._keys_response()
+
+        result = command._list_keys(client, None, None)
+
+        # Nothing human-facing on stdout — the framework serialises the result.
+        mock_console.print.assert_not_called()
+        assert result.count == 1
+        assert result.keys[0].key_id == "key1"
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_json_mode_created_key_only_in_result(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        """The secret must reach the caller via the result, not stray prints."""
+        client = Mock(spec=DeepgramClient)
+        client.create_key.return_value = {
+            "api_key_id": "new-id",
+            "key": "secret-value",
+        }
+
+        result = command._create_key(client, None, comment="ci", scopes="member")
+
+        mock_console.print.assert_not_called()
+        assert result.created_key.key == "secret-value"
+        assert result.created_key.key_id == "new-id"
+
+    @patch("deepctl_cmd_keys.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_keys.command.status_console")
+    @patch("deepctl_cmd_keys.command.console")
+    def test_json_mode_show_key_renders_nothing(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.get_key.return_value = {
+            "api_key": {"api_key_id": "key1", "comment": "c", "scopes": ["member"]}
+        }
+
+        result = command._show_key(client, "key1", None)
+
+        mock_console.print.assert_not_called()
+        assert result.keys[0].key_id == "key1"
 
 
 class TestKeysModels:
