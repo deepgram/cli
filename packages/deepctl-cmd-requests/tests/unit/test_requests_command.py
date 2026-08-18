@@ -4,7 +4,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 from deepctl_cmd_requests.command import RequestsCommand
-from deepctl_cmd_requests.models import RequestInfo, RequestsResult
+from deepctl_cmd_requests.models import (
+    RequestDetailResult,
+    RequestInfo,
+    RequestsResult,
+)
 from deepctl_core import AuthManager, BaseResult, Config, DeepgramClient
 
 
@@ -220,6 +224,94 @@ class TestRequestsCommand:
 
         assert result.status == "error"
         assert "API connection failed" in result.message
+
+
+class TestRequestsOutputGating:
+    """stdout stays machine-parseable in json/yaml/csv modes.
+
+    In any non-``default`` output mode the command must not write its human
+    table/detail to the stdout ``console`` — the framework serialises the
+    returned result to stdout, so a stray print here would prepend
+    non-parseable text to piped JSON. Status chrome uses ``status_console``
+    (stderr) and is intentionally unaffected.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return RequestsCommand()
+
+    def _handle_list(self, command, client):
+        return command.handle(
+            config=Mock(spec=Config),
+            auth_manager=Mock(spec=AuthManager),
+            client=client,
+        )
+
+    @staticmethod
+    def _list_response():
+        return {
+            "requests": [
+                {
+                    "request_id": "req-1",
+                    "created": "2024-01-01T00:00:00Z",
+                    "path": "/v1/listen",
+                    "method": "sync",
+                    "response": {"code": 200},
+                    "duration": 1.5,
+                }
+            ]
+        }
+
+    @patch("deepctl_cmd_requests.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_requests.command.console")
+    def test_list_json_mode_writes_nothing_to_stdout(
+        self, mock_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.list_requests.return_value = self._list_response()
+
+        result = self._handle_list(command, client)
+
+        # Result still fully populated for the framework to serialise.
+        assert isinstance(result, RequestsResult)
+        assert result.count == 1
+        assert result.requests[0].request_id == "req-1"
+        # Nothing written to the stdout console.
+        mock_console.print.assert_not_called()
+
+    @patch("deepctl_cmd_requests.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_requests.command.console")
+    def test_list_default_mode_renders_table(self, mock_console, _fmt, command):
+        client = Mock(spec=DeepgramClient)
+        client.list_requests.return_value = self._list_response()
+
+        self._handle_list(command, client)
+
+        assert mock_console.print.called
+
+    @patch("deepctl_cmd_requests.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_requests.command.console")
+    def test_show_json_mode_returns_detail_only(self, mock_console, _fmt, command):
+        client = Mock(spec=DeepgramClient)
+        client.get_request.return_value = {
+            "request_id": "req-1",
+            "path": "/v1/listen",
+        }
+
+        result = command.handle(
+            config=Mock(spec=Config),
+            auth_manager=Mock(spec=AuthManager),
+            client=client,
+            show="req-1",
+        )
+
+        assert isinstance(result, RequestDetailResult)
+        assert result.detail == {"request_id": "req-1", "path": "/v1/listen"}
+        # Dedicated model: no empty requests/count noise beside the detail.
+        dumped = result.model_dump()
+        assert "requests" not in dumped
+        assert "count" not in dumped
+        mock_console.print.assert_not_called()
 
 
 class TestRequestsModels:
