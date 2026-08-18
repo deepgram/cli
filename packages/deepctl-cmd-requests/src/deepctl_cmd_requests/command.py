@@ -16,7 +16,7 @@ from deepctl_core import (
 from rich.console import Console
 from rich.table import Table
 
-from .models import RequestInfo, RequestsResult
+from .models import RequestDetailResult, RequestInfo, RequestsResult
 
 console = Console()
 # Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
@@ -258,9 +258,7 @@ class RequestsCommand(BaseCommand):
         request_id: str,
         project_id: str | None,
     ) -> BaseResult:
-        status_console.print(
-            f"[blue]Fetching request details:[/blue] {request_id}"
-        )
+        status_console.print(f"[blue]Fetching request details:[/blue] {request_id}")
         result = client.get_request(request_id, project_id=project_id)
 
         if get_output_format() == "default":
@@ -273,7 +271,7 @@ class RequestsCommand(BaseCommand):
                 else:
                     console.print(f"  {key}: {value}")
 
-        return RequestsResult(
+        return RequestDetailResult(
             status="success",
             detail=dict(result) if isinstance(result, dict) else {"value": result},
         )

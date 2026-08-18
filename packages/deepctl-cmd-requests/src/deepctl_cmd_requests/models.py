@@ -20,6 +20,11 @@ class RequestInfo(BaseModel):
 class RequestsResult(BaseResult):
     requests: list[RequestInfo] = Field(default_factory=list)
     count: int = 0
-    # Populated by `--show`; carries the full request detail so json/yaml
-    # output is useful instead of a bare success message.
-    detail: dict[str, Any] | None = None
+
+
+class RequestDetailResult(BaseResult):
+    # Returned by `--show`; carries the full request detail so json/yaml
+    # output is useful instead of a bare success message. Kept separate from
+    # RequestsResult so single-request output doesn't emit an empty
+    # `requests: []` / `count: 0` alongside the detail.
+    detail: dict[str, Any] = Field(default_factory=dict)

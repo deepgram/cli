@@ -118,9 +118,7 @@ class UsageCommand(BaseCommand):
                 status_console.print("[blue]Fetching usage for last month...[/blue]")
             elif current_month:
                 start_date, end_date = self._get_current_month_range()
-                status_console.print(
-                    "[blue]Fetching usage for current month...[/blue]"
-                )
+                status_console.print("[blue]Fetching usage for current month...[/blue]")
             elif start_date or end_date:
                 # Validate custom date range
                 if start_date and not validate_date_format(start_date):
@@ -142,9 +140,7 @@ class UsageCommand(BaseCommand):
             else:
                 # Default to current month
                 start_date, end_date = self._get_current_month_range()
-                status_console.print(
-                    "[blue]Fetching usage for current month...[/blue]"
-                )
+                status_console.print("[blue]Fetching usage for current month...[/blue]")
 
             # Get usage data
             result = client.get_usage(project_id, start_date, end_date)
@@ -246,8 +242,7 @@ class UsageCommand(BaseCommand):
                 # to stdout, so printing here would corrupt that output.
                 if get_output_format() == "default":
                     console.print(
-                        f"\n[green]Usage Summary "
-                        f"({start_date} to {end_date}):[/green]"
+                        f"\n[green]Usage Summary ({start_date} to {end_date}):[/green]"
                     )
                     console.print(f"  Total Hours: {total_hours:,.1f}")
                     console.print(f"  Total Requests: {total_requests:,}")
@@ -282,8 +277,7 @@ class UsageCommand(BaseCommand):
 
                             if "tokens" in item and item["tokens"].get("out", 0) > 0:
                                 console.print(
-                                    f"    Tokens Out: "
-                                    f"{item['tokens'].get('out', 0):,}"
+                                    f"    Tokens Out: {item['tokens'].get('out', 0):,}"
                                 )
 
                 project_id = result_dict.get("project_id", "")

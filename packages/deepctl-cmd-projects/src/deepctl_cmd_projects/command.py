@@ -168,9 +168,7 @@ class ProjectsCommand(BaseCommand):
             # framework from the returned result, so printing here would prepend
             # non-parseable text to that output.
             if get_output_format() == "default":
-                console.print(
-                    f"[green]Found {len(project_models)} project(s):[/green]"
-                )
+                console.print(f"[green]Found {len(project_models)} project(s):[/green]")
                 for info in project_models:
                     console.print(f"  • {info.name}")
                     console.print(f"    ID: {info.project_id}")
