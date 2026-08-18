@@ -301,3 +301,74 @@ class TestReadResult:
         assert data["summary"] == "Test summary"
         assert data["sentiment"] == "negative"
         assert data["sentiment_score"] == 0.3
+
+
+class TestReadOutputGating:
+    """stdout stays machine-parseable in json/yaml/csv modes.
+
+    ``read`` prints its analysis inline (summary/sentiment/topics/intents). In
+    any non-``default`` output mode none of that may reach the stdout
+    ``console`` — the framework serialises the returned ``ReadResult`` to
+    stdout, so a stray print would corrupt piped JSON. The result must still
+    carry the parsed fields regardless of format.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return ReadCommand()
+
+    @pytest.fixture
+    def analyze_response(self):
+        return {
+            "results": {
+                "summary": {"text": "A summary of the content"},
+                "sentiments": {
+                    "average": {
+                        "sentiment": "positive",
+                        "sentiment_score": 0.85,
+                    }
+                },
+            }
+        }
+
+    @patch("deepctl_cmd_read.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_read.command.console")
+    def test_json_mode_writes_nothing_to_stdout(
+        self, mock_console, _fmt, command, analyze_response
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.analyze_text.return_value = analyze_response
+
+        result = command.handle(
+            config=Mock(spec=Config),
+            auth_manager=Mock(spec=AuthManager),
+            client=client,
+            text="Hello world",
+            sentiment=True,
+            summarize=True,
+        )
+
+        # Parsed fields still populated for the framework to serialise.
+        assert result.status == "success"
+        assert result.sentiment == "positive"
+        assert result.summary == "A summary of the content"
+        mock_console.print.assert_not_called()
+
+    @patch("deepctl_cmd_read.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_read.command.console")
+    def test_default_mode_prints_analysis(
+        self, mock_console, _fmt, command, analyze_response
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.analyze_text.return_value = analyze_response
+
+        command.handle(
+            config=Mock(spec=Config),
+            auth_manager=Mock(spec=AuthManager),
+            client=client,
+            text="Hello world",
+            sentiment=True,
+            summarize=True,
+        )
+
+        assert mock_console.print.called

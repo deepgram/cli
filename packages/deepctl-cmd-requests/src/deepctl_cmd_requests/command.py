@@ -11,13 +11,17 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from rich.console import Console
 from rich.table import Table
 
-from .models import RequestInfo, RequestsResult
+from .models import RequestDetailResult, RequestInfo, RequestsResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = Console(stderr=True)
 
 
 class RequestsCommand(BaseCommand):
@@ -144,7 +148,7 @@ class RequestsCommand(BaseCommand):
                     last_day=kwargs.get("last_day", False),
                 )
         except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+            status_console.print(f"[red]Error:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _list_requests(
@@ -176,7 +180,7 @@ class RequestsCommand(BaseCommand):
             start_dt = datetime.fromisoformat(start_date)
             end_dt = datetime.fromisoformat(end_date) if end_date else datetime.now()
 
-        console.print("[blue]Fetching request history...[/blue]")
+        status_console.print("[blue]Fetching request history...[/blue]")
 
         result = client.list_requests(
             project_id=project_id,
@@ -191,18 +195,10 @@ class RequestsCommand(BaseCommand):
 
         requests_raw = result.get("requests", [])
         if not requests_raw:
-            console.print("[yellow]No requests found[/yellow]")
+            status_console.print("[yellow]No requests found[/yellow]")
             return RequestsResult(status="info", message="No requests found")
 
         req_models: list[RequestInfo] = []
-        table = Table(title="API Requests", show_header=True, header_style="bold blue")
-        table.add_column("Time", style="dim")
-        table.add_column("Endpoint", style="cyan")
-        table.add_column("Method")
-        table.add_column("Status")
-        table.add_column("Duration")
-        table.add_column("Request ID", style="dim")
-
         for r in requests_raw:
             req_data = (
                 r
@@ -222,20 +218,35 @@ class RequestsCommand(BaseCommand):
             )
             req_models.append(info)
 
-            status_style = "green" if info.status == "succeeded" else "red"
-            table.add_row(
-                info.created[:19] if info.created else "-",
-                info.path or "-",
-                info.method or "-",
-                f"[{status_style}]{info.status}[/{status_style}]",
-                f"{info.duration:.2f}s" if info.duration else "-",
-                info.request_id[:12] + "..."
-                if len(info.request_id) > 12
-                else info.request_id,
+        # Render the human table only in default mode. For json/yaml/csv the
+        # framework serialises the returned result to stdout, so printing the
+        # table here would prepend non-parseable text to that output.
+        if get_output_format() == "default":
+            table = Table(
+                title="API Requests", show_header=True, header_style="bold blue"
             )
+            table.add_column("Time", style="dim")
+            table.add_column("Endpoint", style="cyan")
+            table.add_column("Method")
+            table.add_column("Status")
+            table.add_column("Duration")
+            table.add_column("Request ID", style="dim")
 
-        console.print(table)
-        console.print(f"\n[dim]{len(req_models)} request(s) shown[/dim]")
+            for info in req_models:
+                status_style = "green" if info.status == "succeeded" else "red"
+                table.add_row(
+                    info.created[:19] if info.created else "-",
+                    info.path or "-",
+                    info.method or "-",
+                    f"[{status_style}]{info.status}[/{status_style}]",
+                    f"{info.duration:.2f}s" if info.duration else "-",
+                    info.request_id[:12] + "..."
+                    if len(info.request_id) > 12
+                    else info.request_id,
+                )
+
+            console.print(table)
+            console.print(f"\n[dim]{len(req_models)} request(s) shown[/dim]")
 
         return RequestsResult(
             status="success", requests=req_models, count=len(req_models)
@@ -247,16 +258,20 @@ class RequestsCommand(BaseCommand):
         request_id: str,
         project_id: str | None,
     ) -> BaseResult:
-        console.print(f"[blue]Fetching request details:[/blue] {request_id}")
+        status_console.print(f"[blue]Fetching request details:[/blue] {request_id}")
         result = client.get_request(request_id, project_id=project_id)
 
-        console.print("[green]Request Details:[/green]")
-        for key, value in result.items():
-            if isinstance(value, dict):
-                console.print(f"  {key}:")
-                for k, v in value.items():
-                    console.print(f"    {k}: {v}")
-            else:
-                console.print(f"  {key}: {value}")
+        if get_output_format() == "default":
+            console.print("[green]Request Details:[/green]")
+            for key, value in result.items():
+                if isinstance(value, dict):
+                    console.print(f"  {key}:")
+                    for k, v in value.items():
+                        console.print(f"    {k}: {v}")
+                else:
+                    console.print(f"  {key}: {value}")
 
-        return BaseResult(status="success", message="Request details displayed")
+        return RequestDetailResult(
+            status="success",
+            detail=dict(result) if isinstance(result, dict) else {"value": result},
+        )

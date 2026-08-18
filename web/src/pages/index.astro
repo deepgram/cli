@@ -72,6 +72,14 @@ const commandCards: CommandCard[] = [
     desc: 'Pipe real-time caption output directly to a .vtt file.',
     lines: ['dg listen --mic --webvtt > captions.vtt'] },
   { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Redact sensitive audio',
+    desc: 'Strip PCI, SSN, or numbers from transcripts — works on files and live streams.',
+    lines: ['dg listen call.wav --redact pci --numerals'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
+    title: 'Stream with Flux STT',
+    desc: 'Conversational turn-based model for live audio. Streaming only — use nova-3 for files.',
+    lines: ['dg listen --mic --model flux-general-en \\', '  --redact aggressive_numbers'] },
+  { cmd: 'listen', icon: 'mic', color: 'green',
     title: 'Pipe transcript to an LLM',
     desc: 'Chain with any LLM CLI for instant summarization or Q&A.',
     lines: ['dg listen meeting.mp3 \\', '  | llm "summarize key decisions"'] },
@@ -79,7 +87,16 @@ const commandCards: CommandCard[] = [
   // ── dg speak ────────────────────────────────────────────────────────────
   { cmd: 'speak', icon: 'speaker', color: 'purple',
     title: 'Synthesize speech to a file',
+    desc: 'Streams from Flux TTS by default — Aura voices stay available with -m aura-2-*.',
     lines: ['dg speak "Hello from Deepgram" -o hello.wav'] },
+  { cmd: 'speak', icon: 'speaker', color: 'purple',
+    title: 'Tune pace and expressivity',
+    desc: 'Flux-only controls: --speed in 0.05 steps from 0.85 to 1.15, and --expressivity from -2 to 2 (beta).',
+    lines: ['dg speak "So exciting!" --speed 1.05 \\', '  --expressivity 2 -o lively.wav'] },
+  { cmd: 'speak', icon: 'speaker', color: 'purple',
+    title: 'Pick an Aura voice',
+    desc: 'Speak v1 REST batch — 40+ Aura voices with mp3, linear16, flac, and opus output.',
+    lines: ['dg speak "Hola, mundo" -m aura-2-selena-es -o hola.mp3'] },
   { cmd: 'speak', icon: 'speaker', color: 'purple',
     title: 'Pipe TTS to your speaker',
     desc: 'Any text in, audio out. Works with ffplay, aplay, or mpv.',
@@ -101,21 +118,21 @@ const commandCards: CommandCard[] = [
     lines: ['dg login'] },
   { cmd: 'keys', icon: 'key', color: 'amber',
     title: 'Create a scoped API key',
-    lines: ['dg keys create "ci-runner"'] },
+    lines: ['dg keys --create --comment "ci-runner" --scopes member'] },
 
   // ── account ─────────────────────────────────────────────────────────────
   { cmd: 'projects', icon: 'building', color: 'amber',
     title: 'List all projects',
-    lines: ['dg projects list'] },
+    lines: ['dg projects --list'] },
   { cmd: 'members', icon: 'users', color: 'amber',
     title: 'View project members',
-    lines: ['dg members list'] },
+    lines: ['dg members --list'] },
 
   // ── models & data ───────────────────────────────────────────────────────
   { cmd: 'models', icon: 'chart', color: 'blue',
     title: 'Browse available models',
     desc: 'Filter by type, language, or tier to find the right model.',
-    lines: ['dg models list --type stt'] },
+    lines: ['dg models --type stt'] },
   { cmd: 'usage', icon: 'chart', color: 'subtle',
     title: 'Check usage and limits',
     lines: ['dg usage'] },
@@ -124,13 +141,13 @@ const commandCards: CommandCard[] = [
     lines: ['dg billing'] },
   { cmd: 'requests', icon: 'clock', color: 'subtle',
     title: 'Audit recent API calls',
-    lines: ['dg requests list --limit 20 -o json'] },
+    lines: ['dg -o json requests --limit 20'] },
 
   // ── raw api ─────────────────────────────────────────────────────────────
   { cmd: 'api', icon: 'code', color: 'blue',
     title: 'Call any Deepgram endpoint',
     desc: 'Escape hatch for endpoints not yet covered by a dedicated command.',
-    lines: ['dg api GET /v1/projects'] },
+    lines: ['dg api /v1/projects'] },
 
   // ── debug ───────────────────────────────────────────────────────────────
   { cmd: 'debug audio', icon: 'wrench', color: 'amber',
@@ -170,7 +187,26 @@ const commandCards: CommandCard[] = [
   // ── utilities ───────────────────────────────────────────────────────────
   { cmd: 'completion', icon: 'check', color: 'subtle',
     title: 'Install shell tab-completion',
-    lines: ['dg completion install --shell zsh'] },
+    lines: ['dg completion zsh --install'] },
+  { cmd: 'profiles', icon: 'users', color: 'amber',
+    title: 'Switch between accounts',
+    desc: 'Keep separate credentials per environment and switch with one command.',
+    lines: ['dg profiles --list', 'dg profiles --switch staging'] },
+  { cmd: 'logout', icon: 'key', color: 'amber',
+    title: 'Clear stored credentials',
+    lines: ['dg logout --profile staging'] },
+  { cmd: 'ffprobe', icon: 'wrench', color: 'subtle',
+    title: 'Point at a custom ffprobe',
+    desc: 'Used for local audio analysis before transcription.',
+    lines: ['dg ffprobe --path $(which ffprobe)'] },
+  { cmd: 'debug browser', icon: 'wrench', color: 'amber',
+    title: 'Check browser capabilities',
+    desc: 'Verifies codec and WebSocket support for browser-based capture.',
+    lines: ['dg debug browser'] },
+  { cmd: 'debug probe', icon: 'wrench', color: 'amber',
+    title: 'Proxy and inspect a live stream',
+    desc: 'Sits in front of a stream so you can see exactly what reaches Deepgram.',
+    lines: ['dg debug probe'] },
 ];
 ---
 
@@ -594,7 +630,7 @@ const commandCards: CommandCard[] = [
                 <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m0 0l-2-2m2 2l2-2M6.464 8.464a5 5 0 000 7.072"/></svg>
               </div>
               <h3 class="font-bold text-base mb-2 text-dg-text">Text-to-speech</h3>
-              <p class="text-sm text-dg-muted leading-relaxed">Generate speech with Aura voices. Pipe to ffplay or save to file.</p>
+              <p class="text-sm text-dg-muted leading-relaxed">Stream speech with Flux TTS, or pick from 40+ Aura voices. Pipe to ffplay or save to file.</p>
             </div>
           </div>
 
@@ -940,7 +976,7 @@ const commandCards: CommandCard[] = [
     // ── TTS → pipe to player ──────────────────────
     [
       { p: '❯ ', t: 'dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -', c: '' },
-      { p: '',   t: '✓  Synthesizing · aura-2-asteria-en', c: '#13ef95' },
+      { p: '',   t: '✓  Synthesizing · flux-alexis-en', c: '#13ef95' },
       { p: '',   t: '▶  Streaming 3.2s of audio…', c: '#949498' },
       { p: '',   t: '', c: '' },
     ],

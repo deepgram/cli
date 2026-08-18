@@ -1,6 +1,6 @@
 """Tests for billing command."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from deepctl_cmd_billing.command import BillingCommand
@@ -222,9 +222,7 @@ class TestBillingCommand:
             grouping="tags",
         )
 
-    def test_handle_error(
-        self, command, mock_config, mock_auth_manager, mock_client
-    ):
+    def test_handle_error(self, command, mock_config, mock_auth_manager, mock_client):
         """Test client exception returns error status."""
         mock_client.get_balances.side_effect = Exception("API connection failed")
 
@@ -284,3 +282,67 @@ class TestBillingModels:
         assert data["balances"][0]["balance_id"] == "bal-1"
         assert data["balances"][0]["amount"] == 100.0
         assert data["breakdown"]["resolution"]["period"] == "monthly"
+
+
+class TestBillingBreakdownStreamRouting:
+    """In default mode the breakdown header and table share the stdout stream.
+
+    The 'Billing Period' header must go to the stdout ``console`` (with the
+    table), not ``status_console`` (stderr) — otherwise a default-mode
+    ``dg billing --breakdown > out.txt`` keeps the table but silently drops
+    the header. In json/yaml/csv modes nothing is rendered (the framework
+    serialises the returned result), so no human output touches either stream.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return BillingCommand()
+
+    @staticmethod
+    def _breakdown_response():
+        return {
+            "resolution": {"period": "monthly", "amount": 1},
+            "results": [
+                {"start": "2026-08-01", "amount": 12.5, "units": "usd"},
+            ],
+        }
+
+    @patch("deepctl_cmd_billing.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_billing.command.status_console")
+    @patch("deepctl_cmd_billing.command.console")
+    def test_default_mode_period_on_stdout_not_stderr(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.get_billing_breakdown.return_value = self._breakdown_response()
+
+        command._show_breakdown(client, None, BillingResult(status="success"))
+
+        stdout_text = " ".join(
+            str(c.args[0]) for c in mock_console.print.call_args_list if c.args
+        )
+        stderr_text = " ".join(
+            str(c.args[0]) for c in mock_status_console.print.call_args_list if c.args
+        )
+        # Header rides stdout with the table...
+        assert "Billing Period" in stdout_text
+        # ...and never leaks to stderr; only the "Fetching" chrome does.
+        assert "Billing Period" not in stderr_text
+        assert "Fetching billing breakdown" in stderr_text
+
+    @patch("deepctl_cmd_billing.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_billing.command.status_console")
+    @patch("deepctl_cmd_billing.command.console")
+    def test_json_mode_renders_no_human_output(
+        self, mock_console, mock_status_console, _fmt, command
+    ):
+        client = Mock(spec=DeepgramClient)
+        client.get_billing_breakdown.return_value = self._breakdown_response()
+        result = BillingResult(status="success")
+
+        command._show_breakdown(client, None, result)
+
+        # Result still carries the breakdown for the framework to serialise.
+        assert result.breakdown == self._breakdown_response()
+        # No table/header printed to stdout in json mode.
+        mock_console.print.assert_not_called()

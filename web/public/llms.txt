@@ -17,7 +17,7 @@
 
 - `dg login` — Authenticate via browser (OIDC device flow) or `--api-key` flag
 - `dg listen <file|url|->` — Transcribe files, URLs, microphone (`--mic`), or stdin. Supports `--diarize`, `--webvtt`, `--srt`, `--summarize`. (`dg transcribe` is a hidden alias)
-- `dg speak "<text>"` — Text-to-speech synthesis with Aura voices
+- `dg speak "<text>"` — Text-to-speech synthesis; streams Flux TTS by default (flux-alexis-en), or pick an Aura voice with `-m aura-2-*`
 - `dg read <text>` — Text intelligence: sentiment, summaries, topics, intents
 - `dg models` — List available Deepgram models
 - `dg projects` — Manage Deepgram projects

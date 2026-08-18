@@ -1,6 +1,6 @@
 """Tests for models command."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from deepctl_cmd_models.command import ModelsCommand
@@ -256,3 +256,61 @@ class TestModelsResult:
         assert data["count"] == 1
         assert len(data["models"]) == 1
         assert data["models"][0]["name"] == "Nova-3"
+
+
+class TestModelsOutputGating:
+    """stdout stays machine-parseable in json/yaml/csv modes.
+
+    In any non-``default`` output mode the command must not write its human
+    table to the stdout ``console``; the framework serialises the returned
+    result to stdout, so a stray print here would corrupt piped JSON.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return ModelsCommand()
+
+    @staticmethod
+    def _response():
+        return {
+            "stt": [
+                {
+                    "uuid": "stt-uuid-1",
+                    "name": "Nova-3",
+                    "version": "1.0",
+                    "language": "en",
+                }
+            ],
+            "tts": [],
+        }
+
+    @patch("deepctl_cmd_models.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_models.command.console")
+    def test_json_mode_writes_nothing_to_stdout(self, mock_console, _fmt, command):
+        client = Mock(spec=DeepgramClient)
+        client.list_models.return_value = self._response()
+
+        result = command.handle(
+            config=Mock(spec=Config),
+            auth_manager=Mock(spec=AuthManager),
+            client=client,
+        )
+
+        assert isinstance(result, ModelsResult)
+        assert result.count == 1
+        assert result.models[0].name == "Nova-3"
+        mock_console.print.assert_not_called()
+
+    @patch("deepctl_cmd_models.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_models.command.console")
+    def test_default_mode_renders_table(self, mock_console, _fmt, command):
+        client = Mock(spec=DeepgramClient)
+        client.list_models.return_value = self._response()
+
+        command.handle(
+            config=Mock(spec=Config),
+            auth_manager=Mock(spec=AuthManager),
+            client=client,
+        )
+
+        assert mock_console.print.called
