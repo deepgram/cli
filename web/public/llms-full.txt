@@ -158,7 +158,8 @@ dg speak --file script.txt                        # From file
 | `--model` | Voice model — `flux-alexis-en` (default, streaming) or `aura-2-asteria-en` / `aura-2-selena-es` (REST batch) |
 | `--speed` | Flux TTS only — speech-rate multiplier in 0.05 steps from 0.85 to 1.15 (1.00 = nominal) |
 | `--expressivity` | Flux TTS only (beta) — expressive range -2 to 2 (0 = nominal) |
-| `--encoding` | Output encoding (mp3, linear16, flac, wav, ogg) |
+| `--encoding` | Audio encoding — Aura: mp3, linear16, flac, mulaw, alaw, opus, aac; Flux: linear16 (default), mulaw, alaw |
+| `--container` | Audio container — none, wav, ogg (Aura only; Flux auto-wraps linear16 in WAV) |
 | `--file` | Read text from file |
 
 ---

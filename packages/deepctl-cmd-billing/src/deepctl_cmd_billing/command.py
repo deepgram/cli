@@ -196,7 +196,7 @@ class BillingCommand(BaseCommand):
             period = resolution.get("period", "")
             amount = resolution.get("amount", 0)
             if period:
-                status_console.print(
+                console.print(
                     f"\n[green]Billing Period:[/green] {period} ({amount} units)"
                 )
 
