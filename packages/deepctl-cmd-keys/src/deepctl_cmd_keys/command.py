@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
+import click
 from deepctl_core import (
     AuthManager,
     BaseCommand,
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
+    get_status_console,
+    is_agentic,
 )
 from rich.console import Console
 from rich.table import Table
@@ -17,6 +22,9 @@ from rich.table import Table
 from .models import KeyCreatedInfo, KeyInfo, KeysResult
 
 console = Console()
+# Status/progress chrome must never touch stdout, or it corrupts JSON/CSV
+# output that callers pipe into jq and friends.
+status_console = get_status_console()
 
 
 class KeysCommand(BaseCommand):
@@ -137,9 +145,11 @@ class KeysCommand(BaseCommand):
         create_key = kwargs.get("create", False)
         show_key = kwargs.get("show")
         delete_key = kwargs.get("delete")
-        project_id = kwargs.get("project_id")
-
-        dry_run = kwargs.get("dry_run", False)
+        # Popped, not read: both are forwarded explicitly to _create_key, which
+        # also receives **kwargs. Leaving them in the dict passes each argument
+        # twice and raises TypeError before the body runs.
+        project_id = kwargs.pop("project_id", None)
+        dry_run = kwargs.pop("dry_run", False)
 
         try:
             if create_key:
@@ -159,7 +169,7 @@ class KeysCommand(BaseCommand):
                 return self._list_keys(client, project_id, kwargs.get("status"))
 
         except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+            status_console.print(f"[red]Error:[/red] {e}")
             return BaseResult(status="error", message=str(e))
 
     def _list_keys(
@@ -168,12 +178,12 @@ class KeysCommand(BaseCommand):
         project_id: str | None,
         status: str | None,
     ) -> BaseResult:
-        console.print("[blue]Fetching API keys...[/blue]")
+        status_console.print("[blue]Fetching API keys...[/blue]")
         result = client.list_keys(project_id=project_id, status=status)
 
         keys_raw = result.get("api_keys", result.get("keys", []))
         if not keys_raw:
-            console.print("[yellow]No API keys found[/yellow]")
+            status_console.print("[yellow]No API keys found[/yellow]")
             return KeysResult(status="info", message="No keys found")
 
         key_models: list[KeyInfo] = []
@@ -208,8 +218,12 @@ class KeysCommand(BaseCommand):
                 info.expiration_date[:10] if info.expiration_date else "never",
             )
 
-        console.print(table)
-        console.print(f"\n[dim]{len(key_models)} key(s) found[/dim]")
+        # Human table only in default mode; json/yaml/csv are emitted by the
+        # framework from the returned result, so printing here would prepend
+        # non-parseable text to that output.
+        if get_output_format() == "default":
+            console.print(table)
+            console.print(f"\n[dim]{len(key_models)} key(s) found[/dim]")
 
         return KeysResult(status="success", keys=key_models, count=len(key_models))
 
@@ -231,18 +245,19 @@ class KeysCommand(BaseCommand):
         tags = [t.strip() for t in tags_str.split(",")] if tags_str else None
 
         if dry_run:
-            console.print("[yellow]Dry run — no changes made[/yellow]")
-            console.print(f"  Would create key: comment='{comment or '(none)'}'")
-            console.print(f"  Scopes:  {', '.join(scopes)}")
-            if expiration:
-                console.print(f"  Expires: {expiration}")
-            if ttl:
-                console.print(f"  TTL:     {ttl}s")
-            if tags:
-                console.print(f"  Tags:    {', '.join(tags)}")
+            if get_output_format() == "default":
+                console.print("[yellow]Dry run — no changes made[/yellow]")
+                console.print(f"  Would create key: comment='{comment or '(none)'}'")
+                console.print(f"  Scopes:  {', '.join(scopes)}")
+                if expiration:
+                    console.print(f"  Expires: {expiration}")
+                if ttl:
+                    console.print(f"  TTL:     {ttl}s")
+                if tags:
+                    console.print(f"  Tags:    {', '.join(tags)}")
             return BaseResult(status="dry_run", message="Dry run: key would be created")
 
-        console.print("[blue]Creating API key...[/blue]")
+        status_console.print("[blue]Creating API key...[/blue]")
 
         result = client.create_key(
             project_id=project_id,
@@ -256,13 +271,18 @@ class KeysCommand(BaseCommand):
         key_id = result.get("api_key_id", "")
         key_value = result.get("key", "")
 
-        console.print("[green]API key created successfully[/green]")
-        console.print(f"  Key ID:  {key_id}")
-        console.print(f"  Comment: {comment or '(none)'}")
-        console.print(f"  Scopes:  {', '.join(scopes)}")
-        if key_value:
-            console.print(f"\n  [bold yellow]Key: {key_value}[/bold yellow]")
-            console.print("[dim]  Save this key now — it won't be shown again.[/dim]")
+        # The created key (secret included) is carried in the result for
+        # json/yaml/csv, so only render it for humans in default mode.
+        if get_output_format() == "default":
+            console.print("[green]API key created successfully[/green]")
+            console.print(f"  Key ID:  {key_id}")
+            console.print(f"  Comment: {comment or '(none)'}")
+            console.print(f"  Scopes:  {', '.join(scopes)}")
+            if key_value:
+                console.print(f"\n  [bold yellow]Key: {key_value}[/bold yellow]")
+                console.print(
+                    "[dim]  Save this key now — it won't be shown again.[/dim]"
+                )
 
         created = KeyCreatedInfo(
             key_id=key_id,
@@ -278,7 +298,7 @@ class KeysCommand(BaseCommand):
         key_id: str,
         project_id: str | None,
     ) -> BaseResult:
-        console.print(f"[blue]Fetching key details:[/blue] {key_id}")
+        status_console.print(f"[blue]Fetching key details:[/blue] {key_id}")
         result = client.get_key(key_id, project_id=project_id)
 
         key_data = result.get("api_key", result) if isinstance(result, dict) else result
@@ -292,14 +312,17 @@ class KeysCommand(BaseCommand):
             tags=key_data.get("tags", []),
         )
 
-        console.print("[green]Key Details:[/green]")
-        console.print(f"  Key ID:     {info.key_id}")
-        console.print(f"  Comment:    {info.comment or '(none)'}")
-        console.print(f"  Scopes:     {', '.join(info.scopes) if info.scopes else '-'}")
-        console.print(f"  Created:    {info.created or '-'}")
-        console.print(f"  Expires:    {info.expiration_date or 'never'}")
-        if info.tags:
-            console.print(f"  Tags:       {', '.join(info.tags)}")
+        if get_output_format() == "default":
+            console.print("[green]Key Details:[/green]")
+            console.print(f"  Key ID:     {info.key_id}")
+            console.print(f"  Comment:    {info.comment or '(none)'}")
+            console.print(
+                f"  Scopes:     {', '.join(info.scopes) if info.scopes else '-'}"
+            )
+            console.print(f"  Created:    {info.created or '-'}")
+            console.print(f"  Expires:    {info.expiration_date or 'never'}")
+            if info.tags:
+                console.print(f"  Tags:       {', '.join(info.tags)}")
 
         return KeysResult(status="success", keys=[info], count=1)
 
@@ -312,18 +335,52 @@ class KeysCommand(BaseCommand):
         dry_run: bool = False,
     ) -> BaseResult:
         if dry_run:
-            console.print("[yellow]Dry run — no changes made[/yellow]")
-            console.print(f"  Would delete key: {key_id}")
+            if get_output_format() == "default":
+                console.print("[yellow]Dry run — no changes made[/yellow]")
+                console.print(f"  Would delete key: {key_id}")
             return BaseResult(
                 status="dry_run", message=f"Dry run: key {key_id} would be deleted"
             )
 
-        if not yes and not self.confirm(
-            f"Delete API key {key_id}? This cannot be undone.", default=False
-        ):
-            return BaseResult(status="cancelled", message="Cancelled by user")
+        if not yes:
+            aborted = self._confirm_delete(key_id)
+            if aborted is not None:
+                return aborted
 
-        console.print(f"[blue]Deleting API key:[/blue] {key_id}")
+        status_console.print(f"[blue]Deleting API key:[/blue] {key_id}")
         client.delete_key(key_id, project_id=project_id)
-        console.print(f"[green]API key {key_id} deleted[/green]")
+        status_console.print(f"[green]API key {key_id} deleted[/green]")
         return BaseResult(status="success", message=f"Key {key_id} deleted")
+
+    def _confirm_delete(self, key_id: str) -> BaseResult | None:
+        """Gate a delete behind confirmation; return a result to abort with.
+
+        `BaseCommand.confirm` cannot be used here. It returns its default
+        (False) whenever any parameter came from the command line, and
+        `--delete KEY_ID` is itself such a parameter — so the prompt never
+        appeared and every `dg keys --delete ID` reported "Cancelled by user"
+        without asking and without deleting. Prompting on stderr keeps stdout
+        parseable under `-o json`.
+
+        Returns:
+            None to proceed with the delete, or the result to return instead
+        """
+        if is_agentic() or not sys.stdin.isatty():
+            # No one is there to answer. Refusing is right, but it is a usage
+            # error rather than something the user chose to cancel.
+            return BaseResult(
+                status="error",
+                message=(
+                    f"Refusing to delete key {key_id} without confirmation. "
+                    "Pass --yes to confirm."
+                ),
+            )
+
+        if not click.confirm(
+            f"Delete API key {key_id}? This cannot be undone.",
+            default=False,
+            err=True,
+        ):
+            return BaseResult(status="cancelled", message="Delete cancelled")
+
+        return None

@@ -29,6 +29,19 @@ class BaseCommand(ABC):
     requires_project: bool = False
     ci_friendly: bool = True
 
+    # Result status -> process exit code, per the contract published in
+    # llms-full.txt: 0 = success, 1 = error, 2 = user interrupt. A command that
+    # reports failure must not exit 0 -- scripts and CI branch on the exit code,
+    # not on the "status" field inside the payload. "cancelled" is 2 rather than
+    # the shell's 130 to match that contract and main.py's own KeyboardInterrupt
+    # handler; `dg mcp` in particular returns cancelled straight out of its
+    # KeyboardInterrupt path. Any status not listed here exits 0
+    # (success, succeeded, info, dry_run, warning).
+    EXIT_CODES: ClassVar[dict[str, int]] = {
+        "error": 1,
+        "cancelled": 2,
+    }
+
     # Agent-oriented metadata
     examples: ClassVar[list[str]] = []
     agent_help: str = ""
@@ -146,6 +159,23 @@ class BaseCommand(ABC):
                 if config.get("output.verbose", False):
                     stderr_console.print_exception()
                 raise click.ClickException(str(e))
+
+            # Payload is already on stdout; now make the exit code agree with it.
+            exit_code = self.exit_code_for(result)
+            if exit_code:
+                raise SystemExit(exit_code)
+
+    def exit_code_for(self, result: Any) -> int:
+        """Map a command result to a process exit code.
+
+        Args:
+            result: Command result (may be None)
+
+        Returns:
+            Exit code for this result's status; 0 when it reported no failure
+        """
+        status = str(getattr(result, "status", "") or "")
+        return self.EXIT_CODES.get(status, 0)
 
     def is_guided(self, ctx: click.Context) -> bool:
         """True only when the user invoked this command with no input at all.
@@ -285,8 +315,24 @@ class BaseCommand(ABC):
             elif output_format == "csv":
                 self._output_csv(result)
             else:
-                console.print(f"[red]Unknown output format:[/red] {output_format}")
+                # Diagnostics belong on stderr even here, or the complaint about
+                # the format corrupts the payload we fall back to.
+                stderr_console.print(
+                    f"[red]Unknown output format:[/red] {output_format}"
+                )
                 self._output_json(result)
+
+    def _write_payload(self, text: str) -> None:
+        """Write already-serialised machine-readable text to stdout verbatim.
+
+        Rich's default print would treat square brackets as style markup and
+        silently delete them, so a key comment of "[ci] runner" would lose the
+        "[ci]". It would also hard-wrap at the console width, injecting newlines
+        into the middle of a value. Both corrupt the payload, so markup,
+        highlighting and wrapping are all off. Routed through `console` rather
+        than `sys.stdout` so `--quiet` still suppresses output.
+        """
+        console.print(text, markup=False, highlight=False, soft_wrap=True)
 
     def _output_json(self, result: Any) -> None:
         """Output result as JSON."""
@@ -310,9 +356,11 @@ class BaseCommand(ABC):
         import yaml
 
         if isinstance(result, dict | list):
-            console.print(yaml.dump(result, default_flow_style=False))
+            self._write_payload(yaml.dump(result, default_flow_style=False))
         else:
-            console.print(yaml.dump({"result": str(result)}, default_flow_style=False))
+            self._write_payload(
+                yaml.dump({"result": str(result)}, default_flow_style=False)
+            )
 
     def _output_table(self, result: Any) -> None:
         """Output result as table."""
@@ -359,7 +407,7 @@ class BaseCommand(ABC):
             dict_writer = csv.DictWriter(output, fieldnames=result[0].keys())
             dict_writer.writeheader()
             dict_writer.writerows(result)
-            console.print(output.getvalue())
+            self._write_payload(output.getvalue())
 
         elif isinstance(result, dict):
             # Dictionary
@@ -368,7 +416,7 @@ class BaseCommand(ABC):
             writer.writerow(["Key", "Value"])
             for key, value in result.items():
                 writer.writerow([key, value])
-            console.print(output.getvalue())
+            self._write_payload(output.getvalue())
 
         else:
             # Fallback to JSON

@@ -361,12 +361,18 @@ def main() -> None:
                 # Preprocess arguments to handle hyphenated commands
                 processed_args = preprocess_hyphenated_commands(args)
 
+            exit_code = 0
             with TimingContext("cli_execution"), _telemetry_transaction():
                 try:
                     cli(args=processed_args, standalone_mode=False)
-                except SystemExit:
-                    # Click calls sys.exit() even in non-standalone mode
-                    pass
+                except SystemExit as exc:
+                    # Click calls sys.exit() even in non-standalone mode, so we
+                    # cannot let this propagate — the notifications and timing
+                    # summary below still need to run. But swallowing the code
+                    # outright made every failure exit 0, which is what broke
+                    # `if dg -o json keys; then ...` in scripts and CI. Carry it
+                    # and re-raise at the end instead.
+                    exit_code = exc.code if isinstance(exc.code, int) else 0
 
         # Print update notifications if available (before timing summary)
         if print_pending_notification is not None:
@@ -379,6 +385,9 @@ def main() -> None:
         # Print timing summary if timing was enabled
         if timing_requested:
             print_timing_summary(detailed_timing)
+
+        if exit_code:
+            sys.exit(exit_code)
 
     except KeyboardInterrupt:
         _safe_console_print("\n[yellow]Operation cancelled by user[/yellow]")
