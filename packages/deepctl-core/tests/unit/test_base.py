@@ -1097,7 +1097,10 @@ class TestExitCodes:
         ("status", "expected"),
         [
             ("error", 1),
-            ("cancelled", 130),
+            # 2, not the shell's 130: llms-full.txt publishes
+            # "0 = success, 1 = error, 2 = user interrupt", and main.py's
+            # KeyboardInterrupt handler already exits 2.
+            ("cancelled", 2),
             ("success", 0),
             ("succeeded", 0),
             ("info", 0),

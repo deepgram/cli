@@ -29,13 +29,17 @@ class BaseCommand(ABC):
     requires_project: bool = False
     ci_friendly: bool = True
 
-    # Result status -> process exit code. A command that reports failure must
-    # not exit 0: scripts and CI branch on the exit code, not on the "status"
-    # field inside the payload. Any status not listed here exits 0
+    # Result status -> process exit code, per the contract published in
+    # llms-full.txt: 0 = success, 1 = error, 2 = user interrupt. A command that
+    # reports failure must not exit 0 -- scripts and CI branch on the exit code,
+    # not on the "status" field inside the payload. "cancelled" is 2 rather than
+    # the shell's 130 to match that contract and main.py's own KeyboardInterrupt
+    # handler; `dg mcp` in particular returns cancelled straight out of its
+    # KeyboardInterrupt path. Any status not listed here exits 0
     # (success, succeeded, info, dry_run, warning).
     EXIT_CODES: ClassVar[dict[str, int]] = {
         "error": 1,
-        "cancelled": 130,
+        "cancelled": 2,
     }
 
     # Agent-oriented metadata
