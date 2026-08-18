@@ -70,10 +70,6 @@ def is_agentic() -> bool:
 
 _agentic = is_agentic()
 
-# Global console instance — plain when agentic, rich when interactive
-console = Console(no_color=_agentic, highlight=not _agentic)
-stderr_console = Console(stderr=True, no_color=_agentic, highlight=not _agentic)
-
 # Global output configuration
 _output_config: dict[str, Any] = {
     "format": "default",
@@ -82,6 +78,51 @@ _output_config: dict[str, Any] = {
     "color": not _agentic,
     "agentic": _agentic,
 }
+
+
+# Formats where stdout carries a machine-readable payload and must not be
+# polluted by human-facing status text, tables or progress.
+MACHINE_FORMATS = frozenset({"json", "yaml", "csv"})
+
+
+class StatusConsole(Console):
+    """Console for human-facing output that yields stdout to the payload.
+
+    Commands print status lines and tables for humans, while the framework
+    writes the serialised result to stdout. When a machine-readable format is
+    requested those two collide: `dg -o json projects | jq` sees
+    "Fetching projects..." before the JSON and fails. Resolving the target at
+    write time (rather than at construction) lets status output move to stderr
+    for exactly those formats, without commands having to ask.
+    """
+
+    @property
+    def file(self) -> Any:
+        if _output_config["format"] in MACHINE_FORMATS:
+            return sys.stderr
+        return self._file or sys.stdout
+
+    @file.setter
+    def file(self, new_file: Any) -> None:
+        self._file = new_file
+
+
+# Global console instance — plain when agentic, rich when interactive.
+# `console` is the human/status channel: it steps aside to stderr whenever a
+# machine-readable format owns stdout. `stdout_console` is the payload channel
+# and always writes to stdout.
+console = StatusConsole(no_color=_agentic, highlight=not _agentic)
+stdout_console = Console(no_color=_agentic, highlight=not _agentic)
+stderr_console = Console(stderr=True, no_color=_agentic, highlight=not _agentic)
+
+
+def get_status_console() -> Console:
+    """Get the shared human/status console.
+
+    Prefer this over a module-level ``Console()`` so status output is routed to
+    stderr automatically when ``-o json``/``yaml``/``csv`` owns stdout.
+    """
+    return console
 
 
 def setup_output(
@@ -309,23 +350,23 @@ def print_output(data: Any, format_type: str | None = None) -> None:
         if isinstance(data, str):
             try:
                 parsed = json.loads(data)
-                console.print(JSON.from_data(parsed))
+                stdout_console.print(JSON.from_data(parsed))
             except json.JSONDecodeError:
-                console.print(data)
+                stdout_console.print(data)
         else:
-            console.print(JSON.from_data(data))
+            stdout_console.print(JSON.from_data(data))
     elif format_type == "yaml":
         # Use Rich's syntax highlighting for YAML
         yaml_str = formatter.format(data)
         syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=False)
-        console.print(syntax)
+        stdout_console.print(syntax)
     elif format_type == "table":
         # Table is already formatted for Rich
         formatted = formatter.format(data)
-        console.print(formatted, end="")
+        stdout_console.print(formatted, end="")
     else:
         # CSV and other formats
-        console.print(formatter.format(data))
+        stdout_console.print(formatter.format(data))
 
 
 def print_success(message: str) -> None:

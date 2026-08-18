@@ -1,13 +1,16 @@
 """Tests for the output utilities."""
 
 import json
+import sys
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import yaml
 from deepctl_core.output import (
+    MACHINE_FORMATS,
     OutputFormatter,
     get_console,
+    get_status_console,
     is_agentic,
     print_error,
     print_info,
@@ -387,7 +390,7 @@ class TestPrintFunctions:
 class TestPrintOutput:
     """Test print_output function."""
 
-    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output.stdout_console")
     @patch(
         "deepctl_core.output._output_config",
         {"quiet": False, "format": "json"},
@@ -400,7 +403,7 @@ class TestPrintOutput:
         # Should use Rich's JSON display
         mock_console.print.assert_called_once()
 
-    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output.stdout_console")
     @patch(
         "deepctl_core.output._output_config", {"quiet": True, "format": "json"}
     )
@@ -411,7 +414,7 @@ class TestPrintOutput:
         # Should not print in quiet mode
         mock_console.print.assert_not_called()
 
-    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output.stdout_console")
     @patch(
         "deepctl_core.output._output_config",
         {"quiet": False, "format": "yaml"},
@@ -424,7 +427,7 @@ class TestPrintOutput:
         # Should use syntax highlighting
         mock_console.print.assert_called_once()
 
-    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output.stdout_console")
     @patch(
         "deepctl_core.output._output_config",
         {"quiet": False, "format": "table"},
@@ -437,7 +440,7 @@ class TestPrintOutput:
         # Table formatting uses capture which results in multiple print calls
         assert mock_console.print.call_count >= 1
 
-    @patch("deepctl_core.output.console")
+    @patch("deepctl_core.output.stdout_console")
     @patch(
         "deepctl_core.output._output_config", {"quiet": False, "format": "csv"}
     )
@@ -460,3 +463,47 @@ class TestGetConsole:
         # Should return Rich Console instance
         assert console is not None
         assert hasattr(console, "print")
+
+
+class TestStatusConsoleRouting:
+    """Status output must yield stdout to machine-readable payloads.
+
+    Regression tests for the `-o json` pollution bug: commands printed status
+    lines and tables to stdout, so `dg -o json projects | jq` received
+    "Fetching projects..." ahead of the JSON and failed to parse.
+    """
+
+    @pytest.mark.parametrize("fmt", sorted(MACHINE_FORMATS))
+    def test_status_console_writes_to_stderr_for_machine_formats(self, fmt):
+        with patch(
+            "deepctl_core.output._output_config",
+            {"format": fmt, "quiet": False, "agentic": False},
+        ):
+            assert get_status_console().file is sys.stderr
+
+    @pytest.mark.parametrize("fmt", ["default", "table"])
+    def test_status_console_writes_to_stdout_for_human_formats(self, fmt):
+        with patch(
+            "deepctl_core.output._output_config",
+            {"format": fmt, "quiet": False, "agentic": False},
+        ):
+            assert get_status_console().file is sys.stdout
+
+    def test_machine_formats_membership(self):
+        # `table` is a human rendering and must keep stdout
+        assert "table" not in MACHINE_FORMATS
+        assert "default" not in MACHINE_FORMATS
+        assert {"json", "yaml", "csv"} == set(MACHINE_FORMATS)
+
+    def test_payload_console_is_not_the_status_console(self):
+        """The payload must never be diverted along with status output."""
+        from deepctl_core.output import stdout_console
+
+        assert stdout_console is not get_status_console()
+        with patch(
+            "deepctl_core.output._output_config",
+            {"format": "json", "quiet": False, "agentic": False},
+        ):
+            # status steps aside, payload keeps stdout
+            assert get_status_console().file is sys.stderr
+            assert stdout_console.file is sys.stdout

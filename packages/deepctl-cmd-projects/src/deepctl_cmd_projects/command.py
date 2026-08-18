@@ -9,11 +9,12 @@ from deepctl_core import (
     Config,
     DeepgramClient,
 )
-from rich.console import Console
+from deepctl_core.output import get_status_console
 
 from .models import ProjectInfo, ProjectsResult
 
-console = Console()
+# Human/status output — routed to stderr when -o json/yaml/csv owns stdout
+console = get_status_console()
 
 
 class ProjectsCommand(BaseCommand):
