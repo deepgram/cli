@@ -103,3 +103,31 @@ jobs:
 
       - name: Verify packages
         run: make verify-packages
+
+  # Single rollup so branch protection needs exactly one required check.
+  # Requiring the matrix contexts directly means editing repo settings every
+  # time a Python version or OS is added or dropped, and a required context
+  # that stops reporting blocks every merge until someone notices.
+  #
+  # `if: always()` is load-bearing: without it this job is *skipped* when a
+  # prerequisite fails, and a skipped required check never reports failure --
+  # it just stalls. Run always, then fail on anything that is not success, so
+  # cancelled and skipped prerequisites are failures here too.
+  all-checks:
+    name: All checks
+    needs: [test, lint, floors, build-test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report prerequisite results
+        run: |
+          echo "test:       ${{ needs.test.result }}"
+          echo "lint:       ${{ needs.lint.result }}"
+          echo "floors:     ${{ needs.floors.result }}"
+          echo "build-test: ${{ needs.build-test.result }}"
+
+      - name: Fail unless every prerequisite succeeded
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "::error::One or more required jobs did not succeed"
+          exit 1
