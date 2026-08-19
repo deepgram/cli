@@ -19,10 +19,7 @@ except ModuleNotFoundError:
     try:
         import tomli as tomllib  # type: ignore[no-redef]
     except ModuleNotFoundError:
-        print(
-            "Python 3.11+ required (tomllib), "
-            "or install tomli: pip install tomli"
-        )
+        print("Python 3.11+ required (tomllib), or install tomli: pip install tomli")
         sys.exit(1)
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -130,8 +127,7 @@ def render_command_readme(
     lines = [
         f"# {name}",
         "",
-        "> Part of [deepctl](https://github.com/deepgram/cli)"
-        " — Official Deepgram CLI",
+        "> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI",
         "",
         description,
         "",
@@ -159,9 +155,7 @@ def render_command_readme(
     else:
         lines.append("No external dependencies.")
 
-    lines.extend(
-        ["", "## License", "", "MIT — see [LICENSE](../../LICENSE)", ""]
-    )
+    lines.extend(["", "## License", "", "MIT — see [LICENSE](../../LICENSE)", ""])
     return "\n".join(lines)
 
 
@@ -176,8 +170,7 @@ def render_debug_subcommand_readme(
     lines = [
         f"# {name}",
         "",
-        "> Part of [deepctl](https://github.com/deepgram/cli)"
-        " — Official Deepgram CLI",
+        "> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI",
         "",
         description,
         "",
@@ -207,9 +200,7 @@ def render_debug_subcommand_readme(
     else:
         lines.append("No external dependencies.")
 
-    lines.extend(
-        ["", "## License", "", "MIT — see [LICENSE](../../LICENSE)", ""]
-    )
+    lines.extend(["", "## License", "", "MIT — see [LICENSE](../../LICENSE)", ""])
     return "\n".join(lines)
 
 
@@ -223,8 +214,7 @@ def render_core_readme(
     lines = [
         f"# {name}",
         "",
-        "> Part of [deepctl](https://github.com/deepgram/cli)"
-        " — Official Deepgram CLI",
+        "> Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI",
         "",
         description,
         "",
@@ -243,9 +233,7 @@ def render_core_readme(
     else:
         lines.append("No external dependencies.")
 
-    lines.extend(
-        ["", "## License", "", "MIT — see [LICENSE](../../LICENSE)", ""]
-    )
+    lines.extend(["", "## License", "", "MIT — see [LICENSE](../../LICENSE)", ""])
     return "\n".join(lines)
 
 
@@ -269,9 +257,7 @@ def generate_readme(package_dir: Path) -> str:
             name, description, entry_points, external_deps, package_dir
         )
     else:
-        return render_core_readme(
-            name, description, external_deps, package_dir
-        )
+        return render_core_readme(name, description, external_deps, package_dir)
 
 
 def get_package_dirs(single: str | None = None) -> list[Path]:
@@ -307,13 +293,9 @@ def get_all_packages() -> list[dict]:
             {
                 "dir_name": pkg_dir.name,
                 "name": project["name"],
-                "description": project.get(
-                    "description", project["name"]
-                ),
+                "description": project.get("description", project["name"]),
                 "commands": eps.get("deepctl.commands", {}),
-                "debug_subcommands": eps.get(
-                    "deepctl.subcommands.debug", {}
-                ),
+                "debug_subcommands": eps.get("deepctl.subcommands.debug", {}),
             }
         )
     return packages
@@ -328,9 +310,7 @@ def generate_commands_section(packages: list[dict]) -> str:
         for cmd_name in pkg["commands"]:
             rows.append((f"`deepctl {cmd_name}`", pkg["description"]))
         for cmd_name in pkg["debug_subcommands"]:
-            rows.append(
-                (f"`deepctl debug {cmd_name}`", pkg["description"])
-            )
+            rows.append((f"`deepctl debug {cmd_name}`", pkg["description"]))
     rows.sort(key=lambda r: r[0])
     lines = [
         "| Command | Description |",
@@ -349,8 +329,7 @@ def generate_packages_section(packages: list[dict]) -> str:
     ]
     for pkg in sorted(packages, key=lambda p: p["name"]):
         lines.append(
-            f"| [`{pkg['name']}`](packages/{pkg['dir_name']})"
-            f" | {pkg['description']} |"
+            f"| [`{pkg['name']}`](packages/{pkg['dir_name']}) | {pkg['description']} |"
         )
     return "\n".join(lines)
 
@@ -365,9 +344,7 @@ def generate_architecture_section(packages: list[dict]) -> str:
         return f"{line}{' ' * padding}# {desc}"
 
     lines = ["```", "cli/"]
-    lines.append(
-        tree_line("├── ", "src/deepctl/", "Main CLI entry point")
-    )
+    lines.append(tree_line("├── ", "src/deepctl/", "Main CLI entry point"))
     lines.append("├── packages/")
 
     sorted_pkgs = sorted(packages, key=lambda p: p["dir_name"])
@@ -382,19 +359,13 @@ def generate_architecture_section(packages: list[dict]) -> str:
             )
         )
 
-    lines.append(
-        tree_line("├── ", "tests/", "Integration tests")
-    )
-    lines.append(
-        tree_line("└── ", "Makefile", "Development tasks")
-    )
+    lines.append(tree_line("├── ", "tests/", "Integration tests"))
+    lines.append(tree_line("└── ", "Makefile", "Development tasks"))
     lines.append("```")
     return "\n".join(lines)
 
 
-def replace_section(
-    content: str, section: str, replacement: str
-) -> str:
+def replace_section(content: str, section: str, replacement: str) -> str:
     """Replace content between BEGIN:section and END:section markers."""
     pattern = re.compile(
         rf"(<!-- BEGIN:{re.escape(section)} -->\n)"
@@ -409,9 +380,7 @@ def replace_section(
     return pattern.sub(repl, content)
 
 
-def update_root_readme(
-    *, dry_run: bool = False, check: bool = False
-) -> bool:
+def update_root_readme(*, dry_run: bool = False, check: bool = False) -> bool:
     """Update auto-generated sections in the root README.md.
 
     Returns True if the file was (or needs to be) changed.
@@ -506,9 +475,7 @@ def main():
 
     # Update root README sections (skip when targeting a single package)
     if not args.package:
-        root_changed = update_root_readme(
-            dry_run=args.dry_run, check=args.check
-        )
+        root_changed = update_root_readme(dry_run=args.dry_run, check=args.check)
         if root_changed:
             stale.append("README.md")
 
@@ -522,10 +489,7 @@ def main():
     if not args.check and not args.dry_run:
         total = len(package_dirs) + (0 if args.package else 1)
         updated = len(stale)
-        print(
-            f"\nDone: {updated} updated, "
-            f"{total - updated} already current"
-        )
+        print(f"\nDone: {updated} updated, {total - updated} already current")
 
 
 if __name__ == "__main__":

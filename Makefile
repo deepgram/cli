@@ -103,20 +103,20 @@ test-watch: ## Run tests in watch mode (requires pytest-watch)
 
 ## Formatting
 format: ## Auto-format code with ruff
-	uv run ruff format src/ packages/**/src
+	uv run ruff format src/ packages/**/src scripts/
 
 format-check: ## Check code formatting (no changes)
-	uv run ruff format --check src/ packages/**/src
+	uv run ruff format --check src/ packages/**/src scripts/
 
 ## Linting
 lint: format-check lint-check typecheck ## Run all linters
 	@echo "✅ All linters passed!"
 
 lint-fix: ## Run ruff with auto-fix
-	uv run ruff check --fix src/ packages/**/src
+	uv run ruff check --fix src/ packages/**/src scripts/
 
 lint-check: ## Run ruff without fixes
-	uv run ruff check src/ packages/**/src
+	uv run ruff check src/ packages/**/src scripts/
 
 ## Type Checking
 typecheck: ## Run mypy type checker
