@@ -6,7 +6,6 @@
 ### ⚠ BREAKING CHANGES
 
 * `dg` now exits non-zero when a command fails: 1 for errors (including crashes and usage errors), 2 for user interrupt, 0 on success. Every command previously exited 0 regardless of outcome, so scripts and CI steps that ignored the exit code will surface failures they were silently swallowing. No command that succeeds changes its exit code.
-* `dg` now exits non-zero when a command fails: 1 for errors (including crashes and usage errors), 2 for user interrupt, 0 on success. Every command previously exited 0 regardless of outcome, so scripts and CI steps that ignored the exit code will surface failures they were silently swallowing. No command that succeeds changes its exit code.
 
 ### Bug Fixes
 
@@ -21,6 +20,29 @@
 * **release:** bump pypi-publish action to v1.14.2 for Metadata-Version 2.5 ([#94](https://github.com/deepgram/cli/issues/94)) ([582cd83](https://github.com/deepgram/cli/commit/582cd831c11a1924c30f5f82e6dbe3767ccbdbad))
 * send root error and interrupt output to stderr, not stdout ([f4b7c48](https://github.com/deepgram/cli/commit/f4b7c48a2155942c0ff7865079fd016397d40482))
 * **web:** repair broken Heap snippet, upgrade astro 6→7, clear all 20 npm alerts ([#96](https://github.com/deepgram/cli/issues/96)) ([11928fe](https://github.com/deepgram/cli/commit/11928feaf5106885663bb577e252c24c3d866fd9))
+
+
+### Behavior changes
+
+Alongside the exit-code change above, upgrading to 0.3.0 changes these:
+
+* The full exit-code contract is now enforced end to end: `0` = success, `1` = error, `2` = user interrupt. Crashes **and usage errors** (bad flag, unknown command, bare `dg`) exit `1`; `2` is reserved for cancellation, so Ctrl-C during a running command and Ctrl-D at a prompt both still exit `2`.
+* Error and cancellation messages are written to **stderr** instead of stdout. `dg -o json …` therefore keeps stdout machine-readable when a command fails — previously a failure printed `Error: …` prose to stdout, so a script piping stdout into `jq` parsed the error text instead of JSON. Successful commands still write their payload to stdout.
+* `-o yaml` and `-o csv` no longer drop square-bracketed text from values. Output was passed through a renderer that read `[...]` as style markup and deleted it, so an API key comment of `[ci] runner` was emitted as `runner`. Long values are also no longer hard-wrapped mid-field.
+* `dg keys --delete KEY_ID` now asks for confirmation on stderr instead of always reporting `Cancelled by user` without deleting. In a non-interactive context it exits `1` and tells you to pass `--yes`.
+* `dg keys --create --dry-run` now reports what it would create. It previously failed with an internal `TypeError`.
+
+### Previously unreleased
+
+0.2.27 was tagged on 2026-08-17 but never reached PyPI — its publish step failed with `InvalidDistribution: Invalid distribution metadata: '2.5' is not a valid metadata version`, which [#94](https://github.com/deepgram/cli/issues/94) and [#95](https://github.com/deepgram/cli/issues/95) then fixed. PyPI therefore goes straight from 0.2.26 to 0.3.0, and this release is the first published build to include the 0.2.27 changes:
+
+* SDK 7.7.0 — Flux TTS controls, Flux STT fix, listen redact/numerals ([#92](https://github.com/deepgram/cli/issues/92)) ([50d96cf](https://github.com/deepgram/cli/commit/50d96cf8950c9f180619e0e2dbd41931d1a63ef6))
+* **speak:** default to Flux TTS (`flux-alexis-en`) instead of Aura 2 ([#89](https://github.com/deepgram/cli/issues/89)) ([5a0b698](https://github.com/deepgram/cli/commit/5a0b6981755d58cb5a1725150bf437c81c792433)). This changes the default model for `dg speak`, so synthesised audio differs unless you pass an `aura-*` model explicitly.
+* **mcp:** swallow broken/closed-pipe on dg mcp startup notifications and error path ([#88](https://github.com/deepgram/cli/issues/88)) ([b24396e](https://github.com/deepgram/cli/commit/b24396ec3c53197b1f9e5e610c57a298926f9031))
+
+Six packages tagged in that cycle also reach PyPI for the first time here: `deepctl-cmd-listen` 0.0.14, `deepctl-cmd-login` 0.1.17, `deepctl-cmd-skills` 0.0.7, `deepctl-cmd-speak` 0.0.4, `deepctl-cmd-update` 0.2.6 and `deepctl-telemetry` 0.0.6.
+
+Because 0.2.27 never published, `dg update` on pip also had to be repaired for this release to arrive at all: root's inter-package dependency floors were lower than the versions being published, so pip's default `only-if-needed` strategy left most sub-packages stale and `dg --version` reported the new number while the fixes never landed. Floors now match the published versions exactly.
 
 ## [0.2.27](https://github.com/deepgram/cli/compare/v0.2.26...v0.2.27) (2026-08-17)
 
