@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.14...deepctl-cmd-mcp-v0.1.15) (2026-08-19)
+
+
+### Bug Fixes
+
+* **deps:** cap mcp &lt;2 (fixes broken dg mcp), commit uv.lock, require twine &gt;=7 ([#95](https://github.com/deepgram/cli/issues/95)) ([997cd36](https://github.com/deepgram/cli/commit/997cd36f64c95d8afadb4b9fb86673153169ce1f))
+
 ## [0.1.14](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.13...deepctl-cmd-mcp-v0.1.14) (2026-05-12)
 
 

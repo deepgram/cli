@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.16](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.15...deepctl-core-v0.2.16) (2026-08-19)
+
+
+### Bug Fixes
+
+* correct web command examples, document Flux TTS/STT, and honor -o json across account commands ([#97](https://github.com/deepgram/cli/issues/97)) ([55984ec](https://github.com/deepgram/cli/commit/55984ecbc306f24c61568c3aeea59556f96b2707))
+* **keys:** honor -o json so stdout stays parseable (completes the [#97](https://github.com/deepgram/cli/issues/97) sweep) ([#101](https://github.com/deepgram/cli/issues/101)) ([e430a77](https://github.com/deepgram/cli/commit/e430a77609cbf701f52fc454907ee2ddb99dbd07))
+
+
+### Behavior changes
+
+* Commands now map their result status to a process exit code (`error` → `1`, `cancelled` → `2`, otherwise `0`), and `BaseCommand.exit_code_for()` exposes that mapping. Exit codes were previously discarded, so every command exited `0`.
+* `-o yaml` and `-o csv` payloads are written verbatim; the renderer no longer interprets `[...]` as markup or wraps long values.
+* New `get_status_console()` returns the shared stderr console for status output. Commands should use it instead of declaring their own. Packages that import it require `deepctl-core>=0.2.16`.
+
 ## [0.2.15](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.14...deepctl-core-v0.2.15) (2026-08-17)
 
 
