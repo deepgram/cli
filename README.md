@@ -319,6 +319,22 @@ dg usage --last-week -o yaml
 When running in a non-TTY environment (pipes, CI, or AI coding tools), the CLI
 automatically switches to structured JSON output with plain-text status messages.
 
+### Exit codes
+
+Since 0.3.0, `dg` exits non-zero when a command fails — branch on the exit
+code, not on parsing output:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Error — a failed command, a crash, or a usage error (bad flag, unknown command) |
+| `2` | Cancelled by the user (Ctrl-C, or declining a confirmation prompt) |
+
+Errors and status messages go to stderr; stdout carries only the payload, so
+`dg ... -o json | jq` stays parseable even when a command fails. If a CI step
+relied on `dg` always exiting `0` (every command did, before 0.3.0), it will
+now fail where it previously passed silently.
+
 ### Forcing non-interactive mode
 
 Three explicit ways to skip every prompt and run with defaults — useful from a
