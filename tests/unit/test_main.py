@@ -132,6 +132,28 @@ class TestMainCLI:
                 # main()'s own KeyboardInterrupt handler: 2 = user interrupt
                 assert exc_info.value.code == 2
 
+    def test_main_click_abort(self):
+        """A click Abort (Ctrl-C/Ctrl-D during a command) exits 2.
+
+        With standalone_mode=False, Click catches a KeyboardInterrupt raised
+        inside command execution and re-raises it as Abort (a RuntimeError,
+        not a KeyboardInterrupt) -- so the mid-command interrupt, the common
+        case, reaches main() as Abort. It is user cancellation: 2, not 1.
+        """
+        import click
+
+        from deepctl.main import main
+
+        main_mod = sys.modules["deepctl.main"]
+        with patch("sys.argv", ["deepctl"]):
+            with patch.object(
+                main_mod, "cli", side_effect=click.exceptions.Abort()
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+
+                assert exc_info.value.code == 2
+
     def test_main_general_exception(self):
         """Test main() handles general exceptions."""
         from deepctl.main import main

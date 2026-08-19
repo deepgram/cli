@@ -389,7 +389,10 @@ def main() -> None:
         if exit_code:
             sys.exit(exit_code)
 
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, click.exceptions.Abort):
+        # Click wraps a Ctrl-C/Ctrl-D raised inside cli() in Abort when
+        # standalone_mode=False, so a mid-command interrupt arrives here as
+        # Abort, not KeyboardInterrupt. Both are user cancellation: exit 2.
         _safe_console_print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(2)
     except Exception as e:
