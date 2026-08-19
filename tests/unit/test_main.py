@@ -182,6 +182,51 @@ class TestMainCLI:
 
             assert exc_info.value.code == 1
 
+    @pytest.mark.parametrize(
+        ("argv", "label"),
+        [
+            (["deepctl", "-o", "json", "not-a-command"], "unknown command"),
+            (["deepctl", "-o", "json", "--definitely-not-a-flag"], "bad flag"),
+        ],
+    )
+    def test_failure_keeps_stdout_clean(self, capsys, argv, label):
+        """A failing `dg -o json ...` writes nothing to stdout.
+
+        The whole point of `-o json` is that stdout is machine-readable, so a
+        script can pipe it into jq. Diagnostics therefore belong on stderr:
+        printing `Error: ...` to stdout leaves the caller parsing prose. This
+        is the root-handler half of the #97 sweep, which moved command-level
+        status chrome to stderr but left main()'s own handlers on stdout.
+        """
+        from deepctl.main import main
+
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == "", f"{label} polluted stdout: {captured.out!r}"
+        assert "Error" in captured.err
+
+    def test_interrupt_message_goes_to_stderr(self, capsys):
+        """The cancellation notice is a diagnostic, so it also stays off stdout."""
+        import click
+
+        from deepctl.main import main
+
+        main_mod = sys.modules["deepctl.main"]
+        with patch("sys.argv", ["deepctl"]):
+            with patch.object(
+                main_mod, "cli", side_effect=click.exceptions.Abort()
+            ):
+                with pytest.raises(SystemExit):
+                    main()
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "cancelled" in captured.err.lower()
+
 
 class TestSafeConsolePrint:
     """The closed/broken-stream guard on the error/interrupt exit path.
