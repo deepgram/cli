@@ -129,9 +129,50 @@ jobs:
           pip install --find-links "$DIST_DIR" dist/deepctl-*.whl
           deepctl --version
 
+  verify-published:
+    name: Verify release is installable from PyPI
+    needs: [release-please, publish]
+    # `pip install deepctl==X` must resolve the full dependency closure from
+    # PyPI before anything advertises the release. Two real failure modes:
+    # 0.2.27 published partially (root uninstallable, and pip *silently
+    # backtracks* to the previous version, exit 0), and the 0.3.0 rollout
+    # showed a fresh install backtracking to 0.2.26 during the CDN
+    # propagation window. Poll the actual resolver, not just the JSON
+    # endpoint, so mark-latest / deploy-web / brew never point at a version
+    # a user cannot install.
+    if: |
+      needs.release-please.outputs.release_created == 'true' &&
+      startsWith(needs.release-please.outputs.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Wait until pip can resolve the full release
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet --upgrade pip
+          for i in $(seq 1 30); do
+            if /tmp/verify/bin/pip install --dry-run --no-cache-dir \
+                "deepctl==${VERSION}" >/dev/null 2>&1; then
+              echo "deepctl==${VERSION} resolves with its full closure"
+              exit 0
+            fi
+            echo "Waiting for deepctl==${VERSION} to resolve (${i}/30)..."
+            sleep 20
+          done
+          echo "::error::deepctl==${VERSION} did not resolve from PyPI after 10 minutes -- a dependency is missing or the index has not propagated"
+          exit 1
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+
   mark-latest:
     name: Mark root release as latest
-    needs: [release-please, publish]
+    needs: [release-please, publish, verify-published]
     # Re-assert latest on the root package tag (vX.Y.Z) after PyPI publish so
     # users clicking "latest" land on a tag whose artifact is actually
     # installable. Also re-asserts after all sub-package releases since
@@ -149,7 +190,7 @@ jobs:
 
   deploy-web:
     name: Deploy web to production
-    needs: [release-please, publish]
+    needs: [release-please, publish, verify-published]
     # Only fire on root-package releases (v0.2.4, v1.0.0, …) and only after
     # PyPI publish so cli.deepgram.com never advertises a version that isn't
     # installable yet. Sub-package tags look like deepctl-cmd-listen-v0.0.3 —
@@ -180,7 +221,7 @@ jobs:
 
   bump-brew-formula:
     name: Bump Homebrew formula
-    needs: [release-please, publish]
+    needs: [release-please, publish, verify-published]
     # Only fire on root-package releases (v0.2.4, v1.0.0, …).
     # Sub-package tags look like deepctl-cmd-listen-v0.0.3 — skip those.
     if: |
