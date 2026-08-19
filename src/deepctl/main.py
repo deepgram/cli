@@ -19,12 +19,18 @@ from deepctl_core import (
     print_timing_summary,
     setup_output,
 )
-from rich.console import Console
+from deepctl_core.output import stderr_console
 from rich.traceback import install
 
 # Install rich traceback for better error messages
 install(show_locals=True)
-console = Console()
+
+# Diagnostics go to stderr so stdout carries only the requested payload -- a
+# crash or usage error must not corrupt `dg -o json ...` for a script piping
+# stdout into jq. Same console the command layer uses via print_error(), so
+# root-level and command-level diagnostics format identically (including the
+# no-color handling for agentic/CI callers).
+console = stderr_console
 
 
 def _record_install_method_cb(
@@ -282,7 +288,7 @@ def _telemetry_transaction() -> Iterator[None]:
 
 
 def _safe_console_print(message: str) -> None:
-    """Print to the console, tolerating a closed/broken output stream.
+    """Print a diagnostic to stderr, tolerating a closed/broken stream.
 
     When `dg` runs as an MCP server, the host can close stdio before the
     process finishes. A write to the closed stream raises ``BrokenPipeError``
@@ -389,12 +395,15 @@ def main() -> None:
         if exit_code:
             sys.exit(exit_code)
 
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, click.exceptions.Abort):
+        # Click wraps a Ctrl-C/Ctrl-D raised inside cli() in Abort when
+        # standalone_mode=False, so a mid-command interrupt arrives here as
+        # Abort, not KeyboardInterrupt. Both are user cancellation: exit 2.
         _safe_console_print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(2)
     except Exception as e:
         _safe_console_print(f"[red]Error: {e}[/red]")
-        sys.exit(2)
+        sys.exit(1)  # 1 = error; 2 is reserved for user interrupt
 
 
 if __name__ == "__main__":

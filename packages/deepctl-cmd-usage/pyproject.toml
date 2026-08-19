@@ -21,7 +21,7 @@ classifiers = [
 keywords = ["deepgram", "cli", "usage", "statistics"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10",
+    "deepctl-core>=0.2.16",
     "deepctl-shared-utils>=0.1.10",
     "click>=8.0.0",
     "rich>=13.0.0",
