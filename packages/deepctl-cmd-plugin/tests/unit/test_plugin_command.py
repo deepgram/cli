@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 from deepctl_cmd_plugin.command import PluginCommand
@@ -233,6 +234,54 @@ class TestPluginCommand:
 
             assert result.success is False
             assert "not installed" in result.message
+
+    def test_remove_declined_aborts_instead_of_exiting_zero(self) -> None:
+        """Declining the prompt must exit 2, not 0.
+
+        `_handle_remove` is a group subcommand returning None, so there is no
+        result for BaseCommand.EXIT_CODES to map to an exit code. A bare
+        return made a declined removal indistinguishable from a successful
+        one for any script branching on the exit code, contradicting the
+        contract published in the README. Abort is what main.py turns into 2.
+        """
+        with (
+            patch("click.confirm", return_value=False),
+            patch.object(self.command, "remove_plugin") as mock_remove,
+        ):
+            with pytest.raises(click.Abort):
+                self.command._handle_remove(
+                    self.config,
+                    self.auth_manager,
+                    self.client,
+                    package="test-plugin",
+                )
+
+            mock_remove.assert_not_called()
+
+    def test_remove_with_yes_skips_the_prompt(self) -> None:
+        """Positive control: --yes must not prompt and must not abort."""
+        with (
+            patch("click.confirm") as mock_confirm,
+            patch.object(self.command, "remove_plugin") as mock_remove,
+            patch.object(self.command, "_maybe_update_skills"),
+        ):
+            mock_remove.return_value = PluginOperationResult(
+                success=True,
+                action="remove",
+                package="test-plugin",
+                message="Successfully removed test-plugin",
+            )
+
+            self.command._handle_remove(
+                self.config,
+                self.auth_manager,
+                self.client,
+                package="test-plugin",
+                yes=True,
+            )
+
+            mock_confirm.assert_not_called()
+            mock_remove.assert_called_once()
 
     @patch("deepctl_cmd_plugin.command.subprocess.run")
     def test_discover_from_environment(self, mock_run: MagicMock) -> None:
