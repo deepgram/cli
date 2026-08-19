@@ -394,7 +394,7 @@ def main() -> None:
         sys.exit(2)
     except Exception as e:
         _safe_console_print(f"[red]Error: {e}[/red]")
-        sys.exit(2)
+        sys.exit(1)  # 1 = error; 2 is reserved for user interrupt
 
 
 if __name__ == "__main__":
