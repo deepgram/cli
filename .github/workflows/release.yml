@@ -17,6 +17,8 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38  # v4
         id: release
@@ -24,6 +26,56 @@ jobs:
           token: ${{ github.token }}
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+
+  sync-release-pr:
+    name: Sync lockfile and floors on the release PR
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' && needs.release-please.outputs.pr }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+
+      # release-please bumps every pyproject version but updates neither
+      # uv.lock (CI's `uv sync --locked` then fails all jobs at the install
+      # step -- the 0.2.28/0.3.0 wall, twice) nor the root dependency floors
+      # (without which `dg update` on pip delivers the wrapper and skips the
+      # sub-packages the changelog advertises). Both are mechanical
+      # consequences of the version bumps, so regenerate them here.
+      #
+      # Caveat: this push uses GITHUB_TOKEN, which does not retrigger the
+      # PR's checks. The routine hand-edit of the release notes retriggers
+      # them; for an untouched release PR, re-run checks from the UI. If
+      # releases ever need to go out unattended, switch this push to a
+      # dedicated PAT or GitHub App token.
+      - name: Regenerate uv.lock and pin root floors
+        run: |
+          set -euo pipefail
+          python3 scripts/check_dependency_floors.py --fix
+          uv lock
+          python3 scripts/check_dependency_floors.py
+
+      - name: Commit and push if changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "uv.lock and floors already in sync"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock pyproject.toml
+          git commit -m "chore: sync uv.lock and root dependency floors with release-please bumps"
+          git push
 
   build:
     name: Build packages
