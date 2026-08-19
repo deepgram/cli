@@ -855,7 +855,7 @@ wheels = [
 
 [[package]]
 name = "deepctl"
-version = "0.2.27"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1052,7 +1052,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-billing"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-billing" }
 dependencies = [
     { name = "click" },
@@ -1288,7 +1288,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-keys"
-version = "0.0.3"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-keys" }
 dependencies = [
     { name = "click" },
@@ -1360,7 +1360,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-mcp"
-version = "0.1.14"
+version = "0.1.15"
 source = { editable = "packages/deepctl-cmd-mcp" }
 dependencies = [
     { name = "click" },
@@ -1400,7 +1400,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-cmd-members"
-version = "0.0.3"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-members" }
 dependencies = [
     { name = "click" },
@@ -1419,7 +1419,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-models"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-models" }
 dependencies = [
     { name = "click" },
@@ -1455,7 +1455,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-projects"
-version = "0.1.13"
+version = "0.2.0"
 source = { editable = "packages/deepctl-cmd-projects" }
 dependencies = [
     { name = "click" },
@@ -1476,7 +1476,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-read"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-read" }
 dependencies = [
     { name = "click" },
@@ -1495,7 +1495,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-requests"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-requests" }
 dependencies = [
     { name = "click" },
@@ -1601,7 +1601,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-cmd-usage"
-version = "0.1.13"
+version = "0.2.0"
 source = { editable = "packages/deepctl-cmd-usage" }
 dependencies = [
     { name = "click" },
@@ -1624,7 +1624,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-core"
-version = "0.2.15"
+version = "0.2.16"
 source = { editable = "packages/deepctl-core" }
 dependencies = [
     { name = "click" },
