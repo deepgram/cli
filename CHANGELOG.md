@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.3.0](https://github.com/deepgram/cli/compare/v0.2.27...v0.3.0) (2026-08-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* `dg` now exits non-zero when a command fails: 1 for errors (including crashes and usage errors), 2 for user interrupt, 0 on success. Every command previously exited 0 regardless of outcome, so scripts and CI steps that ignored the exit code will surface failures they were silently swallowing. No command that succeeds changes its exit code.
+* `dg` now exits non-zero when a command fails: 1 for errors (including crashes and usage errors), 2 for user interrupt, 0 on success. Every command previously exited 0 regardless of outcome, so scripts and CI steps that ignored the exit code will surface failures they were silently swallowing. No command that succeeds changes its exit code.
+
+### Bug Fixes
+
+* correct web command examples, document Flux TTS/STT, and honor -o json across account commands ([#97](https://github.com/deepgram/cli/issues/97)) ([55984ec](https://github.com/deepgram/cli/commit/55984ecbc306f24c61568c3aeea59556f96b2707))
+* dependency floors that let dg update skip this release, and exit-code + error-stream correctness ([#102](https://github.com/deepgram/cli/issues/102)) ([fd1e8a4](https://github.com/deepgram/cli/commit/fd1e8a4a2b34a85c37729fd80690c93b28c92281))
+* **deps:** cap mcp &lt;2 (fixes broken dg mcp), commit uv.lock, require twine &gt;=7 ([#95](https://github.com/deepgram/cli/issues/95)) ([997cd36](https://github.com/deepgram/cli/commit/997cd36f64c95d8afadb4b9fb86673153169ce1f))
+* **deps:** raise deepctl-core floor to 0.2.16 in the eight packages that import get_status_console ([98f9e91](https://github.com/deepgram/cli/commit/98f9e912682aff85836dbef40ee65391bb579fae))
+* **deps:** raise root dependency floors to the versions this release publishes ([c0b0023](https://github.com/deepgram/cli/commit/c0b0023e2395a65f444e5cdc9487cabd9ae2ea22))
+* exit 1, not 2, when a command crashes or is misused ([914e132](https://github.com/deepgram/cli/commit/914e132951c64f37ceab49f363ff93d567326de7))
+* keep exit 2 when Ctrl-C interrupts a running command ([b0e80e2](https://github.com/deepgram/cli/commit/b0e80e2b35484654dbb5afaae6db32d0eba8bdfe))
+* **keys:** honor -o json so stdout stays parseable (completes the [#97](https://github.com/deepgram/cli/issues/97) sweep) ([#101](https://github.com/deepgram/cli/issues/101)) ([e430a77](https://github.com/deepgram/cli/commit/e430a77609cbf701f52fc454907ee2ddb99dbd07))
+* **release:** bump pypi-publish action to v1.14.2 for Metadata-Version 2.5 ([#94](https://github.com/deepgram/cli/issues/94)) ([582cd83](https://github.com/deepgram/cli/commit/582cd831c11a1924c30f5f82e6dbe3767ccbdbad))
+* send root error and interrupt output to stderr, not stdout ([f4b7c48](https://github.com/deepgram/cli/commit/f4b7c48a2155942c0ff7865079fd016397d40482))
+* **web:** repair broken Heap snippet, upgrade astro 6→7, clear all 20 npm alerts ([#96](https://github.com/deepgram/cli/issues/96)) ([11928fe](https://github.com/deepgram/cli/commit/11928feaf5106885663bb577e252c24c3d866fd9))
+
 ## [0.2.27](https://github.com/deepgram/cli/compare/v0.2.26...v0.2.27) (2026-08-17)
 
 

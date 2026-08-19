@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-read"
-version = "0.0.2" # x-release-please-version
+version = "0.1.0" # x-release-please-version
 description = "Read (text intelligence) command for deepctl"
 readme = "README.md"
 license = "MIT"

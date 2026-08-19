@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.16](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.15...deepctl-core-v0.2.16) (2026-08-19)
+
+
+### Bug Fixes
+
+* correct web command examples, document Flux TTS/STT, and honor -o json across account commands ([#97](https://github.com/deepgram/cli/issues/97)) ([55984ec](https://github.com/deepgram/cli/commit/55984ecbc306f24c61568c3aeea59556f96b2707))
+* **keys:** honor -o json so stdout stays parseable (completes the [#97](https://github.com/deepgram/cli/issues/97) sweep) ([#101](https://github.com/deepgram/cli/issues/101)) ([e430a77](https://github.com/deepgram/cli/commit/e430a77609cbf701f52fc454907ee2ddb99dbd07))
+
 ## [0.2.15](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.14...deepctl-core-v0.2.15) (2026-08-17)
 
 
