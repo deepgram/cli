@@ -7,9 +7,12 @@ from dataclasses import dataclass, field
 from threading import local
 from typing import Any
 
-from rich.console import Console
+from .output import stderr_console
 
-console = Console()
+# Diagnostics only: everything printed here is status or error chrome, so
+# it goes to stderr and can never corrupt the machine-readable payload a
+# command writes to stdout. See get_status_console() in output.py.
+console = stderr_console
 
 # Thread-local storage for timing data
 _timing_data = local()

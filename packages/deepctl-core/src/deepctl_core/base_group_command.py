@@ -3,14 +3,17 @@
 from typing import Any
 
 import click
-from rich.console import Console
 
 from .auth import AuthManager
 from .base_command import BaseCommand
 from .client import DeepgramClient
 from .config import Config
+from .output import stderr_console
 
-console = Console()
+# Diagnostics only: everything printed here is status or error chrome, so
+# it goes to stderr and can never corrupt the machine-readable payload a
+# command writes to stdout. See get_status_console() in output.py.
+console = stderr_console
 
 
 class BaseGroupCommand(BaseCommand):
