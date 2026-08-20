@@ -575,3 +575,39 @@ class TestPluginManager:
         ) as mock_warn:
             plugin_manager._warn_if_plugin_venv_python_mismatch()
             mock_warn.assert_called_once()
+
+
+class TestLoadErrorStream:
+    """Plugin-load diagnostics must go to stderr, never stdout.
+
+    A broken plugin's ImportError used to print through a stdout Console,
+    corrupting `dg ... -o json` payloads for every remaining command (the
+    amplifier in the 0.2.x core-floor incident). The module console is the
+    shared stderr console so that cannot recur.
+    """
+
+    def test_module_console_is_the_shared_stderr_console(self):
+        from deepctl_core import plugin_manager
+        from deepctl_core.output import stderr_console
+
+        assert plugin_manager.console is stderr_console
+        assert plugin_manager.console.stderr is True
+
+    def test_load_error_writes_to_stderr_not_stdout(self, capsys):
+        from deepctl_core import plugin_manager
+
+        mock_entry_point = Mock()
+        mock_entry_point.name = "broken-command"
+        mock_entry_point.load.side_effect = ImportError("Module not found")
+
+        with patch(
+            "deepctl_core.plugin_manager.metadata.entry_points"
+        ) as mock_eps:
+            mock_eps.return_value.select.return_value = [mock_entry_point]
+            plugin_manager.PluginManager()._load_builtin_commands(
+                click.Group("dg")
+            )
+
+        captured = capsys.readouterr()
+        assert "broken-command" in captured.err
+        assert captured.out == ""

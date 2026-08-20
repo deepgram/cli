@@ -7,12 +7,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import click
-from rich.console import Console
 
 from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
 from .models import ErrorResult, PluginInfo
-from .output import print_warning
+from .output import print_warning, stderr_console
 from .plugin_env import (
     PLUGIN_VENV,
     get_plugin_state,
@@ -21,7 +20,9 @@ from .plugin_env import (
 )
 from .timing import TimingContext
 
-console = Console()
+# Load errors are diagnostics: they go to stderr so a broken plugin can't
+# corrupt `dg ... -o json` payloads on stdout.
+console = stderr_console
 
 
 class PluginManager:

@@ -64,6 +64,34 @@ Or manually create a package under `packages/` following the existing pattern. E
 
 Then run `make readmes` to update all READMEs.
 
+The root `pyproject.toml` dependency is not optional bookkeeping — it is the
+delivery manifest. `pip install --upgrade deepctl` (what `dg update` runs)
+only installs what root depends on, so a published package missing from that
+list never reaches anyone. `make floors-check` fails on both that omission and
+a floor left below the workspace version; run `make floors-fix` to pin floors.
+
+### Releasing
+
+Releases are driven by release-please. Two things are worth knowing before you
+run one:
+
+**Land your release-notes edits as a commit, not a PR description edit.**
+`sync-release-pr` regenerates `uv.lock` and the root dependency floors on the
+release branch automatically, but it pushes with `GITHUB_TOKEN`, which by
+design retriggers nothing — so the PR's checks still reflect the bot's first
+commit and stay red on content that is now correct. Editing `CHANGELOG.md` on
+the branch is a commit and retriggers them. Editing the PR *description* does
+not: that fires `pull_request: edited`, which is outside the default trigger
+types. If a release ever needs to go out unattended, switch that push to a
+dedicated PAT or GitHub App token.
+
+**Nothing advertises a release until it is installable.** `verify-published`
+polls PyPI until `pip install deepctl==X` resolves its full closure, then
+installs it for real and runs the CLI. `mark-latest`, `deploy-web`, and the
+Homebrew bump all wait on it. If it times out, PyPI has not propagated or a
+sub-package failed to publish — re-run that one job once PyPI has caught up
+and the three downstream jobs re-evaluate.
+
 ### Testing
 
 - Unit tests: `packages/*/tests/unit/`
