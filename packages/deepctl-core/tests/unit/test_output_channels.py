@@ -70,7 +70,11 @@ class TestNoBareConsoleInCore:
         offenders: list[str] = []
 
         for path in sorted(CORE_SRC.glob("*.py")):
-            tree = ast.parse(path.read_text(), filename=str(path))
+            # encoding is explicit because read_text() otherwise uses the
+            # locale codec -- cp1252 on Windows, which cannot decode the
+            # emoji in timing.py and fails the whole matrix.
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
