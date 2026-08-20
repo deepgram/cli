@@ -539,7 +539,7 @@ class ProfilesCommand(BaseCommand):
 
     examples = [
         "dg profiles --list",
-        "dg profiles --show default",
+        "dg profiles --current",
         "dg profiles --switch staging",
     ]
     agent_help = (
