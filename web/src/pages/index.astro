@@ -430,7 +430,7 @@ const commandCards: CommandCard[] = [
             "name": "Can I pipe the Deepgram CLI output to other tools?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. The CLI is fully UNIX-composable. Use --output json (or -o json) to get structured JSON, which can be piped to jq, grep, and other tools. When stdout is a pipe, the CLI automatically switches to JSON. Status messages always go to stderr to keep stdout clean."
+              "text": "Yes. The CLI is fully UNIX-composable. Use --output json (or -o json) to get structured JSON, which can be piped to jq, grep, and other tools. In CI and AI coding tools the CLI detects the context and switches to JSON automatically; from an interactive shell, pass -o json explicitly. Status messages go to stderr so stdout carries only the result."
             }
           }
         ]
@@ -669,12 +669,12 @@ const commandCards: CommandCard[] = [
           <p class="text-dg-muted leading-relaxed mb-8 text-sm">
             Every command writes structured data to stdout and diagnostics to stderr.
             Switch formats with <code class="font-mono text-dg-text text-xs px-1.5 py-0.5 rounded" style="background:#1a1a1f; border: 1px solid #2c2c33;">-o json</code> or let it
-            auto-switch when piped. Plays nicely with every UNIX tool you already know.
+            auto-switch in agent and CI environments. Plays nicely with every UNIX tool you already know.
           </p>
           <div class="space-y-4">
             {[
-              ['JSON / YAML / table / CSV', 'Explicit output format, or auto-JSON when piped.'],
-              ['Errors to stderr', 'Clean stdout channel. No surprises in pipes.'],
+              ['JSON / YAML / table / CSV', 'Explicit output format, or auto-JSON in agent and CI contexts.'],
+              ['Errors to stderr', 'Status and diagnostics on stderr, structured results on stdout.'],
               ['Exit codes everywhere', 'Non-zero on error. Works in set -e scripts.'],
             ].map(([label, desc]) => (
               <div class="flex gap-3 items-start">
