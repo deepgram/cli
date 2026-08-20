@@ -62,18 +62,20 @@ NOT_SHIPPED = {
 def workspace_versions() -> dict[str, str]:
     """Map package name -> current workspace version, per the manifest."""
     versions: dict[str, str] = {}
-    for path in json.loads(MANIFEST.read_text()):
+    for path in json.loads(MANIFEST.read_text(encoding="utf-8")):
         pyproject = REPO / (
             "pyproject.toml" if path == "." else f"{path}/pyproject.toml"
         )
-        project = tomllib.loads(pyproject.read_text())["project"]
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
         versions[project["name"]] = project["version"]
     return versions
 
 
 def floors(pyproject: Path) -> list[tuple[str, str, str]]:
     """Yield (name, floor, raw-spec) for each intra-workspace dependency."""
-    deps = tomllib.loads(pyproject.read_text())["project"].get("dependencies", [])
+    deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"].get(
+        "dependencies", []
+    )
     out = []
     for dep in deps:
         m = re.match(r"^(deepctl[\w-]*)>=([0-9][0-9.]*)", dep)
@@ -108,7 +110,7 @@ def main() -> int:
 
     # Rule 1: root floors == workspace versions.
     root = REPO / "pyproject.toml"
-    root_text = root.read_text()
+    root_text = root.read_text(encoding="utf-8")
     fixed = root_text
     root_floors = floors(root)
     for name, floor, raw in root_floors:
@@ -133,7 +135,7 @@ def main() -> int:
             " (published fixes will not be delivered by pip upgrades)"
         )
     if args.fix and fixed != root_text:
-        root.write_text(fixed)
+        root.write_text(fixed, encoding="utf-8")
         print(f"fixed: root floors pinned to workspace versions in {root}")
 
     # Rule 2: every sub-package floor must be satisfiable at co-release.
