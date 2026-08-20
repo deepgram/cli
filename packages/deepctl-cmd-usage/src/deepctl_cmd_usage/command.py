@@ -37,8 +37,8 @@ class UsageCommand(BaseCommand):
 
     examples = [
         "dg usage",
-        "dg usage --days 30",
-        "dg usage --start 2025-01-01 --end 2025-01-31",
+        "dg usage --last-month",
+        "dg usage --start-date 2025-01-01 --end-date 2025-01-31",
     ]
     agent_help = (
         "View Deepgram API usage statistics for the current project. "
