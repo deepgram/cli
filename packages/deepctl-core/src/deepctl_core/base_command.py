@@ -4,15 +4,20 @@ from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 import click
-from rich.console import Console
 
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config
+from .models import ErrorResult
 from .output import _agentic, print_error, print_info, print_warning, stderr_console
+from .output import console as stdout_console
 from .timing import TimingContext
 
-console = Console()
+# The PAYLOAD console -- stdout, deliberately. Tables, JSON and raw text
+# written by _output_* are the machine-readable result and belong there.
+# Shared instance rather than a bare Console() so it honours the agentic
+# no-color/highlight settings; diagnostics use stderr_console instead.
+console = stdout_console
 
 
 class BaseCommand(ABC):
@@ -105,10 +110,22 @@ class BaseCommand(ABC):
                                 else:
                                     print_warning("No project ID specified")
 
-                    except Exception:
-                        # guard() already printed helpful error messages;
-                        # exit without duplicating them.
-                        raise SystemExit(1)
+                    except Exception as auth_error:
+                        # guard() already wrote the human-readable diagnosis to
+                        # stderr, so don't duplicate it -- but stdout must still
+                        # carry a parseable payload in a machine-readable
+                        # format. A CI step doing `dg -o json ... > out.json`
+                        # and parsing the result should get a structured error,
+                        # not an empty file. output_result is a no-op in
+                        # default mode, so this adds nothing for humans.
+                        self._tag_telemetry_status("error")
+                        try:
+                            self.output_result(
+                                ErrorResult(error=str(auth_error)), config
+                            )
+                        except (BrokenPipeError, OSError):
+                            pass
+                        raise SystemExit(1) from auth_error
 
             # Check project ID if required
             if self.requires_project:

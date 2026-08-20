@@ -316,8 +316,11 @@ dg keys --list -o csv
 dg usage --last-week -o yaml
 ```
 
-When running in a non-TTY environment (pipes, CI, or AI coding tools), the CLI
-automatically switches to structured JSON output with plain-text status messages.
+In CI and AI coding tools, the CLI detects the context and automatically
+switches to structured JSON output with plain-text status messages. A plain
+pipe on its own does not trigger this — `dg projects | jq` still gets the
+human-readable table, so pass `-o json` explicitly when you are piping from an
+interactive shell.
 
 ### Exit codes
 
