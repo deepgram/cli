@@ -293,6 +293,80 @@ class PluginManager:
             help="Skip interactive prompts; use defaults for any optional features.",
         )(cmd)
 
+        # Accept the global output options after the subcommand as well.
+        cmd = self._add_global_passthrough_options(cmd)
+
+        return cmd
+
+    def _add_global_passthrough_options(self, cmd: click.Command) -> click.Command:
+        """Let the global output options work after the subcommand too.
+
+        The root group defines -o/--output, -q/--quiet and -v/--verbose, but
+        Click only parses group options that appear *before* the subcommand
+        name — so ``dg models -o json`` used to fail with "No such option
+        '-o'" while ``dg -o json models`` worked, and the error gave no hint.
+        These pass-through copies apply the same effect from the subcommand
+        position. A copy is only added when the command does not already
+        define the option name itself (for example, ``dg speak --output``
+        names an audio file and keeps its own meaning).
+        """
+        from .output import update_output
+
+        taken: set[str] = set()
+        for param in cmd.params:
+            taken.update(param.opts)
+            taken.update(param.secondary_opts)
+
+        def _apply_format(
+            _ctx: click.Context, _param: click.Parameter, value: str | None
+        ) -> None:
+            if value is not None:
+                update_output(format_type=value)
+
+        def _apply_quiet(
+            _ctx: click.Context, _param: click.Parameter, value: bool
+        ) -> None:
+            if value:
+                update_output(quiet=True)
+
+        def _apply_verbose(
+            _ctx: click.Context, _param: click.Parameter, value: bool
+        ) -> None:
+            if value:
+                update_output(verbose=True)
+
+        if not {"--output", "-o"} & taken:
+            cmd = click.option(
+                "--output",
+                "-o",
+                type=click.Choice(
+                    ["json", "yaml", "table", "csv"], case_sensitive=False
+                ),
+                expose_value=False,
+                callback=_apply_format,
+                help="Output format (same as the global -o before the command).",
+            )(cmd)
+
+        if not {"--quiet", "-q"} & taken:
+            cmd = click.option(
+                "--quiet",
+                "-q",
+                is_flag=True,
+                expose_value=False,
+                callback=_apply_quiet,
+                help="Suppress non-essential output.",
+            )(cmd)
+
+        if not {"--verbose", "-v"} & taken:
+            cmd = click.option(
+                "--verbose",
+                "-v",
+                is_flag=True,
+                expose_value=False,
+                callback=_apply_verbose,
+                help="Enable verbose output.",
+            )(cmd)
+
         return cmd
 
     def _build_help_text(self, instance: Any) -> str:

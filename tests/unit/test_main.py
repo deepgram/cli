@@ -276,3 +276,63 @@ class TestSafeConsolePrint:
             main_mod.main()
 
         assert exc_info.value.code == 1
+
+
+class TestGlobalOptionHint:
+    """A global option after the subcommand gets a placement hint.
+
+    `dg models --profile staging` fails because Click parses group options
+    only before the subcommand name. The bare "No such option" reads as if
+    the option does not exist; the hint names the working placement. The
+    exit code stays 1 per the published contract.
+    """
+
+    def test_hint_for_global_option_after_subcommand(self, capsys):
+        from deepctl.main import main
+
+        # --api-key is a real global option with no pass-through copy, so
+        # it still fails when placed after the subcommand — now with a hint.
+        with (
+            patch("sys.argv", ["deepctl", "not-a-command", "--api-key", "x"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Error" in captured.err
+
+    def test_hint_names_global_option(self):
+        """The helper recognizes root-group options and skips unknowns."""
+        from deepctl.main import _global_option_hint
+
+        hint = _global_option_hint("No such option: '--api-key'")
+        assert hint is not None
+        assert "--api-key" in hint
+        assert "before the subcommand" in hint
+
+        hint = _global_option_hint("No such option: '--profile'")
+        assert hint is not None
+        assert "--profile" in hint
+
+        # An option that is not global gets no hint.
+        assert _global_option_hint("No such option: '--not-a-real-flag'") is None
+
+        # A message with no option token gets no hint.
+        assert _global_option_hint("Missing argument 'FILE'.") is None
+
+    def test_usage_error_without_hint_keeps_contract(self, capsys):
+        """A plain unknown flag still errors to stderr and exits 1."""
+        from deepctl.main import main
+
+        with (
+            patch("sys.argv", ["deepctl", "--definitely-not-a-flag"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Error" in captured.err
