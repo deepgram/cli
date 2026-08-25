@@ -10,6 +10,7 @@ from deepctl_core import (
     DeepgramClient,
     ProfileInfo,
     ProfilesResult,
+    get_output_format,
 )
 from rich.console import Console
 from rich.prompt import Prompt
@@ -751,6 +752,7 @@ class WhoamiCommand(BaseCommand):
         # Determine key and its exact storage source
         api_key: str | None = None
         key_source = "not set"
+        env_key = os.environ.get("DEEPGRAM_API_KEY")
 
         try:
             api_key = _keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
@@ -760,14 +762,19 @@ class WhoamiCommand(BaseCommand):
             pass
 
         if not api_key and profile_cfg.api_key:
+            # Config merges DEEPGRAM_API_KEY into the profile at load time
+            # (environment overrides the file), so a profile key equal to the
+            # environment value came from the environment, not the config
+            # file — label it accordingly instead of claiming "config file".
             api_key = profile_cfg.api_key
-            key_source = "config file"
-
-        if not api_key:
-            env_key = os.environ.get("DEEPGRAM_API_KEY")
-            if env_key:
-                api_key = env_key
+            if env_key and profile_cfg.api_key == env_key:
                 key_source = "DEEPGRAM_API_KEY (env)"
+            else:
+                key_source = "config file"
+
+        if not api_key and env_key:
+            api_key = env_key
+            key_source = "DEEPGRAM_API_KEY (env)"
 
         authenticated = api_key is not None
         masked: str | None = None
@@ -777,21 +784,25 @@ class WhoamiCommand(BaseCommand):
         project_id = auth_manager.get_project_id()
         base_url = profile_cfg.base_url or "https://api.deepgram.com"
 
-        if not authenticated:
-            console.print(
-                "[yellow]Not logged in.[/yellow] Run 'dg login' to authenticate."
-            )
-        else:
-            console.print("[green]✓[/green] Authenticated")
-            console.print(f"  Profile:    {profile_name}")
-            console.print(f"  API Key:    {masked}  [dim]({key_source})[/dim]")
-            console.print(
-                f"  Project ID: {project_id}"
-                if project_id
-                else "  Project ID: [dim]not set[/dim]"
-            )
-            if base_url != "https://api.deepgram.com":
-                console.print(f"  Base URL:   {base_url}")
+        # Render the human block only in default mode. For json/yaml/csv the
+        # framework serialises the returned result to stdout, so printing the
+        # block here would corrupt that output for piping (the #97 pattern).
+        if get_output_format() == "default":
+            if not authenticated:
+                console.print(
+                    "[yellow]Not logged in.[/yellow] Run 'dg login' to authenticate."
+                )
+            else:
+                console.print("[green]✓[/green] Authenticated")
+                console.print(f"  Profile:    {profile_name}")
+                console.print(f"  API Key:    {masked}  [dim]({key_source})[/dim]")
+                console.print(
+                    f"  Project ID: {project_id}"
+                    if project_id
+                    else "  Project ID: [dim]not set[/dim]"
+                )
+                if base_url != "https://api.deepgram.com":
+                    console.print(f"  Base URL:   {base_url}")
 
         return WhoamiResult(
             authenticated=authenticated,
