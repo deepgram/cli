@@ -314,3 +314,224 @@ class TestModelsOutputGating:
         )
 
         assert mock_console.print.called
+
+
+class TestFieldMapping:
+    """The SDK/API field-name fixes: uuid_ and languages.
+
+    The Deepgram Python SDK's generated response classes rename the API's
+    `uuid` field to `uuid_`, and the API reports `languages` as a list.
+    The command used to read `uuid` and `language`, so every row rendered
+    with an empty ID and an empty language column.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return ModelsCommand()
+
+    @pytest.fixture
+    def mock_config(self):
+        return Mock(spec=Config)
+
+    @pytest.fixture
+    def mock_auth_manager(self):
+        manager = Mock(spec=AuthManager)
+        manager.get_api_key.return_value = "test-api-key"
+        return manager
+
+    @pytest.fixture
+    def mock_client(self):
+        return Mock(spec=DeepgramClient)
+
+    def test_sdk_shape_uuid_underscore_and_languages_list(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """model_dump() output (uuid_, languages list) maps onto ModelInfo."""
+        mock_client.list_models.return_value = {
+            "stt": [
+                {
+                    "uuid_": "6b28e919-8427-4f32-9847-492e2efd7daf",
+                    "name": "nova-3",
+                    "canonical_name": "nova-3-general",
+                    "architecture": "nova-3",
+                    "languages": ["en", "en-US"],
+                    "version": "2025-01-01.0",
+                },
+            ],
+            "tts": [
+                {
+                    "uuid_": "6fe3f8e3-14d3-456c-9534-766132310608",
+                    "name": "agathe",
+                    "canonical_name": "aura-2-agathe-fr",
+                    "architecture": "aura-2",
+                    "languages": ["fr", "fr-FR"],
+                    "version": "2025-10-29.0",
+                },
+            ],
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+        )
+
+        assert result.status == "success"
+        stt = result.models[0]
+        assert stt.model_id == "6b28e919-8427-4f32-9847-492e2efd7daf"
+        assert stt.canonical_name == "nova-3-general"
+        assert stt.architecture == "nova-3"
+        assert stt.language == "en"
+        assert stt.languages == ["en", "en-US"]
+
+        tts = result.models[1]
+        assert tts.model_id == "6fe3f8e3-14d3-456c-9534-766132310608"
+        assert tts.canonical_name == "aura-2-agathe-fr"
+        assert tts.model_type == "tts"
+
+    def test_legacy_shape_still_maps(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """The older keys (uuid, language) keep working as fallbacks."""
+        mock_client.list_models.return_value = {
+            "stt": [
+                {
+                    "uuid": "legacy-uuid",
+                    "name": "Nova-3",
+                    "version": "1.0",
+                    "language": "en",
+                },
+            ],
+            "tts": [],
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            type="stt",
+        )
+
+        assert result.status == "success"
+        assert result.models[0].model_id == "legacy-uuid"
+        assert result.models[0].language == "en"
+
+    def test_null_category_does_not_crash(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """An explicit null for a category is treated as an empty list."""
+        mock_client.list_models.return_value = {
+            "stt": [
+                {"uuid_": "u1", "name": "nova-3", "languages": ["en"]},
+            ],
+            "tts": None,
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+        )
+
+        assert result.status == "success"
+        assert result.count == 1
+
+    def test_empty_tts_prints_warning(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """Zero TTS models triggers a loud warning instead of silence.
+
+        A catalog that silently shows only speech-to-text models led agents
+        to conclude Deepgram has no text-to-speech side. The warning makes
+        an empty category visible as an anomaly.
+        """
+        mock_client.list_models.return_value = {
+            "stt": [
+                {"uuid_": "u1", "name": "nova-3", "languages": ["en"]},
+            ],
+            "tts": [],
+        }
+
+        with patch("deepctl_cmd_models.command.status_console") as mock_status_console:
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+            )
+
+        assert result.status == "success"
+        warnings = [str(call) for call in mock_status_console.print.call_args_list]
+        assert any("zero text-to-speech" in w for w in warnings)
+
+    def test_stt_filter_suppresses_tts_warning(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """--type stt does not warn about the (unrequested) TTS category."""
+        mock_client.list_models.return_value = {
+            "stt": [
+                {"uuid_": "u1", "name": "nova-3", "languages": ["en"]},
+            ],
+            "tts": [],
+        }
+
+        with patch("deepctl_cmd_models.command.status_console") as mock_status_console:
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                type="stt",
+            )
+
+        assert result.status == "success"
+        warnings = [str(call) for call in mock_status_console.print.call_args_list]
+        assert not any("zero text-to-speech" in w for w in warnings)
+
+
+class TestDeprecationFlags:
+    """Legacy models are flagged so nobody derives new names from them."""
+
+    @pytest.fixture
+    def command(self):
+        return ModelsCommand()
+
+    @pytest.fixture
+    def mock_config(self):
+        return Mock(spec=Config)
+
+    @pytest.fixture
+    def mock_auth_manager(self):
+        manager = Mock(spec=AuthManager)
+        manager.get_api_key.return_value = "test-api-key"
+        return manager
+
+    @pytest.fixture
+    def mock_client(self):
+        return Mock(spec=DeepgramClient)
+
+    @pytest.mark.parametrize("legacy_name", ["conversationalai", "2-conversationalai"])
+    def test_conversationalai_flagged_deprecated(
+        self, command, mock_config, mock_auth_manager, mock_client, legacy_name
+    ):
+        mock_client.list_models.return_value = {
+            "stt": [
+                {"uuid_": "u1", "name": legacy_name, "languages": ["en"]},
+                {"uuid_": "u2", "name": "nova-3", "languages": ["en"]},
+            ],
+            "tts": [],
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            type="stt",
+        )
+
+        legacy = next(m for m in result.models if m.name == legacy_name)
+        assert legacy.deprecated is True
+        assert "nova-3" in legacy.deprecation_note
+        assert "nova-3-conversational" in legacy.deprecation_note
+
+        current = next(m for m in result.models if m.name == "nova-3")
+        assert current.deprecated is False
+        assert current.deprecation_note == ""
