@@ -575,3 +575,92 @@ class TestPluginManager:
         ) as mock_warn:
             plugin_manager._warn_if_plugin_venv_python_mismatch()
             mock_warn.assert_called_once()
+
+
+class TestGlobalPassthroughOptions:
+    """Global output options must work after the subcommand too.
+
+    The root group defines -o/--output, -q and -v, but Click only parses
+    group options given before the subcommand, so `dg models -o json`
+    failed with "No such option '-o'". Every generated command now carries
+    pass-through copies — except where the command defines the same option
+    itself (dg speak --output names an audio file).
+    """
+
+    @pytest.fixture
+    def plugin_manager(self):
+        return PluginManager()
+
+    def _make_command_class(self, arguments: list[dict[str, Any]]):
+        class PassthroughProbeCommand(BaseCommand):
+            name = "probe"
+            help = "Probe command"
+
+            def get_arguments(self) -> list[dict[str, Any]]:
+                return arguments
+
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs,
+            ) -> Any:
+                return {"result": "success"}
+
+        return PassthroughProbeCommand
+
+    @pytest.mark.unit
+    def test_output_option_added_when_free(self, plugin_manager):
+        """A command without its own -o/--output gets the pass-through."""
+        command_class = self._make_command_class([])
+        cmd = plugin_manager._create_click_command(command_class())
+
+        opts = set()
+        for param in cmd.params:
+            opts.update(param.opts)
+        assert "--output" in opts
+        assert "-o" in opts
+        assert "--quiet" in opts
+        assert "--verbose" in opts
+
+    @pytest.mark.unit
+    def test_output_option_skipped_on_collision(self, plugin_manager):
+        """A command with its own --output keeps its own meaning."""
+        command_class = self._make_command_class(
+            [
+                {
+                    "names": ["--output", "-o"],
+                    "help": "Output audio file path",
+                    "type": str,
+                    "is_option": True,
+                },
+            ]
+        )
+        cmd = plugin_manager._create_click_command(command_class())
+
+        output_params = [p for p in cmd.params if "--output" in p.opts]
+        assert len(output_params) == 1
+        # The command's own option takes a free-form string, not a Choice.
+        assert not isinstance(output_params[0].type, click.Choice)
+
+    @pytest.mark.unit
+    def test_passthrough_output_applies_format(self, plugin_manager):
+        """Parsing `probe -o json` switches the global output format."""
+        from click.testing import CliRunner
+        from deepctl_core.output import _output_config
+
+        command_class = self._make_command_class([])
+        instance = command_class()
+        # Bypass auth/client plumbing: the test targets option parsing only.
+        instance.execute = lambda ctx, **kwargs: None
+        cmd = plugin_manager._create_click_command(instance)
+
+        previous_format = _output_config["format"]
+        try:
+            runner = CliRunner()
+            result = runner.invoke(cmd, ["-o", "yaml"], standalone_mode=False)
+            assert result.exception is None
+            assert _output_config["format"] == "yaml"
+        finally:
+            _output_config["format"] = previous_format
