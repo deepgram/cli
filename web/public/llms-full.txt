@@ -316,24 +316,28 @@ All commands accept these global flags:
 
 `dg` auto-detects AI agent context and adjusts behavior automatically:
 
-**Detection signals (hard):**
-- `CLAUDECODE=1` (Claude Code)
-- `CLAUDE_CODE_ENTRYPOINT` (Claude Code CLI)
-- `CODEX_SANDBOX` (OpenAI Codex)
-- `OR_APP_NAME=Aider` (Aider)
+**Detection signals (hard, any one is conclusive):**
+- `CLAUDECODE` set (Claude Code)
+- `CLAUDE_CODE_ENTRYPOINT` set (Claude Code CLI)
+- `CODEX_SANDBOX` or `CODEX_SANDBOX_NETWORK_DISABLED` set (OpenAI Codex)
+- `OR_APP_NAME=Aider`, or `aider` in `OR_SITE_URL` (Aider)
+- `CI=true` or `CI=1`
 - `--agent-friendly` flag on command line
+- `--non-interactive` flag on command line
 
 **Detection signals (soft, 3+ = agent mode):**
 - stdin not a TTY
 - stdout not a TTY
-- `CI=true` or `CI=1`
 - `TERM=dumb` or TERM unset
 - `NO_COLOR` set
 
 **Agent mode behavior:**
 - All interactive prompts return defaults (no blocking on stdin)
 - Status messages routed to stderr
-- Data output to stdout only
+- Data output to stdout: the core commands write nothing else there, so a
+  failure arrives on stdout as parseable JSON. A handful of commands still
+  print a human summary to stdout ahead of the payload, so branch on the exit
+  code rather than on whether stdout parsed.
 - JSON output format by default
 - Exit codes: 0 = success, 1 = error, 2 = user interrupt
 

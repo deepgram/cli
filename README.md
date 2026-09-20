@@ -316,11 +316,12 @@ dg keys --list -o csv
 dg usage --last-week -o yaml
 ```
 
-In CI and AI coding tools, the CLI detects the context and automatically
-switches to structured JSON output with plain-text status messages. A plain
-pipe on its own does not trigger this — `dg projects | jq` still gets the
-human-readable table, so pass `-o json` explicitly when you are piping from an
-interactive shell.
+In CI, in AI coding tools, and in any fully non-interactive environment with
+no terminal attached (cron, systemd, `docker run` without `-t`), the CLI
+detects the context and automatically switches to structured JSON output with
+plain-text status messages. A plain pipe on its own does not trigger this —
+`dg projects | jq` from an interactive shell still gets the human-readable
+table, so pass `-o json` explicitly when you are piping by hand.
 
 ### Exit codes
 
@@ -337,8 +338,16 @@ Note that `dg` reports `2` for an interrupt rather than the shell's
 conventional `130`, so the code is the same whether the cancellation came from
 Ctrl-C or from declining a prompt.
 
-If a CI step relied on `dg` always exiting `0` (every command did, before
-0.3.0), it will now fail where it previously passed silently.
+Human-readable status and error messages go to stderr, and stdout carries the
+result. With `-o json` a command that runs and fails writes that failure to
+stdout as a payload with `"status": "error"`, so `dg ... -o json | jq` stays
+parseable across the failure — authentication failures, `dg ffprobe` and
+`dg debug audio` included. This is not yet universal: a handful of commands
+still echo their human-readable summary to stdout ahead of the payload, and a
+usage error (a bad flag, an unknown command) writes nothing to stdout at all.
+Branch on the exit code rather than on whether stdout parsed. If a CI step
+relied on `dg` always exiting `0` (every command did, before 0.3.0), it will
+now fail where it previously passed silently.
 
 ### Forcing non-interactive mode
 
