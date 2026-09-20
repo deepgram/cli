@@ -210,6 +210,18 @@ def _play_audio(player: str, audio: bytes, *, suffix: str) -> None:
         sink.write(audio)
 
 
+def _fail(message: str) -> BaseResult:
+    """An error result whose message the user actually sees.
+
+    In default output mode the framework prints nothing for a returned
+    result — it only maps the status to a non-zero exit code — so the human
+    message has to go to the stderr console here, the way every other status
+    line in this command does.
+    """
+    console.print(f"[red]Error:[/red] {message}")
+    return BaseResult(status="error", message=message)
+
+
 def _fmt_bytes(n: int) -> str:
     """Human-readable byte count for progress display."""
     if n < 1024:
@@ -503,17 +515,15 @@ class SpeakCommand(BaseCommand):
         if not text and file_path:
             path = Path(file_path)
             if not path.exists():
-                return BaseResult(
-                    status="error", message=f"File not found: {file_path}"
-                )
+                return _fail(f"File not found: {file_path}")
             text = path.read_text().strip()
         elif not text and not sys.stdin.isatty():
             text = sys.stdin.read().strip()
 
         if not text:
-            return BaseResult(
-                status="error",
-                message="No text provided. Pass text as argument, use --file, or pipe via stdin.",
+            return _fail(
+                "No text provided. Pass text as argument, use --file, "
+                "or pipe via stdin."
             )
 
         # If --play was requested, resolve the player up front so we fail fast
@@ -522,33 +532,17 @@ class SpeakCommand(BaseCommand):
         if play:
             player = _find_audio_player()
             if player is None:
-                return BaseResult(
-                    status="error",
-                    message=(
-                        "No audio player found — install ffmpeg, or use -o to "
-                        "save a file."
-                    ),
+                return _fail(
+                    "No audio player found — install ffmpeg, or use -o to save a file."
                 )
 
         # If stdout is a TTY and there's nowhere for the audio to go, require an
         # explicit destination. --play satisfies that requirement.
         stdout_is_tty = sys.stdout.isatty()
         if not output_path and not play and stdout_is_tty:
-            return BaseResult(
-                status="error",
-                message=(
-                    "No output specified. Use -o/--output to save to a file, "
-                    "--play to hear it, or pipe stdout."
-                ),
-            )
-
-        if play and not output_path and not stdout_is_tty:
-            # Playing sends the audio to the player, not to stdout, so a
-            # redirect or pipe would otherwise collect nothing and give no
-            # hint why.
-            console.print(
-                "[yellow]Note:[/yellow] --play sends the audio to your player, "
-                "so stdout stays empty. Add -o to save a file too."
+            return _fail(
+                "No output specified. Use -o/--output to save to a file, "
+                "--play to hear it, or pipe stdout."
             )
 
         # Only the documented flux-* namespace uses speak.v2. Aura and unknown
@@ -563,7 +557,7 @@ class SpeakCommand(BaseCommand):
                 player, is_flux=is_flux, encoding=encoding, container=container
             )
             if unplayable is not None:
-                return BaseResult(status="error", message=unplayable)
+                return _fail(unplayable)
 
         # speed / expressivity are Flux (Speak v2) connect controls; reject them
         # for other models rather than silently dropping them. Raise (not return)
@@ -583,6 +577,15 @@ class SpeakCommand(BaseCommand):
             allowed = ", ".join(str(e) for e in _FLUX_EXPRESSIVITY)
             raise click.ClickException(
                 f"--expressivity must be one of: {allowed} (got {expressivity})."
+            )
+
+        if play and not output_path and not stdout_is_tty:
+            # Playing sends the audio to the player, not to stdout, so a
+            # redirect or pipe would otherwise collect nothing and give no
+            # hint why.
+            console.print(
+                "[yellow]Note:[/yellow] --play sends the audio to your player, "
+                "so stdout stays empty. Add -o to save a file too."
             )
 
         if is_flux:
@@ -819,7 +822,7 @@ class SpeakCommand(BaseCommand):
                 total_bytes = len(audio_bytes)
 
                 if not audio_bytes:
-                    return BaseResult(status="error", message="TTS returned no audio.")
+                    return _fail("TTS returned no audio.")
 
                 if output_path:
                     Path(output_path).write_bytes(audio_bytes)
