@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import shlex
 from importlib import metadata
+from pathlib import Path
 
 import click
 import pytest
@@ -54,6 +55,8 @@ def _is_dynamic(argv: list[str]) -> bool:
         return True
     return False
 
+
+ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 # `$(...)` or `` `...` `` -- non-nested, which is all our examples use.
 SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
@@ -100,6 +103,10 @@ def _dg_invocations(example: str) -> list[list[str]]:
                 argv = shlex.split(segment, comments=True)
             except ValueError:
                 continue
+            # `CI=1 dg listen x.wav` and `DEEPCTL_TELEMETRY_DISABLED=1 dg …`
+            # are advertised too; the assignments are shell, the rest is ours.
+            while argv and ENV_ASSIGNMENT.match(argv[0]):
+                argv = argv[1:]
             if argv and argv[0] in BINARY_NAMES:
                 invocations.append(argv[1:])
     return invocations
@@ -183,3 +190,108 @@ def test_example_parses(
             "Fix the example, or add the option/subcommand it promises. This "
             "array is also what --agent-friendly emits."
         )
+
+
+# ---------------------------------------------------------------------------
+# The same guarantee, for the commands advertised in developer-facing docs.
+#
+# The `examples` arrays are not the only place the CLI tells people how to run
+# it. The README and the two `llms*.txt` files agents read carry ~190 more
+# command strings, and the #105 sweep did not reach them: `llms-full.txt` still
+# advertised `dg usage --start/--end`, the exact option pair #105 fixed in
+# `--help`, plus a `-o json` placement the CLI rejects (`-o` is a global flag
+# and must precede the subcommand).
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+DOC_FILES = [
+    "README.md",
+    "web/public/llms.txt",
+    "web/public/llms-full.txt",
+]
+
+# Templates, not runnable commands: `dg ... -o json | jq`, `dg <command>
+# --agent-friendly`, `dg keys --delete KEY_ID`, `dg login --api-key SK`.
+PLACEHOLDER = re.compile(r"\.\.\.|[<>{}]|YOUR_|\bKEY_ID\b|\bSK\b")
+
+# Lines that start a shell snippet we own.
+SNIPPET_START = ("dg ", "deepctl ", "dg\t", "eval ")
+
+
+def _doc_commands(path: str) -> list[tuple[int, str]]:
+    """(line number, command string) for every `dg …` a doc file advertises.
+
+    Two sources, because both are read as instructions: lines inside fenced
+    code blocks, and inline `code spans` in prose. Non-ASCII candidates are
+    prose, not commands (the README banner caption is `deepctl \u2014 Official
+    Deepgram CLI \u2026`), and templates carrying a placeholder are skipped --
+    with the placeholder set spelled out above rather than dropped silently.
+    """
+    found: list[tuple[int, str]] = []
+    fenced = False
+    text = (REPO_ROOT / path).read_text(encoding="utf-8")
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith("```"):
+            fenced = not fenced
+            continue
+        candidates = []
+        stripped = line.strip()
+        if fenced and (
+            stripped.startswith(SNIPPET_START)
+            or (ENV_ASSIGNMENT.match(stripped) and " dg " in stripped)
+        ):
+            candidates.append(stripped)
+        candidates += [
+            span
+            for span in re.findall(r"`([^`]+)`", line)
+            if span.startswith(("dg ", "deepctl "))
+        ]
+        for candidate in candidates:
+            if PLACEHOLDER.search(candidate) or not candidate.isascii():
+                continue
+            found.append((lineno, candidate))
+    return found
+
+
+DOC_CASES = [
+    (path, lineno, command)
+    for path in DOC_FILES
+    for lineno, command in _doc_commands(path)
+]
+
+
+@pytest.mark.parametrize("path", DOC_FILES)
+def test_doc_commands_were_discovered(path: str) -> None:
+    """A docs refactor that stops matching must fail rather than pass empty."""
+    assert [case for case in DOC_CASES if case[0] == path], (
+        f"no `dg ...` commands found in {path} -- the extractor is stale, so "
+        "this file is testing nothing"
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "lineno", "command"),
+    DOC_CASES,
+    ids=[f"{path}:{lineno}" for path, lineno, _ in DOC_CASES],
+)
+def test_doc_command_parses(path: str, lineno: int, command: str) -> None:
+    """Every command a doc advertises must resolve against the real CLI."""
+    from deepctl.main import cli
+
+    for argv in _dg_invocations(command):
+        try:
+            _parse(cli, argv)
+        except (SystemExit, click.exceptions.Exit):
+            # An eager option such as --help short-circuits; it parsed fine.
+            pass
+        except (click.exceptions.NoArgsIsHelpError, click.MissingParameter):
+            # The docs list bare command names (`dg debug`, `dg plugin`) in
+            # tables. Those resolve; they just need arguments to run.
+            pass
+        except click.ClickException as exc:
+            pytest.fail(
+                f"{path}:{lineno} advertises `{command}`, which does not "
+                f"parse: {type(exc).__name__}: {exc}\n"
+                "Fix the doc, or add the option/subcommand it promises."
+            )

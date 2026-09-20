@@ -77,7 +77,7 @@ dg listen recording.wav
 dg listen podcast.mp3 --model nova-3
 dg listen interview.mp4 --diarize --language en-US
 dg listen meeting.wav --summarize --topics
-dg listen call.mp3 --output json --save-to transcript.json
+dg -o json listen call.mp3 --save-to transcript.json
 ```
 
 ### Transcribe a URL
@@ -168,7 +168,7 @@ dg speak --file script.txt                        # From file
 
 ```bash
 dg read "The product exceeded expectations" --sentiment
-dg read --file article.txt --summarize --detect-topics --detect-entities
+dg read --file article.txt --summarize --topics --intents
 echo "Meeting notes..." | dg read --summarize
 ```
 
@@ -215,7 +215,7 @@ dg members --revoke-invite user@example.com
 
 ```bash
 dg usage                             # Usage summary
-dg usage --start 2024-01-01 --end 2024-01-31
+dg usage --start-date 2024-01-01 --end-date 2024-01-31
 dg billing                           # Account balance
 dg requests                          # Recent API requests
 ```
@@ -286,7 +286,7 @@ Plugins install into an isolated venv at `~/.deepctl/plugins/venv/`.
 ## Debug Tools
 
 ```bash
-dg debug audio recording.wav         # Analyze audio file (codec, bitrate, compatibility)
+dg debug audio -f recording.wav      # Analyze audio file (codec, bitrate, compatibility)
 dg debug network                     # Test connectivity to Deepgram API
 dg debug browser                     # Check browser/WebRTC capabilities
 dg debug probe                       # Analyze WebSocket stream
@@ -306,7 +306,6 @@ All commands accept these global flags:
 | `--profile`, `-p` | Use named credential profile |
 | `--config`, `-c` | Path to config file |
 | `--api-key` | Explicit API key (overrides profile) |
-| `--project-id` | Explicit project ID |
 | `--timing` | Show performance timing |
 | `--agent-friendly` | Output JSON metadata for this command and exit |
 
@@ -376,19 +375,19 @@ Environment variables:
 
 ```bash
 # Transcribe and extract text with jq
-dg listen call.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'
+dg -o json listen call.mp3 | jq '.results.channels[0].alternatives[0].transcript'
 
 # Get all speaker segments
-dg listen interview.mp3 --diarize -o json | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
+dg -o json listen interview.mp3 --diarize | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
 
 # TTS piped to audio player
 dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -
 
 # Stream mic and log all transcripts
-dg listen --mic -o json | tee transcripts.jsonl
+dg -o json listen --mic | tee transcripts.jsonl
 
 # Create a time-limited API key for CI
-dg keys --create --comment "CI/CD" --ttl 3600 -o json | jq -r '.created_key.key'
+dg -o json keys --create --comment "CI/CD" --ttl 3600 | jq -r '.created_key.key'
 ```
 
 ---

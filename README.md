@@ -311,9 +311,9 @@ dg keys --delete KEY_ID --yes
 dg read --file report.txt --summarize
 
 # Output formats for scripting
-dg projects --list -o json
-dg keys --list -o csv
-dg usage --last-week -o yaml
+dg -o json projects --list
+dg -o csv keys --list
+dg -o yaml usage --last-week
 ```
 
 In CI, in AI coding tools, and in any fully non-interactive environment with
@@ -407,10 +407,14 @@ The CLI phones home anonymous error reports to help us catch crashes and regress
 
 ### Opt out
 
-Persistent (recommended):
+Persistent (recommended) — add this to your `config.yaml`
+(`~/.config/deepctl/config.yaml` on Linux,
+`~/Library/Application Support/deepctl/config.yaml` on macOS,
+`%LOCALAPPDATA%\\deepgram\\deepctl\\config.yaml` on Windows):
 
-```bash
-dg config set telemetry.enabled false
+```yaml
+telemetry:
+  enabled: false
 ```
 
 One-shot (CI, scripts, single command):
