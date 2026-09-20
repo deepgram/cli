@@ -69,7 +69,9 @@ class TestNoBareConsoleInCore:
     def test_no_module_declares_a_bare_console(self) -> None:
         offenders: list[str] = []
 
-        for path in sorted(CORE_SRC.glob("*.py")):
+        # rglob, not glob: a future subpackage under deepctl_core/ must be
+        # swept too, or the guard quietly stops covering new code.
+        for path in sorted(CORE_SRC.rglob("*.py")):
             # encoding is explicit because read_text() otherwise uses the
             # locale codec -- cp1252 on Windows, which cannot decode the
             # emoji in timing.py and fails the whole matrix.
@@ -150,3 +152,81 @@ class TestAuthFailurePayload:
         captured = self._run_guard_failure(capsys, "default")
 
         assert captured.out == ""
+
+
+class TestCredentialSourceDiagnostics:
+    """The #104 success path: `--api-key` used to prefix the payload.
+
+    `print_info` / `print_warning` write to *stdout* outside agentic mode, so
+    `dg --api-key <key> -o json projects --list` put two English sentences in
+    front of the JSON and `json.loads(stdout)` raised. These are diagnostics;
+    they belong on stderr in every mode.
+    """
+
+    def _run_with_credential_source(self, capsys, source: str, project_id):
+        from unittest.mock import MagicMock, patch
+
+        import click
+        from deepctl_core import base_command
+        from deepctl_core.base_command import BaseCommand
+        from deepctl_core.config import Config
+        from deepctl_core.models import BaseResult
+
+        class NeedsAuth(BaseCommand):
+            name = "needs-auth"
+            help = "test command"
+            requires_auth = True
+
+            def handle(self, config, auth_manager, client, **kwargs):  # type: ignore[no-untyped-def]
+                return BaseResult(status="success", message="done")
+
+        command = NeedsAuth()
+        ctx = MagicMock(spec=click.Context)
+        ctx.obj = {"config": Config()}
+        # is_guided() walks ctx.command.params; spec=Context does not supply
+        # `command` because click sets it in __init__.
+        ctx.command = MagicMock(params=[])
+        ctx.params = {}
+
+        auth_manager = MagicMock()
+        auth_manager.guard.return_value = None
+        auth_manager.get_credential_source.return_value = source
+        auth_manager.get_project_id.return_value = project_id
+
+        # Non-agentic is the mode the bug lived in: print_info/print_warning
+        # already route to stderr when `agentic` is set, and pytest's captured
+        # streams would otherwise make that the default here and hide the
+        # regression. Pin it off so this test exercises the broken path.
+        with (
+            patch(
+                "deepctl_core.base_command.AuthManager", return_value=auth_manager
+            ),
+            patch("deepctl_core.base_command.DeepgramClient"),
+            patch(
+                "deepctl_core.output.get_output_format", return_value="json"
+            ),
+            patch.object(base_command, "_agentic", False),
+            patch.dict(output._output_config, {"agentic": False, "quiet": False}),
+        ):
+            command.execute(ctx)
+
+        return capsys.readouterr()
+
+    def test_explicit_flags_leave_stdout_parseable(self, capsys) -> None:
+        captured = self._run_with_credential_source(capsys, "explicit flags", None)
+
+        payload = json.loads(captured.out)
+        assert payload["status"] == "success"
+        assert "Using credentials from" in captured.err
+        assert "No project ID specified" in captured.err
+        assert "Using credentials from" not in captured.out
+
+    def test_project_id_line_also_goes_to_stderr(self, capsys) -> None:
+        captured = self._run_with_credential_source(
+            capsys, "environment variables", "abc-123"
+        )
+
+        payload = json.loads(captured.out)
+        assert payload["status"] == "success"
+        assert "Affecting project: abc-123" in captured.err
+        assert "abc-123" not in captured.out
