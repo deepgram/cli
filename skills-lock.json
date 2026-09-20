@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "skills": {
+    "api": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/api/SKILL.md",
+      "computedHash": "a16f61cdb910fe519f70d36131ade7f526bfe7bc7aaa0bdadd6b529a525d35b7"
+    },
+    "audio-intelligence": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/audio-intelligence/SKILL.md",
+      "computedHash": "af1bd7542e9783ee4a97cbe3dacc59686e4be998cf9965e4d4769d58abc5de68"
+    },
+    "browser-agent": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/browser-agent/SKILL.md",
+      "computedHash": "5d61d87961a498fe020695166a129e4122c4520e45fa24b463fb411e0d680846"
+    },
+    "cli": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/cli/SKILL.md",
+      "computedHash": "2b7c224fe96708e293448767758a449d7df99942ab872b74f8edbfb04fd6a889"
+    },
+    "docs": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/docs/SKILL.md",
+      "computedHash": "3cf6bdf4fa55563ca95492df8a1acda49f4ee415143f34c9b67513f29fdf6bf5"
+    },
+    "examples": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/examples/SKILL.md",
+      "computedHash": "d4eb777c4af4b5c871a687aad436c133a1456f007df225688567bb6d2f011c43"
+    },
+    "recipes": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/recipes/SKILL.md",
+      "computedHash": "0124a68afaf7e325d78fed75ab8ac2fd56e4b899f11fd760bb3abfd84906ff5c"
+    },
+    "self-hosted": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/self-hosted/SKILL.md",
+      "computedHash": "6cacc2448a14d604b189d8d5326fdeecbbe3c53ec56025b8f466dad39a3e9329"
+    },
+    "setup-mcp": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/setup-mcp/SKILL.md",
+      "computedHash": "86d469dc6333ec5fb03cc187538507992b73a5d7f895d8ccf2ce18e5d2ebf358"
+    },
+    "speech-to-text": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/speech-to-text/SKILL.md",
+      "computedHash": "c848730ab7d591df3777c4e82e7f0c9980b6d86756029bb5171d13388039b71e"
+    },
+    "starters": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/starters/SKILL.md",
+      "computedHash": "73fdc3391254144d2f7bfe696b020d651212a36f17a80807bc4a1a0aa4a377ea"
+    },
+    "text-intelligence": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/text-intelligence/SKILL.md",
+      "computedHash": "b84a8b49325e736a06f11b0ae3dfc265a1c49b1b19bc84300a0785c27f438c47"
+    },
+    "text-to-speech": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/text-to-speech/SKILL.md",
+      "computedHash": "51862f8b839036148f534cb5cdb2cc33e0f57749ae465adca576326854f06d78"
+    },
+    "voice-agent": {
+      "source": "deepgram/skills",
+      "sourceType": "github",
+      "skillPath": "skills/voice-agent/SKILL.md",
+      "computedHash": "80ad462f742b2c4dd1ed56f5c47f388e29076b09b12fb46f996142be154262f7"
+    }
+  }
+}

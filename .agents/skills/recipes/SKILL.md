@@ -1,0 +1,84 @@
+---
+name: recipes
+description: >
+  Find focused, runnable Deepgram recipes for a specific feature × language. Use whenever
+  someone wants a minimal working code snippet for ONE feature (transcribe URL, diarize,
+  smart-format, voice agent connect, etc.) rather than a full starter app. Recipes are
+  under 50 lines, read DEEPGRAM_API_KEY from env, and ship with a runnable example_test.
+  Covers Python, JavaScript, Go, .NET, Java, Rust, and the Deepgram CLI.
+---
+
+# Deepgram Recipes
+
+Agent-maintained micro-recipes showing how to use every Deepgram SDK feature across every supported language. Each recipe is a focused, runnable snippet — not a full app.
+
+## When to use recipes
+
+- You know the product and feature; you want the shortest working code
+- You want `example.py` / `example.js` / `example.go` / etc. you can copy into your project
+- You want a language-specific answer to "how do I call `{feature}` with the Deepgram SDK?"
+
+**Use a different skill when:**
+- You want a full starter app with a web UI, deploy config, etc. → `starters` skill
+- You want integration with a third-party platform (Twilio, LiveKit, Vercel AI SDK, Discord, etc.) → `examples` skill
+- You want the full API contract (params, responses, message shapes) → `api` skill
+- You want a shell command rather than application code → `cli` skill
+
+## Browse recipes
+
+Repository: <https://github.com/deepgram/recipes>
+
+Coverage matrix: <https://github.com/deepgram/recipes/blob/main/COVERAGE.md>
+
+## Recipe structure
+
+```
+recipes/{language}/{product}/{version}/{recipe}/
+  example.{ext}       # runnable, < 50 lines, reads DEEPGRAM_API_KEY from env
+  example_test.{ext}  # runs the example as a subprocess, asserts output
+  README.md           # feature explanation, params, sample output, how to run
+```
+
+## Products covered
+
+| Product | Recipe examples |
+|---|---|
+| Speech-to-Text — Nova (`/v1/listen`) | transcribe-url, transcribe-file, paragraphs, diarize, smart-format, utterances, summarize, sentiment, topics, intents, detect-entities, detect-language, redact, search, keywords, streaming |
+| Speech-to-Text — Flux STT (`/v2/listen`) | streaming conversational transcription, EOT / eager-EOT, mid-session `Configure`, keyterms |
+| Text-to-Speech — Aura (`/v1/speak`) | generate-audio, stream-audio, websocket-streaming, select-model, select-encoding, bit-rate |
+| Audio Intelligence (`/v1/listen`) | summarize, sentiment, topics, intents, entities |
+| Voice Agents | connect, custom-llm, custom-tts, function-calling |
+| Text Analysis (`/v1/read`) | summarize, sentiment, topics, intents |
+
+Audio Intelligence and Text Analysis run the same analysis on different inputs, so pick the row by what you already have. The Audio Intelligence recipes are query parameters layered on `/v1/listen`, so the input is audio and `entities` is one of them. The Text Analysis recipes are one `POST /v1/read`, so the input is text and there is no entities recipe: `detect_entities` on `/v1/read` returns 400 `{"err_code":"INVALID_QUERY_PARAMETER","err_msg":"unknown query parameter: detect_entities"}`. Open the `audio-intelligence` skill for the first and `text-intelligence` for the second. Text Analysis recipes exist in all seven languages.
+
+Nova is the general-purpose STT family; Flux STT is designed for conversational audio and voice agents. Both are actively maintained — see the `api` skill's "Nova vs Flux STT" section for the decision guide. Note that Flux STT (`/v2/listen`) and Flux TTS (`/v2/speak`) are separate products that share the Flux name.
+
+**Flux TTS (`/v2/speak`) has no recipes yet.** The TTS recipes above cover Aura on `/v1/speak` only — there is no `text-to-speech/v2` directory in the recipes repo. For Flux TTS, use the `api` skill's "Aura vs Flux TTS" section for the endpoint contract, or the `starters` skill's `flux-tts` apps (node, flask, fastapi, django, java) for runnable code.
+
+## Languages
+
+Python, JavaScript, Go, .NET, Java, Rust, plus the Deepgram CLI (`dg` / `deepctl`).
+
+## Install the related SDK skills
+
+For language-idiomatic patterns beyond a single recipe (full quick-starts, common patterns, gotchas), install the SDK-specific skills:
+
+```bash
+npx skills add deepgram/deepgram-python-sdk     # Python
+npx skills add deepgram/deepgram-js-sdk         # JavaScript / TypeScript
+npx skills add deepgram/deepgram-java-sdk       # Java
+npx skills add deepgram/deepgram-go-sdk         # Go
+npx skills add deepgram/deepgram-rust-sdk       # Rust
+npx skills add deepgram/deepgram-dotnet-sdk     # C# / .NET
+```
+
+Swift and Kotlin SDK skills are not listed because those repositories are not public and `npx skills add` cannot reach them. For browser work, open the `browser-agent` skill: it covers the four Browser Agent SDK packages published on npm (`@deepgram/agents`, `@deepgram/react`, `@deepgram/ui`, `@deepgram/agents-widget`).
+
+## Related Deepgram skills
+
+- `api` — consolidated REST + WebSocket API reference
+- `examples` — third-party platform integrations (Twilio, LiveKit, LangChain, etc.)
+- `starters` — runnable starter apps (framework × feature matrix)
+- `docs` — documentation finder
+- `setup-mcp` — Deepgram MCP server installation

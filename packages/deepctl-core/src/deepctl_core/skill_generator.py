@@ -1,7 +1,21 @@
-"""Skill generator for AI coding assistant integration.
+"""Install Deepgram skills into AI coding assistants.
 
-Generates skill/instruction files that teach AI coding CLIs (Claude Code,
-Codex, Gemini CLI, etc.) how to use deepctl.
+Two different artifacts live in this module, and keeping them apart is the
+point:
+
+* The **Deepgram skills** themselves, fetched from deepgram/skills by
+  :mod:`deepctl_core.skill_bundle`. A skill is a *folder* — ``SKILL.md``
+  plus, for some, a ``references/`` subdirectory — and it is installed
+  verbatim into whatever directory the target tool loads skills from.
+* A generated **deepctl developer guide** (:func:`render_developer_guide`),
+  for tools that have no skills directory and only read one long context or
+  rules file. That is the one thing that legitimately gets merged into a
+  file the user also edits, under HTML markers.
+
+Mixing the two is what produced ``~/.claude/commands/deepgram/api.md`` (the
+slash-command directory, holding a skill) and a 58 KB ``instructions.md``
+with four skills concatenated inside a marker that claimed to be a CLI
+reference.
 """
 
 from __future__ import annotations
@@ -13,7 +27,19 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from deepctl_core.skill_bundle import fetch_skill_bundle
+
+if TYPE_CHECKING:
+    from deepctl_core.skill_bundle import RepoSkill
+
+# The cross-tool installer that owns the directory conventions this module
+# targets. Quoted verbatim to users whose tool has no skills directory yet.
+SKILLS_CLI_HINT = "npx skills add deepgram/skills"
+
+#: Filename that marks a directory as a skill.
+SKILL_ENTRY_FILE = "SKILL.md"
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -44,8 +70,6 @@ class CommandMetadata:
 _SKILLS_DIR = Path.home() / ".deepctl" / "skills"
 _STATE_FILE = _SKILLS_DIR / "skills.json"
 _REPO_CACHE_DIR = _SKILLS_DIR / "repo_cache"
-_SKILLS_REPO = "deepgram/skills"
-_SKILLS_BRANCH = "main"
 
 
 def get_skills_state() -> dict[str, Any]:
@@ -63,61 +87,27 @@ def save_skills_state(state: dict[str, Any]) -> None:
     _STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def fetch_repo_skills(force: bool = False) -> dict[str, str]:
-    """Download skill markdown files from the deepgram/skills GitHub repo.
+def fetch_repo_skills(
+    ref: str | None = None,
+    *,
+    force: bool = False,
+) -> list[RepoSkill]:
+    """Fetch every skill published by deepgram/skills.
 
-    Returns a mapping of skill name -> markdown content.
-    Caches locally to avoid repeated network requests.
+    The list comes from the upstream ``.claude-plugin/marketplace.json``
+    manifest, never from a list in this repo: upstream CI checks that
+    manifest against the directories on disk in both directions on every
+    pull request, so it is the one place that cannot drift.
+
+    Args:
+        ref: Upstream git ref. Defaults to the pinned release tag.
+        force: Re-download even if the ref is already cached.
+
+    Raises:
+        SkillFetchError: The bundle could not be fetched or trusted. This
+            is deliberately fatal — see :class:`SkillFetchError`.
     """
-    import urllib.request
-
-    cache_marker = _REPO_CACHE_DIR / ".fetched"
-    if not force and cache_marker.exists():
-        # Check if cache is less than 1 hour old
-        import time
-
-        try:
-            age = time.time() - cache_marker.stat().st_mtime
-            if age < 3600:  # 1 hour
-                return _read_cached_skills()
-        except OSError:
-            pass
-
-    base = f"https://raw.githubusercontent.com/{_SKILLS_REPO}/{_SKILLS_BRANCH}"
-    skill_names = ["api", "docs", "setup-mcp", "starters"]
-    skills: dict[str, str] = {}
-
-    _REPO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-    for name in skill_names:
-        url = f"{base}/skills/{name}/SKILL.md"
-        try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                content = resp.read().decode("utf-8")
-            skills[name] = content
-            (  # Cache to disk
-                _REPO_CACHE_DIR / f"{name}.md"
-            ).write_text(content)
-        except Exception:
-            # Use cached version if available
-            cached = _REPO_CACHE_DIR / f"{name}.md"
-            if cached.exists():
-                skills[name] = cached.read_text()
-
-    if skills:
-        cache_marker.write_text("1")
-
-    return skills
-
-
-def _read_cached_skills() -> dict[str, str]:
-    """Read previously cached repo skills."""
-    skills: dict[str, str] = {}
-    if not _REPO_CACHE_DIR.exists():
-        return skills
-    for md_file in _REPO_CACHE_DIR.glob("*.md"):
-        skills[md_file.stem] = md_file.read_text()
-    return skills
+    return fetch_skill_bundle(ref, cache_dir=_REPO_CACHE_DIR, force=force)
 
 
 def _commands_hash(commands: list[CommandMetadata]) -> str:
@@ -673,79 +663,191 @@ def render_skill_content(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class LegacyArtifact:
+    """Something deepctl <= 0.3.0 wrote that the tool does not read as a skill.
+
+    Cleaned up on install and remove so an upgrade does not leave a stale
+    copy of four skills lying around next to a fresh copy of fourteen.
+    """
+
+    path: Path
+    #: True when the path is a file the user also edits, so only deepctl's
+    #: own marked-off section may be removed.
+    shared: bool = False
+
+
 class SkillGenerator(ABC):
-    """Base class for AI CLI skill file generators."""
+    """Base class for installing Deepgram skills into one AI coding tool.
+
+    A tool that loads skill *folders* overrides :meth:`skills_root` with the
+    directory it reads. Skills are copied there verbatim — ``SKILL.md``,
+    ``references/`` and anything else the skill ships.
+
+    A tool with no skills directory installs nothing and reports
+    :meth:`manual_hint` instead. Writing a Deepgram blob into a context file
+    that the tool may or may not read, under a marker claiming to be
+    something else, is how this command came to write 58 KB into
+    ``~/.codex/instructions.md`` — a path current Codex does not read at all.
+    """
 
     cli_name: str = ""
     display_name: str = ""
+
+    #: Markers written by deepctl <= 0.3.0. They claimed to delimit a CLI
+    #: reference but actually wrapped four concatenated skills. Retained
+    #: only so that section can be found and removed again.
+    _LEGACY_BEGIN = "<!-- BEGIN deepctl CLI Reference (auto-generated by deepctl) -->"
+    _LEGACY_END = "<!-- END deepctl CLI Reference -->"
 
     @abstractmethod
     def detect(self) -> bool:
         """Return True if this AI CLI is installed/available."""
 
-    @abstractmethod
-    def get_skill_paths(self) -> list[Path]:
-        """Return the file paths where skills will be written."""
+    def skills_root(self) -> Path | None:
+        """User-scope directory this tool loads skill folders from.
 
-    @abstractmethod
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        """Generate skill file contents.
-
-        Returns:
-            Mapping of file path -> content string
+        ``None`` means the tool has no documented skills directory, so
+        skills cannot honestly be installed for it by copying files.
         """
+        return None
+
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        """Paths written by earlier deepctl versions, to be cleaned up."""
+        return []
+
+    def get_skill_paths(self) -> list[Path]:
+        """Return the installed skill folders currently on disk."""
+        root = self.skills_root()
+        if root is None or not root.is_dir():
+            return []
+        return sorted(p for p in root.iterdir() if (p / SKILL_ENTRY_FILE).is_file())
 
     def install(
         self,
         commands: list[CommandMetadata],  # noqa: ARG002
         version: str,  # noqa: ARG002
+        *,
+        ref: str | None = None,
     ) -> list[Path]:
-        """Fetch skills from deepgram/skills repo and install them."""
-        repo_skills = fetch_repo_skills(force=True)
-        if not repo_skills:
-            return []
-        return self._write_repo_skills(repo_skills)
+        """Fetch the upstream skills and install them for this tool.
 
-    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
-        """Write combined repo skill content to this tool's skill paths."""
-        combined = "\n\n---\n\n".join(repo_skills.values())
+        Raises:
+            SkillFetchError: Upstream could not be fetched or trusted.
+        """
+        if self.skills_root() is None:
+            self.clean_legacy()
+            return []
+        return self.install_skills(fetch_repo_skills(ref, force=True))
+
+    def install_skills(self, skills: list[RepoSkill]) -> list[Path]:
+        """Copy each skill folder into this tool's skills directory."""
+        root = self.skills_root()
+        if root is None:
+            return []
+        self.clean_legacy()
+        root.mkdir(parents=True, exist_ok=True)
         written: list[Path] = []
-        for path in self.get_skill_paths():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(combined)
-            written.append(path)
+        for skill in skills:
+            dest = root / skill.name
+            # Replace rather than merge: when a skill drops a reference
+            # file upstream it has to disappear here too, or the assistant
+            # keeps reading a page that no longer exists.
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            elif dest.exists():
+                dest.unlink()
+            shutil.copytree(skill.path, dest)
+            written.append(dest)
         return written
 
     def remove(self) -> list[Path]:
-        """Remove installed skill files. Returns paths removed."""
-        removed: list[Path] = []
+        """Remove everything this generator installed."""
+        removed = self.clean_legacy()
         for path in self.get_skill_paths():
-            if path.exists():
-                path.unlink()
-                removed.append(path)
+            shutil.rmtree(path, ignore_errors=True)
+            removed.append(path)
+        root = self.skills_root()
+        if root is not None and root.is_dir() and not any(root.iterdir()):
+            try:
+                root.rmdir()
+            except OSError:
+                pass
+        return removed
+
+    def clean_legacy(self) -> list[Path]:
+        """Remove what deepctl <= 0.3.0 wrote for this tool."""
+        removed: list[Path] = []
+        for artifact in self.legacy_paths():
+            if _clean_legacy_artifact(artifact, self._LEGACY_BEGIN, self._LEGACY_END):
+                removed.append(artifact.path)
         return removed
 
     def is_installed(self) -> bool:
-        """Check if skill files exist."""
-        return any(p.exists() for p in self.get_skill_paths())
+        """Check whether skills are installed for this tool."""
+        return bool(self.get_skill_paths())
+
+    def manual_hint(self) -> str | None:
+        """How to get Deepgram skills into a tool deepctl cannot install to."""
+        if self.skills_root() is not None:
+            return None
+        return (
+            f"{self.display_name} has no documented skills directory. "
+            f"For the Deepgram skills, run: {SKILLS_CLI_HINT}"
+        )
+
+
+def _clean_legacy_artifact(artifact: LegacyArtifact, begin: str, end: str) -> bool:
+    """Remove one legacy artifact. Returns True if anything changed."""
+    path = artifact.path
+    if not path.exists():
+        return False
+
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+        return True
+
+    if not artifact.shared:
+        path.unlink()
+        return True
+
+    # A file the user also writes: take out only deepctl's own section.
+    try:
+        content = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if begin not in content:
+        return False
+
+    head, _, rest = content.partition(begin)
+    _, found, tail = rest.partition(end)
+    # An unterminated marker means a truncated write; dropping the tail is
+    # safer than leaving half a generated blob in the user's instructions.
+    remaining = (head + (tail if found else "")).strip()
+    if remaining:
+        path.write_text(remaining + "\n")
+    else:
+        path.unlink()
+    return True
 
 
 # ---------------------------------------------------------------------------
 # Concrete generators
+#
+# Every destination below is the user-scope skills directory each tool's own
+# documentation names. Where a tool documents a native directory that is its
+# own, skills go there so that `dg skills remove --cli <tool>` has exactly
+# one thing to undo. Codex is the exception: its only documented user-scope
+# location is the cross-tool ~/.agents/skills, and its ~/.codex/skills is
+# marked deprecated in Codex's own source.
 # ---------------------------------------------------------------------------
 
 
 class ClaudeCodeGenerator(SkillGenerator):
-    """Generator for Claude Code (Anthropic)."""
+    """Claude Code — https://code.claude.com/docs/en/skills."""
 
     cli_name = "claude"
     display_name = "Claude Code"
-
-    @property
-    def _skill_dir(self) -> Path:
-        return Path.home() / ".claude" / "commands" / "deepgram"
 
     def detect(self) -> bool:
         return (
@@ -753,111 +855,46 @@ class ClaudeCodeGenerator(SkillGenerator):
             or shutil.which("claude") is not None
         )
 
-    def get_skill_paths(self) -> list[Path]:
-        return [
-            self._skill_dir / f"{name}.md"
-            for name in ["api", "docs", "setup-mcp", "starters"]
-        ]
+    def skills_root(self) -> Path | None:
+        return Path.home() / ".claude" / "skills"
 
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version, include_frontmatter=True)
-        return {self._skill_dir / "deepgram.md": content}
-
-    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
-        self._skill_dir.mkdir(parents=True, exist_ok=True)
-        written: list[Path] = []
-        for name, content in repo_skills.items():
-            path = self._skill_dir / f"{name}.md"
-            path.write_text(content)
-            written.append(path)
-        return written
-
-    def remove(self) -> list[Path]:
-        removed: list[Path] = []
-        if self._skill_dir.exists():
-            for f in self._skill_dir.glob("*.md"):
-                f.unlink()
-                removed.append(f)
-            try:
-                self._skill_dir.rmdir()
-            except OSError:
-                pass
-        return removed
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        # ~/.claude/commands/ is the single-file prompt directory. Claude
+        # Code will not read a references/ folder next to a file there, and
+        # a command file does not accept the `name:` key every SKILL.md has.
+        return [LegacyArtifact(Path.home() / ".claude" / "commands" / "deepgram")]
 
 
 class CodexGenerator(SkillGenerator):
-    """Generator for OpenAI Codex CLI."""
+    """OpenAI Codex CLI — https://developers.openai.com/codex/skills."""
 
     cli_name = "codex"
     display_name = "OpenAI Codex"
-
-    _BEGIN = "<!-- BEGIN deepctl CLI Reference (auto-generated by deepctl) -->"
-    _END = "<!-- END deepctl CLI Reference -->"
 
     def detect(self) -> bool:
         return (
             Path.home().joinpath(".codex").is_dir() or shutil.which("codex") is not None
         )
 
-    def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".codex" / "instructions.md"]
+    def skills_root(self) -> Path | None:
+        # Codex documents exactly one user-scope location, the cross-tool
+        # one. ~/.codex/skills also loads, but Codex's source marks it
+        # "Deprecated user skills location ... kept for backward
+        # compatibility", so new installs should not go there.
+        return Path.home() / ".agents" / "skills"
 
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        wrapped = f"{self._BEGIN}\n{content}{self._END}\n"
-        path = self.get_skill_paths()[0]
-        return {path: self._merge(path, wrapped)}
-
-    def _merge(self, path: Path, section: str) -> str:
-        """Merge delimited section into existing file content."""
-        if not path.exists():
-            return section
-        existing = path.read_text()
-        if self._BEGIN in existing:
-            before = existing[: existing.index(self._BEGIN)]
-            after_end = existing.find(self._END)
-            after = existing[after_end + len(self._END) :] if after_end != -1 else ""
-            return before + section + after.lstrip("\n")
-        return existing.rstrip("\n") + "\n\n" + section
-
-    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
-        combined = "\n\n---\n\n".join(repo_skills.values())
-        wrapped = f"{self._BEGIN}\n{combined}\n{self._END}\n"
-        path = self.get_skill_paths()[0]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self._merge(path, wrapped))
-        return [path]
-
-    def remove(self) -> list[Path]:
-        path = self.get_skill_paths()[0]
-        if not path.exists():
-            return []
-        content = path.read_text()
-        if self._BEGIN not in content:
-            return []
-        before = content[: content.index(self._BEGIN)]
-        after_end = content.find(self._END)
-        after = content[after_end + len(self._END) :] if after_end != -1 else ""
-        remaining = (before + after).strip()
-        if remaining:
-            path.write_text(remaining + "\n")
-        else:
-            path.unlink()
-        return [path]
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        # ~/.codex/instructions.md does not appear in current Codex docs or
+        # source at all; global instructions are ~/.codex/AGENTS.md. It is
+        # treated as shared anyway, in case a user adopted the file.
+        return [LegacyArtifact(Path.home() / ".codex" / "instructions.md", shared=True)]
 
 
 class GeminiGenerator(SkillGenerator):
-    """Generator for Google Gemini CLI."""
+    """Gemini CLI — google-gemini/gemini-cli docs/cli/skills.md."""
 
     cli_name = "gemini"
     display_name = "Gemini CLI"
-
-    _BEGIN = "<!-- BEGIN deepctl CLI Reference (auto-generated by deepctl) -->"
-    _END = "<!-- END deepctl CLI Reference -->"
 
     def detect(self) -> bool:
         return (
@@ -865,205 +902,17 @@ class GeminiGenerator(SkillGenerator):
             or shutil.which("gemini") is not None
         )
 
-    def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".gemini" / "GEMINI.md"]
+    def skills_root(self) -> Path | None:
+        return Path.home() / ".gemini" / "skills"
 
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        wrapped = f"{self._BEGIN}\n{content}{self._END}\n"
-        path = self.get_skill_paths()[0]
-        return {path: self._merge(path, wrapped)}
-
-    def _merge(self, path: Path, section: str) -> str:
-        if not path.exists():
-            return section
-        existing = path.read_text()
-        if self._BEGIN in existing:
-            before = existing[: existing.index(self._BEGIN)]
-            after_end = existing.find(self._END)
-            after = existing[after_end + len(self._END) :] if after_end != -1 else ""
-            return before + section + after.lstrip("\n")
-        return existing.rstrip("\n") + "\n\n" + section
-
-    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
-        combined = "\n\n---\n\n".join(repo_skills.values())
-        wrapped = f"{self._BEGIN}\n{combined}\n{self._END}\n"
-        path = self.get_skill_paths()[0]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self._merge(path, wrapped))
-        return [path]
-
-    def remove(self) -> list[Path]:
-        path = self.get_skill_paths()[0]
-        if not path.exists():
-            return []
-        content = path.read_text()
-        if self._BEGIN not in content:
-            return []
-        before = content[: content.index(self._BEGIN)]
-        after_end = content.find(self._END)
-        after = content[after_end + len(self._END) :] if after_end != -1 else ""
-        remaining = (before + after).strip()
-        if remaining:
-            path.write_text(remaining + "\n")
-        else:
-            path.unlink()
-        return [path]
-
-
-class AmazonQGenerator(SkillGenerator):
-    """Generator for Amazon Q Developer CLI."""
-
-    cli_name = "amazonq"
-    display_name = "Amazon Q Developer"
-
-    def detect(self) -> bool:
-        return Path.home().joinpath(".amazonq").is_dir()
-
-    def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".amazonq" / "rules" / "deepctl.md"]
-
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        return {self.get_skill_paths()[0]: content}
-
-
-class AiderGenerator(SkillGenerator):
-    """Generator for Aider CLI."""
-
-    cli_name = "aider"
-    display_name = "Aider"
-
-    _SKILL_FILE = Path.home() / ".deepctl" / "skills" / "deepctl-conventions.md"
-
-    def detect(self) -> bool:
-        return shutil.which("aider") is not None
-
-    def get_skill_paths(self) -> list[Path]:
-        return [self._SKILL_FILE]
-
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        return {self._SKILL_FILE: content}
-
-    def install(self, commands: list[CommandMetadata], version: str) -> list[Path]:
-        written = super().install(commands, version)
-        # Add read reference to aider config if not already present
-        self._ensure_config_ref()
-        return written
-
-    def _ensure_config_ref(self) -> None:
-        """Add the skill file as a read reference in ~/.aider.conf.yml."""
-        conf_path = Path.home() / ".aider.conf.yml"
-        ref = str(self._SKILL_FILE)
-        try:
-            import yaml
-
-            if conf_path.exists():
-                data = yaml.safe_load(conf_path.read_text()) or {}
-            else:
-                data = {}
-            read_list = data.get("read", [])
-            if not isinstance(read_list, list):
-                read_list = [read_list] if read_list else []
-            if ref not in read_list:
-                read_list.append(ref)
-                data["read"] = read_list
-                conf_path.write_text(yaml.dump(data, default_flow_style=False))
-        except Exception:
-            pass
-
-    def remove(self) -> list[Path]:
-        removed = super().remove()
-        # Remove reference from aider config
-        conf_path = Path.home() / ".aider.conf.yml"
-        ref = str(self._SKILL_FILE)
-        try:
-            import yaml
-
-            if conf_path.exists():
-                data = yaml.safe_load(conf_path.read_text()) or {}
-                read_list = data.get("read", [])
-                if isinstance(read_list, list) and ref in read_list:
-                    read_list.remove(ref)
-                    data["read"] = read_list
-                    conf_path.write_text(yaml.dump(data, default_flow_style=False))
-        except Exception:
-            pass
-        return removed
-
-
-class OpenCodeGenerator(SkillGenerator):
-    """Generator for OpenCode CLI."""
-
-    cli_name = "opencode"
-    display_name = "OpenCode"
-
-    _BEGIN = "<!-- BEGIN deepctl CLI Reference (auto-generated by deepctl) -->"
-    _END = "<!-- END deepctl CLI Reference -->"
-
-    def detect(self) -> bool:
-        return (
-            Path.home().joinpath(".opencode").is_dir()
-            or shutil.which("opencode") is not None
-        )
-
-    def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".opencode" / "agents.md"]
-
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        wrapped = f"{self._BEGIN}\n{content}{self._END}\n"
-        path = self.get_skill_paths()[0]
-        return {path: self._merge(path, wrapped)}
-
-    def _merge(self, path: Path, section: str) -> str:
-        if not path.exists():
-            return section
-        existing = path.read_text()
-        if self._BEGIN in existing:
-            before = existing[: existing.index(self._BEGIN)]
-            after_end = existing.find(self._END)
-            after = existing[after_end + len(self._END) :] if after_end != -1 else ""
-            return before + section + after.lstrip("\n")
-        return existing.rstrip("\n") + "\n\n" + section
-
-    def _write_repo_skills(self, repo_skills: dict[str, str]) -> list[Path]:
-        combined = "\n\n---\n\n".join(repo_skills.values())
-        wrapped = f"{self._BEGIN}\n{combined}\n{self._END}\n"
-        path = self.get_skill_paths()[0]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self._merge(path, wrapped))
-        return [path]
-
-    def remove(self) -> list[Path]:
-        path = self.get_skill_paths()[0]
-        if not path.exists():
-            return []
-        content = path.read_text()
-        if self._BEGIN not in content:
-            return []
-        before = content[: content.index(self._BEGIN)]
-        after_end = content.find(self._END)
-        after = content[after_end + len(self._END) :] if after_end != -1 else ""
-        remaining = (before + after).strip()
-        if remaining:
-            path.write_text(remaining + "\n")
-        else:
-            path.unlink()
-        return [path]
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        # GEMINI.md is a real global context file, which is exactly why
+        # deepctl should not be pasting 58 KB of skills into it.
+        return [LegacyArtifact(Path.home() / ".gemini" / "GEMINI.md", shared=True)]
 
 
 class CursorGenerator(SkillGenerator):
-    """Generator for Cursor IDE CLI."""
+    """Cursor — https://cursor.com/docs/context/skills."""
 
     cli_name = "cursor"
     display_name = "Cursor"
@@ -1074,18 +923,38 @@ class CursorGenerator(SkillGenerator):
             or shutil.which("cursor") is not None
         )
 
-    def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".cursor" / "rules" / "deepctl.mdc"]
+    def skills_root(self) -> Path | None:
+        return Path.home() / ".cursor" / "skills"
 
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        return {self.get_skill_paths()[0]: content}
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        # Cursor rules are project-scoped .cursor/rules/*.mdc; user-scope
+        # rules are a settings-UI feature, so ~/.cursor/rules/deepctl.mdc
+        # was never read by anything.
+        return [LegacyArtifact(Path.home() / ".cursor" / "rules" / "deepctl.mdc")]
+
+
+class OpenCodeGenerator(SkillGenerator):
+    """OpenCode — https://opencode.ai/docs/skills."""
+
+    cli_name = "opencode"
+    display_name = "OpenCode"
+
+    def detect(self) -> bool:
+        return (
+            Path.home().joinpath(".opencode").is_dir()
+            or Path.home().joinpath(".config", "opencode").is_dir()
+            or shutil.which("opencode") is not None
+        )
+
+    def skills_root(self) -> Path | None:
+        return Path.home() / ".config" / "opencode" / "skills"
+
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        return [LegacyArtifact(Path.home() / ".opencode" / "agents.md", shared=True)]
 
 
 class ClineGenerator(SkillGenerator):
-    """Generator for Cline CLI."""
+    """Cline — https://docs.cline.bot/features/skills."""
 
     cli_name = "cline"
     display_name = "Cline"
@@ -1093,14 +962,69 @@ class ClineGenerator(SkillGenerator):
     def detect(self) -> bool:
         return Path.home().joinpath(".cline").is_dir()
 
-    def get_skill_paths(self) -> list[Path]:
-        return [Path.home() / ".cline" / "rules" / "deepctl.md"]
+    def skills_root(self) -> Path | None:
+        return Path.home() / ".cline" / "skills"
 
-    def generate(
-        self, commands: list[CommandMetadata], version: str
-    ) -> dict[Path, str]:
-        content = render_skill_content(commands, version)
-        return {self.get_skill_paths()[0]: content}
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        return [LegacyArtifact(Path.home() / ".cline" / "rules" / "deepctl.md")]
+
+
+class AmazonQGenerator(SkillGenerator):
+    """Amazon Q Developer CLI — no skills mechanism to install into.
+
+    Q Developer has custom agents (``~/.aws/amazonq/cli-agents/*.json``)
+    and project-scoped ``.amazonq/rules/`` pulled in through an agent's
+    ``resources``. Neither is a skills directory, and the
+    ``~/.amazonq/rules/deepctl.md`` this command used to write is not a
+    path Q reads. So it reports the one-liner instead of writing a file.
+    """
+
+    cli_name = "amazonq"
+    display_name = "Amazon Q Developer"
+
+    def detect(self) -> bool:
+        return Path.home().joinpath(".amazonq").is_dir()
+
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        return [LegacyArtifact(Path.home() / ".amazonq" / "rules" / "deepctl.md")]
+
+
+class AiderGenerator(SkillGenerator):
+    """Aider — no skills mechanism; it reads whole files listed in config."""
+
+    cli_name = "aider"
+    display_name = "Aider"
+
+    _LEGACY_FILE = Path.home() / ".deepctl" / "skills" / "deepctl-conventions.md"
+
+    def detect(self) -> bool:
+        return shutil.which("aider") is not None
+
+    def legacy_paths(self) -> list[LegacyArtifact]:
+        return [LegacyArtifact(self._LEGACY_FILE)]
+
+    def clean_legacy(self) -> list[Path]:
+        removed = super().clean_legacy()
+        self._drop_config_ref()
+        return removed
+
+    def _drop_config_ref(self) -> None:
+        """Drop the stale read reference from ~/.aider.conf.yml."""
+        conf_path = Path.home() / ".aider.conf.yml"
+        ref = str(self._LEGACY_FILE)
+        try:
+            import yaml
+
+            if not conf_path.exists():
+                return
+            data = yaml.safe_load(conf_path.read_text()) or {}
+            read_list = data.get("read", [])
+            if isinstance(read_list, list) and ref in read_list:
+                read_list.remove(ref)
+                data["read"] = read_list
+                conf_path.write_text(yaml.dump(data, default_flow_style=False))
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1111,11 +1035,11 @@ _ALL_GENERATORS: list[type[SkillGenerator]] = [
     ClaudeCodeGenerator,
     CodexGenerator,
     GeminiGenerator,
+    CursorGenerator,
+    OpenCodeGenerator,
+    ClineGenerator,
     AmazonQGenerator,
     AiderGenerator,
-    OpenCodeGenerator,
-    CursorGenerator,
-    ClineGenerator,
 ]
 
 
@@ -1127,3 +1051,12 @@ def get_all_generators() -> list[SkillGenerator]:
 def detect_ai_clis() -> list[SkillGenerator]:
     """Return generators for detected AI CLIs."""
     return [g for g in get_all_generators() if g.detect()]
+
+
+def installable_generators(
+    generators: list[SkillGenerator],
+) -> tuple[list[SkillGenerator], list[SkillGenerator]]:
+    """Split generators into those with a skills directory and those without."""
+    supported = [g for g in generators if g.skills_root() is not None]
+    unsupported = [g for g in generators if g.skills_root() is None]
+    return supported, unsupported

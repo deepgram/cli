@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 from deepctl_core.auth import AuthManager
@@ -12,8 +12,19 @@ from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
 from deepctl_core.output import print_info, print_success, print_warning
+from deepctl_core.skill_bundle import (
+    DEFAULT_SKILLS_REF,
+    REF_ENV_VAR,
+    SkillFetchError,
+    resolve_skills_ref,
+)
 from rich.console import Console
 from rich.table import Table
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from deepctl_core.skill_bundle import RepoSkill
 
 console = Console()
 
@@ -123,6 +134,16 @@ class SkillsCommand(BaseGroupCommand):
             "cli_name",
             help="Install for a specific AI CLI only",
         )
+        @click.option(
+            "--ref",
+            "ref",
+            metavar="REF",
+            help=(
+                "Install from this deepgram/skills git ref instead of the "
+                f"pinned release ({DEFAULT_SKILLS_REF}). Also settable with "
+                f"{REF_ENV_VAR}."
+            ),
+        )
         def install_cmd(**kwargs: Any) -> None:
             pass
 
@@ -136,13 +157,22 @@ class SkillsCommand(BaseGroupCommand):
 
         @click.command(
             name="update",
-            help="Regenerate all installed skill files from current metadata",
+            help="Reinstall every installed tool's skills from upstream",
+        )
+        @click.option(
+            "--ref",
+            "ref",
+            metavar="REF",
+            help=(
+                "Install from this deepgram/skills git ref instead of the "
+                f"pinned release ({DEFAULT_SKILLS_REF})."
+            ),
         )
         def update_cmd(**kwargs: Any) -> None:
             pass
 
         update_cmd.callback = context_wrapper(
-            lambda config, auth_manager, client, **kw: self._handle_update()
+            lambda config, auth_manager, client, **kw: self._handle_update(**kw)
         )
         return update_cmd
 
@@ -200,6 +230,15 @@ class SkillsCommand(BaseGroupCommand):
             is_flag=True,
             help="Install for all detected tools without prompting",
         )
+        @click.option(
+            "--ref",
+            "ref",
+            metavar="REF",
+            help=(
+                "Install from this deepgram/skills git ref instead of the "
+                f"pinned release ({DEFAULT_SKILLS_REF})."
+            ),
+        )
         def setup_cmd(**kwargs: Any) -> None:
             pass
 
@@ -209,12 +248,38 @@ class SkillsCommand(BaseGroupCommand):
         return setup_cmd
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _fetch_skills(self, ref: str | None) -> list[RepoSkill]:
+        """Fetch the upstream skills, or fail the command outright.
+
+        A partial install is worse than none: once the files are on disk
+        there is nothing to tell the user that four of fourteen skills
+        arrived. ClickException is what main.py turns into exit 1.
+        """
+        from deepctl_core.skill_generator import fetch_repo_skills
+
+        try:
+            return fetch_repo_skills(ref, force=True)
+        except SkillFetchError as exc:
+            raise click.ClickException(
+                f"{exc}\n\nNo skills were installed. Retry when the "
+                "network is available, or pass --ref to pick another "
+                "deepgram/skills revision."
+            )
+
+    # ------------------------------------------------------------------
     # Handlers
     # ------------------------------------------------------------------
 
     def _handle_status(self) -> None:
         """Show detected AI CLIs and whether skills are installed."""
-        from deepctl_core.skill_generator import get_all_generators, get_skills_state
+        from deepctl_core.skill_generator import (
+            SKILLS_CLI_HINT,
+            get_all_generators,
+            get_skills_state,
+        )
 
         generators = get_all_generators()
         state = get_skills_state()
@@ -224,17 +289,31 @@ class SkillsCommand(BaseGroupCommand):
         table.add_column("CLI", style="cyan", no_wrap=True)
         table.add_column("Detected", style="white")
         table.add_column("Skills Installed", style="white")
+        table.add_column("Skills Directory", style="dim")
 
         for gen in generators:
             detected = gen.detect()
-            has_skills = gen.cli_name in installed
+            root = gen.skills_root()
+            count = len(gen.get_skill_paths())
+            if root is None:
+                installed_cell = "[dim]n/a[/dim]"
+                root_cell = "[dim]no skills directory[/dim]"
+            else:
+                installed_cell = f"[green]{count}[/green]" if count else "[dim]No[/dim]"
+                root_cell = str(root)
             table.add_row(
                 gen.display_name,
                 "[green]Yes[/green]" if detected else "[dim]No[/dim]",
-                "[green]Yes[/green]" if has_skills else "[dim]No[/dim]",
+                installed_cell,
+                root_cell,
             )
 
         console.print(table)
+
+        if any(g.detect() and g.skills_root() is None for g in generators):
+            print_info(
+                f"Tools with no skills directory: install with '{SKILLS_CLI_HINT}'."
+            )
 
         detected_count = sum(1 for g in generators if g.detect())
         if detected_count > 0 and not installed:
@@ -246,14 +325,16 @@ class SkillsCommand(BaseGroupCommand):
         self,
         install_all: bool = False,
         cli_name: str | None = None,
+        ref: str | None = None,
     ) -> None:
-        """Detect AI CLIs, prompt user, generate & install skill files."""
+        """Detect AI CLIs, prompt the user, and install the Deepgram skills."""
         from deepctl_core.skill_generator import (
             _commands_hash,
             collect_command_metadata,
             detect_ai_clis,
             get_all_generators,
             get_skills_state,
+            installable_generators,
             save_skills_state,
         )
 
@@ -291,47 +372,59 @@ class SkillsCommand(BaseGroupCommand):
 
         # Collect metadata
         commands = collect_command_metadata()
-        try:
-            version = importlib.metadata.version("deepctl")
-        except importlib.metadata.PackageNotFoundError:
-            version = "0.0.0"
+        version = _deepctl_version()
+
+        selected = [
+            g
+            for g in generators
+            if install_all
+            or cli_name
+            or self.confirm(
+                f"Install Deepgram skills for {g.display_name}?",
+                default=True,
+            )
+        ]
+        supported, unsupported = installable_generators(selected)
 
         state = get_skills_state()
-        total_written: list[str] = []
+        total_written: list[Path] = []
 
-        for gen in generators:
-            if (
-                not install_all
-                and not cli_name
-                and not self.confirm(
-                    f"Install deepctl skills for {gen.display_name}?",
-                    default=True,
+        if supported:
+            skills = self._fetch_skills(ref)
+            for gen in supported:
+                paths = gen.install_skills(skills)
+                state["installed_skills"][gen.cli_name] = {
+                    "paths": [str(p) for p in paths],
+                    "installed_at": datetime.now(timezone.utc).isoformat(),
+                    "version": version,
+                    "commands_hash": _commands_hash(commands),
+                    "skills_ref": resolve_skills_ref(ref),
+                    "skills": [s.name for s in skills],
+                }
+                total_written.extend(paths)
+                print_success(
+                    f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
                 )
-            ):
-                continue
 
-            paths = gen.install(commands, version)
-            cmd_hash = _commands_hash(commands)
-            state["installed_skills"][gen.cli_name] = {
-                "paths": [str(p) for p in paths],
-                "installed_at": datetime.now(timezone.utc).isoformat(),
-                "version": version,
-                "commands_hash": cmd_hash,
-            }
-            for p in paths:
-                total_written.append(str(p))
-                print_success(f"  Wrote {p}")
+        for gen in unsupported:
+            # Nothing was written, so nothing is recorded as installed.
+            gen.clean_legacy()
+            state["installed_skills"].pop(gen.cli_name, None)
+            print_warning(f"  {gen.manual_hint()}")
 
         save_skills_state(state)
 
         if total_written:
-            print_success(f"\nInstalled skills: {len(total_written)} file(s)")
+            print_success(
+                f"\nInstalled {len(total_written)} skill folder(s) "
+                f"from deepgram/skills@{resolve_skills_ref(ref)}"
+            )
             print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
-        else:
+        elif not unsupported:
             print_info("No skills were installed.")
 
-    def _handle_update(self) -> None:
-        """Regenerate all installed skill files from current metadata."""
+    def _handle_update(self, ref: str | None = None) -> None:
+        """Reinstall every installed tool's skills from upstream."""
         from deepctl_core.skill_generator import (
             _commands_hash,
             collect_command_metadata,
@@ -348,37 +441,46 @@ class SkillsCommand(BaseGroupCommand):
             return
 
         commands = collect_command_metadata()
-        try:
-            version = importlib.metadata.version("deepctl")
-        except importlib.metadata.PackageNotFoundError:
-            version = "0.0.0"
+        version = _deepctl_version()
 
         generators = {g.cli_name: g for g in get_all_generators()}
-        updated_count = 0
-
+        targets = []
         for cli_key in list(installed.keys()):
             gen = generators.get(cli_key)
             if gen is None:
                 print_warning(f"Unknown CLI '{cli_key}', skipping.")
                 continue
+            if gen.skills_root() is None:
+                print_warning(f"  {gen.manual_hint()}")
+                continue
+            targets.append(gen)
 
-            paths = gen.install(commands, version)
-            cmd_hash = _commands_hash(commands)
-            state["installed_skills"][cli_key].update(
+        if not targets:
+            print_info("Nothing to update.")
+            return
+
+        skills = self._fetch_skills(ref)
+        for gen in targets:
+            paths = gen.install_skills(skills)
+            state["installed_skills"][gen.cli_name].update(
                 {
                     "paths": [str(p) for p in paths],
                     "version": version,
-                    "commands_hash": cmd_hash,
+                    "commands_hash": _commands_hash(commands),
+                    "skills_ref": resolve_skills_ref(ref),
+                    "skills": [s.name for s in skills],
                 }
             )
-            updated_count += 1
-            for p in paths:
-                print_success(f"  Updated {p}")
+            print_success(
+                f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
+            )
 
         save_skills_state(state)
-        print_success(f"Updated {updated_count} skill(s)")
-        if updated_count:
-            print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
+        print_success(
+            f"Updated {len(targets)} tool(s) from "
+            f"deepgram/skills@{resolve_skills_ref(ref)}"
+        )
+        print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
 
     def _handle_remove(
         self,
@@ -426,7 +528,9 @@ class SkillsCommand(BaseGroupCommand):
         print_success(f"Removed {len(targets)} skill(s).")
 
     def _handle_list(self) -> None:
-        """Show installed skills with paths and versions."""
+        """Show installed skills with locations, versions and upstream ref."""
+        from pathlib import Path
+
         from deepctl_core.skill_generator import get_skills_state
 
         state = get_skills_state()
@@ -440,27 +544,32 @@ class SkillsCommand(BaseGroupCommand):
 
         table = Table(title="Installed Skills")
         table.add_column("CLI", style="cyan", no_wrap=True)
-        table.add_column("Version", style="green")
-        table.add_column("Paths", style="white")
+        table.add_column("deepctl", style="green")
+        table.add_column("Skills ref", style="green")
+        table.add_column("Skills", style="white")
+        table.add_column("Location", style="dim")
 
         for cli_key, info in installed.items():
-            paths = "\n".join(info.get("paths", []))
-            table.add_row(cli_key, info.get("version", "?"), paths)
-
-        console.print(table)
-
-        auto = state.get("auto_update", True)
-        if auto:
-            print_info(
-                "[dim]Auto-update is enabled — skills regenerate on plugin changes.[/dim]"
+            names = info.get("skills") or []
+            paths = info.get("paths") or []
+            location = str(Path(paths[0]).parent) if paths else "?"
+            table.add_row(
+                cli_key,
+                info.get("version", "?"),
+                info.get("skills_ref", "?"),
+                f"{len(names) or len(paths)}",
+                location,
             )
 
-    def _handle_setup(self, install_all: bool = False) -> None:
+        console.print(table)
+        print_info("[dim]Run 'dg skills update' to reinstall from upstream.[/dim]")
+
+    def _handle_setup(self, install_all: bool = False, ref: str | None = None) -> None:
         """Interactive first-run setup: detect AI tools and install skills.
 
-        Downloads Deepgram skills from the deepgram/skills GitHub repo and
-        installs both the repo skills and the local deepctl command reference
-        for each selected AI coding tool.
+        Fetches the Deepgram skills from the deepgram/skills repo and
+        installs each one, as a folder, into the skills directory the
+        selected tool actually reads.
         """
         import sys
 
@@ -470,6 +579,7 @@ class SkillsCommand(BaseGroupCommand):
             detect_ai_clis,
             get_all_generators,
             get_skills_state,
+            installable_generators,
             save_skills_state,
         )
 
@@ -523,35 +633,53 @@ class SkillsCommand(BaseGroupCommand):
             # Non-TTY without --all: install for all detected
             selected = list(detected)
 
-        # 3. Collect command metadata and install for selected tools
+        # 3. Install the upstream skills for each selected tool
         console.print("\n[blue]Installing Deepgram skills...[/blue]")
         commands = collect_command_metadata()
-        try:
-            version = importlib.metadata.version("deepctl")
-        except importlib.metadata.PackageNotFoundError:
-            version = "0.0.0"
+        version = _deepctl_version()
+        supported, unsupported = installable_generators(selected)
 
         state = get_skills_state()
-        total_written: list[str] = []
+        total_written: list[Path] = []
 
-        for gen in selected:
-            paths = gen.install(commands, version)
-            cmd_hash = _commands_hash(commands)
-            state["installed_skills"][gen.cli_name] = {
-                "paths": [str(p) for p in paths],
-                "installed_at": datetime.now(timezone.utc).isoformat(),
-                "version": version,
-                "commands_hash": cmd_hash,
-            }
-            for p in paths:
-                total_written.append(str(p))
-                print_success(f"  {gen.display_name} → {p}")
+        if supported:
+            skills = self._fetch_skills(ref)
+            for gen in supported:
+                paths = gen.install_skills(skills)
+                state["installed_skills"][gen.cli_name] = {
+                    "paths": [str(p) for p in paths],
+                    "installed_at": datetime.now(timezone.utc).isoformat(),
+                    "version": version,
+                    "commands_hash": _commands_hash(commands),
+                    "skills_ref": resolve_skills_ref(ref),
+                    "skills": [s.name for s in skills],
+                }
+                total_written.extend(paths)
+                print_success(
+                    f"  {gen.display_name} -> {gen.skills_root()} ({len(paths)} skills)"
+                )
+
+        for gen in unsupported:
+            gen.clean_legacy()
+            state["installed_skills"].pop(gen.cli_name, None)
+            print_warning(f"  {gen.manual_hint()}")
 
         save_skills_state(state)
 
         if total_written:
             console.print()
-            print_success(f"Setup complete — {len(total_written)} file(s) installed")
+            print_success(
+                f"Setup complete - {len(total_written)} skill folder(s) from "
+                f"deepgram/skills@{resolve_skills_ref(ref)}"
+            )
             print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
-        else:
+        elif not unsupported:
             print_info("No skills were installed.")
+
+
+def _deepctl_version() -> str:
+    """Return the installed deepctl version, or a placeholder."""
+    try:
+        return importlib.metadata.version("deepctl")
+    except importlib.metadata.PackageNotFoundError:
+        return "0.0.0"
