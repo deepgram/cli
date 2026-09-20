@@ -18,7 +18,12 @@ from .ffprobe_models import AudioFormatInfo, AudioProbeResult, AudioStreamInfo
 if TYPE_CHECKING:
     from deepctl_core import Config
 
-console = Console()
+# Diagnostics only: every console.print below is an error, a warning or a
+# progress line -- never a payload -- so it goes to stderr and can never
+# corrupt the machine-readable result a command writes to stdout (#104).
+# deepctl-shared-utils does not depend on deepctl-core, so this is a local
+# stderr Console rather than an import of core's shared `stderr_console`.
+console = Console(stderr=True)
 
 
 def get_ffprobe_path(config: Config | None = None) -> str | None:
