@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -314,7 +314,13 @@ def _extract(archive: Path, dest: Path, ref: str) -> None:
     """Unpack ``archive`` into ``dest``, rejecting unsafe members."""
     try:
         with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(dest, members=_safe_members(tar, dest))
+            # _safe_members already rejects anything that escapes dest; the
+            # stdlib filter is belt-and-braces where the interpreter has it
+            # (3.12+, and the backports in 3.10.12 / 3.11.4).
+            extra: dict[str, Any] = {}
+            if hasattr(tarfile, "data_filter"):
+                extra["filter"] = "data"
+            tar.extractall(dest, members=_safe_members(tar, dest), **extra)
     except SkillFetchError:
         raise
     except (tarfile.TarError, OSError, EOFError) as exc:
