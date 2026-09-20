@@ -230,3 +230,60 @@ class TestCredentialSourceDiagnostics:
         assert payload["status"] == "success"
         assert "Affecting project: abc-123" in captured.err
         assert "abc-123" not in captured.out
+
+
+class TestAuthFailurePayloadOnAClosedStream:
+    """The failure payload must not turn a closed pipe into a crash.
+
+    `dg -o json … | head -1` closes stdout early. Writing the failure payload
+    then raises either `BrokenPipeError` (an `OSError`) or, from rich,
+    `ValueError("I/O operation on closed file")`. Both are swallowed so the
+    command still exits 1; any other `ValueError` is a real bug and must
+    surface.
+    """
+
+    def _run(self, output_error):
+        from unittest.mock import MagicMock, patch
+
+        import click
+        from deepctl_core.auth import AuthenticationError
+        from deepctl_core.base_command import BaseCommand
+        from deepctl_core.config import Config
+
+        class NeedsAuth(BaseCommand):
+            name = "needs-auth"
+            help = "test command"
+            requires_auth = True
+
+            def handle(self, config, auth_manager, client, **kwargs):  # type: ignore[no-untyped-def]
+                raise AssertionError("handle must not run when guard() fails")
+
+        command = NeedsAuth()
+        ctx = MagicMock(spec=click.Context)
+        ctx.obj = {"config": Config()}
+
+        auth_manager = MagicMock()
+        auth_manager.guard.side_effect = AuthenticationError("bad key")
+
+        with (
+            patch(
+                "deepctl_core.base_command.AuthManager", return_value=auth_manager
+            ),
+            patch("deepctl_core.base_command.DeepgramClient"),
+            patch.object(NeedsAuth, "output_result", side_effect=output_error),
+        ):
+            return command.execute(ctx)
+
+    def test_broken_pipe_still_exits_one(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            self._run(BrokenPipeError(32, "Broken pipe"))
+        assert exc.value.code == 1
+
+    def test_closed_file_value_error_still_exits_one(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            self._run(ValueError("I/O operation on closed file"))
+        assert exc.value.code == 1
+
+    def test_any_other_value_error_surfaces(self) -> None:
+        with pytest.raises(ValueError, match="something else"):
+            self._run(ValueError("something else"))

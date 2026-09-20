@@ -129,3 +129,80 @@ class TestFfprobeCommand:
         assert isinstance(result, FfprobeResult)
         assert result.available is False
         mock_print.assert_called_once()
+
+
+class TestOutputChannels:
+    """Which stream each line lands on (#104).
+
+    `dg -o json ffprobe` used to put the human status lines on stdout ahead
+    of the serialized FfprobeResult, so `json.loads(stdout)` raised. Errors
+    belong on stderr always; the human rendering belongs on stdout only in
+    default mode.
+    """
+
+    def setup_method(self):
+        self.cmd = FfprobeCommand()
+        self.config = Mock()
+        self.config._config = Mock()
+        self.config._config.tools = Mock()
+        self.config._config.tools.ffprobe_path = None
+        self.config.get.return_value = None
+        self.auth = Mock()
+        self.client = Mock()
+
+    @pytest.mark.parametrize("fmt", ["json", "yaml", "csv", "table"])
+    @patch("deepctl_cmd_ffprobe.command.get_output_format")
+    def test_errors_go_to_stderr_leaving_stdout_empty(
+        self, mock_format, fmt, capsys
+    ):
+        mock_format.return_value = fmt
+
+        result = self.cmd.handle(
+            self.config, self.auth, self.client, path="/nonexistent"
+        )
+        captured = capsys.readouterr()
+
+        assert result.status == "error"
+        assert captured.out == ""
+        assert "File not found" in captured.err
+
+    @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="default")
+    def test_errors_still_reach_a_human_on_stderr(self, mock_format, capsys):
+        self.cmd.handle(self.config, self.auth, self.client, path="/nonexistent")
+        captured = capsys.readouterr()
+
+        assert captured.out == ""
+        assert "File not found" in captured.err
+
+    @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="json")
+    @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
+    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.subprocess.run")
+    def test_status_summary_is_suppressed_for_machines(
+        self, mock_run, mock_which, mock_get_path, mock_format, capsys
+    ):
+        mock_which.return_value = "/usr/bin/ffprobe"
+        mock_get_path.return_value = "/usr/bin/ffprobe"
+        mock_run.return_value = Mock(returncode=0, stdout="ffprobe version 6.0\n")
+
+        result = self.cmd.handle(self.config, self.auth, self.client)
+        captured = capsys.readouterr()
+
+        assert result.available is True
+        assert captured.out == ""
+
+    @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="default")
+    @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
+    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.subprocess.run")
+    def test_status_summary_still_prints_for_humans(
+        self, mock_run, mock_which, mock_get_path, mock_format, capsys
+    ):
+        mock_which.return_value = "/usr/bin/ffprobe"
+        mock_get_path.return_value = "/usr/bin/ffprobe"
+        mock_run.return_value = Mock(returncode=0, stdout="ffprobe version 6.0\n")
+
+        self.cmd.handle(self.config, self.auth, self.client)
+        captured = capsys.readouterr()
+
+        assert "ffprobe is available" in captured.out
