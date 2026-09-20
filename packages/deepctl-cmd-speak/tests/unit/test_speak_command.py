@@ -1531,6 +1531,33 @@ class TestSpeakCommand:
         printed = " ".join(capsys.readouterr().err.split())
         assert "No audio player found" in printed
 
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_error_message_keeps_bracketed_paths(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        capsys,
+    ):
+        """A path with brackets prints as typed, not half-eaten as markup."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text=None,
+            file="/tmp/[draft]/script.txt",
+        )
+
+        assert result is not None
+        assert result.status == "error"
+        printed = " ".join(capsys.readouterr().err.split())
+        assert "/tmp/[draft]/script.txt" in printed
+
     @patch("deepctl_cmd_speak.command.shutil")
     @patch("deepctl_cmd_speak.command.sys")
     def test_handle_play_rejects_raw_flux_encoding(
