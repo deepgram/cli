@@ -542,6 +542,15 @@ class SpeakCommand(BaseCommand):
                 ),
             )
 
+        if play and not output_path and not stdout_is_tty:
+            # Playing sends the audio to the player, not to stdout, so a
+            # redirect or pipe would otherwise collect nothing and give no
+            # hint why.
+            console.print(
+                "[yellow]Note:[/yellow] --play sends the audio to your player, "
+                "so stdout stays empty. Add -o to save a file too."
+            )
+
         # Only the documented flux-* namespace uses speak.v2. Aura and unknown
         # model names pass through to the REST API so the service can resolve them.
         is_flux = model.lower().startswith("flux-")
@@ -619,23 +628,33 @@ class SpeakCommand(BaseCommand):
                 console.print(f"[blue]Playing audio ({player})...[/blue]")
                 pcm = bytearray()
                 saved_bytes = 0
+                player_gone = False
                 try:
                     with _player_stdin(player) as sink:
                         wrote_header = False
                         for chunk in stream:
                             if not chunk:
                                 continue
-                            if not wrote_header:
-                                sink.write(
-                                    _streaming_wav_header(
-                                        sample_rate=int(eff_sample_rate)
-                                    )
-                                )
-                                wrote_header = True
-                            sink.write(chunk)
-                            sink.flush()
                             if output_path:
                                 pcm.extend(chunk)
+                            if player_gone:
+                                continue
+                            try:
+                                if not wrote_header:
+                                    sink.write(
+                                        _streaming_wav_header(
+                                            sample_rate=int(eff_sample_rate)
+                                        )
+                                    )
+                                    wrote_header = True
+                                sink.write(chunk)
+                                sink.flush()
+                            except BrokenPipeError:
+                                # The player exited first (ffplay's "q", for
+                                # instance). That is the user stopping
+                                # playback, not a failure — but keep draining
+                                # the stream so a -o file is still complete.
+                                player_gone = True
 
                         if output_path and pcm:
                             # Save before waiting on the player (that wait
@@ -650,10 +669,6 @@ class SpeakCommand(BaseCommand):
                             saved_bytes = len(audio_bytes)
                 except click.ClickException:
                     raise
-                except BrokenPipeError:
-                    # The player exited first (ffplay's "q", for instance).
-                    # That is the user stopping playback, not a failure.
-                    pass
                 except Exception as e:
                     raise click.ClickException(f"Flux streaming failed: {e}")
 
