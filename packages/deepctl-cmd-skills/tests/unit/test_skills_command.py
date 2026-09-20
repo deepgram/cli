@@ -1,10 +1,12 @@
 """Unit tests for skills command."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click
 import pytest
 from deepctl_cmd_skills.command import SkillsCommand
+from deepctl_core.skill_bundle import DEFAULT_SKILLS_REF, RepoSkill, SkillFetchError
 
 
 class TestSkillsCommand:
@@ -37,6 +39,14 @@ class TestSkillsCommand:
         assert "list" in names
         assert "status" in names
 
+    def test_install_update_and_setup_accept_a_ref(self):
+        """Pinning has to be overridable without editing the source."""
+        cmd = SkillsCommand()
+        by_name = {c.name: c for c in cmd.setup_commands()}
+        for name in ("install", "update", "setup"):
+            options = {p.name for p in by_name[name].params}
+            assert "ref" in options, name
+
     def test_declining_install_anyway_aborts_instead_of_exiting_zero(self):
         """Declining the prompt must exit 2, not 0.
 
@@ -62,16 +72,18 @@ class TestSkillsCommand:
             with pytest.raises(click.Abort):
                 cmd._handle_install(cli_name="claude")
 
-        generator.install.assert_not_called()
+        generator.install_skills.assert_not_called()
 
-    def test_accepting_install_anyway_does_not_abort(self):
+    def test_accepting_install_anyway_does_not_abort(self, tmp_path):
         """Positive control: confirming must proceed to the install."""
         cmd = SkillsCommand()
         generator = MagicMock()
         generator.cli_name = "claude"
         generator.display_name = "Claude Code"
         generator.detect.return_value = False
-        generator.install.return_value = []
+        root = tmp_path / ".claude" / "skills"
+        generator.skills_root.return_value = root
+        generator.install_skills.return_value = [root / "api"]
 
         with (
             patch(
@@ -80,18 +92,22 @@ class TestSkillsCommand:
             ),
             patch(
                 "deepctl_core.skill_generator.collect_command_metadata",
-                return_value={},
+                return_value=[],
             ),
             patch(
                 "deepctl_core.skill_generator.get_skills_state",
                 return_value={"installed_skills": {}},
             ),
             patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills",
+                return_value=[RepoSkill(name="api", path=tmp_path / "api")],
+            ),
             patch.object(cmd, "confirm", return_value=True),
         ):
             cmd._handle_install(cli_name="claude")
 
-        generator.install.assert_called_once()
+        generator.install_skills.assert_called_once()
 
     def test_unknown_cli_exits_one(self):
         """An unknown --cli must exit 1, not print an error and exit 0."""
@@ -122,6 +138,134 @@ class TestSkillsCommand:
                 cmd._handle_remove(cli_name="cursor", remove_all=False)
 
         assert "No skills installed for 'cursor'" in str(exc.value)
+
+
+class TestFetchFailuresAreFatal:
+    """A partial install is worse than a failed one, so it must exit non-zero."""
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Could not download deepgram/skills@main: no network",
+            "deepgram/skills has no ref 'nope' (HTTP 404)",
+            "Skill manifest .claude-plugin/marketplace.json is not valid JSON",
+        ],
+    )
+    def test_fetch_error_becomes_a_click_exception(self, message):
+        cmd = SkillsCommand()
+        with patch(
+            "deepctl_core.skill_generator.fetch_repo_skills",
+            side_effect=SkillFetchError(message),
+        ):
+            with pytest.raises(click.ClickException) as excinfo:
+                cmd._fetch_skills(None)
+        rendered = str(excinfo.value)
+        assert message in rendered
+        assert "No skills were installed" in rendered
+
+    def test_install_does_not_swallow_the_failure(self, tmp_path):
+        """`skills install` used to print a notice and exit 0 with no files."""
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "claude"
+        generator.display_name = "Claude Code"
+        generator.detect.return_value = True
+        generator.skills_root.return_value = tmp_path / ".claude" / "skills"
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=[generator]
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": {}},
+            ),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills",
+                side_effect=SkillFetchError("no network"),
+            ),
+        ):
+            with pytest.raises(click.ClickException):
+                cmd._handle_install(install_all=True)
+
+        generator.install_skills.assert_not_called()
+        save.assert_not_called()
+
+
+class TestInstallRecordsWhatItDid:
+    def test_state_records_the_ref_and_every_skill(self, tmp_path):
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "claude"
+        generator.display_name = "Claude Code"
+        generator.detect.return_value = True
+        root = tmp_path / ".claude" / "skills"
+        generator.skills_root.return_value = root
+        generator.install_skills.return_value = [root / "api", root / "docs"]
+
+        skills = [
+            RepoSkill(name="api", path=tmp_path / "api"),
+            RepoSkill(name="docs", path=tmp_path / "docs"),
+        ]
+        state = {"installed_skills": {}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=[generator]
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=skills
+            ),
+        ):
+            cmd._handle_install(install_all=True)
+
+        entry = state["installed_skills"]["claude"]
+        assert entry["skills"] == ["api", "docs"]
+        assert entry["skills_ref"] == DEFAULT_SKILLS_REF
+        assert [Path(p).name for p in entry["paths"]] == ["api", "docs"]
+
+    def test_a_tool_without_a_skills_directory_gets_the_one_liner(self, capsys):
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "amazonq"
+        generator.display_name = "Amazon Q Developer"
+        generator.detect.return_value = True
+        generator.skills_root.return_value = None
+        generator.manual_hint.return_value = (
+            "Amazon Q Developer has no documented skills directory. "
+            "For the Deepgram skills, run: npx skills add deepgram/skills"
+        )
+        state = {"installed_skills": {}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=[generator]
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch("deepctl_core.skill_generator.fetch_repo_skills") as fetch,
+        ):
+            cmd._handle_install(install_all=True)
+
+        # Nothing to install means nothing to download.
+        fetch.assert_not_called()
+        # Advisory output belongs on stderr, so stdout stays parseable.
+        captured = capsys.readouterr()
+        assert "npx skills add deepgram/skills" in " ".join(captured.err.split())
+        assert captured.out == ""
+        assert state["installed_skills"] == {}
 
 
 class TestSkillsStartupCheck:
