@@ -410,7 +410,7 @@ The CLI phones home anonymous error reports to help us catch crashes and regress
 Persistent (recommended) — add this to your `config.yaml`
 (`~/.config/deepctl/config.yaml` on Linux,
 `~/Library/Application Support/deepctl/config.yaml` on macOS,
-`%LOCALAPPDATA%\\deepgram\\deepctl\\config.yaml` on Windows):
+`%LOCALAPPDATA%\deepgram\deepctl\config.yaml` on Windows):
 
 ```yaml
 telemetry:
