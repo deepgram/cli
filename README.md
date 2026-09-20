@@ -275,13 +275,43 @@ Add to your editor's MCP config:
 
 ### AI Tool Integration
 
-Automatically detect and configure AI coding assistants with Deepgram skills.
+Install the Deepgram agent skills from
+[`deepgram/skills`](https://github.com/deepgram/skills) into the AI coding
+tools on this machine. Each skill is installed as a folder, into the
+user-scope skills directory the tool's own documentation names.
 
 ```bash
-dg skills status                          # Detect AI tools
+dg skills status                          # Detect AI tools and show their skills directories
 dg skills setup                           # Interactive setup wizard
 dg skills install --all                   # Install for all detected tools
+dg skills list                            # Show what is installed, and from which ref
+dg skills update                          # Reinstall from upstream
 ```
+
+| Tool | Skills directory |
+| --- | --- |
+| Claude Code | `~/.claude/skills/` |
+| OpenAI Codex | `~/.agents/skills/` |
+| Gemini CLI | `~/.gemini/skills/` |
+| Cursor | `~/.cursor/skills/` |
+| OpenCode | `~/.config/opencode/skills/` |
+| Cline | `~/.cline/skills/` |
+
+Amazon Q Developer and Aider have no skills mechanism, so `dg skills` prints
+`npx skills add deepgram/skills` for those rather than writing a file they
+would not read.
+
+Installs are pinned to a released `deepgram/skills` tag so the same deepctl
+version always installs the same skills. Override with `--ref` or the
+`DEEPCTL_SKILLS_REF` environment variable:
+
+```bash
+dg skills install --all --ref main        # track the upstream default branch
+```
+
+A failed download, an unknown ref, or an upstream manifest that does not match
+the directories it lists is a hard failure (exit 1) with nothing written — a
+partial install is indistinguishable from a complete one once it is on disk.
 
 ### Starter Apps
 
