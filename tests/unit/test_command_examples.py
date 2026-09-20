@@ -30,33 +30,78 @@ COMMAND_GROUPS = ["deepctl.commands", "deepctl.subcommands.debug"]
 BINARY_NAMES = ("dg", "deepctl", "deepgram")
 
 # Groups whose subcommands are built at runtime from state this test cannot
-# see, so their examples are unverifiable rather than wrong.
-#   toolkit: subcommands come from a manifest fetched by `dg debug toolkit
-#            refresh` and cached on disk; a clean checkout has only `refresh`.
-DYNAMIC_SUBCOMMAND_PREFIXES = [("debug", "toolkit")]
+# see, so their examples are unverifiable rather than wrong. The value is the
+# set of subcommands that *are* statically present, and those stay checked --
+# exempting the whole prefix would have excused `dg debug toolkit refresh`,
+# the one subcommand the comment below says a clean checkout always has.
+#   toolkit: the rest come from a manifest fetched by `dg debug toolkit
+#            refresh` and cached on disk.
+DYNAMIC_SUBCOMMAND_PREFIXES: dict[tuple[str, ...], frozenset[str]] = {
+    ("debug", "toolkit"): frozenset({"refresh"}),
+}
+
+
+def _is_dynamic(argv: list[str]) -> bool:
+    """True when argv names a subcommand only a populated cache would define."""
+    for prefix, static in DYNAMIC_SUBCOMMAND_PREFIXES.items():
+        if tuple(argv[: len(prefix)]) != prefix:
+            continue
+        rest = argv[len(prefix) :]
+        # `dg debug toolkit` itself, and its statically defined subcommands,
+        # resolve in a clean checkout -- check them.
+        if not rest or rest[0].startswith("-") or rest[0] in static:
+            return False
+        return True
+    return False
+
+
+# `$(...)` or `` `...` `` -- non-nested, which is all our examples use.
+SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+
+# Stands in for whatever a command substitution would expand to. Options that
+# take a path validate their argument at runtime, not at parse time, so any
+# non-empty token is enough to check the *shape* of the invocation.
+SUBSTITUTION_PLACEHOLDER = "SUBSTITUTED"
+
+
+def _split_substitutions(example: str) -> tuple[str, list[str]]:
+    """Split a snippet into its outer command and its substituted snippets.
+
+    `eval "$(dg completion bash)"` and `dg ffprobe --path $(which ffprobe)`
+    are both advertised. Dropping them, as this test first did, left 2 of the
+    advertised examples unchecked -- including the only one that invokes
+    `dg completion`. Instead, lift each substitution out as a snippet in its
+    own right and leave a placeholder token behind, so both the inner and the
+    outer invocation get validated.
+    """
+    inner: list[str] = []
+
+    def take(match: re.Match[str]) -> str:
+        inner.append(match.group(1) if match.group(1) is not None else match.group(2))
+        return SUBSTITUTION_PLACEHOLDER
+
+    return SUBSTITUTION.sub(take, example), inner
 
 
 def _dg_invocations(example: str) -> list[list[str]]:
     """Extract the argv of each `dg ...` invocation in a shell example.
 
     Examples are shell snippets, not bare argv: they contain pipelines
-    (`dg speak "hi" | ffplay -`), upstream producers (`cat f | dg read`), and
-    trailing `# comments`. Only the segments that invoke our own binary are
-    ours to validate.
+    (`dg speak "hi" | ffplay -`), upstream producers (`cat f | dg read`),
+    command substitutions, and trailing `# comments`. Only the segments that
+    invoke our own binary are ours to validate.
     """
-    if "$(" in example or "`" in example:
-        # Command substitution -- `eval "$(dg completion bash)"` and friends.
-        # The inner dg call is real but the surrounding shell is not argv.
-        return []
+    outer, inner = _split_substitutions(example)
 
     invocations = []
-    for segment in re.split(r"\|\||&&|\|", example):
-        try:
-            argv = shlex.split(segment, comments=True)
-        except ValueError:
-            continue
-        if argv and argv[0] in BINARY_NAMES:
-            invocations.append(argv[1:])
+    for snippet in [outer, *inner]:
+        for segment in re.split(r"\|\||&&|\|", snippet):
+            try:
+                argv = shlex.split(segment, comments=True)
+            except ValueError:
+                continue
+            if argv and argv[0] in BINARY_NAMES:
+                invocations.append(argv[1:])
     return invocations
 
 
@@ -76,8 +121,8 @@ def _parse(cli: click.Group, argv: list[str]) -> None:
     command.parse_args(ctx, list(args))
 
 
-def _collect() -> list[tuple[str, str, list[str]]]:
-    """(command name, example string, argv) for every advertised example."""
+def _collect() -> list[tuple[str, str, str, list[str]]]:
+    """(group, command name, example string, argv) for every advertised example."""
     entry_points = metadata.entry_points()
     collected = []
     for group in COMMAND_GROUPS:
@@ -88,32 +133,41 @@ def _collect() -> list[tuple[str, str, list[str]]]:
                 continue
             for example in getattr(command_class, "examples", None) or []:
                 for argv in _dg_invocations(example):
-                    if any(
-                        tuple(argv[: len(prefix)]) == prefix
-                        for prefix in DYNAMIC_SUBCOMMAND_PREFIXES
-                    ):
+                    if _is_dynamic(argv):
                         continue
-                    collected.append((entry_point.name, example, argv))
+                    collected.append((group, entry_point.name, example, argv))
     return collected
 
 
 CASES = _collect()
 
 
-def test_examples_were_discovered() -> None:
-    """Guard the guard: an import change that empties CASES must not pass."""
-    assert len(CASES) > 50, (
-        f"only {len(CASES)} examples discovered -- the entry point groups in "
-        "COMMAND_GROUPS are probably stale, so this file is testing nothing"
+@pytest.mark.parametrize("group", COMMAND_GROUPS)
+def test_examples_were_discovered(group: str) -> None:
+    """Guard the guard: a stale entry point group must not pass unnoticed.
+
+    A floor on the *total* does not do that. `deepctl.commands` alone supplies
+    the overwhelming majority of cases, so dropping
+    `deepctl.subcommands.debug` -- the group that carried the broken
+    `dg debug stream` example -- still cleared a total-count check. Require
+    every group to contribute.
+    """
+    from_group = [case for case in CASES if case[0] == group]
+    assert from_group, (
+        f"no examples discovered from the {group!r} entry point group -- it is "
+        "probably stale or its packages are not installed, so this file is "
+        "silently testing less than it claims"
     )
 
 
 @pytest.mark.parametrize(
-    ("command_name", "example", "argv"),
+    ("group", "command_name", "example", "argv"),
     CASES,
-    ids=[f"{name}: {example}" for name, example, _ in CASES],
+    ids=[f"{name}: {example}" for _, name, example, _ in CASES],
 )
-def test_example_parses(command_name: str, example: str, argv: list[str]) -> None:
+def test_example_parses(
+    group: str, command_name: str, example: str, argv: list[str]
+) -> None:
     """Every string in every `examples` array must parse against the real CLI."""
     from deepctl.main import cli
 
