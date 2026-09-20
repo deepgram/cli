@@ -296,7 +296,8 @@ dg debug probe                       # Analyze WebSocket stream
 
 ## Global Options
 
-All commands accept these global flags:
+These go on `dg` itself, before the command: `dg -o json listen call.mp3`.
+Putting them after the command fails with `No such option`.
 
 | Flag | Description |
 |------|-------------|
@@ -305,9 +306,18 @@ All commands accept these global flags:
 | `--verbose`, `-v` | Enable verbose/debug output |
 | `--profile`, `-p` | Use named credential profile |
 | `--config`, `-c` | Path to config file |
+| `--base-url` | Override the API base URL |
 | `--api-key` | Explicit API key (overrides profile) |
-| `--timing` | Show performance timing |
-| `--agent-friendly` | Output JSON metadata for this command and exit |
+| `--timing`, `--timing-detailed` | Show performance timing |
+| `--non-interactive` | Skip prompts; use defaults |
+
+Per-command flags, which go after the command:
+
+| Flag | Description |
+|------|-------------|
+| `--agent-friendly` | Output JSON metadata for that command and exit |
+| `--non-interactive` | Also accepted here, so either position works |
+| `--project-id`, `-p` | Explicit project ID (billing, keys, login, members, requests, usage) |
 
 ---
 
