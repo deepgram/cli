@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -22,8 +23,6 @@ from rich.console import Console
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from deepctl_core.skill_bundle import RepoSkill
 
 console = Console()
@@ -33,19 +32,26 @@ class SkillsCommand(BaseGroupCommand):
     """AI coding assistant skill management."""
 
     name = "skills"
-    help = "Manage AI coding assistant integrations for deepctl"
+    help = "Install Deepgram agent skills into AI coding assistants"
     examples = [
         "dg skills status",
         "dg skills install",
         "dg skills install --all",
+        "dg skills install --all --ref main",
         "dg skills update",
         "dg skills remove --all",
     ]
     agent_help = (
-        "Manage skill files that teach AI coding assistants (Claude Code, "
-        "Codex, Gemini CLI, etc.) how to use deepctl. Use 'skills status' to "
-        "detect which AI CLIs are installed, 'skills install' to generate "
-        "integration files, and 'skills update' to regenerate after plugin changes."
+        "Install the Deepgram agent skills from github.com/deepgram/skills "
+        "into AI coding assistants (Claude Code, Codex, Gemini CLI, Cursor, "
+        "OpenCode, Cline). Each skill is copied as a folder into the "
+        "user-scope skills directory that tool reads. Use 'skills status' to "
+        "see which tools are present and where their skills go, "
+        "'skills install' to install, 'skills list' to see what is installed "
+        "and from which upstream ref, and 'skills update' to reinstall. "
+        "Installs are pinned to a released deepgram/skills tag; override with "
+        "--ref or DEEPCTL_SKILLS_REF. A fetch failure exits non-zero with "
+        "nothing written rather than installing a subset."
     )
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
@@ -300,7 +306,7 @@ class SkillsCommand(BaseGroupCommand):
                 root_cell = "[dim]no skills directory[/dim]"
             else:
                 installed_cell = f"[green]{count}[/green]" if count else "[dim]No[/dim]"
-                root_cell = str(root)
+                root_cell = _tilde(root)
             table.add_row(
                 gen.display_name,
                 "[green]Yes[/green]" if detected else "[dim]No[/dim]",
@@ -529,8 +535,6 @@ class SkillsCommand(BaseGroupCommand):
 
     def _handle_list(self) -> None:
         """Show installed skills with locations, versions and upstream ref."""
-        from pathlib import Path
-
         from deepctl_core.skill_generator import get_skills_state
 
         state = get_skills_state()
@@ -552,7 +556,7 @@ class SkillsCommand(BaseGroupCommand):
         for cli_key, info in installed.items():
             names = info.get("skills") or []
             paths = info.get("paths") or []
-            location = str(Path(paths[0]).parent) if paths else "?"
+            location = _tilde(Path(paths[0]).parent) if paths else "?"
             table.add_row(
                 cli_key,
                 info.get("version", "?"),
@@ -675,6 +679,14 @@ class SkillsCommand(BaseGroupCommand):
             print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
         elif not unsupported:
             print_info("No skills were installed.")
+
+
+def _tilde(path: Path) -> str:
+    """Render a path under the user's home as ~/... so tables stay readable."""
+    try:
+        return f"~/{path.relative_to(Path.home())}"
+    except ValueError:
+        return str(path)
 
 
 def _deepctl_version() -> str:
