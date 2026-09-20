@@ -24,6 +24,7 @@ from deepctl_core import (
     get_output_format,
 )
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .models import SpeakResult, SpeakVoicesResult, VoiceInfo
@@ -216,9 +217,11 @@ def _fail(message: str) -> BaseResult:
     In default output mode the framework prints nothing for a returned
     result — it only maps the status to a non-zero exit code — so the human
     message has to go to the stderr console here, the way every other status
-    line in this command does.
+    line in this command does. The message is escaped because it can carry a
+    user-supplied path, and rich would otherwise eat any [bracketed] segment
+    of it as markup.
     """
-    console.print(f"[red]Error:[/red] {message}")
+    console.print(f"[red]Error:[/red] {escape(message)}")
     return BaseResult(status="error", message=message)
 
 
