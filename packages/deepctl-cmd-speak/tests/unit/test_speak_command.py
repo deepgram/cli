@@ -1504,6 +1504,7 @@ class TestSpeakCommand:
         mock_config,
         mock_auth_manager,
         mock_client,
+        capsys,
     ):
         """--play with no available player fails clearly before any API call."""
         mock_sys.stdin.isatty.return_value = True
@@ -1525,6 +1526,10 @@ class TestSpeakCommand:
         assert "No audio player found" in result.message
         mock_client.speak_text.assert_not_called()
         mock_client.speak_text_stream.assert_not_called()
+        # Default output mode prints nothing for a returned result, so the
+        # command has to put the reason on stderr itself.
+        printed = " ".join(capsys.readouterr().err.split())
+        assert "No audio player found" in printed
 
     @patch("deepctl_cmd_speak.command.shutil")
     @patch("deepctl_cmd_speak.command.sys")
