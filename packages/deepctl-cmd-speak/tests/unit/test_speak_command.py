@@ -954,7 +954,7 @@ class TestSpeakCommand:
         captured = capsys.readouterr()
         assert "Deepgram TTS Voices" in captured.out
         assert "flux-alexis-en" in captured.out
-        assert "default: flux-alexis-en" in captured.out.replace("\n", "")
+        assert "default: flux-alexis-en" in " ".join(captured.out.split())
 
     @patch("deepctl_cmd_speak.command.get_output_format", return_value="json")
     def test_handle_list_voices_json_prints_no_table(
@@ -1275,6 +1275,84 @@ class TestSpeakCommand:
         assert isinstance(result, SpeakResult)
         assert result.status == "success"
         assert result.played is True
+
+    @patch("deepctl_cmd_speak.command.shutil")
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_flux_play_quit_still_saves_the_whole_file(
+        self,
+        mock_sys,
+        mock_shutil,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """Stopping playback must not truncate or skip the -o file."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+        mock_shutil.which.side_effect = _only("ffplay")
+        pcm = [b"\x01\x00\x02\x00", b"\x03\x00\x04\x00"]
+        mock_client.speak_text_stream.return_value = iter(pcm)
+        output_file = tmp_path / "out.wav"
+
+        @contextmanager
+        def quit_immediately(player):
+            sink = Mock()
+            sink.write.side_effect = BrokenPipeError
+            yield sink
+
+        with patch("deepctl_cmd_speak.command._player_stdin", quit_immediately):
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(output_file),
+                model="flux-alexis-en",
+                play=True,
+            )
+
+        assert isinstance(result, SpeakResult)
+        assert result.status == "success"
+        # The whole utterance still reached the file the user asked for.
+        with wave.open(str(output_file), "rb") as wav:
+            assert wav.readframes(wav.getnframes()) == b"".join(pcm)
+        assert result.bytes_written == output_file.stat().st_size
+
+    @patch("deepctl_cmd_speak.command.shutil")
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_handle_play_with_redirected_stdout_warns(
+        self,
+        mock_sys,
+        mock_shutil,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        stub_stdin_player,
+        capsys,
+    ):
+        """Playing with stdout redirected says why the redirect gets nothing."""
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = False
+        mock_shutil.which.side_effect = _only("ffplay")
+        mock_client.speak_text_stream.return_value = iter([b"\x01\x00"])
+
+        command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text="Hello",
+            output=None,
+            model="flux-alexis-en",
+            play=True,
+        )
+
+        # Normalize rich's wrapping so the assertion is width-independent.
+        note = " ".join(capsys.readouterr().err.split())
+        assert "--play sends the audio to your player" in note
+        assert "stdout stays empty" in note
 
     @patch("deepctl_cmd_speak.command.shutil")
     @patch("deepctl_cmd_speak.command.sys")
