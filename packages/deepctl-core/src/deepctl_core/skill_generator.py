@@ -838,11 +838,15 @@ class SkillGenerator(ABC):
         root = self.skills_root()
         if root is None:
             return []
-        owned = {str(p) for p in self.owned_skill_paths(recorded)}
+        # Compare resolved paths, not the strings: a record written under
+        # one spelling of the same directory (/tmp vs /private/tmp, a home
+        # reached through a symlink) still describes the folder deepctl
+        # installed, and matching on text would call it a stranger's.
+        owned = {p.resolve() for p in self.owned_skill_paths(recorded)}
         conflicts: list[Path] = []
         for skill in skills:
             dest = root / skill.name
-            if (dest.exists() or dest.is_symlink()) and str(dest) not in owned:
+            if (dest.exists() or dest.is_symlink()) and dest.resolve() not in owned:
                 conflicts.append(dest)
         return conflicts
 

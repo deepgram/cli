@@ -419,7 +419,10 @@ class TestOwnership:
         target.mkdir(parents=True)
         (target / "SKILL.md").write_text("---\nname: api\n---\n")
         link = root / "api"
-        link.symlink_to(target, target_is_directory=True)
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):  # unprivileged Windows
+            pytest.skip("this filesystem does not allow creating symlinks")
 
         with patch.object(gen, "skills_root", return_value=root):
             with patch.object(gen, "legacy_paths", return_value=[]):
@@ -460,6 +463,23 @@ class TestOwnership:
                 again = gen.install_skills(skills, written)
         assert again == written
         assert (root / "api" / "references" / "old.md").is_file()
+
+    def test_a_record_written_through_a_symlinked_home_still_counts(self, tmp_path):
+        """/tmp vs /private/tmp is the same folder, so it is still ours."""
+        gen, root = self._gen(tmp_path)
+        link_root = tmp_path / "link-home" / ".claude" / "skills"
+        link_root.parent.mkdir(parents=True)
+        try:
+            link_root.symlink_to(root, target_is_directory=True)
+        except (OSError, NotImplementedError):  # unprivileged Windows
+            pytest.skip("this filesystem does not allow creating symlinks")
+
+        skills = [_fake_skill(tmp_path, "api")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                gen.install_skills(skills)
+                # Recorded under the other spelling of the same directory.
+                assert gen.install_conflicts(skills, [str(link_root / "api")]) == []
 
     def test_install_conflicts_lists_every_unowned_destination(self, tmp_path):
         gen, root = self._gen(tmp_path)
