@@ -36,6 +36,16 @@ EXPECTED_ROOTS = {
     "cline": Path(".cline") / "skills",
 }
 
+# How `dg skills status` labels each of them.
+TOOL_DISPLAY_NAMES = {
+    "claude": "Claude Code",
+    "codex": "OpenAI Codex",
+    "gemini": "Gemini CLI",
+    "cursor": "Cursor",
+    "opencode": "OpenCode",
+    "cline": "Cline",
+}
+
 # The directory whose presence makes each tool "detected". OpenCode and
 # Cline are detected by their own config directories, not by the skills
 # directory deepctl writes into.
@@ -104,6 +114,24 @@ def installed(home: Path) -> Path:
 
 def _state(home: Path) -> dict:
     return json.loads((home / ".deepctl" / "skills" / "skills.json").read_text())
+
+
+def _status_counts(result: subprocess.CompletedProcess[str]) -> dict[str, str]:
+    """The "Skills Installed" cell of the `skills status` table, per tool.
+
+    Parses the rendered table rather than searching the whole screen for a
+    number, so "14" appearing in a path cannot pass for a skill count.
+    """
+    assert result.returncode == 0, result.stderr
+    counts: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        cells = [cell.strip() for cell in line.split("│")]
+        # Rich draws the row as: "" | CLI | Detected | Installed | Dir | ""
+        if len(cells) != 6:
+            continue
+        if cells[1] in TOOL_DISPLAY_NAMES.values():
+            counts[cells[1]] = cells[3]
+    return counts
 
 
 class TestSkillsLandWhereTheToolReadsThem:
@@ -189,8 +217,8 @@ class TestSkillsLandWhereTheToolReadsThem:
         rendered = " ".join(result.stdout.split())
         for relative in EXPECTED_ROOTS.values():
             assert f"~/{relative.as_posix()}" in rendered, relative
-        # Six tools, fourteen skills each.
-        assert rendered.count("14") >= len(EXPECTED_ROOTS)
+        counts = _status_counts(result)
+        assert counts == {name: "14" for name in TOOL_DISPLAY_NAMES.values()}
 
 
 class TestUnrelatedSkillsAreNotDeepctlsToTouch:
@@ -241,16 +269,10 @@ class TestUnrelatedSkillsAreNotDeepctlsToTouch:
 
     def test_status_does_not_count_an_unrelated_skill(self, home: Path) -> None:
         self._seed_unrelated(home, self.NAME)
-        result = _run(["skills", "status"], home)
-        assert result.returncode == 0, result.stderr
-        rows = [
-            line
-            for line in result.stdout.splitlines()
-            if "skills" in line and "│" in line
-        ]
-        assert rows
-        for row in rows:
-            assert " 1 " not in row, row
+        counts = _status_counts(_run(["skills", "status"], home))
+        assert set(counts) == set(TOOL_DISPLAY_NAMES.values())
+        for tool, cell in counts.items():
+            assert cell == "No", f"{tool} counted a skill it did not install: {cell}"
 
 
 class TestUpgradeFromTheOldLayout:
