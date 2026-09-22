@@ -1174,10 +1174,12 @@ except:
         """Regenerate AI CLI skills if installed (best-effort)."""
         try:
             from deepctl_core.skill_generator import (
+                SkillOwnershipError,
                 _commands_hash,
                 collect_command_metadata,
                 get_all_generators,
                 get_skills_state,
+                recorded_skill_paths,
                 save_skills_state,
             )
 
@@ -1192,7 +1194,17 @@ except:
             for cli_name, info in state["installed_skills"].items():
                 gen = generators.get(cli_name)
                 if gen:
-                    paths = gen.install(commands, version)
+                    try:
+                        paths = gen.install(
+                            commands,
+                            version,
+                            recorded=recorded_skill_paths(state, cli_name),
+                        )
+                    except SkillOwnershipError:
+                        # Not deepctl's folder to replace. Leave it, and
+                        # leave the recorded state describing the install
+                        # that is actually on disk.
+                        continue
                     info.update(
                         {
                             "paths": [str(p) for p in paths],

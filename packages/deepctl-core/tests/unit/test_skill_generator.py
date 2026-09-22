@@ -1,6 +1,7 @@
 """Unit tests for skill generator module."""
 
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,11 +16,13 @@ from deepctl_core.skill_generator import (
     CursorGenerator,
     GeminiGenerator,
     LegacyArtifact,
+    SkillOwnershipError,
     _commands_hash,
     collect_command_metadata,
     detect_ai_clis,
     get_all_generators,
     get_skills_state,
+    recorded_skill_paths,
     render_developer_guide,
     render_skill_content,
     save_skills_state,
@@ -285,7 +288,7 @@ class TestInstallSkills:
 
     def test_reinstall_drops_files_that_disappeared_upstream(self, tmp_path):
         skills = [_fake_skill(tmp_path, "api", references=("old.md",))]
-        gen, root, _ = self._install(tmp_path, skills)
+        gen, root, written = self._install(tmp_path, skills)
         assert (root / "api" / "references" / "old.md").is_file()
 
         fresh = tmp_path / "bundle2"
@@ -294,7 +297,7 @@ class TestInstallSkills:
         from deepctl_core.skill_bundle import RepoSkill
 
         with patch.object(gen, "skills_root", return_value=root):
-            gen.install_skills([RepoSkill(name="api", path=fresh / "api")])
+            gen.install_skills([RepoSkill(name="api", path=fresh / "api")], written)
         assert not (root / "api" / "references").exists()
 
     def test_frontmatter_survives_verbatim(self, tmp_path):
@@ -302,21 +305,24 @@ class TestInstallSkills:
         _, root, _ = self._install(tmp_path, skills)
         assert (root / "api" / "SKILL.md").read_text().startswith("---\nname: api")
 
-    def test_get_skill_paths_reports_what_is_installed(self, tmp_path):
+    def test_installed_skill_paths_reports_what_deepctl_installed(self, tmp_path):
         skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
-        gen, root, _ = self._install(tmp_path, skills)
+        gen, root, written = self._install(tmp_path, skills)
         with patch.object(gen, "skills_root", return_value=root):
-            assert [p.name for p in gen.get_skill_paths()] == ["api", "docs"]
-            assert gen.is_installed() is True
+            assert [p.name for p in gen.installed_skill_paths(written)] == [
+                "api",
+                "docs",
+            ]
+            assert gen.is_installed(written) is True
 
     def test_remove_deletes_every_installed_skill(self, tmp_path):
         skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
-        gen, root, _ = self._install(tmp_path, skills)
+        gen, root, written = self._install(tmp_path, skills)
         with patch.object(gen, "skills_root", return_value=root):
             with patch.object(gen, "legacy_paths", return_value=[]):
-                removed = gen.remove()
+                removed = gen.remove(written)
                 assert len(removed) == 2
-                assert gen.is_installed() is False
+                assert gen.is_installed(written) is False
         assert not root.exists()
 
     def test_install_propagates_a_fetch_failure(self, tmp_path):
@@ -329,6 +335,199 @@ class TestInstallSkills:
             ):
                 with pytest.raises(SkillFetchError):
                     gen.install([_make_command()], "1.0.0")
+
+
+class TestOwnership:
+    """These skills directories are shared. deepctl touches only its own.
+
+    ``~/.claude/skills`` and every other destination here hold skills from
+    the user and from other publishers. Treating each child folder with a
+    ``SKILL.md`` as deepctl's made ``dg skills remove`` delete a
+    developer's unrelated work and let an install overwrite it.
+    """
+
+    def _gen(self, tmp_path):
+        gen = ClaudeCodeGenerator()
+        root = tmp_path / "home" / ".claude" / "skills"
+        root.mkdir(parents=True)
+        return gen, root
+
+    def _unrelated(self, root, name="my-private-skill"):
+        """A skill folder somebody other than deepctl put there."""
+        folder = root / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(f"---\nname: {name}\n---\n\nmine\n")
+        return folder
+
+    # -- remove ------------------------------------------------------
+
+    def test_remove_preserves_an_unrelated_skill(self, tmp_path):
+        """The reported bug: `dg skills remove` erased user-owned folders."""
+        gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root)
+        skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(skills)
+                removed = gen.remove(written)
+
+        assert sorted(p.name for p in removed) == ["api", "docs"]
+        assert mine.is_dir()
+        assert (mine / "SKILL.md").read_text().endswith("mine\n")
+
+    def test_remove_without_a_record_deletes_nothing(self, tmp_path):
+        """A hand-deleted skills.json leaves deepctl unable to prove ownership."""
+        gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root)
+        skills = [_fake_skill(tmp_path, "api")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                gen.install_skills(skills)
+                assert gen.remove([]) == []
+
+        assert (root / "api" / "SKILL.md").is_file()
+        assert mine.is_dir()
+
+    def test_remove_ignores_a_recorded_path_outside_the_skills_root(self, tmp_path):
+        """A tampered or stale skills.json cannot aim a delete elsewhere."""
+        gen, root = self._gen(tmp_path)
+        elsewhere = tmp_path / "home" / "Documents" / "thesis"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "chapter-1.md").write_text("years of work")
+        nested = root / "api" / "references"
+        nested.mkdir(parents=True)
+
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                removed = gen.remove(
+                    [
+                        str(elsewhere),
+                        str(root / ".." / ".." / "Documents"),
+                        str(nested),  # a grandchild, not a direct child
+                        "relative/path",
+                    ]
+                )
+
+        assert removed == []
+        assert (elsewhere / "chapter-1.md").is_file()
+        assert nested.is_dir()
+
+    def test_remove_ignores_a_recorded_path_that_became_a_symlink(self, tmp_path):
+        """Resolve first: a symlinked name must not delete its target."""
+        gen, root = self._gen(tmp_path)
+        target = tmp_path / "home" / "real-work"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text("---\nname: api\n---\n")
+        link = root / "api"
+        link.symlink_to(target, target_is_directory=True)
+
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                assert gen.remove([str(link)]) == []
+
+        assert target.is_dir()
+        assert (target / "SKILL.md").is_file()
+
+    # -- install -----------------------------------------------------
+
+    def test_install_refuses_a_same_name_collision(self, tmp_path):
+        """An unrecorded folder named `api` is somebody else's `api`."""
+        gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root, "api")
+        skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
+
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                with pytest.raises(SkillOwnershipError) as excinfo:
+                    gen.install_skills(skills)
+
+        assert [p for _, p in excinfo.value.conflicts] == [root / "api"]
+        assert "Refusing to overwrite" in str(excinfo.value)
+        assert str(root / "api") in str(excinfo.value)
+        # The user's file is untouched...
+        assert (mine / "SKILL.md").read_text().endswith("mine\n")
+        # ...and nothing else was installed either: a collision on one
+        # skill must not leave a half-written bundle behind.
+        assert not (root / "docs").exists()
+
+    def test_install_replaces_only_what_deepctl_recorded(self, tmp_path):
+        gen, root = self._gen(tmp_path)
+        skills = [_fake_skill(tmp_path, "api", references=("old.md",))]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(skills)
+                # Recorded, so a reinstall may replace it.
+                again = gen.install_skills(skills, written)
+        assert again == written
+        assert (root / "api" / "references" / "old.md").is_file()
+
+    def test_install_conflicts_lists_every_unowned_destination(self, tmp_path):
+        gen, root = self._gen(tmp_path)
+        self._unrelated(root, "api")
+        self._unrelated(root, "docs")
+        skills = [_fake_skill(tmp_path, n) for n in ("api", "docs", "cli")]
+        with patch.object(gen, "skills_root", return_value=root):
+            conflicts = gen.install_conflicts(skills)
+        assert conflicts == [root / "api", root / "docs"]
+
+    def test_a_fresh_install_over_an_existing_folder_fails_rather_than_overwrites(
+        self, tmp_path
+    ):
+        """No skills.json yet is exactly the case with no proof of ownership."""
+        gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root, "api")
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                with pytest.raises(SkillOwnershipError):
+                    gen.install([_make_command()], "1.0.0", recorded=[])
+        assert (mine / "SKILL.md").read_text().endswith("mine\n")
+
+    # -- status ------------------------------------------------------
+
+    def test_status_does_not_count_unowned_folders(self, tmp_path):
+        gen, root = self._gen(tmp_path)
+        self._unrelated(root)
+        self._unrelated(root, "someone-elses-api")
+        skills = [_fake_skill(tmp_path, "api")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(skills)
+                assert gen.installed_skill_paths(written) == [root / "api"]
+
+    def test_status_drops_a_recorded_folder_the_user_deleted(self, tmp_path):
+        gen, root = self._gen(tmp_path)
+        skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(skills)
+                shutil.rmtree(root / "docs")
+                assert gen.installed_skill_paths(written) == [root / "api"]
+
+    # -- the record itself -------------------------------------------
+
+    def test_recorded_skill_paths_tolerates_a_mangled_state_file(self):
+        assert recorded_skill_paths({}, "claude") == []
+        assert recorded_skill_paths({"installed_skills": None}, "claude") == []
+        assert recorded_skill_paths({"installed_skills": {}}, "claude") == []
+        assert (
+            recorded_skill_paths({"installed_skills": {"claude": "nope"}}, "claude")
+            == []
+        )
+        assert (
+            recorded_skill_paths(
+                {"installed_skills": {"claude": {"paths": "not-a-list"}}}, "claude"
+            )
+            == []
+        )
+        assert recorded_skill_paths(
+            {"installed_skills": {"claude": {"paths": ["/a", 7, None, "/b"]}}},
+            "claude",
+        ) == ["/a", "/b"]
+
+    def test_tools_without_a_skills_directory_own_nothing(self):
+        gen = AmazonQGenerator()
+        assert gen.owned_skill_paths(["/anywhere"]) == []
+        assert gen.install_conflicts([], ["/anywhere"]) == []
 
 
 class TestLegacyCleanup:
@@ -346,6 +545,48 @@ class TestLegacyCleanup:
             removed = gen.clean_legacy()
         assert removed == [legacy]
         assert not legacy.exists()
+
+    def test_claude_cleanup_only_takes_the_markdown_it_wrote(self, tmp_path):
+        """0.3.0 wrote `*.md` here and removed `*.md`; so does the cleanup."""
+        legacy = tmp_path / ".claude" / "commands" / "deepgram"
+        legacy.mkdir(parents=True)
+        for name in ("api.md", "docs.md", "setup-mcp.md", "starters.md"):
+            (legacy / name).write_text(f"---\nname: {name}\n---\n")
+        (legacy / "my-own-notes.txt").write_text("not deepctl's")
+        (legacy / "mine").mkdir()
+
+        gen = ClaudeCodeGenerator()
+        with patch.object(
+            gen,
+            "legacy_paths",
+            return_value=[LegacyArtifact(legacy, contents=("*.md",))],
+        ):
+            removed = gen.clean_legacy()
+
+        assert removed == [legacy]
+        assert not list(legacy.glob("*.md"))
+        assert (legacy / "my-own-notes.txt").read_text() == "not deepctl's"
+        assert (legacy / "mine").is_dir()
+
+    def test_claude_cleanup_removes_the_directory_once_it_is_empty(self, tmp_path):
+        legacy = tmp_path / ".claude" / "commands" / "deepgram"
+        legacy.mkdir(parents=True)
+        (legacy / "api.md").write_text("stale")
+
+        gen = ClaudeCodeGenerator()
+        with patch.object(
+            gen,
+            "legacy_paths",
+            return_value=[LegacyArtifact(legacy, contents=("*.md",))],
+        ):
+            gen.clean_legacy()
+        assert not legacy.exists()
+
+    def test_claude_generator_scopes_its_real_legacy_artifact(self):
+        """Not just the test's fixture — the shipped artifact is scoped too."""
+        (artifact,) = ClaudeCodeGenerator().legacy_paths()
+        assert artifact.path == Path.home() / ".claude" / "commands" / "deepgram"
+        assert artifact.contents == ("*.md",)
 
     def test_shared_context_file_keeps_the_user_content(self, tmp_path):
         target = tmp_path / "instructions.md"

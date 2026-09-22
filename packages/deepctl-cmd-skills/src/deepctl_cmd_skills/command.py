@@ -51,7 +51,11 @@ class SkillsCommand(BaseGroupCommand):
         "and from which upstream ref, and 'skills update' to reinstall. "
         "Installs are pinned to a released deepgram/skills tag; override with "
         "--ref or DEEPCTL_SKILLS_REF. A fetch failure exits non-zero with "
-        "nothing written rather than installing a subset."
+        "nothing written rather than installing a subset. Those skills "
+        "directories are shared with the user's own skills and other "
+        "publishers', so every subcommand operates only on the folders "
+        "deepctl recorded installing: install refuses to overwrite an "
+        "unrecorded folder of the same name and remove never deletes one."
     )
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
@@ -187,18 +191,18 @@ class SkillsCommand(BaseGroupCommand):
 
         @click.command(
             name="remove",
-            help="Remove installed skill files",
+            help=("Remove the skill folders deepctl installed (never ones it did not)"),
         )
         @click.option(
             "--all",
             "remove_all",
             is_flag=True,
-            help="Remove all installed skill files",
+            help="Remove deepctl's skills from every tool it installed into",
         )
         @click.option(
             "--cli",
             "cli_name",
-            help="Remove skill files for a specific AI CLI",
+            help="Remove deepctl's skills for a specific AI CLI",
         )
         def remove_cmd(**kwargs: Any) -> None:
             pass
@@ -275,6 +279,32 @@ class SkillsCommand(BaseGroupCommand):
                 "deepgram/skills revision."
             )
 
+    def _refuse_unowned_destinations(
+        self,
+        generators: list[Any],
+        skills: list[RepoSkill],
+        state: dict[str, Any],
+    ) -> None:
+        """Stop before writing if any destination is not deepctl's to replace.
+
+        Checked across every selected tool first, so a collision in the
+        last one does not leave the earlier ones half-updated.
+        """
+        from deepctl_core.skill_generator import (
+            SkillOwnershipError,
+            recorded_skill_paths,
+        )
+
+        conflicts: list[tuple[str, Path]] = []
+        for gen in generators:
+            recorded = recorded_skill_paths(state, gen.cli_name)
+            conflicts.extend(
+                (gen.display_name, path)
+                for path in gen.install_conflicts(skills, recorded)
+            )
+        if conflicts:
+            raise click.ClickException(str(SkillOwnershipError(conflicts)))
+
     # ------------------------------------------------------------------
     # Handlers
     # ------------------------------------------------------------------
@@ -285,6 +315,7 @@ class SkillsCommand(BaseGroupCommand):
             SKILLS_CLI_HINT,
             get_all_generators,
             get_skills_state,
+            recorded_skill_paths,
         )
 
         generators = get_all_generators()
@@ -300,7 +331,12 @@ class SkillsCommand(BaseGroupCommand):
         for gen in generators:
             detected = gen.detect()
             root = gen.skills_root()
-            count = len(gen.get_skill_paths())
+            # Deepgram's own skills only. These directories are shared, so
+            # counting every folder in them would report the user's skills
+            # and other publishers' skills as deepctl installs.
+            count = len(
+                gen.installed_skill_paths(recorded_skill_paths(state, gen.cli_name))
+            )
             if root is None:
                 installed_cell = "[dim]n/a[/dim]"
                 root_cell = "[dim]no skills directory[/dim]"
@@ -341,6 +377,7 @@ class SkillsCommand(BaseGroupCommand):
             get_all_generators,
             get_skills_state,
             installable_generators,
+            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -397,8 +434,10 @@ class SkillsCommand(BaseGroupCommand):
 
         if supported:
             skills = self._fetch_skills(ref)
+            self._refuse_unowned_destinations(supported, skills, state)
             for gen in supported:
-                paths = gen.install_skills(skills)
+                recorded = recorded_skill_paths(state, gen.cli_name)
+                paths = gen.install_skills(skills, recorded)
                 state["installed_skills"][gen.cli_name] = {
                     "paths": [str(p) for p in paths],
                     "installed_at": datetime.now(timezone.utc).isoformat(),
@@ -436,6 +475,7 @@ class SkillsCommand(BaseGroupCommand):
             collect_command_metadata,
             get_all_generators,
             get_skills_state,
+            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -466,8 +506,10 @@ class SkillsCommand(BaseGroupCommand):
             return
 
         skills = self._fetch_skills(ref)
+        self._refuse_unowned_destinations(targets, skills, state)
         for gen in targets:
-            paths = gen.install_skills(skills)
+            recorded = recorded_skill_paths(state, gen.cli_name)
+            paths = gen.install_skills(skills, recorded)
             state["installed_skills"][gen.cli_name].update(
                 {
                     "paths": [str(p) for p in paths],
@@ -493,10 +535,17 @@ class SkillsCommand(BaseGroupCommand):
         remove_all: bool = False,
         cli_name: str | None = None,
     ) -> None:
-        """Remove installed skill files."""
+        """Remove the skill folders deepctl recorded installing.
+
+        Only those. These are shared directories, so a folder deepctl has
+        no record of installing belongs to the user or another publisher
+        and is never deleted — including when ``skills.json`` is gone, in
+        which case there is nothing deepctl can prove it owns.
+        """
         from deepctl_core.skill_generator import (
             get_all_generators,
             get_skills_state,
+            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -504,7 +553,11 @@ class SkillsCommand(BaseGroupCommand):
         installed = state.get("installed_skills", {})
 
         if not installed:
-            print_info("No skills are installed.")
+            print_info(
+                "No skills are installed according to deepctl's records. "
+                "deepctl only removes folders it recorded installing, so if "
+                "those records were deleted, remove the skill folders by hand."
+            )
             return
 
         generators = {g.cli_name: g for g in get_all_generators()}
@@ -525,9 +578,14 @@ class SkillsCommand(BaseGroupCommand):
         for cli_key in targets:
             gen = generators.get(cli_key)
             if gen:
-                removed = gen.remove()
+                removed = gen.remove(recorded_skill_paths(state, cli_key))
                 for p in removed:
                     print_info(f"  Removed {p}")
+                if not removed:
+                    print_warning(
+                        f"  {gen.display_name}: nothing deepctl installed is "
+                        "still on disk; left everything else alone."
+                    )
             del state["installed_skills"][cli_key]
 
         save_skills_state(state)
@@ -584,6 +642,7 @@ class SkillsCommand(BaseGroupCommand):
             get_all_generators,
             get_skills_state,
             installable_generators,
+            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -648,8 +707,10 @@ class SkillsCommand(BaseGroupCommand):
 
         if supported:
             skills = self._fetch_skills(ref)
+            self._refuse_unowned_destinations(supported, skills, state)
             for gen in supported:
-                paths = gen.install_skills(skills)
+                recorded = recorded_skill_paths(state, gen.cli_name)
+                paths = gen.install_skills(skills, recorded)
                 state["installed_skills"][gen.cli_name] = {
                     "paths": [str(p) for p in paths],
                     "installed_at": datetime.now(timezone.utc).isoformat(),

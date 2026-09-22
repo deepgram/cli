@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING, Any
 from deepctl_core.skill_bundle import fetch_skill_bundle
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
     from deepctl_core.skill_bundle import RepoSkill
 
 # The cross-tool installer that owns the directory conventions this module
@@ -40,6 +42,29 @@ SKILLS_CLI_HINT = "npx skills add deepgram/skills"
 
 #: Filename that marks a directory as a skill.
 SKILL_ENTRY_FILE = "SKILL.md"
+
+
+class SkillOwnershipError(Exception):
+    """A destination already exists and deepctl did not put it there.
+
+    Every tool deepctl installs into reads a *shared* skills directory —
+    ``~/.claude/skills`` and friends hold skills from the user and from
+    other publishers too. deepctl therefore only ever replaces or deletes
+    a folder it recorded installing itself, and raises this instead of
+    touching anything else.
+    """
+
+    def __init__(self, conflicts: Sequence[tuple[str, Path]]) -> None:
+        self.conflicts = list(conflicts)
+        listing = "\n".join(f"  {name}: {path}" for name, path in self.conflicts)
+        super().__init__(
+            "Refusing to overwrite skills deepctl did not install:\n"
+            f"{listing}\n\n"
+            f"They are not recorded in {_STATE_FILE}, so they belong to you "
+            "or to another publisher. Rename or delete them and run the "
+            "install again. Nothing was installed."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -85,6 +110,29 @@ def save_skills_state(state: dict[str, Any]) -> None:
     """Persist the skills state file."""
     _SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     _STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def recorded_skill_paths(state: dict[str, Any], cli_name: str) -> list[str]:
+    """Paths ``skills.json`` records deepctl having installed for one tool.
+
+    This is deepctl's only claim of ownership over anything in a tool's
+    skills directory. It is a *claim*, not a guarantee — every consumer
+    re-checks each path against the tool's skills root before writing to
+    it or deleting it, so a hand-edited or stale state file cannot point
+    an operation somewhere else.
+
+    A user who deletes ``skills.json`` therefore leaves deepctl unable to
+    prove it owns anything: install refuses to overwrite the folders it
+    previously wrote, and remove deletes nothing. That is the safe
+    direction to fail in — the folders are still there to delete by hand.
+    """
+    entry = (state.get("installed_skills") or {}).get(cli_name)
+    if not isinstance(entry, dict):
+        return []
+    paths = entry.get("paths")
+    if not isinstance(paths, list):
+        return []
+    return [p for p in paths if isinstance(p, str)]
 
 
 def fetch_repo_skills(
@@ -675,6 +723,11 @@ class LegacyArtifact:
     #: True when the path is a file the user also edits, so only deepctl's
     #: own marked-off section may be removed.
     shared: bool = False
+    #: For a directory: the glob patterns deepctl <= 0.3.0 wrote into it.
+    #: Only matching files are deleted, and the directory itself only if
+    #: that leaves it empty, so a file the user put alongside survives.
+    #: Empty means deepctl owned the whole directory.
+    contents: tuple[str, ...] = ()
 
 
 class SkillGenerator(ABC):
@@ -689,6 +742,15 @@ class SkillGenerator(ABC):
     that the tool may or may not read, under a marker claiming to be
     something else, is how this command came to write 58 KB into
     ``~/.codex/instructions.md`` — a path current Codex does not read at all.
+
+    **Nothing here touches a folder deepctl did not install.** Those
+    directories are shared: ``~/.claude/skills`` holds the user's own
+    skills and other publishers' skills next to Deepgram's. So install,
+    update and remove all take the paths ``skills.json`` recorded for this
+    tool, keep only those that are a direct child of :meth:`skills_root`,
+    and work on that set alone. An existing folder deepctl cannot prove it
+    installed is never replaced (:class:`SkillOwnershipError`) and never
+    deleted.
     """
 
     cli_name: str = ""
@@ -716,12 +778,73 @@ class SkillGenerator(ABC):
         """Paths written by earlier deepctl versions, to be cleaned up."""
         return []
 
-    def get_skill_paths(self) -> list[Path]:
-        """Return the installed skill folders currently on disk."""
+    def owned_skill_paths(self, recorded: Iterable[str | Path]) -> list[Path]:
+        """The recorded paths this tool may safely write to or delete.
+
+        ``recorded`` comes from :func:`recorded_skill_paths`. Each entry
+        has to survive two checks before it counts as deepctl's:
+
+        * it is absolute, and
+        * it resolves to a *direct child* of this tool's skills root,
+          with symlinks followed on both sides.
+
+        The second check is what makes a hand-edited or stale
+        ``skills.json`` harmless: an entry pointing at ``~/Documents`` or
+        at ``~/.claude/skills/api/../../..`` resolves outside the root and
+        is dropped, and a skill folder someone replaced with a symlink
+        resolves to its target and is dropped too.
+        """
         root = self.skills_root()
-        if root is None or not root.is_dir():
+        if root is None:
             return []
-        return sorted(p for p in root.iterdir() if (p / SKILL_ENTRY_FILE).is_file())
+        resolved_root = root.expanduser().resolve()
+        owned: list[Path] = []
+        seen: set[Path] = set()
+        for entry in recorded:
+            path = Path(entry).expanduser()
+            if not path.is_absolute():
+                continue
+            if path.resolve().parent != resolved_root:
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            owned.append(path)
+        return owned
+
+    def installed_skill_paths(self, recorded: Iterable[str | Path]) -> list[Path]:
+        """Skill folders deepctl installed for this tool that are still there.
+
+        Deliberately *not* "every folder under the skills root with a
+        ``SKILL.md``": that would count the user's own skills, and every
+        other publisher's, as Deepgram's.
+        """
+        return sorted(
+            p
+            for p in self.owned_skill_paths(recorded)
+            if (p / SKILL_ENTRY_FILE).is_file()
+        )
+
+    def install_conflicts(
+        self,
+        skills: list[RepoSkill],
+        recorded: Iterable[str | Path] = (),
+    ) -> list[Path]:
+        """Destinations that already exist and deepctl cannot claim.
+
+        An upstream skill named ``api`` must not quietly replace a folder
+        called ``api`` that somebody else wrote.
+        """
+        root = self.skills_root()
+        if root is None:
+            return []
+        owned = {str(p) for p in self.owned_skill_paths(recorded)}
+        conflicts: list[Path] = []
+        for skill in skills:
+            dest = root / skill.name
+            if (dest.exists() or dest.is_symlink()) and str(dest) not in owned:
+                conflicts.append(dest)
+        return conflicts
 
     def install(
         self,
@@ -729,22 +852,43 @@ class SkillGenerator(ABC):
         version: str,  # noqa: ARG002
         *,
         ref: str | None = None,
+        recorded: Iterable[str | Path] = (),
     ) -> list[Path]:
         """Fetch the upstream skills and install them for this tool.
 
         Raises:
             SkillFetchError: Upstream could not be fetched or trusted.
+            SkillOwnershipError: A destination exists that deepctl did
+                not install.
         """
         if self.skills_root() is None:
             self.clean_legacy()
             return []
-        return self.install_skills(fetch_repo_skills(ref, force=True))
+        return self.install_skills(
+            fetch_repo_skills(ref, force=True), recorded=recorded
+        )
 
-    def install_skills(self, skills: list[RepoSkill]) -> list[Path]:
-        """Copy each skill folder into this tool's skills directory."""
+    def install_skills(
+        self,
+        skills: list[RepoSkill],
+        recorded: Iterable[str | Path] = (),
+    ) -> list[Path]:
+        """Copy each skill folder into this tool's skills directory.
+
+        Raises:
+            SkillOwnershipError: One of the destinations already exists
+                and is not recorded as deepctl's. Checked for every skill
+                up front, so a collision on the tenth leaves the first
+                nine unwritten rather than half-installing.
+        """
         root = self.skills_root()
         if root is None:
             return []
+        recorded = list(recorded)
+        conflicts = self.install_conflicts(skills, recorded)
+        if conflicts:
+            raise SkillOwnershipError([(self.display_name, p) for p in conflicts])
+
         self.clean_legacy()
         root.mkdir(parents=True, exist_ok=True)
         written: list[Path] = []
@@ -752,19 +896,27 @@ class SkillGenerator(ABC):
             dest = root / skill.name
             # Replace rather than merge: when a skill drops a reference
             # file upstream it has to disappear here too, or the assistant
-            # keeps reading a page that no longer exists.
-            if dest.is_dir():
+            # keeps reading a page that no longer exists. Only reachable
+            # for a destination install_conflicts just cleared as ours.
+            if dest.is_dir() and not dest.is_symlink():
                 shutil.rmtree(dest)
-            elif dest.exists():
+            elif dest.exists() or dest.is_symlink():
                 dest.unlink()
             shutil.copytree(skill.path, dest)
             written.append(dest)
         return written
 
-    def remove(self) -> list[Path]:
-        """Remove everything this generator installed."""
+    def remove(self, recorded: Iterable[str | Path] = ()) -> list[Path]:
+        """Remove the skill folders deepctl recorded installing for this tool.
+
+        Only those. A folder deepctl did not install is left alone even
+        when it sits in the same directory and looks exactly like a skill,
+        because it is somebody else's work.
+        """
         removed = self.clean_legacy()
-        for path in self.get_skill_paths():
+        for path in self.owned_skill_paths(recorded):
+            if path.is_symlink() or not path.is_dir():
+                continue
             shutil.rmtree(path, ignore_errors=True)
             removed.append(path)
         root = self.skills_root()
@@ -783,9 +935,9 @@ class SkillGenerator(ABC):
                 removed.append(artifact.path)
         return removed
 
-    def is_installed(self) -> bool:
-        """Check whether skills are installed for this tool."""
-        return bool(self.get_skill_paths())
+    def is_installed(self, recorded: Iterable[str | Path] = ()) -> bool:
+        """Check whether deepctl's skills are installed for this tool."""
+        return bool(self.installed_skill_paths(recorded))
 
     def manual_hint(self) -> str | None:
         """How to get Deepgram skills into a tool deepctl cannot install to."""
@@ -804,8 +956,24 @@ def _clean_legacy_artifact(artifact: LegacyArtifact, begin: str, end: str) -> bo
         return False
 
     if path.is_dir():
-        shutil.rmtree(path, ignore_errors=True)
-        return True
+        if not artifact.contents:
+            shutil.rmtree(path, ignore_errors=True)
+            return True
+        # A directory deepctl <= 0.3.0 created but does not exclusively
+        # own: delete only the files it wrote there, and the directory
+        # itself only once nothing else is left in it.
+        changed = False
+        for pattern in artifact.contents:
+            for child in sorted(path.glob(pattern)):
+                if child.is_file() and not child.is_symlink():
+                    child.unlink()
+                    changed = True
+        if not any(path.iterdir()):
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+        return changed
 
     if not artifact.shared:
         path.unlink()
@@ -862,7 +1030,16 @@ class ClaudeCodeGenerator(SkillGenerator):
         # ~/.claude/commands/ is the single-file prompt directory. Claude
         # Code will not read a references/ folder next to a file there, and
         # a command file does not accept the `name:` key every SKILL.md has.
-        return [LegacyArtifact(Path.home() / ".claude" / "commands" / "deepgram")]
+        #
+        # 0.3.0 wrote `*.md` into this directory and its own remove() took
+        # back exactly `*.md`, so that is the scope here too: a slash
+        # command the user added alongside is not deepctl's to delete.
+        return [
+            LegacyArtifact(
+                Path.home() / ".claude" / "commands" / "deepgram",
+                contents=("*.md",),
+            )
+        ]
 
 
 class CodexGenerator(SkillGenerator):

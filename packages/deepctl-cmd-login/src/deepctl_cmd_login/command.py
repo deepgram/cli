@@ -239,8 +239,10 @@ class LoginCommand(BaseCommand):
 
             # Install skills for selected tools
             from deepctl_core.skill_generator import (
+                SkillOwnershipError,
                 _commands_hash,
                 collect_command_metadata,
+                recorded_skill_paths,
                 save_skills_state,
             )
 
@@ -256,7 +258,17 @@ class LoginCommand(BaseCommand):
                 version = "0.0.0"
 
             for gen in selected:
-                paths = gen.install(commands, version)
+                try:
+                    paths = gen.install(
+                        commands,
+                        version,
+                        recorded=recorded_skill_paths(state, gen.cli_name),
+                    )
+                except SkillOwnershipError as exc:
+                    # Someone else's skill folder has one of these names.
+                    # Skip this tool rather than overwrite their work.
+                    console.print(f"[yellow]{exc}[/yellow]")
+                    continue
                 cmd_hash = _commands_hash(commands)
                 state["installed_skills"][gen.cli_name] = {
                     "paths": [str(p) for p in paths],

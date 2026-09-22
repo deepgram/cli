@@ -205,6 +205,7 @@ class TestInstallRecordsWhatItDid:
         generator.detect.return_value = True
         root = tmp_path / ".claude" / "skills"
         generator.skills_root.return_value = root
+        generator.install_conflicts.return_value = []
         generator.install_skills.return_value = [root / "api", root / "docs"]
 
         skills = [
@@ -266,6 +267,139 @@ class TestInstallRecordsWhatItDid:
         assert "npx skills add deepgram/skills" in " ".join(captured.err.split())
         assert captured.out == ""
         assert state["installed_skills"] == {}
+
+
+class TestTheCommandTouchesOnlyWhatItInstalled:
+    """`dg skills` shares these directories with the user and other publishers."""
+
+    def _generator(self, tmp_path, cli_name="claude"):
+        generator = MagicMock()
+        generator.cli_name = cli_name
+        generator.display_name = "Claude Code"
+        generator.detect.return_value = True
+        root = tmp_path / ".claude" / "skills"
+        generator.skills_root.return_value = root
+        generator.install_conflicts.return_value = []
+        generator.install_skills.return_value = [root / "api"]
+        generator.remove.return_value = []
+        generator.installed_skill_paths.return_value = []
+        return generator, root
+
+    def test_install_refuses_an_unowned_collision_and_writes_nothing(self, tmp_path):
+        cmd = SkillsCommand()
+        generator, root = self._generator(tmp_path)
+        generator.install_conflicts.return_value = [root / "api"]
+        skills = [RepoSkill(name="api", path=tmp_path / "api")]
+        state = {"installed_skills": {}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=[generator]
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=skills
+            ),
+        ):
+            with pytest.raises(click.ClickException) as excinfo:
+                cmd._handle_install(install_all=True)
+
+        rendered = str(excinfo.value)
+        assert "Refusing to overwrite" in rendered
+        assert str(root / "api") in rendered
+        assert "Claude Code" in rendered
+        generator.install_skills.assert_not_called()
+        save.assert_not_called()
+        assert state["installed_skills"] == {}
+
+    def test_install_hands_the_recorded_paths_to_the_generator(self, tmp_path):
+        cmd = SkillsCommand()
+        generator, root = self._generator(tmp_path)
+        recorded = [str(root / "api")]
+        state = {"installed_skills": {"claude": {"paths": list(recorded)}}}
+        skills = [RepoSkill(name="api", path=tmp_path / "api")]
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=[generator]
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=skills
+            ),
+        ):
+            cmd._handle_install(install_all=True)
+
+        generator.install_conflicts.assert_called_once_with(skills, recorded)
+        generator.install_skills.assert_called_once_with(skills, recorded)
+
+    def test_remove_hands_the_recorded_paths_to_the_generator(self, tmp_path):
+        cmd = SkillsCommand()
+        generator, root = self._generator(tmp_path)
+        recorded = [str(root / "api"), str(root / "docs")]
+        state = {"installed_skills": {"claude": {"paths": list(recorded)}}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        generator.remove.assert_called_once_with(recorded)
+        assert state["installed_skills"] == {}
+
+    def test_remove_with_no_record_deletes_nothing(self, capsys):
+        """Deleting skills.json leaves deepctl nothing it can prove it owns."""
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "claude"
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": {}},
+            ),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        generator.remove.assert_not_called()
+        save.assert_not_called()
+        assert "by hand" in " ".join(capsys.readouterr().err.split())
+
+    def test_status_counts_only_the_recorded_folders(self, tmp_path):
+        cmd = SkillsCommand()
+        generator, root = self._generator(tmp_path)
+        recorded = [str(root / "api")]
+        state = {"installed_skills": {"claude": {"paths": list(recorded)}}}
+        generator.installed_skill_paths.return_value = [root / "api"]
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+        ):
+            cmd._handle_status()
+
+        generator.installed_skill_paths.assert_called_once_with(recorded)
 
 
 class TestSkillsStartupCheck:

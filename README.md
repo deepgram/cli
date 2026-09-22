@@ -313,6 +313,21 @@ A failed download, an unknown ref, or an upstream manifest that does not match
 the directories it lists is a hard failure (exit 1) with nothing written — a
 partial install is indistinguishable from a complete one once it is on disk.
 
+**deepctl only ever touches folders it installed.** Those directories are
+shared: your own skills and other publishers' skills live in them too. So
+`dg skills` records every folder it writes in `~/.deepctl/skills/skills.json`
+and works on that list alone.
+
+- `install` and `update` refuse to overwrite a folder that is not on the list —
+  if you already have a skill called `api`, the install exits 1 and writes
+  nothing, naming the folder so you can rename it.
+- `remove` deletes only the recorded folders. An unrelated skill in the same
+  directory stays.
+- `status` counts only the recorded folders, not everything with a `SKILL.md`.
+- If you delete `skills.json`, deepctl can no longer prove it installed
+  anything: `remove` deletes nothing and `install` reports the collision rather
+  than reclaiming the folders. Delete them by hand, then install again.
+
 ### Starter Apps
 
 Scaffold a new project from Deepgram templates.
