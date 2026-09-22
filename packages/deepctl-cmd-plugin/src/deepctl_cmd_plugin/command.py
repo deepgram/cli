@@ -1173,6 +1173,7 @@ except:
     def _maybe_update_skills(self) -> None:
         """Regenerate AI CLI skills if installed (best-effort)."""
         try:
+            from deepctl_core.skill_bundle import resolve_skills_ref
             from deepctl_core.skill_generator import (
                 SkillOwnershipError,
                 _commands_hash,
@@ -1193,7 +1194,7 @@ except:
 
             for cli_name, info in state["installed_skills"].items():
                 gen = generators.get(cli_name)
-                if gen:
+                if gen and gen.skills_root() is not None:
                     try:
                         paths = gen.install(
                             commands,
@@ -1205,11 +1206,16 @@ except:
                         # leave the recorded state describing the install
                         # that is actually on disk.
                         continue
+                    # Same keys 'dg skills install' records, so a refresh
+                    # triggered from here does not blank the ref and skill
+                    # list that 'dg skills list' prints.
                     info.update(
                         {
                             "paths": [str(p) for p in paths],
                             "version": version,
                             "commands_hash": _commands_hash(commands),
+                            "skills_ref": resolve_skills_ref(None),
+                            "skills": [p.name for p in paths],
                         }
                     )
 

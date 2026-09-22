@@ -314,10 +314,10 @@ A failed download, an unknown ref, or an upstream manifest that does not match
 the directories it lists is a hard failure (exit 1) with nothing written — a
 partial install is indistinguishable from a complete one once it is on disk.
 
-**deepctl only ever touches skill folders it installed.** Those directories are
-shared: your own skills and other publishers' skills live in them too. So
-`dg skills` records every folder it writes in `~/.deepctl/skills/skills.json`
-and works on that list alone.
+**deepctl only ever touches skill folder paths it installed.** Those
+directories are shared: your own skills and other publishers' skills live in
+them too. So `dg skills` records every folder it writes in
+`~/.deepctl/skills/skills.json` and works on that list alone.
 
 - `install` and `update` refuse to overwrite a folder that is not on the list —
   if you already have a skill called `api`, the install exits 1 and writes
@@ -328,10 +328,17 @@ and works on that list alone.
 - If you delete `skills.json`, deepctl can no longer prove it installed
   anything: `remove` deletes nothing and `install` reports the collision rather
   than reclaiming the folders. Delete them by hand, then install again.
+- The list holds *paths*, not fingerprints. Delete a folder deepctl installed
+  and put your own skill at the same path without running `dg skills remove`,
+  and deepctl still counts that path as its own — the next `update` replaces
+  it and `remove` deletes it. Where the filesystem ignores case, as macOS and
+  Windows do by default, `API` and `api` are the same path for this purpose.
+  So run `dg skills remove` first, or drop the entry from `skills.json`,
+  before reusing a name deepctl installed under.
 
-#### Upgrading from deepctl 0.3.0 or earlier
+#### Upgrading from deepctl 0.2.16 through 0.3.0
 
-Older versions wrote to paths that are not skills directories, so the first
+Those versions wrote to paths that are not skills directories, so the first
 `install`, `update`, `setup` or `remove` on this version clears them —
 otherwise four stale skills sit next to fourteen fresh ones. This is the one
 thing `dg skills` touches outside its own skill folders, and it is scoped to
@@ -343,6 +350,11 @@ what 0.3.0 wrote:
 | `~/.codex/instructions.md`, `~/.gemini/GEMINI.md`, `~/.opencode/agents.md` | Cuts out only the `<!-- BEGIN deepctl CLI Reference -->` section; the rest of the file is yours and is kept |
 | `~/.cursor/rules/deepctl.mdc`, `~/.cline/rules/deepctl.md`, `~/.amazonq/rules/deepctl.md` | Deleted — 0.3.0 created these files and nothing else writes them |
 | `~/.aider.conf.yml` | Drops the stale `read:` entry pointing at deepctl's old conventions file |
+
+deepctl 0.2.15 and earlier wrote one combined file at
+`~/.claude/commands/deepctl.md` instead, with no marker around it. Nothing
+distinguishes it from a `/deepctl` slash command you wrote yourself, so the
+cleanup leaves it alone. Delete it by hand if it is there.
 
 ### Starter Apps
 

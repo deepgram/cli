@@ -238,6 +238,7 @@ class LoginCommand(BaseCommand):
                 return
 
             # Install skills for selected tools
+            from deepctl_core.skill_bundle import resolve_skills_ref
             from deepctl_core.skill_generator import (
                 SkillOwnershipError,
                 _commands_hash,
@@ -269,12 +270,24 @@ class LoginCommand(BaseCommand):
                     # Skip this tool rather than overwrite their work.
                     console.print(f"[yellow]{exc}[/yellow]")
                     continue
+                if gen.skills_root() is None:
+                    # No skills directory, so nothing was written and there
+                    # is nothing to record. An entry here would make
+                    # 'dg skills list' show a tool as installed with no
+                    # skills, and 'dg skills update' chase it every run.
+                    console.print(f"[yellow]  {gen.manual_hint()}[/yellow]")
+                    continue
                 cmd_hash = _commands_hash(commands)
+                # Same keys 'dg skills install' records. Without skills_ref
+                # and skills, 'dg skills list' shows '?' for the very ref
+                # this install pinned.
                 state["installed_skills"][gen.cli_name] = {
                     "paths": [str(p) for p in paths],
                     "installed_at": datetime.now(timezone.utc).isoformat(),
                     "version": version,
                     "commands_hash": cmd_hash,
+                    "skills_ref": resolve_skills_ref(None),
+                    "skills": [p.name for p in paths],
                 }
                 for p in paths:
                     console.print(f"  [green]✓[/green] {gen.display_name} → {p}")

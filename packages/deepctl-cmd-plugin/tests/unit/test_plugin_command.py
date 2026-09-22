@@ -18,6 +18,26 @@ from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
 
 
+# Captured before the autouse fixture below replaces the attribute, so the
+# one class that does want to exercise it still can.
+_REAL_MAYBE_UPDATE_SKILLS = PluginCommand._maybe_update_skills
+
+
+@pytest.fixture(autouse=True)
+def _no_real_skill_installs():
+    """Keep the skills refresh that follows a plugin operation off this machine.
+
+    Every successful plugin install, update or uninstall calls
+    ``_maybe_update_skills()``, which downloads the deepgram/skills bundle
+    and reinstalls it into the real ``~/.claude/skills`` and friends,
+    deleting ``~/.amazonq/rules/deepctl.md`` and rewriting
+    ``~/.aider.conf.yml`` on the way. It swallows every exception, so a
+    test suite doing that leaves no trace in its own output.
+    """
+    with patch.object(PluginCommand, "_maybe_update_skills", return_value=None):
+        yield
+
+
 class TestPluginCommand:
     """Test PluginCommand class."""
 
@@ -607,3 +627,63 @@ class TestPluginCommand:
         assert self.command._needs_isolated_venv(InstallMethod.PIP) is False
         assert self.command._needs_isolated_venv(InstallMethod.PIPX) is False
         assert self.command._needs_isolated_venv(InstallMethod.UV) is False
+
+
+class TestSkillsRefreshAfterAPluginChange:
+    """`_maybe_update_skills` writes the record `dg skills list` then reads."""
+
+    def _generator(self, cli_name, root, paths):
+        gen = MagicMock()
+        gen.cli_name = cli_name
+        gen.skills_root.return_value = root
+        gen.install.return_value = paths
+        return gen
+
+    def _run(self, generators, state):
+        command = PluginCommand()
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_skills_state", return_value=state
+            ),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata",
+                return_value=[],
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=generators,
+            ),
+        ):
+            # The autouse fixture stubs this out for every other test here.
+            _REAL_MAYBE_UPDATE_SKILLS(command)
+        return state
+
+    def test_it_keeps_the_upstream_ref_and_skill_names(self, tmp_path):
+        from deepctl_core.skill_bundle import DEFAULT_SKILLS_REF
+
+        root = tmp_path / ".claude" / "skills"
+        gen = self._generator("claude", root, [root / "api", root / "docs"])
+        state = {
+            "installed_skills": {
+                "claude": {"paths": [], "skills_ref": "old", "skills": []}
+            },
+            "auto_update": True,
+        }
+        self._run([gen], state)
+
+        entry = state["installed_skills"]["claude"]
+        assert entry["skills_ref"] == DEFAULT_SKILLS_REF
+        assert entry["skills"] == ["api", "docs"]
+
+    def test_a_tool_with_no_skills_directory_is_left_alone(self):
+        """Nothing is installed for it, so nothing is fetched or rewritten."""
+        gen = self._generator("amazonq", None, [])
+        state = {
+            "installed_skills": {"amazonq": {"paths": []}},
+            "auto_update": True,
+        }
+        self._run([gen], state)
+
+        gen.install.assert_not_called()
+        assert state["installed_skills"]["amazonq"] == {"paths": []}

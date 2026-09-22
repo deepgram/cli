@@ -754,7 +754,7 @@ class SkillGenerator(ABC):
     something else, is how this command came to write 58 KB into
     ``~/.codex/instructions.md`` — a path current Codex does not read at all.
 
-    **Nothing here touches a folder deepctl did not install.** Those
+    **Nothing here touches a folder path deepctl did not install.** Those
     directories are shared: ``~/.claude/skills`` holds the user's own
     skills and other publishers' skills next to Deepgram's. So install,
     update and remove all take the paths ``skills.json`` recorded for this
@@ -762,6 +762,15 @@ class SkillGenerator(ABC):
     and work on that set alone. An existing folder deepctl cannot prove it
     installed is never replaced (:class:`SkillOwnershipError`) and never
     deleted.
+
+    Ownership is by path, not by content. A recorded path stays deepctl's
+    until ``dg skills remove`` drops the record, so a folder someone puts
+    back at that path without removing first is replaced like deepctl's
+    own — and on a case-insensitive filesystem ``API`` and ``api`` are the
+    same path here. Closing that would need a fingerprint or a marker file
+    inside each installed skill, which also decides whether ``update`` may
+    refresh a skill the user has edited; that is a product decision, not a
+    detail of this class.
     """
 
     cli_name: str = ""

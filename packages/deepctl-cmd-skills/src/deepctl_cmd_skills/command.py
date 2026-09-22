@@ -470,7 +470,11 @@ class SkillsCommand(BaseGroupCommand):
                 f"\nInstalled {len(total_written)} skill folder(s) "
                 f"from deepgram/skills@{resolve_skills_ref(ref)}"
             )
-            print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
+            print_info(
+                "One of the installed skills is 'setup-mcp' — ask your "
+                "assistant to set up the Deepgram MCP server, or run 'dg mcp' "
+                "to start it directly."
+            )
         elif not unsupported:
             print_info("No skills were installed.")
 
@@ -536,7 +540,11 @@ class SkillsCommand(BaseGroupCommand):
             f"Updated {len(targets)} tool(s) from "
             f"deepgram/skills@{resolve_skills_ref(ref)}"
         )
-        print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
+        print_info(
+            "One of the installed skills is 'setup-mcp' — ask your "
+            "assistant to set up the Deepgram MCP server, or run 'dg mcp' "
+            "to start it directly."
+        )
 
     def _handle_remove(
         self,
@@ -751,7 +759,11 @@ class SkillsCommand(BaseGroupCommand):
                 f"Setup complete - {len(total_written)} skill folder(s) from "
                 f"deepgram/skills@{resolve_skills_ref(ref)}"
             )
-            print_info("Run /deepgram:setup-mcp to configure the Deepgram MCP server.")
+            print_info(
+                "One of the installed skills is 'setup-mcp' — ask your "
+                "assistant to set up the Deepgram MCP server, or run 'dg mcp' "
+                "to start it directly."
+            )
         elif not unsupported:
             print_info("No skills were installed.")
 

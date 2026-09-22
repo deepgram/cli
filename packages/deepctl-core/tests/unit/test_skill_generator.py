@@ -6,8 +6,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from deepctl_core import skill_generator
 from deepctl_core.skill_bundle import SkillFetchError
 from deepctl_core.skill_generator import (
+    AiderGenerator,
     AmazonQGenerator,
     ClaudeCodeGenerator,
     ClineGenerator,
@@ -28,6 +30,62 @@ from deepctl_core.skill_generator import (
     save_skills_state,
     skills_need_update,
 )
+
+
+#: Set by the autouse fixture below for the duration of each test. The guard
+#: test reads it from here rather than requesting the fixture, so it fails if
+#: the fixture ever stops being autouse.
+_ACTIVE_THROWAWAY_HOME: Path | None = None
+
+
+@pytest.fixture(autouse=True)
+def _throwaway_home(tmp_path, monkeypatch):
+    """Point every home-derived path in this module at a throwaway directory.
+
+    Nothing here may read or write the home of whoever is running pytest.
+    Two routes reach it and neither is obvious at the call site:
+
+    * ``install_skills()`` runs ``clean_legacy()``, which resolves
+      ``Path.home()`` when it is called, so patching only ``skills_root``
+      still let six tests delete the real
+      ``~/.claude/commands/deepgram/*.md``.
+    * ``_SKILLS_DIR``, ``_STATE_FILE``, ``_REPO_CACHE_DIR`` and
+      ``AiderGenerator._LEGACY_FILE`` are evaluated at import time, so they
+      keep pointing at the real home however ``Path.home`` is patched.
+    """
+    home = tmp_path / "throwaway-home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    skills_dir = home / ".deepctl" / "skills"
+    monkeypatch.setattr(skill_generator, "_SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(skill_generator, "_STATE_FILE", skills_dir / "skills.json")
+    monkeypatch.setattr(skill_generator, "_REPO_CACHE_DIR", skills_dir / "repo_cache")
+    monkeypatch.setattr(
+        AiderGenerator, "_LEGACY_FILE", skills_dir / "deepctl-conventions.md"
+    )
+
+    global _ACTIVE_THROWAWAY_HOME
+    _ACTIVE_THROWAWAY_HOME = home
+    yield home
+    _ACTIVE_THROWAWAY_HOME = None
+
+
+def test_no_test_in_this_module_can_reach_the_real_home():
+    """The guard above is the finding, so it gets its own assertion."""
+    home = _ACTIVE_THROWAWAY_HOME
+    assert home is not None, "the throwaway-home fixture is no longer autouse"
+    assert Path.home() == home
+    assert skill_generator._STATE_FILE.is_relative_to(home)
+    assert skill_generator._REPO_CACHE_DIR.is_relative_to(home)
+    assert AiderGenerator._LEGACY_FILE.is_relative_to(home)
+    for gen in get_all_generators():
+        for artifact in gen.legacy_paths():
+            assert artifact.path.is_relative_to(home), gen.cli_name
+        root = gen.skills_root()
+        assert root is None or root.is_relative_to(home), gen.cli_name
 
 
 def _make_command(**overrides):
