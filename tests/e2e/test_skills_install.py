@@ -24,14 +24,29 @@ pytestmark = pytest.mark.skipif(
     reason="RUN_SKILLS_E2E must be set to 1 (this test downloads deepgram/skills)",
 )
 
-# The tools deepctl can install skills for, and the user-scope directory
-# each one's own documentation names.
+# Every tool deepctl can install skills for, and the user-scope directory
+# each one's own documentation names. All six, because a destination that
+# nothing exercises end to end is a destination nobody has checked.
 EXPECTED_ROOTS = {
     "claude": Path(".claude") / "skills",
     "codex": Path(".agents") / "skills",
     "gemini": Path(".gemini") / "skills",
     "cursor": Path(".cursor") / "skills",
+    "opencode": Path(".config") / "opencode" / "skills",
+    "cline": Path(".cline") / "skills",
 }
+
+# The directory whose presence makes each tool "detected". OpenCode and
+# Cline are detected by their own config directories, not by the skills
+# directory deepctl writes into.
+DETECTION_MARKERS = [
+    Path(".claude"),
+    Path(".codex"),
+    Path(".gemini"),
+    Path(".cursor"),
+    Path(".config") / "opencode",
+    Path(".cline"),
+]
 
 # Directories deepctl <= 0.3.0 wrote, none of which are skills directories.
 LEGACY_PATHS = [
@@ -39,6 +54,8 @@ LEGACY_PATHS = [
     Path(".codex") / "instructions.md",
     Path(".gemini") / "GEMINI.md",
     Path(".cursor") / "rules" / "deepctl.mdc",
+    Path(".opencode") / "agents.md",
+    Path(".cline") / "rules" / "deepctl.md",
 ]
 
 
@@ -71,9 +88,9 @@ def _run(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def home(tmp_path: Path) -> Path:
-    """A throwaway HOME with the four tools' marker directories present."""
+    """A throwaway HOME with all six tools' marker directories present."""
     fake = tmp_path / "home"
-    for marker in (".claude", ".codex", ".gemini", ".cursor"):
+    for marker in DETECTION_MARKERS:
         (fake / marker).mkdir(parents=True)
     return fake
 
@@ -85,14 +102,15 @@ def installed(home: Path) -> Path:
     return home
 
 
+def _state(home: Path) -> dict:
+    return json.loads((home / ".deepctl" / "skills" / "skills.json").read_text())
+
+
 class TestSkillsLandWhereTheToolReadsThem:
     def test_every_manifest_skill_is_installed_for_every_tool(
         self, installed: Path
     ) -> None:
-        state = json.loads(
-            (installed / ".deepctl" / "skills" / "skills.json").read_text()
-        )
-        expected = state["installed_skills"]["claude"]["skills"]
+        expected = _state(installed)["installed_skills"]["claude"]["skills"]
         assert len(expected) == 14, expected
 
         for cli_name, relative in EXPECTED_ROOTS.items():
@@ -150,11 +168,89 @@ class TestSkillsLandWhereTheToolReadsThem:
     def test_state_records_the_pinned_ref(self, installed: Path) -> None:
         from deepctl_core.skill_bundle import DEFAULT_SKILLS_REF
 
-        state = json.loads(
-            (installed / ".deepctl" / "skills" / "skills.json").read_text()
-        )
+        state = _state(installed)
         for entry in state["installed_skills"].values():
             assert entry["skills_ref"] == DEFAULT_SKILLS_REF
+
+    def test_every_tool_is_recorded_as_installed(self, installed: Path) -> None:
+        """Each of the six, with the folders it wrote, so remove can undo it."""
+        state = _state(installed)
+        assert set(state["installed_skills"]) == set(EXPECTED_ROOTS)
+        for cli_name, relative in EXPECTED_ROOTS.items():
+            recorded = state["installed_skills"][cli_name]["paths"]
+            assert len(recorded) == 14, cli_name
+            assert sorted(recorded) == sorted(
+                str(p) for p in (installed / relative).iterdir()
+            ), cli_name
+
+    def test_status_reports_every_tool_as_installed(self, installed: Path) -> None:
+        result = _run(["skills", "status"], installed)
+        assert result.returncode == 0, result.stderr
+        rendered = " ".join(result.stdout.split())
+        for relative in EXPECTED_ROOTS.values():
+            assert f"~/{relative.as_posix()}" in rendered, relative
+        # Six tools, fourteen skills each.
+        assert rendered.count("14") >= len(EXPECTED_ROOTS)
+
+
+class TestUnrelatedSkillsAreNotDeepctlsToTouch:
+    """These directories hold other people's skills. deepctl leaves them."""
+
+    NAME = "my-private-skill"
+
+    def _seed_unrelated(self, home: Path, name: str) -> list[Path]:
+        seeded = []
+        for relative in EXPECTED_ROOTS.values():
+            folder = home / relative / name
+            folder.mkdir(parents=True)
+            (folder / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Mine, not Deepgram's.\n---\n"
+            )
+            seeded.append(folder)
+        return seeded
+
+    def test_remove_preserves_an_unrelated_skill(self, home: Path) -> None:
+        seeded = self._seed_unrelated(home, self.NAME)
+
+        assert _run(["skills", "install", "--all"], home).returncode == 0
+        removed = _run(["skills", "remove", "--all"], home)
+        assert removed.returncode == 0, removed.stderr
+
+        for folder in seeded:
+            assert folder.is_dir(), f"{folder} was deleted"
+            assert "not Deepgram's" in (folder / "SKILL.md").read_text()
+        for relative in EXPECTED_ROOTS.values():
+            remaining = sorted(p.name for p in (home / relative).iterdir())
+            assert remaining == [self.NAME], relative
+
+    def test_install_refuses_to_overwrite_an_unrelated_skill(self, home: Path) -> None:
+        """A folder called `api` that deepctl did not write is not its `api`."""
+        seeded = self._seed_unrelated(home, "api")
+
+        result = _run(["skills", "install", "--all"], home)
+        assert result.returncode != 0
+        combined = " ".join((result.stdout + result.stderr).split())
+        assert "Refusing to overwrite" in combined
+
+        for folder in seeded:
+            assert "not Deepgram's" in (folder / "SKILL.md").read_text()
+        # Nothing was installed anywhere, not even for tools with no clash.
+        for relative in EXPECTED_ROOTS.values():
+            assert sorted(p.name for p in (home / relative).iterdir()) == ["api"]
+        assert not (home / ".deepctl" / "skills" / "skills.json").exists()
+
+    def test_status_does_not_count_an_unrelated_skill(self, home: Path) -> None:
+        self._seed_unrelated(home, self.NAME)
+        result = _run(["skills", "status"], home)
+        assert result.returncode == 0, result.stderr
+        rows = [
+            line
+            for line in result.stdout.splitlines()
+            if "skills" in line and "│" in line
+        ]
+        assert rows
+        for row in rows:
+            assert " 1 " not in row, row
 
 
 class TestUpgradeFromTheOldLayout:
@@ -172,16 +268,34 @@ class TestUpgradeFromTheOldLayout:
             "# More of my own notes\n"
         )
 
+        cline_rule = home / ".cline" / "rules" / "deepctl.md"
+        cline_rule.parent.mkdir(parents=True)
+        cline_rule.write_text("stale deepctl rules\n")
+
         result = _run(["skills", "install", "--all"], home)
         assert result.returncode == 0, result.stderr
 
         assert not legacy_dir.exists()
+        assert not cline_rule.exists()
         remaining = instructions.read_text()
         assert "BEGIN deepctl" not in remaining
         assert "concatenated into one blob" not in remaining
         # The user's own content is not collateral damage.
         assert "# My own Codex notes" in remaining
         assert "# More of my own notes" in remaining
+
+    def test_cleanup_leaves_a_slash_command_the_user_added(self, home: Path) -> None:
+        """0.3.0 wrote `*.md` there; anything else in it is not deepctl's."""
+        legacy_dir = home / ".claude" / "commands" / "deepgram"
+        legacy_dir.mkdir(parents=True)
+        (legacy_dir / "api.md").write_text("---\nname: api\n---\n\nstale\n")
+        (legacy_dir / "notes.txt").write_text("my own scratch notes")
+
+        result = _run(["skills", "install", "--all"], home)
+        assert result.returncode == 0, result.stderr
+
+        assert not (legacy_dir / "api.md").exists()
+        assert (legacy_dir / "notes.txt").read_text() == "my own scratch notes"
 
 
 class TestFailurePathsExitNonZero:
