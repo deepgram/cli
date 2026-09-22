@@ -43,6 +43,16 @@ SKILLS_CLI_HINT = "npx skills add deepgram/skills"
 #: Filename that marks a directory as a skill.
 SKILL_ENTRY_FILE = "SKILL.md"
 
+#: Exactly what deepctl <= 0.3.0 wrote into ~/.claude/commands/deepgram/:
+#: one file per repo skill it knew about, plus the generated guide.
+_LEGACY_CLAUDE_COMMAND_FILES = (
+    "api.md",
+    "docs.md",
+    "setup-mcp.md",
+    "starters.md",
+    "deepgram.md",
+)
+
 
 class SkillOwnershipError(Exception):
     """A destination already exists and deepctl did not put it there.
@@ -723,10 +733,11 @@ class LegacyArtifact:
     #: True when the path is a file the user also edits, so only deepctl's
     #: own marked-off section may be removed.
     shared: bool = False
-    #: For a directory: the glob patterns deepctl <= 0.3.0 wrote into it.
-    #: Only matching files are deleted, and the directory itself only if
-    #: that leaves it empty, so a file the user put alongside survives.
-    #: Empty means deepctl owned the whole directory.
+    #: For a directory: the exact filenames deepctl <= 0.3.0 wrote into
+    #: it. Only those are deleted, and the directory itself only if that
+    #: leaves it empty, so a file the user put alongside survives — even
+    #: one with the same extension. Empty means deepctl owned the whole
+    #: directory.
     contents: tuple[str, ...] = ()
 
 
@@ -910,6 +921,32 @@ class SkillGenerator(ABC):
             written.append(dest)
         return written
 
+    def prune_retired(
+        self,
+        recorded: Iterable[str | Path],
+        skills: list[RepoSkill],
+    ) -> list[Path]:
+        """Delete folders deepctl installed that upstream no longer ships.
+
+        Without this, a skill renamed or retired in ``deepgram/skills``
+        stays on disk forever: the next install records only the skills
+        that exist now, so the leftover drops off the ownership list and
+        becomes something deepctl will neither update nor remove — and
+        something it would refuse to overwrite if the name ever came back.
+
+        Call it after the install has been recorded, never before: a
+        crash in between should leave a stale folder, not an untracked one.
+        """
+        keep = {skill.name for skill in skills}
+        pruned: list[Path] = []
+        for path in self.owned_skill_paths(recorded):
+            if path.name in keep or path.is_symlink() or not path.is_dir():
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            if not path.exists():
+                pruned.append(path)
+        return pruned
+
     def remove(self, recorded: Iterable[str | Path] = ()) -> list[Path]:
         """Remove the skill folders deepctl recorded installing for this tool.
 
@@ -922,7 +959,11 @@ class SkillGenerator(ABC):
             if path.is_symlink() or not path.is_dir():
                 continue
             shutil.rmtree(path, ignore_errors=True)
-            removed.append(path)
+            # rmtree swallowed any error, so ask the filesystem rather
+            # than reporting a deletion that did not happen — the caller
+            # drops the record on the strength of this list.
+            if not path.exists():
+                removed.append(path)
         root = self.skills_root()
         if root is not None and root.is_dir() and not any(root.iterdir()):
             try:
@@ -938,10 +979,6 @@ class SkillGenerator(ABC):
             if _clean_legacy_artifact(artifact, self._LEGACY_BEGIN, self._LEGACY_END):
                 removed.append(artifact.path)
         return removed
-
-    def is_installed(self, recorded: Iterable[str | Path] = ()) -> bool:
-        """Check whether deepctl's skills are installed for this tool."""
-        return bool(self.installed_skill_paths(recorded))
 
     def manual_hint(self) -> str | None:
         """How to get Deepgram skills into a tool deepctl cannot install to."""
@@ -967,11 +1004,11 @@ def _clean_legacy_artifact(artifact: LegacyArtifact, begin: str, end: str) -> bo
         # own: delete only the files it wrote there, and the directory
         # itself only once nothing else is left in it.
         changed = False
-        for pattern in artifact.contents:
-            for child in sorted(path.glob(pattern)):
-                if child.is_file() and not child.is_symlink():
-                    child.unlink()
-                    changed = True
+        for name in artifact.contents:
+            child = path / name
+            if child.is_file() and not child.is_symlink():
+                child.unlink()
+                changed = True
         if not any(path.iterdir()):
             try:
                 path.rmdir()
@@ -1035,13 +1072,14 @@ class ClaudeCodeGenerator(SkillGenerator):
         # Code will not read a references/ folder next to a file there, and
         # a command file does not accept the `name:` key every SKILL.md has.
         #
-        # 0.3.0 wrote `*.md` into this directory and its own remove() took
-        # back exactly `*.md`, so that is the scope here too: a slash
-        # command the user added alongside is not deepctl's to delete.
+        # Scoped to the exact filenames 0.3.0 wrote here — the four repo
+        # skills it knew about plus the generated guide. A `*.md` glob
+        # would take a slash command the user added alongside, and a
+        # slash command is a .md file, so the glob is not safe.
         return [
             LegacyArtifact(
                 Path.home() / ".claude" / "commands" / "deepgram",
-                contents=("*.md",),
+                contents=_LEGACY_CLAUDE_COMMAND_FILES,
             )
         ]
 

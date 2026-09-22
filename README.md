@@ -286,6 +286,7 @@ dg skills setup                           # Interactive setup wizard
 dg skills install --all                   # Install for all detected tools
 dg skills list                            # Show what is installed, and from which ref
 dg skills update                          # Reinstall from upstream
+dg skills remove --all                    # Uninstall (--cli NAME for one tool)
 ```
 
 | Tool | Skills directory |
@@ -313,7 +314,7 @@ A failed download, an unknown ref, or an upstream manifest that does not match
 the directories it lists is a hard failure (exit 1) with nothing written — a
 partial install is indistinguishable from a complete one once it is on disk.
 
-**deepctl only ever touches folders it installed.** Those directories are
+**deepctl only ever touches skill folders it installed.** Those directories are
 shared: your own skills and other publishers' skills live in them too. So
 `dg skills` records every folder it writes in `~/.deepctl/skills/skills.json`
 and works on that list alone.
@@ -327,6 +328,21 @@ and works on that list alone.
 - If you delete `skills.json`, deepctl can no longer prove it installed
   anything: `remove` deletes nothing and `install` reports the collision rather
   than reclaiming the folders. Delete them by hand, then install again.
+
+#### Upgrading from deepctl 0.3.0 or earlier
+
+Older versions wrote to paths that are not skills directories, so the first
+`install`, `update`, `setup` or `remove` on this version clears them —
+otherwise four stale skills sit next to fourteen fresh ones. This is the one
+thing `dg skills` touches outside its own skill folders, and it is scoped to
+what 0.3.0 wrote:
+
+| Path | What happens |
+| --- | --- |
+| `~/.claude/commands/deepgram/` | Deletes the five files 0.3.0 wrote by name; a command you added stays, and the directory goes only if that empties it |
+| `~/.codex/instructions.md`, `~/.gemini/GEMINI.md`, `~/.opencode/agents.md` | Cuts out only the `<!-- BEGIN deepctl CLI Reference -->` section; the rest of the file is yours and is kept |
+| `~/.cursor/rules/deepctl.mdc`, `~/.cline/rules/deepctl.md`, `~/.amazonq/rules/deepctl.md` | Deleted — 0.3.0 created these files and nothing else writes them |
+| `~/.aider.conf.yml` | Drops the stale `read:` entry pointing at deepctl's old conventions file |
 
 ### Starter Apps
 

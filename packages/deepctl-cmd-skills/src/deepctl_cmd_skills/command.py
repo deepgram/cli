@@ -191,7 +191,7 @@ class SkillsCommand(BaseGroupCommand):
 
         @click.command(
             name="remove",
-            help=("Remove the skill folders deepctl installed (never ones it did not)"),
+            help=("Remove only the skill folders deepctl installed"),
         )
         @click.option(
             "--all",
@@ -325,7 +325,7 @@ class SkillsCommand(BaseGroupCommand):
         table = Table(title="AI Coding Assistant Status")
         table.add_column("CLI", style="cyan", no_wrap=True)
         table.add_column("Detected", style="white")
-        table.add_column("Skills Installed", style="white")
+        table.add_column("Deepgram Skills", style="white")
         table.add_column("Skills Directory", style="dim")
 
         for gen in generators:
@@ -446,6 +446,12 @@ class SkillsCommand(BaseGroupCommand):
                     "skills_ref": resolve_skills_ref(ref),
                     "skills": [s.name for s in skills],
                 }
+                # Record each tool as it lands. If the next one raises —
+                # a read-only mount, a full disk — the folders already
+                # written stay deepctl's to update and remove, instead of
+                # becoming unowned litter it will later refuse to touch.
+                save_skills_state(state)
+                gen.prune_retired(recorded, skills)
                 total_written.extend(paths)
                 print_success(
                     f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
@@ -519,6 +525,8 @@ class SkillsCommand(BaseGroupCommand):
                     "skills": [s.name for s in skills],
                 }
             )
+            save_skills_state(state)
+            gen.prune_retired(recorded, skills)
             print_success(
                 f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
             )
@@ -575,21 +583,25 @@ class SkillsCommand(BaseGroupCommand):
             print_info("Specify --all to remove all, or --cli NAME.")
             return
 
+        total_removed = 0
         for cli_key in targets:
             gen = generators.get(cli_key)
             if gen:
                 removed = gen.remove(recorded_skill_paths(state, cli_key))
                 for p in removed:
                     print_info(f"  Removed {p}")
+                total_removed += len(removed)
                 if not removed:
-                    print_warning(
-                        f"  {gen.display_name}: nothing deepctl installed is "
-                        "still on disk; left everything else alone."
-                    )
+                    print_warning(f"  {gen.display_name}: nothing left to remove.")
             del state["installed_skills"][cli_key]
 
         save_skills_state(state)
-        print_success(f"Removed {len(targets)} skill(s).")
+        if total_removed:
+            print_success(
+                f"Removed {total_removed} folder(s) from {len(targets)} tool(s)."
+            )
+        else:
+            print_info("Nothing was removed.")
 
     def _handle_list(self) -> None:
         """Show installed skills with locations, versions and upstream ref."""
@@ -719,6 +731,8 @@ class SkillsCommand(BaseGroupCommand):
                     "skills_ref": resolve_skills_ref(ref),
                     "skills": [s.name for s in skills],
                 }
+                save_skills_state(state)
+                gen.prune_retired(recorded, skills)
                 total_written.extend(paths)
                 print_success(
                     f"  {gen.display_name} -> {gen.skills_root()} ({len(paths)} skills)"

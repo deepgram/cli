@@ -59,7 +59,9 @@ class TestCommandMetadata:
         assert cmd.examples == ["dg test foo"]
 
     def test_create_with_parent_group(self):
-        cmd = _make_command(name="audio", parent_group="debug", full_command="deepctl debug audio")
+        cmd = _make_command(
+            name="audio", parent_group="debug", full_command="deepctl debug audio"
+        )
         assert cmd.parent_group == "debug"
         assert cmd.full_command == "deepctl debug audio"
 
@@ -68,7 +70,10 @@ class TestCommandsHash:
     """Test _commands_hash."""
 
     def test_deterministic(self):
-        cmds = [_make_command(), _make_command(name="other", full_command="deepctl other")]
+        cmds = [
+            _make_command(),
+            _make_command(name="other", full_command="deepctl other"),
+        ]
         h1 = _commands_hash(cmds)
         h2 = _commands_hash(cmds)
         assert h1 == h2
@@ -95,23 +100,26 @@ class TestSkillsState:
 
     def test_save_and_get_skills_state(self, tmp_path):
         state_file = tmp_path / "skills.json"
-        with patch("deepctl_core.skill_generator._STATE_FILE", state_file), \
-             patch("deepctl_core.skill_generator._SKILLS_DIR", tmp_path):
-            save_skills_state({"installed_skills": {"claude": {}}, "auto_update": False})
+        with (
+            patch("deepctl_core.skill_generator._STATE_FILE", state_file),
+            patch("deepctl_core.skill_generator._SKILLS_DIR", tmp_path),
+        ):
+            save_skills_state(
+                {"installed_skills": {"claude": {}}, "auto_update": False}
+            )
             result = get_skills_state()
             assert result["installed_skills"] == {"claude": {}}
             assert result["auto_update"] is False
 
     def test_skills_need_update_no_installed(self):
-        with patch("deepctl_core.skill_generator.get_skills_state", return_value={"installed_skills": {}}):
+        with patch(
+            "deepctl_core.skill_generator.get_skills_state",
+            return_value={"installed_skills": {}},
+        ):
             assert skills_need_update([_make_command()]) is False
 
     def test_skills_need_update_stale_hash(self):
-        state = {
-            "installed_skills": {
-                "claude": {"commands_hash": "sha256:old"}
-            }
-        }
+        state = {"installed_skills": {"claude": {"commands_hash": "sha256:old"}}}
         with patch("deepctl_core.skill_generator.get_skills_state", return_value=state):
             assert skills_need_update([_make_command()]) is True
 
@@ -243,7 +251,11 @@ class TestSkillsRoots:
         for cli_name in self.NO_SKILLS_DIRECTORY:
             gen = by_name[cli_name]
             assert gen.skills_root() is None
-            assert gen.install([_make_command()], "1.0.0") == []
+            # clean_legacy is patched out: install() calls it, and for
+            # these two it edits the developer's real ~/.amazonq and
+            # ~/.aider.conf.yml while the unit suite runs.
+            with patch.object(gen, "clean_legacy", return_value=[]):
+                assert gen.install([_make_command()], "1.0.0") == []
             hint = gen.manual_hint()
             assert hint and "npx skills add deepgram/skills" in hint
 
@@ -313,7 +325,7 @@ class TestInstallSkills:
                 "api",
                 "docs",
             ]
-            assert gen.is_installed(written) is True
+            assert gen.installed_skill_paths(written) != []
 
     def test_remove_deletes_every_installed_skill(self, tmp_path):
         skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
@@ -322,7 +334,7 @@ class TestInstallSkills:
             with patch.object(gen, "legacy_paths", return_value=[]):
                 removed = gen.remove(written)
                 assert len(removed) == 2
-                assert gen.is_installed(written) is False
+                assert gen.installed_skill_paths(written) == []
         assert not root.exists()
 
     def test_install_propagates_a_fetch_failure(self, tmp_path):
@@ -498,9 +510,31 @@ class TestOwnership:
         mine = self._unrelated(root, "api")
         with patch.object(gen, "skills_root", return_value=root):
             with patch.object(gen, "legacy_paths", return_value=[]):
-                with pytest.raises(SkillOwnershipError):
-                    gen.install([_make_command()], "1.0.0", recorded=[])
+                # Patched: install() would otherwise download the real
+                # bundle into the developer's own ~/.deepctl cache.
+                with patch(
+                    "deepctl_core.skill_generator.fetch_repo_skills",
+                    return_value=[_fake_skill(tmp_path, "api")],
+                ):
+                    with pytest.raises(SkillOwnershipError):
+                        gen.install([_make_command()], "1.0.0", recorded=[])
         assert (mine / "SKILL.md").read_text().endswith("mine\n")
+
+    def test_prune_removes_a_skill_that_disappeared_upstream(self, tmp_path):
+        """Otherwise a retired skill is left behind and becomes unownable."""
+        gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root)
+        first = [_fake_skill(tmp_path, n) for n in ("api", "retired")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(first)
+                pruned = gen.prune_retired(written, [_fake_skill(tmp_path, "api")])
+
+        assert pruned == [root / "retired"]
+        assert not (root / "retired").exists()
+        assert (root / "api").is_dir()
+        # And it still leaves everything it does not own alone.
+        assert mine.is_dir()
 
     # -- status ------------------------------------------------------
 
@@ -559,9 +593,7 @@ class TestLegacyCleanup:
         (legacy / "api.md").write_text("---\nname: api\n---\n")
 
         gen = ClaudeCodeGenerator()
-        with patch.object(
-            gen, "legacy_paths", return_value=[LegacyArtifact(legacy)]
-        ):
+        with patch.object(gen, "legacy_paths", return_value=[LegacyArtifact(legacy)]):
             removed = gen.clean_legacy()
         assert removed == [legacy]
         assert not legacy.exists()
@@ -570,23 +602,23 @@ class TestLegacyCleanup:
         """0.3.0 wrote `*.md` here and removed `*.md`; so does the cleanup."""
         legacy = tmp_path / ".claude" / "commands" / "deepgram"
         legacy.mkdir(parents=True)
-        for name in ("api.md", "docs.md", "setup-mcp.md", "starters.md"):
+        names = ClaudeCodeGenerator().legacy_paths()[0].contents
+        for name in names:
             (legacy / name).write_text(f"---\nname: {name}\n---\n")
-        (legacy / "my-own-notes.txt").write_text("not deepctl's")
+        # A slash command the user wrote. It is a .md file in the same
+        # directory, which is exactly why a *.md glob is not safe here.
+        (legacy / "deploy.md").write_text("my own slash command")
         (legacy / "mine").mkdir()
 
         gen = ClaudeCodeGenerator()
         with patch.object(
-            gen,
-            "legacy_paths",
-            return_value=[LegacyArtifact(legacy, contents=("*.md",))],
+            gen, "legacy_paths", return_value=[LegacyArtifact(legacy, contents=names)]
         ):
             removed = gen.clean_legacy()
 
         assert removed == [legacy]
-        assert not list(legacy.glob("*.md"))
-        assert (legacy / "my-own-notes.txt").read_text() == "not deepctl's"
-        assert (legacy / "mine").is_dir()
+        assert sorted(p.name for p in legacy.iterdir()) == ["deploy.md", "mine"]
+        assert (legacy / "deploy.md").read_text() == "my own slash command"
 
     def test_claude_cleanup_removes_the_directory_once_it_is_empty(self, tmp_path):
         legacy = tmp_path / ".claude" / "commands" / "deepgram"
@@ -597,7 +629,7 @@ class TestLegacyCleanup:
         with patch.object(
             gen,
             "legacy_paths",
-            return_value=[LegacyArtifact(legacy, contents=("*.md",))],
+            return_value=[LegacyArtifact(legacy, contents=("api.md",))],
         ):
             gen.clean_legacy()
         assert not legacy.exists()
@@ -606,7 +638,15 @@ class TestLegacyCleanup:
         """Not just the test's fixture — the shipped artifact is scoped too."""
         (artifact,) = ClaudeCodeGenerator().legacy_paths()
         assert artifact.path == Path.home() / ".claude" / "commands" / "deepgram"
-        assert artifact.contents == ("*.md",)
+        # Exact filenames, never a glob: a slash command the user added to
+        # this directory is also a .md file.
+        assert artifact.contents == (
+            "api.md",
+            "docs.md",
+            "setup-mcp.md",
+            "starters.md",
+            "deepgram.md",
+        )
 
     def test_shared_context_file_keeps_the_user_content(self, tmp_path):
         target = tmp_path / "instructions.md"
@@ -729,12 +769,14 @@ class TestDetectAiClis:
     """Test detect_ai_clis."""
 
     def test_returns_only_detected(self):
-        with patch.object(ClaudeCodeGenerator, "detect", return_value=True), \
-             patch.object(CodexGenerator, "detect", return_value=False), \
-             patch.object(GeminiGenerator, "detect", return_value=False), \
-             patch.object(AmazonQGenerator, "detect", return_value=False), \
-             patch.object(CursorGenerator, "detect", return_value=False), \
-             patch.object(ClineGenerator, "detect", return_value=False):
+        with (
+            patch.object(ClaudeCodeGenerator, "detect", return_value=True),
+            patch.object(CodexGenerator, "detect", return_value=False),
+            patch.object(GeminiGenerator, "detect", return_value=False),
+            patch.object(AmazonQGenerator, "detect", return_value=False),
+            patch.object(CursorGenerator, "detect", return_value=False),
+            patch.object(ClineGenerator, "detect", return_value=False),
+        ):
             detected = detect_ai_clis()
             claude = [g for g in detected if g.cli_name == "claude"]
             assert len(claude) >= 1

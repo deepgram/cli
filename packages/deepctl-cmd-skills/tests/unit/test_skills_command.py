@@ -282,6 +282,7 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         generator.install_conflicts.return_value = []
         generator.install_skills.return_value = [root / "api"]
         generator.remove.return_value = []
+        generator.prune_retired.return_value = []
         generator.installed_skill_paths.return_value = []
         return generator, root
 
@@ -381,9 +382,12 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
 
         generator.remove.assert_not_called()
         save.assert_not_called()
-        assert "by hand" in " ".join(capsys.readouterr().err.split())
+        captured = capsys.readouterr()
+        assert "by hand" in " ".join((captured.out + captured.err).split())
 
-    def test_status_counts_only_the_recorded_folders(self, tmp_path):
+    def test_status_asks_the_generator_only_for_recorded_folders(
+        self, tmp_path, capsys
+    ):
         cmd = SkillsCommand()
         generator, root = self._generator(tmp_path)
         recorded = [str(root / "api")]
@@ -400,6 +404,8 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
             cmd._handle_status()
 
         generator.installed_skill_paths.assert_called_once_with(recorded)
+        # And the table shows that count, not a directory listing.
+        assert "1" in " ".join(capsys.readouterr().out.split())
 
 
 class TestSkillsStartupCheck:
