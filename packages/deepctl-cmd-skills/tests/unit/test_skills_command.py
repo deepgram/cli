@@ -524,6 +524,57 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         assert str(link) in rendered
         assert "byhand" in rendered
 
+    def test_a_tilde_record_is_not_reported_twice_when_it_cannot_be_removed(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """`~/x` and its expansion are one path, so they get one verdict.
+
+        A stranded folder is already reported as "could not be removed".
+        Matching the raw record against the expanded owned path missed
+        it, so the same folder was also reported as one deepctl may no
+        longer touch — two contradictory instructions for one path.
+        """
+        from deepctl_core.skill_generator import ClaudeCodeGenerator
+
+        cmd = SkillsCommand()
+        gen = ClaudeCodeGenerator()
+        home = tmp_path / "home"
+        root = home / ".claude" / "skills"
+        (root / "api").mkdir(parents=True)
+        (root / "api" / "SKILL.md").write_text("---\nname: api\n---\n")
+        state = {"installed_skills": {"claude": {"paths": ["~/.claude/skills/api"]}}}
+
+        def denied(path, ignore_errors=False, **kwargs):
+            if not ignore_errors:
+                raise PermissionError(13, "Permission denied", str(path))
+
+        # expanduser() reads $HOME, not Path.home, so both are pointed at
+        # the throwaway directory -- otherwise this resolves against the
+        # developer's own home.
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        with (
+            patch.object(Path, "home", staticmethod(lambda: home)),
+            patch.object(gen, "skills_root", return_value=root),
+            patch.object(gen, "legacy_paths", return_value=[]),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators", return_value=[gen]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch("deepctl_core.skill_generator.shutil.rmtree", denied),
+        ):
+            with pytest.raises(click.ClickException):
+                cmd._handle_remove(remove_all=True)
+
+        rendered = " ".join(capsys.readouterr().err.split())
+        assert "could not be removed" in rendered
+        assert "no longer deepctl's" not in rendered
+        # Still recorded, so the retry the message asks for can find it.
+        assert state["installed_skills"]["claude"]["paths"] == [
+            str(root / "api")
+        ]
+
     def test_update_reports_the_tools_it_refreshed(self, tmp_path, capsys):
         cmd = SkillsCommand()
         generator, root = self._generator(tmp_path)

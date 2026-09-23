@@ -628,13 +628,23 @@ class SkillsCommand(BaseGroupCommand):
         skill folder was, or an entry pointing outside the skills root.
         Reported rather than deleted, because deleting either one is how
         deepctl would destroy something that is not its.
+
+        Both sides are compared after ``expanduser()``, the same form
+        :meth:`SkillGenerator.owned_skill_paths` keeps, so a record
+        written as ``~/.claude/skills/api`` is not mistaken for a path
+        deepctl may no longer touch. A relative entry is skipped for the
+        same reason that method drops it: it names nothing deepctl can
+        resolve, and resolving it against the working directory would
+        point this warning at an unrelated file.
         """
         keep = {str(p) for p in owned}
         out = []
+        seen = set(keep)
         for entry in recorded:
-            if entry in keep:
-                continue
             path = Path(entry).expanduser()
+            if not path.is_absolute() or str(path) in seen:
+                continue
+            seen.add(str(path))
             if path.is_symlink() or path.exists():
                 out.append(path)
         return out
