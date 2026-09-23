@@ -1,5 +1,6 @@
 """Tests for speak command."""
 
+import json
 import struct
 import sys
 import wave
@@ -977,6 +978,107 @@ class TestSpeakCommand:
         assert result.count == 1
         captured = capsys.readouterr()
         assert captured.out == ""
+
+    @patch("deepctl_cmd_speak.command.get_output_format", return_value="default")
+    def test_handle_list_voices_sdk_shaped_catalog(
+        self, _fmt, command, mock_config, mock_auth_manager, mock_client, capsys
+    ):
+        """The table shows the canonical -m value and every language it lists.
+
+        The catalog carries the usable model id as ``canonical_name`` and the
+        languages as a list; reading only ``name``/``language`` would print
+        "agathe" with a blank language, which -m cannot take.
+        """
+        mock_client.list_models.return_value = {
+            "tts": [
+                {
+                    "name": "agathe",
+                    "canonical_name": "aura-2-agathe-fr",
+                    "languages": ["fr", "fr-FR"],
+                }
+            ]
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text=None,
+            list_voices=True,
+        )
+
+        assert isinstance(result, SpeakVoicesResult)
+        assert result.count == 1
+        voice = result.voices[0]
+        assert voice.name == "aura-2-agathe-fr"
+        assert voice.voice_type == "aura"
+        assert voice.language == "fr, fr-FR"
+
+        captured = capsys.readouterr()
+        assert "aura-2-agathe-fr" in captured.out
+        assert "fr, fr-FR" in captured.out
+
+    @patch("deepctl_core.output.get_output_format", return_value="json")
+    @patch("deepctl_cmd_speak.command.get_output_format", return_value="json")
+    def test_handle_list_voices_json_carries_canonical_name(
+        self,
+        _cmd_fmt,
+        _core_fmt,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        capsys,
+    ):
+        """The serialized JSON carries the same canonical id and languages."""
+        mock_client.list_models.return_value = {
+            "tts": [
+                {
+                    "name": "agathe",
+                    "canonical_name": "aura-2-agathe-fr",
+                    "languages": ["fr", "fr-FR"],
+                }
+            ]
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text=None,
+            list_voices=True,
+        )
+        command.output_result(result, mock_config)
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["voices"] == [
+            {
+                "name": "aura-2-agathe-fr",
+                "voice_type": "aura",
+                "language": "fr, fr-FR",
+            }
+        ]
+
+    @patch("deepctl_cmd_speak.command.get_output_format", return_value="default")
+    def test_handle_list_voices_legacy_catalog_fields(
+        self, _fmt, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A catalog without the new keys still falls back to name/language."""
+        mock_client.list_models.return_value = {
+            "tts": [{"name": "aura-2-asteria-en", "language": "en"}]
+        }
+
+        result = command.handle(
+            config=mock_config,
+            auth_manager=mock_auth_manager,
+            client=mock_client,
+            text=None,
+            list_voices=True,
+        )
+
+        assert isinstance(result, SpeakVoicesResult)
+        assert result.voices[0].name == "aura-2-asteria-en"
+        assert result.voices[0].language == "en"
 
     def test_handle_list_voices_empty(
         self, command, mock_config, mock_auth_manager, mock_client

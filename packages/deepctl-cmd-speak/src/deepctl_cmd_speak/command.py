@@ -906,12 +906,18 @@ class SpeakCommand(BaseCommand):
 
         voices: list[VoiceInfo] = []
         for m in result.get("tts", []):
-            name = m.get("name", "")
+            # canonical_name is the value -m takes ("aura-2-agathe-fr"); the
+            # bare "name" is just the voice ("agathe") and is not a usable
+            # model id. Languages moved to a list in the same catalog reshape,
+            # so keep the singular key as the fallback for both.
+            name = m.get("canonical_name") or m.get("name") or ""
+            languages = m.get("languages") or []
+            language = ", ".join(languages) or m.get("language") or ""
             voices.append(
                 VoiceInfo(
                     name=name,
                     voice_type=_voice_type_badge(name),
-                    language=m.get("language", ""),
+                    language=language,
                 )
             )
 
