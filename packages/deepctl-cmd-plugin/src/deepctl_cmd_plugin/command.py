@@ -1173,6 +1173,7 @@ except:
     def _maybe_update_skills(self) -> None:
         """Regenerate AI CLI skills if installed (best-effort)."""
         try:
+            from deepctl_core.skill_bundle import SkillFetchError
             from deepctl_core.skill_generator import (
                 collect_command_metadata,
                 get_all_generators,
@@ -1203,13 +1204,22 @@ except:
             # fetch, every destination preflighted, and the ownership
             # record saved as each tool lands. Best-effort only in that a
             # failure is reported instead of failing the plugin command.
-            report = install_skills_for(
-                targets,
-                state,
-                commands=collect_command_metadata(),
-                version=importlib.metadata.version("deepctl"),
-                best_effort=True,
-            )
+            try:
+                report = install_skills_for(
+                    targets,
+                    state,
+                    commands=collect_command_metadata(),
+                    version=importlib.metadata.version("deepctl"),
+                    best_effort=True,
+                )
+            except SkillFetchError as exc:
+                # Nothing was written, so the records still describe what
+                # is on disk. Say the refresh did not happen.
+                console.print(
+                    f"[yellow]AI assistant skills not updated: {exc}. "
+                    "Run 'dg skills update' to retry[/yellow]"
+                )
+                return
             save_skills_state(state)
 
             for display_name, path in report.conflicts:
@@ -1219,9 +1229,9 @@ except:
                     f"[yellow]Skipped {display_name} skills: {path} is not "
                     "deepctl's to replace[/yellow]"
                 )
-            for display_name, exc in report.failures:
+            for display_name, failure in report.failures:
                 console.print(
-                    f"[yellow]{display_name} skills not updated: {exc}. "
+                    f"[yellow]{display_name} skills not updated: {failure}. "
                     "Run 'dg skills update' to retry[/yellow]"
                 )
             if report.written:

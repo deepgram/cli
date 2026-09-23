@@ -573,11 +573,18 @@ class TestLoginRecordsTheSameStateAsSkillsInstall:
         )
         second.install_skills.side_effect = OSError(30, "Read-only file system")
 
-        state = self._run([first, second], {"installed_skills": {}}, skills=("api",))
+        with patch("deepctl_cmd_login.command.console") as printer:
+            state = self._run(
+                [first, second], {"installed_skills": {}}, skills=("api",)
+            )
 
         entry = state["installed_skills"]["claude"]
         assert [Path(p).name for p in entry["paths"]] == ["api"]
         assert "cursor" not in state["installed_skills"]
+        # And the user is told, rather than the login going quiet on it.
+        printed = " ".join(str(c) for c in printer.print.call_args_list)
+        assert "Cursor" in printed
+        assert "Read-only file system" in printed
 
     def test_the_bundle_is_fetched_once_for_every_tool(self, tmp_path):
         """Two fetches could install two different revisions side by side."""

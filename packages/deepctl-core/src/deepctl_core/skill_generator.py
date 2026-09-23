@@ -70,9 +70,11 @@ class SkillOwnershipError(Exception):
         super().__init__(
             "Refusing to overwrite skills deepctl did not install:\n"
             f"{listing}\n\n"
-            f"They are not recorded in {_STATE_FILE}, so they belong to you "
-            "or to another publisher. Rename or delete them and run the "
-            "install again. Nothing was installed."
+            f"Either {_STATE_FILE} has no record of deepctl installing "
+            "them, so they belong to you or to another publisher, or the "
+            "path is now a symlink, which deepctl never writes through. "
+            "Rename or delete them and run the install again. Nothing "
+            "was installed."
         )
 
 
@@ -764,10 +766,14 @@ class SkillGenerator(ABC):
     deleted.
 
     Ownership is by path, not by content. A recorded path stays deepctl's
-    until ``dg skills remove`` drops the record, so a folder someone puts
-    back at that path without removing first is replaced like deepctl's
-    own — and on a case-insensitive filesystem ``API`` and ``api`` are the
-    same path here. Closing that would need a fingerprint or a marker file
+    until ``dg skills remove`` drops the record, so a *folder* someone
+    puts back at that path without removing first is replaced like
+    deepctl's own — and on a case-insensitive filesystem ``API`` and
+    ``api`` are the same path here. The one exception is a **symlink**:
+    deepctl never writes or deletes through one, so a recorded path that
+    became a symlink stops being deepctl's, install and update refuse it,
+    and remove reports it instead of following it. Closing the rest would
+    need a fingerprint or a marker file
     inside each installed skill, which also decides whether ``update`` may
     refresh a skill the user has edited; that is a product decision, not a
     detail of this class.
@@ -895,6 +901,13 @@ class SkillGenerator(ABC):
     ) -> list[Path]:
         """Fetch the upstream skills and install them for this tool.
 
+        One tool, one fetch, and **no ownership record written**. Call
+        :func:`install_skills_for` instead for anything a user runs:
+        looping over this method is what left folders on disk that
+        ``skills.json`` did not know about, because the bundle was
+        refetched per tool, no destination was checked against the other
+        tools', and the state was saved only after the loop.
+
         Raises:
             SkillFetchError: Upstream could not be fetched or trusted.
             SkillOwnershipError: A destination exists that deepctl did
@@ -976,16 +989,30 @@ class SkillGenerator(ABC):
 
         Only those. A folder deepctl did not install is left alone even
         when it sits in the same directory and looks exactly like a skill,
-        because it is somebody else's work.
+        because it is somebody else's work. Symlinks never reach this
+        method: :meth:`owned_skill_paths` drops them, so deepctl cannot
+        delete through one.
         """
         removed = self.clean_legacy()
         for path in self.owned_skill_paths(recorded):
-            if path.is_symlink() or not path.is_dir():
+            if not path.exists():
                 continue
-            shutil.rmtree(path, ignore_errors=True)
-            # rmtree swallowed any error, so ask the filesystem rather
-            # than reporting a deletion that did not happen — the caller
-            # drops the record on the strength of this list.
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                # A recorded destination someone replaced with a plain
+                # file. Still deepctl's path, and install would unlink
+                # it to write the skill there, so remove has to be able
+                # to finish the job too -- otherwise the record can
+                # never be cleared and every later remove repeats the
+                # same warning with no action that would resolve it.
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+            # Both deletions swallow their errors, so ask the filesystem
+            # rather than reporting a deletion that did not happen — the
+            # caller drops the record on the strength of this list.
             if not path.exists():
                 removed.append(path)
         root = self.skills_root()
@@ -1344,15 +1371,41 @@ def _ownership_after_failure(
     previously recorded that is still on disk. Recording less would turn
     a half-written bundle into folders deepctl will neither update nor
     remove, and would later refuse to overwrite.
+
+    Never called for :class:`SkillOwnershipError`, because that is
+    raised before the first byte is written and the destinations it
+    names are precisely the ones that are *not* deepctl's. A symlink is
+    excluded for the same reason: it is never deepctl's, whatever it
+    points at, so claiming one would both break that rule and strand the
+    record on a path :meth:`SkillGenerator.remove` will not follow.
     """
     root = gen.skills_root()
     landed = (
-        {root / skill.name for skill in skills if (root / skill.name).exists()}
+        {
+            root / skill.name
+            for skill in skills
+            if (root / skill.name).exists() and not (root / skill.name).is_symlink()
+        }
         if root is not None
         else set()
     )
     surviving = {p for p in gen.owned_skill_paths(recorded) if p.exists()}
     return sorted(landed | surviving)
+
+
+def _retire_unsupported(
+    unsupported: Iterable[SkillGenerator],
+    installed: dict[str, Any],
+) -> None:
+    """Clean up after tools deepctl cannot install to, and un-record them.
+
+    Nothing was written for them, so nothing may claim it was: an entry
+    here would make ``dg skills list`` show a tool as installed with no
+    skills, and ``dg skills update`` chase it every run.
+    """
+    for gen in unsupported:
+        gen.clean_legacy()
+        installed.pop(gen.cli_name, None)
 
 
 def install_skills_for(
@@ -1363,6 +1416,7 @@ def install_skills_for(
     version: str,
     ref: str | None = None,
     fetch: Callable[[], list[RepoSkill]] | None = None,
+    on_installed: Callable[[SkillGenerator, list[Path]], None] | None = None,
     best_effort: bool = False,
 ) -> SkillInstallReport:
     """Install the upstream skills for several tools under one contract.
@@ -1399,6 +1453,8 @@ def install_skills_for(
         fetch: Overrides how the bundle is obtained, for a caller that
             reports a download failure in its own words. Called at most
             once, and only when there is something to install.
+        on_installed: Called with each tool and its folders as that tool
+            lands, so a caller can report it before a later tool fails.
         best_effort: Collect conflicts and errors into the report and
             keep going instead of raising, for callers such as login that
             must not fail the command they are attached to.
@@ -1425,16 +1481,17 @@ def install_skills_for(
         conflicts=[],
         failures=[],
     )
-    installed = state.setdefault("installed_skills", {})
-    for gen in unsupported:
-        # Nothing was written, so nothing may claim it was. An entry here
-        # would make 'dg skills list' show a tool as installed with no
-        # skills, and 'dg skills update' chase it every run.
-        gen.clean_legacy()
-        installed.pop(gen.cli_name, None)
+    # Not setdefault: a hand-edited skills.json can carry a null or a
+    # list here, and every write below would then raise instead of
+    # installing. recorded_skill_paths() tolerates the same damage.
+    installed = state.get("installed_skills")
+    if not isinstance(installed, dict):
+        installed = {}
+        state["installed_skills"] = installed
 
     if not supported:
         # Nothing to install means nothing to download.
+        _retire_unsupported(unsupported, installed)
         return report
 
     skills = fetch() if fetch is not None else fetch_repo_skills(ref, force=True)
@@ -1457,7 +1514,16 @@ def install_skills_for(
         try:
             paths = gen.install_skills(skills, recorded)
         except Exception as exc:
-            kept = _ownership_after_failure(gen, skills, recorded)
+            # A collision is raised before anything is written, and the
+            # destinations it names are the ones that are NOT deepctl's.
+            # Claiming them here would convert a refusal to touch
+            # someone else's folder into a record saying it is ours,
+            # which the next install would then delete.
+            kept = (
+                []
+                if isinstance(exc, SkillOwnershipError)
+                else _ownership_after_failure(gen, skills, recorded)
+            )
             if kept:
                 installed[gen.cli_name] = {
                     "paths": [str(p) for p in kept],
@@ -1488,5 +1554,11 @@ def install_skills_for(
         save_skills_state(state)
         gen.prune_retired(recorded, skills)
         report.written[gen.cli_name] = paths
+        # Report each tool as it lands, not once the loop is over: a
+        # later tool raising must not hide the ones that did install and
+        # are now recorded.
+        if on_installed is not None:
+            on_installed(gen, paths)
 
+    _retire_unsupported(unsupported, installed)
     return report

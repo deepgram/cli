@@ -60,7 +60,12 @@ class SkillsCommand(BaseGroupCommand):
         "directories are shared with the user's own skills and other "
         "publishers', so every subcommand operates only on the folders "
         "deepctl recorded installing: install refuses to overwrite an "
-        "unrecorded folder of the same name and remove never deletes one."
+        "unrecorded folder of the same name and remove never deletes one. "
+        "A recorded path that is now a symlink is not deepctl's either — "
+        "install and update exit non-zero naming it, and remove reports it "
+        "instead of deleting through it. A recorded folder remove cannot "
+        "delete stays recorded and remove exits non-zero, so a later remove "
+        "or update can still reach it."
     )
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
@@ -222,7 +227,7 @@ class SkillsCommand(BaseGroupCommand):
 
         @click.command(
             name="list",
-            help="Show installed skills with paths and versions",
+            help="Show what is installed, from which upstream ref, and where",
         )
         def list_cmd(**kwargs: Any) -> None:
             pass
@@ -304,6 +309,14 @@ class SkillsCommand(BaseGroupCommand):
             install_skills_for,
         )
 
+        def announce(gen: Any, paths: list[Path]) -> None:
+            # Printed as each tool lands, not once they all have: a later
+            # tool failing must not hide the ones that did install and
+            # are now recorded as deepctl's.
+            print_success(
+                f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
+            )
+
         try:
             report = install_skills_for(
                 generators,
@@ -312,16 +325,11 @@ class SkillsCommand(BaseGroupCommand):
                 version=_deepctl_version(),
                 ref=ref,
                 fetch=lambda: self._fetch_skills(ref),
+                on_installed=announce,
             )
         except SkillOwnershipError as exc:
             raise click.ClickException(str(exc))
 
-        for gen in generators:
-            paths = report.written.get(gen.cli_name)
-            if paths is not None:
-                print_success(
-                    f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
-                )
         for gen in report.unsupported:
             print_warning(f"  {gen.manual_hint()}")
         return report
@@ -538,15 +546,19 @@ class SkillsCommand(BaseGroupCommand):
             return
 
         total_removed = 0
-        cleared = 0
+        tools_cleaned = 0
+        stranded_total = 0
         for cli_key in targets:
             gen = generators.get(cli_key)
             if gen is None:
                 # No generator, so no skills root to check a path against
                 # and nothing deepctl can prove about these folders. The
                 # record is the only thing it can honestly drop.
+                print_warning(
+                    f"  Unknown CLI '{cli_key}': dropping its record. Delete "
+                    "any folders it left behind by hand."
+                )
                 del state["installed_skills"][cli_key]
-                cleared += 1
                 continue
 
             recorded = recorded_skill_paths(state, cli_key)
@@ -555,14 +567,27 @@ class SkillsCommand(BaseGroupCommand):
             for p in removed:
                 print_info(f"  Removed {p}")
             total_removed += len(removed)
+            if removed:
+                tools_cleaned += 1
+
+            # A recorded path deepctl can no longer claim — the folder
+            # was replaced by a symlink, or the entry was hand-edited to
+            # point outside the skills root. Never deleted, so say where
+            # it is instead of dropping the record silently.
+            for path in self._unownable(recorded, owned):
+                print_warning(
+                    f"  {gen.display_name}: {path} is no longer deepctl's to "
+                    "delete. Remove it by hand."
+                )
 
             # Ownership outlives a failed deletion. rmtree can lose to a
             # permission error or a read-only mount, and dropping the
             # record then would strand Deepgram's own folders: the next
             # update refuses to overwrite what it cannot prove is its,
             # and the next remove has nothing left to act on.
-            stranded = [p for p in owned if p.exists() or p.is_symlink()]
+            stranded = [p for p in owned if p.exists()]
             if stranded:
+                stranded_total += len(stranded)
                 entry = state["installed_skills"][cli_key]
                 entry["paths"] = [str(p) for p in stranded]
                 entry["skills"] = [p.name for p in stranded]
@@ -574,15 +599,45 @@ class SkillsCommand(BaseGroupCommand):
                 )
             else:
                 del state["installed_skills"][cli_key]
-                cleared += 1
                 if not removed:
                     print_warning(f"  {gen.display_name}: nothing left to remove.")
 
         save_skills_state(state)
         if total_removed:
-            print_success(f"Removed {total_removed} folder(s) from {cleared} tool(s).")
-        else:
+            print_success(
+                f"Removed {total_removed} folder(s) from {tools_cleaned} tool(s)."
+            )
+        elif not stranded_total:
             print_info("Nothing was removed.")
+
+        if stranded_total:
+            # The command did not do what was asked, and the README
+            # documents 1 for a failed command. Raised after the state
+            # is saved, so the retained ownership survives the failure.
+            raise click.ClickException(
+                f"{stranded_total} recorded skill folder(s) could not be "
+                "removed. They are still recorded as deepctl's, so fix the "
+                "permissions and run the remove again."
+            )
+
+    @staticmethod
+    def _unownable(recorded: list[str], owned: list[Path]) -> list[Path]:
+        """Recorded paths still on disk that deepctl may no longer touch.
+
+        ``owned`` has already dropped them — a symlink standing where a
+        skill folder was, or an entry pointing outside the skills root.
+        Reported rather than deleted, because deleting either one is how
+        deepctl would destroy something that is not its.
+        """
+        keep = {str(p) for p in owned}
+        out = []
+        for entry in recorded:
+            if entry in keep:
+                continue
+            path = Path(entry).expanduser()
+            if path.is_symlink() or path.exists():
+                out.append(path)
+        return out
 
     def _handle_list(self) -> None:
         """Show installed skills with locations, versions and upstream ref."""

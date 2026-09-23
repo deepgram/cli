@@ -1,5 +1,6 @@
 """Login command for deepctl."""
 
+from pathlib import Path
 from typing import Any
 
 from deepctl_core import (
@@ -245,6 +246,7 @@ class LoginCommand(BaseCommand):
             # Best-effort here only in that a failure is reported and the
             # login still succeeds -- never in that a folder is written
             # without deepctl recording that it owns it.
+            from deepctl_core.skill_bundle import SkillFetchError
             from deepctl_core.skill_generator import (
                 collect_command_metadata,
                 install_skills_for,
@@ -260,16 +262,27 @@ class LoginCommand(BaseCommand):
             except importlib.metadata.PackageNotFoundError:
                 version = "0.0.0"
 
-            report = install_skills_for(
-                selected,
-                state,
-                commands=collect_command_metadata(),
-                version=version,
-                best_effort=True,
-            )
-            for gen in selected:
-                for p in report.written.get(gen.cli_name, []):
+            def announce(gen: Any, paths: list[Path]) -> None:
+                for p in paths:
                     console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
+
+            try:
+                report = install_skills_for(
+                    selected,
+                    state,
+                    commands=collect_command_metadata(),
+                    version=version,
+                    on_installed=announce,
+                    best_effort=True,
+                )
+            except SkillFetchError as exc:
+                # Nothing was written, so there is no ownership to save.
+                # Say so rather than leaving the banner above unanswered.
+                console.print(
+                    f"[yellow]  Could not download the Deepgram skills: "
+                    f"{exc}. Run 'dg skills install' to retry.[/yellow]"
+                )
+                return
             for gen in report.unsupported:
                 console.print(f"[yellow]  {gen.manual_hint()}[/yellow]")
             # Someone else's skill folder has one of these names, so the
@@ -279,10 +292,10 @@ class LoginCommand(BaseCommand):
                     f"[yellow]  Skipped {display_name}: {path} is not "
                     "deepctl's to replace.[/yellow]"
                 )
-            for display_name, exc in report.failures:
+            for display_name, failure in report.failures:
                 console.print(
-                    f"[yellow]  {display_name}: {exc}. Run 'dg skills install' "
-                    "to retry.[/yellow]"
+                    f"[yellow]  {display_name}: {failure}. Run "
+                    "'dg skills install' to retry.[/yellow]"
                 )
             save_skills_state(state)
 

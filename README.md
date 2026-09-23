@@ -323,18 +323,26 @@ them too. So `dg skills` records every folder it writes in
   if you already have a skill called `api`, the install exits 1 and writes
   nothing, naming the folder so you can rename it.
 - `remove` deletes only the recorded folders. An unrelated skill in the same
-  directory stays.
+  directory stays. A recorded folder it *could not* delete — a permission
+  error, a read-only mount — stays recorded and `remove` exits 1, so the next
+  `remove` or `update` can still reach it. Dropping the record there would
+  leave Deepgram's own folders behind with nothing able to touch them.
 - `status` counts only the recorded folders, not everything with a `SKILL.md`.
 - If you delete `skills.json`, deepctl can no longer prove it installed
   anything: `remove` deletes nothing and `install` reports the collision rather
   than reclaiming the folders. Delete them by hand, then install again.
 - The list holds *paths*, not fingerprints. Delete a folder deepctl installed
-  and put your own skill at the same path without running `dg skills remove`,
-  and deepctl still counts that path as its own — the next `update` replaces
-  it and `remove` deletes it. Where the filesystem ignores case, as macOS and
-  Windows do by default, `API` and `api` are the same path for this purpose.
-  So run `dg skills remove` first, or drop the entry from `skills.json`,
-  before reusing a name deepctl installed under.
+  and put your own **folder** at the same path without running
+  `dg skills remove`, and deepctl still counts that path as its own — the next
+  `update` replaces it and `remove` deletes it. Where the filesystem ignores
+  case, as macOS and Windows do by default, `API` and `api` are the same path
+  for this purpose. So run `dg skills remove` first, or drop the entry from
+  `skills.json`, before reusing a name deepctl installed under.
+- A **symlink** is the exception: deepctl never writes or deletes through one.
+  Put a symlink where a recorded skill folder was and that path stops being
+  deepctl's — `install` and `update` exit 1 naming it rather than replacing
+  it, and `remove` reports it rather than following it to whatever it points
+  at. Delete the symlink yourself to hand the name back.
 
 #### Upgrading from deepctl 0.2.16 through 0.3.0
 

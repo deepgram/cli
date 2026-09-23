@@ -1037,3 +1037,131 @@ class TestInstallSkillsForKeepsOwnership:
         assert report.unsupported == [gen]
         # Nothing was written for it, so nothing may claim it was.
         assert state["installed_skills"] == {}
+
+    def test_best_effort_skips_a_conflicting_tool_and_installs_the_rest(
+        self, tmp_path
+    ):
+        """Login and the plugin refresh must not lose every tool to one."""
+        first, first_root = self._gen(tmp_path, "claude")
+        second, second_root = self._gen(tmp_path, "cursor")
+        theirs = second_root / "api"
+        theirs.mkdir()
+        (theirs / "SKILL.md").write_text("---\nname: api\n---\n\nmine\n")
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {}}
+
+        report, _ = self._run(
+            [first, second],
+            {"claude": first_root, "cursor": second_root},
+            skills,
+            state,
+            best_effort=True,
+        )
+
+        assert [name for name, _ in report.conflicts] == ["cursor"]
+        assert list(report.written) == ["claude"]
+        assert (first_root / "api" / "SKILL.md").is_file()
+        assert (theirs / "SKILL.md").read_text().endswith("mine\n")
+        assert "cursor" not in state["installed_skills"]
+
+    def test_a_late_collision_never_becomes_a_claim_of_ownership(self, tmp_path):
+        """The refusal must not be recorded as "these folders are ours".
+
+        `install_skills` re-checks its own destinations, so a folder that
+        appears between the all-tool preflight and the write raises after
+        the loop has started. Recording what is on disk at that moment
+        would hand deepctl a claim over the very folder it just refused
+        to touch, and the next install would delete it.
+        """
+        gen, root = self._gen(tmp_path, "claude")
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {}}
+        theirs = root / "api"
+
+        real_conflicts = ClaudeCodeGenerator.install_conflicts
+        calls = {"n": 0}
+
+        def install_conflicts(self, bundle, recorded=()):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                # Someone else got there between preflight and write.
+                theirs.mkdir(exist_ok=True)
+                (theirs / "SKILL.md").write_text("---\nname: api\n---\n\nmine\n")
+            return real_conflicts(self, bundle, recorded)
+
+        with patch.object(ClaudeCodeGenerator, "install_conflicts", install_conflicts):
+            report, _ = self._run(
+                [gen], {"claude": root}, skills, state, best_effort=True
+            )
+
+        assert [name for name, _ in report.failures] == ["claude"]
+        assert state["installed_skills"] == {}
+        assert (theirs / "SKILL.md").read_text().endswith("mine\n")
+
+    def test_each_tool_is_reported_as_it_lands_not_after_the_last_one(
+        self, tmp_path
+    ):
+        """A later tool failing must not hide the ones already recorded."""
+        first, first_root = self._gen(tmp_path, "claude")
+        second, second_root = self._gen(tmp_path, "cursor")
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {}}
+        announced = []
+
+        real_install = ClaudeCodeGenerator.install_skills
+
+        def install_skills(self, bundle, recorded=()):
+            if self.cli_name == "cursor":
+                raise OSError(30, "Read-only file system")
+            return real_install(self, bundle, recorded)
+
+        with patch.object(ClaudeCodeGenerator, "install_skills", install_skills):
+            with pytest.raises(OSError):
+                self._run(
+                    [first, second],
+                    {"claude": first_root, "cursor": second_root},
+                    skills,
+                    state,
+                    on_installed=lambda gen, paths: announced.append(gen.cli_name),
+                )
+
+        assert announced == ["claude"]
+
+    def test_a_null_installed_skills_does_not_crash_the_install(self, tmp_path):
+        """A hand-edited skills.json must not take the command down."""
+        gen, root = self._gen(tmp_path, "claude")
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": None}
+
+        self._run([gen], {"claude": root}, skills, state)
+
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+
+    def test_a_fetch_failure_leaves_an_unsupported_tool_alone(self, tmp_path):
+        """Nothing was installed, so nothing of theirs may be cleaned up."""
+        supported, root = self._gen(tmp_path, "claude")
+        unsupported, _ = self._gen(tmp_path, "amazonq")
+        state = {"installed_skills": {}}
+
+        def skills_root(self):
+            return root if self.cli_name == "claude" else None
+
+        with (
+            patch.object(ClaudeCodeGenerator, "skills_root", skills_root),
+            patch.object(skill_generator, "save_skills_state"),
+            patch.object(unsupported, "clean_legacy") as clean,
+            patch.object(
+                skill_generator,
+                "fetch_repo_skills",
+                side_effect=SkillFetchError("no network"),
+            ),
+        ):
+            with pytest.raises(SkillFetchError):
+                skill_generator.install_skills_for(
+                    [supported, unsupported],
+                    state,
+                    commands=[_make_command()],
+                    version="9.9.9",
+                )
+
+        clean.assert_not_called()

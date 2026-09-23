@@ -430,8 +430,13 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
             patch("deepctl_core.skill_generator.save_skills_state"),
             patch("deepctl_core.skill_generator.shutil.rmtree", denied),
         ):
-            cmd._handle_remove(remove_all=True)
+            # A remove that could not remove is a failed command: the
+            # README documents exit 1 for that, and exiting 0 is how the
+            # user would never learn the folders are still there.
+            with pytest.raises(click.ClickException) as excinfo:
+                cmd._handle_remove(remove_all=True)
 
+        assert "could not be removed" in str(excinfo.value)
         assert (root / "api" / "SKILL.md").is_file()
         assert state["installed_skills"]["claude"]["paths"] == [str(root / "api")]
         assert "could not" in " ".join(capsys.readouterr().err.split())
@@ -450,6 +455,119 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
 
         assert not (root / "api").exists()
         assert state["installed_skills"] == {}
+
+    def test_remove_drops_the_record_for_a_cli_it_no_longer_supports(
+        self, tmp_path, capsys
+    ):
+        """No generator means no root to check a path against.
+
+        deepctl cannot prove anything about those folders, so the record
+        is the only thing it can honestly drop -- and it has to say so
+        rather than let the user think something was deleted.
+        """
+        cmd = SkillsCommand()
+        state = {"installed_skills": {"retired-tool": {"paths": ["/somewhere/api"]}}}
+
+        with (
+            patch("deepctl_core.skill_generator.get_all_generators", return_value=[]),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        assert state["installed_skills"] == {}
+        save.assert_called_once()
+        rendered = " ".join(capsys.readouterr().err.split())
+        assert "retired-tool" in rendered
+        assert "by hand" in rendered
+
+    def test_remove_reports_a_recorded_path_it_may_no_longer_touch(
+        self, tmp_path, capsys
+    ):
+        """A symlink where a skill folder was is nobody's to delete.
+
+        Dropping the record without a word would leave it in a shared
+        directory with deepctl no longer able to name it, and following
+        it would delete whatever it points at.
+        """
+        from deepctl_core.skill_generator import ClaudeCodeGenerator
+
+        cmd = SkillsCommand()
+        gen = ClaudeCodeGenerator()
+        root = tmp_path / ".claude" / "skills"
+        root.mkdir(parents=True)
+        target = tmp_path / "my-own-work"
+        target.mkdir()
+        (target / "SKILL.md").write_text("---\nname: api\n---\n\nmine\n")
+        link = root / "api"
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):  # unprivileged Windows
+            pytest.skip("this filesystem does not allow creating symlinks")
+        state = {"installed_skills": {"claude": {"paths": [str(link)]}}}
+
+        with (
+            patch.object(gen, "skills_root", return_value=root),
+            patch.object(gen, "legacy_paths", return_value=[]),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators", return_value=[gen]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        assert link.is_symlink()
+        assert (target / "SKILL.md").read_text().endswith("mine\n")
+        # Rich wraps the path across lines, so compare without whitespace.
+        rendered = "".join(capsys.readouterr().err.split())
+        assert str(link) in rendered
+        assert "byhand" in rendered
+
+    def test_update_reports_the_tools_it_refreshed(self, tmp_path, capsys):
+        cmd = SkillsCommand()
+        generator, root = self._generator(tmp_path)
+        skills = [RepoSkill(name="api", path=tmp_path / "api")]
+        state = {"installed_skills": {"claude": {"paths": [str(root / "api")]}}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=skills
+            ),
+        ):
+            cmd._handle_update()
+
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+        rendered = " ".join(capsys.readouterr().err.split())
+        assert "Updated 1 tool(s)" in rendered
+
+    def test_update_skips_a_cli_it_no_longer_supports(self, capsys):
+        """An unknown key must not take the whole update down."""
+        cmd = SkillsCommand()
+        state = {"installed_skills": {"retired-tool": {"paths": []}}}
+
+        with (
+            patch("deepctl_core.skill_generator.get_all_generators", return_value=[]),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+            patch("deepctl_core.skill_generator.fetch_repo_skills") as fetch,
+        ):
+            cmd._handle_update()
+
+        fetch.assert_not_called()
+        save.assert_not_called()
+        rendered = " ".join(capsys.readouterr().err.split())
+        assert "retired-tool" in rendered
+        assert "Nothing to update" in rendered
 
     def test_status_asks_the_generator_only_for_recorded_folders(
         self, tmp_path, capsys

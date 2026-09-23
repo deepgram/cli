@@ -719,7 +719,13 @@ class TestSkillsRefreshAfterAPluginChange:
             "auto_update": True,
         }
 
-        self._run([first, second], state, skills=("api",))
+        with patch("deepctl_cmd_plugin.command.console") as printer:
+            self._run([first, second], state, skills=("api",))
+
+        # And the user is told, rather than the refresh going quiet on it.
+        printed = " ".join(str(c) for c in printer.print.call_args_list)
+        assert "cursor skills not updated" in printed
+        assert "Read-only file system" in printed
 
         assert state["installed_skills"]["claude"]["skills"] == ["api"]
         # Nothing landed for the tool that failed, so its record still
