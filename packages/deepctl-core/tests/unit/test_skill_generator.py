@@ -501,6 +501,27 @@ class TestOwnership:
         assert target.is_dir()
         assert (target / "SKILL.md").is_file()
 
+    def test_remove_clears_a_recorded_path_someone_replaced_with_a_file(
+        self, tmp_path
+    ):
+        """Skipping it left a record no retry could ever clear.
+
+        install already unlinks a plain file standing at a recorded
+        destination, so remove has to be able to finish the same job --
+        otherwise ownership outliving a failed delete means the warning
+        repeats forever with no action that resolves it.
+        """
+        gen, root = self._gen(tmp_path)
+        stray = root / "api"
+        stray.write_text("not a skill folder\n")
+
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                removed = gen.remove([str(stray)])
+
+        assert removed == [stray]
+        assert not stray.exists()
+
     def test_remove_reports_nothing_for_a_folder_it_could_not_delete(self, tmp_path):
         """The caller drops the record on the strength of this list."""
         gen, root = self._gen(tmp_path)
