@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.3.1](https://github.com/deepgram/cli/compare/v0.3.0...v0.3.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **ci:** close three holes in the dependency-floor guard ([33d3b69](https://github.com/deepgram/cli/commit/33d3b6920efd754f140d70827610b59fe7d0501f))
+* **ci:** parse whole dependency specifiers in the floor guard ([95704fe](https://github.com/deepgram/cli/commit/95704fe381e382f2191cf21d917d60aef6e9cdaa))
+* **ci:** read project files as UTF-8 in the floor guard ([7ab748f](https://github.com/deepgram/cli/commit/7ab748fc91d319e608819e192322aa6a6f925d00))
+* **cli:** accept global output options after the subcommand, and hint on misplaced globals ([632531d](https://github.com/deepgram/cli/commit/632531dc4b81da15f175fac35a4c58bc2c959462))
+* **cli:** reject unsupported group output flags ([c0eb380](https://github.com/deepgram/cli/commit/c0eb380b98ea630cacb4d76b2ae3d22acd1c2f3e))
+* **cli:** support output options on command groups ([42b17d7](https://github.com/deepgram/cli/commit/42b17d7608e4eab222496dd9c799c83532fe909d))
+* **core:** send plugin-loader errors to stderr, not stdout ([9658943](https://github.com/deepgram/cli/commit/9658943f210fb7081068fa4a4235a5b5299bb7ad))
+* **deps:** pin all root floors to workspace versions so pip upgrades deliver every release ([5126599](https://github.com/deepgram/cli/commit/5126599b9f3701b724c543679174630ce110a5ae))
+* model-catalog field mapping and legacy flags, global-option placement, and whoami source label ([#108](https://github.com/deepgram/cli/issues/108)) ([62c2e47](https://github.com/deepgram/cli/commit/62c2e47aa0634deae84a420ea350f866b3bd57f1))
+* **models:** read the SDK's real field names, flag legacy conversationalai, and warn loudly on an empty catalog half ([ff05174](https://github.com/deepgram/cli/commit/ff05174a16f9262d8045c81b65859ef5e24bdfdc))
+* **models:** show architecture and clarify output flags ([0db9172](https://github.com/deepgram/cli/commit/0db91723b99d1f9e55061dcccd19070f8f4a0231))
+* **plugin:** exit 2 when the user declines the remove prompt ([0dcfd2c](https://github.com/deepgram/cli/commit/0dcfd2c0d68a6095f4f6651e51ba6995f2b430d3))
+* **update,skills:** exit 1 when the command fails ([1799c21](https://github.com/deepgram/cli/commit/1799c213911f2fbc1d0c2430bb3ce7d4389c7afc))
+* **update,skills:** exit 2 when the user declines, as documented ([0497ac1](https://github.com/deepgram/cli/commit/0497ac1892333c09d2a482f0b10ccd59d1f1dba2))
+* **whoami:** label an environment-sourced key as env, and keep stdout pure in json mode ([60e8cf9](https://github.com/deepgram/cli/commit/60e8cf99d4f86a76ca43616f571845754976a15f))
+
+
+### Documentation
+
+* **contributing:** document the release runbook and the delivery manifest ([0bc15bb](https://github.com/deepgram/cli/commit/0bc15bb5cd61b2b1a683417bf9084f904e95e6eb))
+* **readme:** document the exit-code contract ([563d162](https://github.com/deepgram/cli/commit/563d162587b5aaea977eb24c17af63f0fbbf1e86))
+* **readme:** drop the stdout/stderr claim until [#107](https://github.com/deepgram/cli/issues/107) lands ([fe94ced](https://github.com/deepgram/cli/commit/fe94ced895687966d66b4f34bbcbe0acb2813072))
+* **readme:** sharpen the exit-code section ([2e1c6c5](https://github.com/deepgram/cli/commit/2e1c6c51248baeab9e0c5f207f4eccbd20fbe0b3))
+* scope Homebrew tap trust to deepgram ([0d4df0c](https://github.com/deepgram/cli/commit/0d4df0c0bb2d66e7b2b9bca8e9a8b10f84d8f291))
+* support Homebrew 5 tap installs ([036b05c](https://github.com/deepgram/cli/commit/036b05c2c0a8f496cebe3d841b99b8f9c87e1e34))
+
 ## [0.3.0](https://github.com/deepgram/cli/compare/v0.2.27...v0.3.0) (2026-08-19)
 
 

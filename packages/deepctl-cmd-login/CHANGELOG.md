@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.18](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.17...deepctl-cmd-login-v0.1.18) (2026-09-23)
+
+
+### Bug Fixes
+
+* model-catalog field mapping and legacy flags, global-option placement, and whoami source label ([#108](https://github.com/deepgram/cli/issues/108)) ([62c2e47](https://github.com/deepgram/cli/commit/62c2e47aa0634deae84a420ea350f866b3bd57f1))
+* **whoami:** label an environment-sourced key as env, and keep stdout pure in json mode ([60e8cf9](https://github.com/deepgram/cli/commit/60e8cf99d4f86a76ca43616f571845754976a15f))
+
 ## [0.1.17](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.16...deepctl-cmd-login-v0.1.17) (2026-08-17)
 
 

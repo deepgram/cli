@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-cmd-plugin-v0.1.12...deepctl-cmd-plugin-v0.1.13) (2026-09-23)
+
+
+### Bug Fixes
+
+* **plugin:** exit 2 when the user declines the remove prompt ([0dcfd2c](https://github.com/deepgram/cli/commit/0dcfd2c0d68a6095f4f6651e51ba6995f2b430d3))
+* **update,skills:** exit 2 when the user declines, as documented ([0497ac1](https://github.com/deepgram/cli/commit/0497ac1892333c09d2a482f0b10ccd59d1f1dba2))
+
 ## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-plugin-v0.1.11...deepctl-cmd-plugin-v0.1.12) (2026-05-09)
 
 

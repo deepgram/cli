@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.17](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.16...deepctl-core-v0.2.17) (2026-09-23)
+
+
+### Bug Fixes
+
+* **cli:** accept global output options after the subcommand, and hint on misplaced globals ([632531d](https://github.com/deepgram/cli/commit/632531dc4b81da15f175fac35a4c58bc2c959462))
+* **cli:** reject unsupported group output flags ([c0eb380](https://github.com/deepgram/cli/commit/c0eb380b98ea630cacb4d76b2ae3d22acd1c2f3e))
+* **cli:** support output options on command groups ([42b17d7](https://github.com/deepgram/cli/commit/42b17d7608e4eab222496dd9c799c83532fe909d))
+* **core:** send plugin-loader errors to stderr, not stdout ([9658943](https://github.com/deepgram/cli/commit/9658943f210fb7081068fa4a4235a5b5299bb7ad))
+* model-catalog field mapping and legacy flags, global-option placement, and whoami source label ([#108](https://github.com/deepgram/cli/issues/108)) ([62c2e47](https://github.com/deepgram/cli/commit/62c2e47aa0634deae84a420ea350f866b3bd57f1))
+
 ## [0.2.16](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.15...deepctl-core-v0.2.16) (2026-08-19)
 
 
