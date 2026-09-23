@@ -6,16 +6,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from rich.console import Console
 
+from .diagnostics import create_diagnostic_console
 from .models import FileInfo
 
 # Diagnostics only: every console.print below is an error, a warning or a
 # progress line -- never a payload -- so it goes to stderr and can never
 # corrupt the machine-readable result a command writes to stdout (#104).
-# deepctl-shared-utils does not depend on deepctl-core, so this is a local
-# stderr Console rather than an import of core's shared `stderr_console`.
-console = Console(stderr=True)
+# deepctl-shared-utils does not depend on deepctl-core, so this local factory
+# mirrors core's agentic/no-color policy instead of importing `stderr_console`.
+console = create_diagnostic_console()
 
 # Supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS = {
