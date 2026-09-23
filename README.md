@@ -339,15 +339,13 @@ conventional `130`, so the code is the same whether the cancellation came from
 Ctrl-C or from declining a prompt.
 
 Human-readable status and error messages go to stderr, and stdout carries the
-result. With `-o json` a command that runs and fails writes that failure to
-stdout as a payload with `"status": "error"`, so `dg ... -o json | jq` stays
-parseable across the failure — authentication failures, `dg ffprobe` and
-`dg debug audio` included. This is not yet universal: a handful of commands
-still echo their human-readable summary to stdout ahead of the payload, and a
-usage error (a bad flag, an unknown command) writes nothing to stdout at all.
-Branch on the exit code rather than on whether stdout parsed. If a CI step
-relied on `dg` always exiting `0` (every command did, before 0.3.0), it will
-now fail where it previously passed silently.
+result. With an explicit structured-output mode, authentication-guard failures
+and commands that return an error result write a payload with `"status":
+"error"` to stdout — authentication failures, `dg ffprobe`, and `dg debug
+audio` included. Usage errors and handler-raised exceptions report on stderr
+and can leave stdout empty. Branch on the exit code rather than on whether
+stdout parsed. If a CI step relied on `dg` always exiting `0` (every command
+did, before 0.3.0), it will now fail where it previously passed silently.
 
 ### Forcing non-interactive mode
 

@@ -343,10 +343,11 @@ Per-command flags, which go after the command:
 **Agent mode behavior:**
 - All interactive prompts return defaults (no blocking on stdin)
 - Status messages routed to stderr
-- Data output to stdout: the core commands write nothing else there, so a
-  failure arrives on stdout as parseable JSON. A handful of commands still
-  print a human summary to stdout ahead of the payload, so branch on the exit
-  code rather than on whether stdout parsed.
+- Data output to stdout: authentication-guard failures and commands that
+  return an error result emit a structured payload in explicit structured-output
+  modes. Usage errors and handler-raised exceptions report on stderr and may
+  leave stdout empty, so branch on the exit code rather than on whether stdout
+  parsed.
 - JSON output format by default
 - Exit codes: 0 = success, 1 = error, 2 = user interrupt
 
@@ -370,9 +371,9 @@ Available on every command. Outputs a JSON contract describing the command:
 ## Configuration
 
 Config file location:
-- macOS: `~/Library/Application Support/deepgram/config.yaml`
-- Linux: `~/.config/deepgram/config.yaml`
-- Windows: `%APPDATA%\deepgram\config.yaml`
+- macOS: `~/Library/Application Support/deepctl/config.yaml`
+- Linux: `~/.config/deepctl/config.yaml`
+- Windows: `%LOCALAPPDATA%\deepgram\deepctl\config.yaml`
 
 Environment variables:
 - `DEEPGRAM_API_KEY` — API key (overrides profile)

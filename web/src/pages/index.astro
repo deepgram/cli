@@ -430,7 +430,7 @@ const commandCards: CommandCard[] = [
             "name": "Can I pipe the Deepgram CLI output to other tools?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. The CLI is fully UNIX-composable. Use --output json (or -o json) to get structured JSON, which can be piped to jq, grep, and other tools. In CI, in AI coding tools, and in any fully non-interactive environment with no terminal attached, the CLI detects the context and switches to JSON automatically; from an interactive shell, pass -o json explicitly. Status and error messages go to stderr, and the core commands keep stdout for the result alone, so a failure still arrives on stdout as parseable JSON. A handful of commands still print a human summary to stdout, so branch on the exit code rather than on whether stdout parsed."
+              "text": "Yes. The CLI is fully UNIX-composable. Use --output json (or -o json) to get structured JSON, which can be piped to jq, grep, and other tools. In CI, in AI coding tools, and in any fully non-interactive environment with no terminal attached, the CLI detects the context and switches to JSON automatically; from an interactive shell, pass -o json explicitly. Authentication-guard failures and commands that return an error result emit a structured payload in explicit structured-output modes. Usage errors and handler-raised exceptions report on stderr and may leave stdout empty, so branch on the exit code rather than on whether stdout parsed."
             }
           }
         ]
