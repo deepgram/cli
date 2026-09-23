@@ -783,6 +783,53 @@ class TestLegacyCleanup:
         assert sorted(p.name for p in legacy.iterdir()) == ["deploy.md", "mine"]
         assert (legacy / "deploy.md").read_text() == "my own slash command"
 
+    def test_claude_cleanup_does_not_reach_through_a_symlinked_directory(
+        self, tmp_path
+    ):
+        """Keeping dotfiles in a repo is how this path becomes a link.
+
+        `api.md` and `docs.md` are plausible names for slash commands
+        someone wrote, and the cleanup deletes exactly those names. It
+        must not follow a link to find them.
+        """
+        mine = tmp_path / "dotfiles" / "claude-commands"
+        mine.mkdir(parents=True)
+        (mine / "api.md").write_text("my own /api command")
+        legacy = tmp_path / ".claude" / "commands" / "deepgram"
+        legacy.parent.mkdir(parents=True)
+        try:
+            legacy.symlink_to(mine, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("this filesystem does not allow creating symlinks")
+
+        gen = ClaudeCodeGenerator()
+        names = ClaudeCodeGenerator().legacy_paths()[0].contents
+        with patch.object(
+            gen, "legacy_paths", return_value=[LegacyArtifact(legacy, contents=names)]
+        ):
+            removed = gen.clean_legacy()
+
+        assert removed == []
+        assert (mine / "api.md").read_text() == "my own /api command"
+        assert legacy.is_symlink()
+
+    def test_a_symlinked_whole_directory_artifact_is_left_alone(self, tmp_path):
+        """rmtree already refused this one, but reported it as cleaned."""
+        mine = tmp_path / "dotfiles" / "rules"
+        mine.mkdir(parents=True)
+        (mine / "notes.md").write_text("mine")
+        legacy = tmp_path / ".cursor" / "rules"
+        legacy.parent.mkdir(parents=True)
+        try:
+            legacy.symlink_to(mine, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("this filesystem does not allow creating symlinks")
+
+        gen = ClaudeCodeGenerator()
+        with patch.object(gen, "legacy_paths", return_value=[LegacyArtifact(legacy)]):
+            assert gen.clean_legacy() == []
+        assert (mine / "notes.md").read_text() == "mine"
+
     def test_claude_cleanup_removes_the_directory_once_it_is_empty(self, tmp_path):
         legacy = tmp_path / ".claude" / "commands" / "deepgram"
         legacy.mkdir(parents=True)

@@ -1061,6 +1061,14 @@ def _clean_legacy_artifact(artifact: LegacyArtifact, begin: str, end: str) -> bo
         return False
 
     if path.is_dir():
+        # Never through a symlink, the same rule owned_skill_paths()
+        # applies to skill folders. A dotfiles setup that links
+        # ~/.claude/commands/deepgram at a directory of the user's own
+        # slash commands would otherwise have `api.md` deleted out of
+        # it -- a file deepctl never wrote. Nothing is lost by stopping:
+        # deepctl <= 0.3.0 wrote the real directory, not a link to one.
+        if path.is_symlink():
+            return False
         if not artifact.contents:
             shutil.rmtree(path, ignore_errors=True)
             return True
