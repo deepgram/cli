@@ -16,7 +16,8 @@ class SpeakResult(BaseResult):
 class VoiceInfo(BaseModel):
     name: str = ""
     voice_type: str = ""  # "aura" or "flux"
-    language: str = ""
+    language: str = ""  # joined display string, e.g. "fr, fr-FR"
+    languages: list[str] = Field(default_factory=list)
 
 
 class SpeakVoicesResult(BaseResult):

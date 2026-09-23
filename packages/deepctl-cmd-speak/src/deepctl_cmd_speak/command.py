@@ -911,13 +911,19 @@ class SpeakCommand(BaseCommand):
             # model id. Languages moved to a list in the same catalog reshape,
             # so keep the singular key as the fallback for both.
             name = m.get("canonical_name") or m.get("name") or ""
-            languages = m.get("languages") or []
-            language = ", ".join(languages) or m.get("language") or ""
+            languages = [str(lang) for lang in (m.get("languages") or [])]
+            legacy_language = m.get("language") or ""
+            if not languages and legacy_language:
+                languages = [legacy_language]
             voices.append(
                 VoiceInfo(
                     name=name,
                     voice_type=_voice_type_badge(name),
-                    language=language,
+                    # The table wants one cell; -o json consumers want the
+                    # tags as data, so carry both rather than make them split
+                    # a display string.
+                    language=", ".join(languages),
+                    languages=languages,
                 )
             )
 
@@ -942,10 +948,19 @@ class SpeakCommand(BaseCommand):
                 table.add_row(v.name, v.voice_type, v.language)
 
             stdout_console.print(table)
+            # The catalog endpoint returns no Flux voices today, so the
+            # default is missing from the list --model's help points at.
+            # Say so rather than let it read as a typo; computed, so the
+            # note disappears once the catalog carries it.
+            default_note = (
+                ""
+                if any(v.name == _DEFAULT_MODEL for v in voices)
+                else " (not listed above)"
+            )
             stdout_console.print(
                 f"\n[dim]{len(voices)} voice(s) — generate with "
                 f'dg speak "..." -m <voice>; '
-                f"default: {_DEFAULT_MODEL}[/dim]"
+                f"default: {_DEFAULT_MODEL}{default_note}[/dim]"
             )
 
         return SpeakVoicesResult(

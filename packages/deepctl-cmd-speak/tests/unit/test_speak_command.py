@@ -955,7 +955,9 @@ class TestSpeakCommand:
         captured = capsys.readouterr()
         assert "Deepgram TTS Voices" in captured.out
         assert "flux-alexis-en" in captured.out
+        # flux-alexis-en is one of the rows here, so the footer names it plainly.
         assert "default: flux-alexis-en" in " ".join(captured.out.split())
+        assert "not listed above" not in captured.out
 
     @patch("deepctl_cmd_speak.command.get_output_format", return_value="json")
     def test_handle_list_voices_json_prints_no_table(
@@ -1013,10 +1015,16 @@ class TestSpeakCommand:
         assert voice.name == "aura-2-agathe-fr"
         assert voice.voice_type == "aura"
         assert voice.language == "fr, fr-FR"
+        assert voice.languages == ["fr", "fr-FR"]
 
         captured = capsys.readouterr()
         assert "aura-2-agathe-fr" in captured.out
         assert "fr, fr-FR" in captured.out
+        # This catalog carries no Flux voices, so the footer's default is not
+        # one of the rows above it and the table says so.
+        assert "default: flux-alexis-en (not listed above)" in " ".join(
+            captured.out.split()
+        )
 
     @patch("deepctl_core.output.get_output_format", return_value="json")
     @patch("deepctl_cmd_speak.command.get_output_format", return_value="json")
@@ -1056,6 +1064,7 @@ class TestSpeakCommand:
                 "name": "aura-2-agathe-fr",
                 "voice_type": "aura",
                 "language": "fr, fr-FR",
+                "languages": ["fr", "fr-FR"],
             }
         ]
 
@@ -1079,6 +1088,7 @@ class TestSpeakCommand:
         assert isinstance(result, SpeakVoicesResult)
         assert result.voices[0].name == "aura-2-asteria-en"
         assert result.voices[0].language == "en"
+        assert result.voices[0].languages == ["en"]
 
     def test_handle_list_voices_empty(
         self, command, mock_config, mock_auth_manager, mock_client
