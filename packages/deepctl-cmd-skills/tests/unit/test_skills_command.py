@@ -569,6 +569,76 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         assert "retired-tool" in rendered
         assert "Nothing to update" in rendered
 
+    def test_list_shows_the_ref_and_count_it_recorded(self, tmp_path, capsys):
+        """`dg skills list` is how a user checks which revision they have."""
+        cmd = SkillsCommand()
+        root = tmp_path / ".claude" / "skills"
+        state = {
+            "installed_skills": {
+                "claude": {
+                    "paths": [str(root / "api"), str(root / "docs")],
+                    "version": "0.4.0",
+                    "skills_ref": "deepgram-skills-v1.6.0",
+                    "skills": ["api", "docs"],
+                }
+            }
+        }
+
+        with patch(
+            "deepctl_core.skill_generator.get_skills_state", return_value=state
+        ):
+            cmd._handle_list()
+
+        rendered = "".join(capsys.readouterr().out.split())
+        assert "deepgram-skills-v1.6.0" in rendered
+        assert "0.4.0" in rendered
+        assert "claude" in rendered
+
+    def test_list_says_so_when_nothing_is_installed(self, capsys):
+        cmd = SkillsCommand()
+        with patch(
+            "deepctl_core.skill_generator.get_skills_state",
+            return_value={"installed_skills": {}},
+        ):
+            cmd._handle_list()
+
+        combined = capsys.readouterr()
+        assert "No skills installed" in " ".join(
+            (combined.out + combined.err).split()
+        )
+
+    def test_setup_without_a_tty_installs_for_everything_detected(self, tmp_path):
+        """CI has no prompt to answer, so setup must not wait for one."""
+        cmd = SkillsCommand()
+        cmd._guided = False
+        generator, root = self._generator(tmp_path)
+        skills = [RepoSkill(name="api", path=tmp_path / "api")]
+        state = {"installed_skills": {}}
+
+        with (
+            patch("sys.stdout") as stdout,
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=[generator]
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=skills
+            ),
+        ):
+            stdout.isatty.return_value = False
+            cmd._handle_setup()
+
+        generator.install_skills.assert_called_once()
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+
     def test_status_asks_the_generator_only_for_recorded_folders(
         self, tmp_path, capsys
     ):
