@@ -10,15 +10,20 @@ import subprocess
 import tempfile
 from typing import TYPE_CHECKING
 
-from rich.console import Console
 from rich.panel import Panel
 
+from .diagnostics import create_diagnostic_console
 from .ffprobe_models import AudioFormatInfo, AudioProbeResult, AudioStreamInfo
 
 if TYPE_CHECKING:
     from deepctl_core import Config
 
-console = Console()
+# Diagnostics only: every console.print below is an error, a warning or a
+# progress line -- never a payload -- so it goes to stderr and can never
+# corrupt the machine-readable result a command writes to stdout (#104).
+# deepctl-shared-utils does not depend on deepctl-core, so this local factory
+# mirrors core's agentic/no-color policy instead of importing `stderr_console`.
+console = create_diagnostic_console()
 
 
 def get_ffprobe_path(config: Config | None = None) -> str | None:

@@ -31,7 +31,12 @@ class TestRenderNotice:
     def test_on_message(self) -> None:
         notice = render_notice(_config(True))
         assert "Telemetry is on" in notice
-        assert "telemetry.enabled false" in notice
+        # The notice must name opt-outs that exist. It used to say
+        # `dg config set telemetry.enabled false`; there is no `dg config`
+        # command, so it names the env var and the config-file key instead.
+        assert "DEEPCTL_TELEMETRY_DISABLED=1" in notice
+        assert "telemetry.enabled: false" in notice
+        assert "dg config" not in notice
 
     def test_off_message(self) -> None:
         notice = render_notice(_config(False))

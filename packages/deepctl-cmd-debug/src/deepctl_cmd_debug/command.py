@@ -27,7 +27,7 @@ class DebugCommand(BaseGroupCommand):
         "dg debug audio -f recording.wav",
         "dg debug network",
         "dg debug browser",
-        "dg debug stream",
+        "dg debug probe",
     ]
     agent_help = (
         "Diagnostic utilities for troubleshooting Deepgram integrations. "

@@ -9,14 +9,17 @@ from urllib.parse import urlencode
 import httpx
 import keyring
 from pydantic import BaseModel
-from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .client import _split_base_url
 from .config import Config
 from .models import ProfileInfo, ProfilesResult
+from .output import stderr_console
 
-console = Console()
+# Diagnostics only: everything printed here is status or error chrome, so
+# it goes to stderr and can never corrupt the machine-readable payload a
+# command writes to stdout. See get_status_console() in output.py.
+console = stderr_console
 
 # Auth provider base URL (dx-id OIDC provider)
 AUTH_BASE_URL = os.getenv("DEEPGRAM_CLI_BASE_URL", "https://id.dx.deepgram.com")

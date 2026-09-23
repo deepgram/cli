@@ -77,7 +77,7 @@ dg listen recording.wav
 dg listen podcast.mp3 --model nova-3
 dg listen interview.mp4 --diarize --language en-US
 dg listen meeting.wav --summarize --topics
-dg listen call.mp3 --output json --save-to transcript.json
+dg -o json listen call.mp3 --save-to transcript.json
 ```
 
 ### Transcribe a URL
@@ -168,7 +168,7 @@ dg speak --file script.txt                        # From file
 
 ```bash
 dg read "The product exceeded expectations" --sentiment
-dg read --file article.txt --summarize --detect-topics --detect-entities
+dg read --file article.txt --summarize --topics --intents
 echo "Meeting notes..." | dg read --summarize
 ```
 
@@ -215,7 +215,7 @@ dg members --revoke-invite user@example.com
 
 ```bash
 dg usage                             # Usage summary
-dg usage --start 2024-01-01 --end 2024-01-31
+dg usage --start-date 2024-01-01 --end-date 2024-01-31
 dg billing                           # Account balance
 dg requests                          # Recent API requests
 ```
@@ -286,7 +286,7 @@ Plugins install into an isolated venv at `~/.deepctl/plugins/venv/`.
 ## Debug Tools
 
 ```bash
-dg debug audio recording.wav         # Analyze audio file (codec, bitrate, compatibility)
+dg debug audio -f recording.wav      # Analyze audio file (codec, bitrate, compatibility)
 dg debug network                     # Test connectivity to Deepgram API
 dg debug browser                     # Check browser/WebRTC capabilities
 dg debug probe                       # Analyze WebSocket stream
@@ -296,7 +296,8 @@ dg debug probe                       # Analyze WebSocket stream
 
 ## Global Options
 
-All commands accept these global flags:
+Most of these go on `dg` itself, before the command: `dg --profile staging listen call.mp3`.
+`--quiet`/`-q`, `--verbose`/`-v`, and `--non-interactive` are also accepted after a leaf command. `--output`/`-o` can follow a leaf command that does not define its own output option, so `dg listen call.mp3 -o json` works. Speak owns `-o` as an audio-file path; use `dg -o json speak ...` for structured Speak output. The remaining options fail after a leaf command; command groups such as `dg debug` reject every trailing global option.
 
 | Flag | Description |
 |------|-------------|
@@ -305,10 +306,18 @@ All commands accept these global flags:
 | `--verbose`, `-v` | Enable verbose/debug output |
 | `--profile`, `-p` | Use named credential profile |
 | `--config`, `-c` | Path to config file |
+| `--base-url` | Override the API base URL |
 | `--api-key` | Explicit API key (overrides profile) |
-| `--project-id` | Explicit project ID |
-| `--timing` | Show performance timing |
-| `--agent-friendly` | Output JSON metadata for this command and exit |
+| `--timing`, `--timing-detailed` | Show performance timing |
+| `--non-interactive` | Skip prompts; use defaults |
+
+Per-command flags, which go after the command:
+
+| Flag | Description |
+|------|-------------|
+| `--agent-friendly` | Output JSON metadata for that command and exit |
+| `--non-interactive` | Also accepted here, so either position works |
+| `--project-id`, `-p` | Explicit project ID (billing, keys, login, members, requests, usage) |
 
 ---
 
@@ -316,24 +325,29 @@ All commands accept these global flags:
 
 `dg` auto-detects AI agent context and adjusts behavior automatically:
 
-**Detection signals (hard):**
-- `CLAUDECODE=1` (Claude Code)
-- `CLAUDE_CODE_ENTRYPOINT` (Claude Code CLI)
-- `CODEX_SANDBOX` (OpenAI Codex)
-- `OR_APP_NAME=Aider` (Aider)
+**Detection signals (hard, any one is conclusive):**
+- `CLAUDECODE` set (Claude Code)
+- `CLAUDE_CODE_ENTRYPOINT` set (Claude Code CLI)
+- `CODEX_SANDBOX` or `CODEX_SANDBOX_NETWORK_DISABLED` set (OpenAI Codex)
+- `OR_APP_NAME=Aider`, or `aider` in `OR_SITE_URL` (Aider)
+- `CI=true` or `CI=1`
 - `--agent-friendly` flag on command line
+- `--non-interactive` flag on command line
 
 **Detection signals (soft, 3+ = agent mode):**
 - stdin not a TTY
 - stdout not a TTY
-- `CI=true` or `CI=1`
 - `TERM=dumb` or TERM unset
 - `NO_COLOR` set
 
 **Agent mode behavior:**
 - All interactive prompts return defaults (no blocking on stdin)
 - Status messages routed to stderr
-- Data output to stdout only
+- Data output to stdout: authentication-guard failures and commands that
+  return an error result emit a structured payload in explicit structured-output
+  modes. Usage errors and handler-raised exceptions report on stderr and may
+  leave stdout empty, so branch on the exit code rather than on whether stdout
+  parsed.
 - JSON output format by default
 - Exit codes: 0 = success, 1 = error, 2 = user interrupt
 
@@ -357,9 +371,9 @@ Available on every command. Outputs a JSON contract describing the command:
 ## Configuration
 
 Config file location:
-- macOS: `~/Library/Application Support/deepgram/config.yaml`
-- Linux: `~/.config/deepgram/config.yaml`
-- Windows: `%APPDATA%\deepgram\config.yaml`
+- macOS: `~/Library/Application Support/deepctl/config.yaml`
+- Linux: `~/.config/deepctl/config.yaml`
+- Windows: `%LOCALAPPDATA%\deepgram\deepctl\config.yaml`
 
 Environment variables:
 - `DEEPGRAM_API_KEY` — API key (overrides profile)
@@ -372,19 +386,19 @@ Environment variables:
 
 ```bash
 # Transcribe and extract text with jq
-dg listen call.mp3 -o json | jq '.results.channels[0].alternatives[0].transcript'
+dg -o json listen call.mp3 | jq '.results.channels[0].alternatives[0].transcript'
 
 # Get all speaker segments
-dg listen interview.mp3 --diarize -o json | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
+dg -o json listen interview.mp3 --diarize | jq '.results.channels[0].alternatives[0].words[] | select(.speaker) | {speaker, word}'
 
 # TTS piped to audio player
 dg speak "Hello from Deepgram" | ffplay -nodisp -autoexit -
 
 # Stream mic and log all transcripts
-dg listen --mic -o json | tee transcripts.jsonl
+dg -o json listen --mic | tee transcripts.jsonl
 
 # Create a time-limited API key for CI
-dg keys --create --comment "CI/CD" --ttl 3600 -o json | jq -r '.created_key.key'
+dg -o json keys --create --comment "CI/CD" --ttl 3600 | jq -r '.created_key.key'
 ```
 
 ---
