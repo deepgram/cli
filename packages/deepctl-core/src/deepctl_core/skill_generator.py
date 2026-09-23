@@ -132,8 +132,14 @@ def recorded_skill_paths(state: dict[str, Any], cli_name: str) -> list[str]:
     This is deepctl's only claim of ownership over anything in a tool's
     skills directory. It is a *claim*, not a guarantee — every consumer
     re-checks each path against the tool's skills root before writing to
-    it or deleting it, so a hand-edited or stale state file cannot point
-    an operation somewhere else.
+    it or deleting it, so a stale state file cannot point an operation at
+    an unrelated directory. It is not a sandbox against a *hostile* one:
+    :meth:`SkillGenerator.owned_skill_paths` lstats only the final
+    component, so a hand-written entry whose intermediate component is a
+    symlink can still resolve to a direct child of the root and be
+    accepted. Anyone who can rewrite ``skills.json`` can already rewrite
+    anything else under the same home directory, so that is not a
+    boundary worth pretending to hold.
 
     A user who deletes ``skills.json`` therefore leaves deepctl unable to
     prove it owns anything: install refuses to overwrite the folders it
