@@ -124,7 +124,7 @@ def _state(home: Path) -> dict:
 
 
 def _status_counts(result: subprocess.CompletedProcess[str]) -> dict[str, str]:
-    """The "Skills Installed" cell of the `skills status` table, per tool.
+    """The "Deepgram Skills" cell of the `skills status` table, per tool.
 
     Parses the rendered table rather than searching the whole screen for a
     number, so "14" appearing in a path cannot pass for a skill count.
