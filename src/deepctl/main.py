@@ -287,6 +287,38 @@ def _telemetry_transaction() -> Iterator[None]:
         yield
 
 
+def _global_option_hint(message: str) -> str | None:
+    """Build a placement hint when a 'No such option' names a global option.
+
+    Global options belong before the subcommand (``dg -o json models``).
+    When one is placed after the subcommand instead (``dg models --profile
+    staging``), Click reports "No such option" with no explanation, which
+    reads as if the option does not exist at all. This looks the failing
+    option up on the root group and, when it is a global one, returns a
+    hint showing the working placement.
+    """
+    import re
+
+    match = re.search(r"[Nn]o such option:?\s*'?(--?[A-Za-z][\w-]*)'?", message)
+    if not match:
+        return None
+    token = match.group(1)
+
+    for param in cli.params:
+        opts = list(getattr(param, "opts", [])) + list(
+            getattr(param, "secondary_opts", [])
+        )
+        if token in opts:
+            takes_value = not getattr(param, "is_flag", False)
+            usage = f"{token} <value>" if takes_value else token
+            return (
+                f"[yellow]Hint: '{token}' is a global option and must come "
+                f"before the subcommand, for example: "
+                f"dg {usage} <command> ...[/yellow]"
+            )
+    return None
+
+
 def _safe_console_print(message: str) -> None:
     """Print a diagnostic to stderr, tolerating a closed/broken stream.
 
@@ -401,6 +433,17 @@ def main() -> None:
         # Abort, not KeyboardInterrupt. Both are user cancellation: exit 2.
         _safe_console_print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(2)
+    except click.UsageError as e:
+        # Keep the published exit-code contract (1 = error), but explain the
+        # one failure mode that reads as a lie: a *global* option placed
+        # after the subcommand, where Click says "No such option" about an
+        # option that very much exists.
+        message = e.format_message()
+        _safe_console_print(f"[red]Error: {message}[/red]")
+        hint = _global_option_hint(message)
+        if hint:
+            _safe_console_print(hint)
+        sys.exit(1)
     except Exception as e:
         _safe_console_print(f"[red]Error: {e}[/red]")
         sys.exit(1)  # 1 = error; 2 is reserved for user interrupt

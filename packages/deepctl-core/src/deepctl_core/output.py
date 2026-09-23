@@ -103,6 +103,30 @@ def setup_output(
     console.quiet = quiet
 
 
+def update_output(
+    format_type: str | None = None,
+    quiet: bool | None = None,
+    verbose: bool | None = None,
+) -> None:
+    """Update parts of the global output configuration in place.
+
+    Unlike setup_output(), only the arguments actually provided change;
+    every other setting keeps its current value. The per-command
+    pass-through options use this so that ``dg models -o json`` has the
+    same effect as ``dg -o json models`` without resetting the quiet or
+    verbose state the root group already applied.
+    """
+    if format_type is not None:
+        if format_type == "default" and _output_config["agentic"]:
+            format_type = "json"
+        _output_config["format"] = format_type
+    if quiet is not None:
+        _output_config["quiet"] = quiet
+        console.quiet = quiet
+    if verbose is not None:
+        _output_config["verbose"] = verbose
+
+
 class OutputFormatter:
     """Formatter for different output types."""
 

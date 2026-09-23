@@ -24,6 +24,7 @@ from .output import (
     print_success,
     print_warning,
     setup_output,
+    update_output,
 )
 from .plugin_manager import PluginManager
 from .timing import (
@@ -63,4 +64,5 @@ __all__ = [
     "print_timing_summary",
     "print_warning",
     "setup_output",
+    "update_output",
 ]

@@ -402,3 +402,76 @@ class TestMaybePromptSkillsSetup:
             mock_stdout.isatty.return_value = True
             cmd._maybe_prompt_skills_setup()
         mock_detect.assert_called_once()
+
+
+class TestWhoamiKeySource:
+    """The key-source label must name where the key actually came from.
+
+    Config merges DEEPGRAM_API_KEY into the profile at load time, so the
+    profile's api_key being set does not prove the key came from the config
+    file. whoami used to label an environment-sourced key "config file".
+    """
+
+    @pytest.fixture
+    def whoami_command(self):
+        from deepctl_cmd_login.command import WhoamiCommand
+
+        return WhoamiCommand()
+
+    def _run(self, whoami_command, mock_config, mock_client, env, profile_key):
+        auth_manager = Mock(spec=AuthManager)
+        auth_manager.get_project_id.return_value = "proj-1"
+        mock_config.get_profile.return_value.api_key = profile_key
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch("keyring.get_password", return_value=None),
+        ):
+            if "DEEPGRAM_API_KEY" not in env:
+                import os
+
+                os.environ.pop("DEEPGRAM_API_KEY", None)
+            return whoami_command.handle(
+                config=mock_config,
+                auth_manager=auth_manager,
+                client=mock_client,
+            )
+
+    def test_env_key_merged_into_profile_labeled_env(
+        self, whoami_command, mock_config, mock_client
+    ):
+        """A profile key equal to DEEPGRAM_API_KEY is labeled as env."""
+        result = self._run(
+            whoami_command,
+            mock_config,
+            mock_client,
+            env={"DEEPGRAM_API_KEY": "dg_env_key_12345"},
+            profile_key="dg_env_key_12345",
+        )
+        assert result.key_source == "DEEPGRAM_API_KEY (env)"
+        assert result.authenticated is True
+
+    def test_real_config_file_key_still_labeled_config_file(
+        self, whoami_command, mock_config, mock_client
+    ):
+        """A profile key with no matching env var keeps the config label."""
+        result = self._run(
+            whoami_command,
+            mock_config,
+            mock_client,
+            env={},
+            profile_key="dg_file_key_67890",
+        )
+        assert result.key_source == "config file"
+
+    def test_env_key_without_profile_labeled_env(
+        self, whoami_command, mock_config, mock_client
+    ):
+        """No profile key, env set: the env fallback branch labels env."""
+        result = self._run(
+            whoami_command,
+            mock_config,
+            mock_client,
+            env={"DEEPGRAM_API_KEY": "dg_env_only_11111"},
+            profile_key=None,
+        )
+        assert result.key_source == "DEEPGRAM_API_KEY (env)"
