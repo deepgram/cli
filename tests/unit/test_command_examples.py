@@ -199,8 +199,7 @@ def test_example_parses(
 # it. The README and the two `llms*.txt` files agents read carry ~190 more
 # command strings, and the #105 sweep did not reach them: `llms-full.txt` still
 # advertised `dg usage --start/--end`, the exact option pair #105 fixed in
-# `--help`, plus a `-o json` placement the CLI rejects (`-o` is a global flag
-# and must precede the subcommand).
+# `--help`, plus stale command names and options.
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -213,6 +212,9 @@ DOC_FILES = [
 
 # Templates, not runnable commands: `dg ... -o json | jq`, `dg <command>
 # --agent-friendly`, `dg keys --delete KEY_ID`, `dg login --api-key SK`.
+# Apply this to the extracted CLI argv rather than a whole shell snippet: a
+# downstream jq filter may contain `{}` while the preceding `dg` invocation is
+# still a valid command that we must validate.
 PLACEHOLDER = re.compile(r"\.\.\.|[<>{}]|YOUR_|\bKEY_ID\b|\bSK\b")
 
 # Lines that start a shell snippet we own.
@@ -248,9 +250,13 @@ def _doc_commands(path: str) -> list[tuple[int, str]]:
             if span.startswith(("dg ", "deepctl "))
         ]
         for candidate in candidates:
-            if PLACEHOLDER.search(candidate) or not candidate.isascii():
+            if not candidate.isascii():
                 continue
-            found.append((lineno, candidate))
+            if any(
+                not PLACEHOLDER.search(" ".join(argv))
+                for argv in _dg_invocations(candidate)
+            ):
+                found.append((lineno, candidate))
     return found
 
 
@@ -280,6 +286,8 @@ def test_doc_command_parses(path: str, lineno: int, command: str) -> None:
     from deepctl.main import cli
 
     for argv in _dg_invocations(command):
+        if PLACEHOLDER.search(" ".join(argv)):
+            continue
         try:
             _parse(cli, argv)
         except (SystemExit, click.exceptions.Exit):

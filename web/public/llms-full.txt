@@ -296,8 +296,8 @@ dg debug probe                       # Analyze WebSocket stream
 
 ## Global Options
 
-These go on `dg` itself, before the command: `dg -o json listen call.mp3`.
-Putting them after the command fails with `No such option`.
+Most of these go on `dg` itself, before the command: `dg --profile staging listen call.mp3`.
+`--output`/`-o`, `--quiet`/`-q`, `--verbose`/`-v`, and `--non-interactive` are also accepted after a leaf command, so `dg listen call.mp3 -o json` works. The remaining options fail after a leaf command; command groups such as `dg debug` reject every trailing global option.
 
 | Flag | Description |
 |------|-------------|

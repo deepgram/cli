@@ -311,9 +311,9 @@ dg keys --delete KEY_ID --yes
 dg read --file report.txt --summarize
 
 # Output formats for scripting
-dg -o json projects --list
-dg -o csv keys --list
-dg -o yaml usage --last-week
+dg projects --list -o json
+dg keys --list -o csv
+dg usage --last-week -o yaml
 ```
 
 In CI, in AI coding tools, and in any fully non-interactive environment with

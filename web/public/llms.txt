@@ -32,7 +32,7 @@
 ## Key Features
 
 - Auto-detects AI agent context (Claude Code, Aider, Codex) and fully non-interactive environments — disables prompts, outputs JSON, routes status to stderr
-- Multiple output formats: `dg -o json|yaml|table|csv <command>` (global flag, goes before the command)
+- Multiple output formats: `dg -o json|yaml|table|csv <command>` (before the command or after a leaf command)
 - Named credential profiles for multi-environment workflows
 - Plugin system: `dg plugin install <package>` installs community extensions in isolated venv
 - `--dry-run` on all destructive operations (key deletion, member removal)
