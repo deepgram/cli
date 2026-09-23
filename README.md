@@ -331,9 +331,10 @@ them too. So `dg skills` records every folder it writes in
 - Those exit codes are for the `dg skills` subcommands. `dg login` offers the
   same install after a successful login, and `dg plugin install/update/remove`
   refreshes what is already installed; both follow the identical ownership
-  rules but report a collision or a download failure as a warning and still
-  exit 0, because neither should fail over skills. Run `dg skills install` to
-  see the error and get the exit code.
+  rules, but a collision or a download failure there is a warning rather than
+  a failure — a skills problem never changes whether the login or the plugin
+  operation succeeded. Run `dg skills install` to see the error and get the
+  exit code.
 - If you delete `skills.json`, deepctl can no longer prove it installed
   anything: `remove` deletes nothing and `install` reports the collision rather
   than reclaiming the folders. Delete them by hand, then install again.
@@ -346,11 +347,11 @@ them too. So `dg skills` records every folder it writes in
   `skills.json`, before reusing a name deepctl installed under.
 - A *symlink* is the exception: deepctl never writes or deletes through one.
   Put a symlink where a recorded skill folder was and that path stops being
-  deepctl's — `install` and `update` exit 1 naming it rather than replacing
-  it, and `remove` reports where it is, drops it from the list and leaves it
-  on disk rather than following it to whatever it points at. Delete the
-  symlink yourself to hand the name back; until you do, installing under that
-  name keeps failing.
+  deepctl's — `install`, `update` and `setup` exit 1 naming it rather than
+  replacing it, and `remove` reports where it is, drops it from the list and
+  leaves it on disk rather than following it to whatever it points at. Delete
+  the symlink yourself to hand the name back; until you do, installing under
+  that name keeps failing.
 
 #### Upgrading from deepctl 0.2.16 through 0.3.0
 
