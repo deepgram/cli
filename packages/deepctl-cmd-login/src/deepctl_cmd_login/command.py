@@ -237,66 +237,60 @@ class LoginCommand(BaseCommand):
                 console.print("[dim]No tools selected.[/dim]")
                 return
 
-            # Install skills for selected tools
-            from deepctl_core.skill_bundle import resolve_skills_ref
+            # Install skills for selected tools. The same shared helper
+            # 'dg skills install' uses, so login cannot drift from the
+            # ownership contract: one fetch for every tool, every
+            # destination preflighted before anything is written, and the
+            # record saved as each tool lands rather than at the end.
+            # Best-effort here only in that a failure is reported and the
+            # login still succeeds -- never in that a folder is written
+            # without deepctl recording that it owns it.
             from deepctl_core.skill_generator import (
-                SkillOwnershipError,
-                _commands_hash,
                 collect_command_metadata,
-                recorded_skill_paths,
+                install_skills_for,
                 save_skills_state,
             )
 
             console.print("\n[blue]Installing Deepgram skills...[/blue]")
 
             import importlib.metadata
-            from datetime import datetime, timezone
 
-            commands = collect_command_metadata()
             try:
                 version = importlib.metadata.version("deepctl")
             except importlib.metadata.PackageNotFoundError:
                 version = "0.0.0"
 
-            for gen in selected:
-                try:
-                    paths = gen.install(
-                        commands,
-                        version,
-                        recorded=recorded_skill_paths(state, gen.cli_name),
-                    )
-                except SkillOwnershipError as exc:
-                    # Someone else's skill folder has one of these names.
-                    # Skip this tool rather than overwrite their work.
-                    console.print(f"[yellow]{exc}[/yellow]")
-                    continue
-                if gen.skills_root() is None:
-                    # No skills directory, so nothing was written and there
-                    # is nothing to record. An entry here would make
-                    # 'dg skills list' show a tool as installed with no
-                    # skills, and 'dg skills update' chase it every run.
-                    console.print(f"[yellow]  {gen.manual_hint()}[/yellow]")
-                    continue
-                cmd_hash = _commands_hash(commands)
-                # Same keys 'dg skills install' records. Without skills_ref
-                # and skills, 'dg skills list' shows '?' for the very ref
-                # this install pinned.
-                state["installed_skills"][gen.cli_name] = {
-                    "paths": [str(p) for p in paths],
-                    "installed_at": datetime.now(timezone.utc).isoformat(),
-                    "version": version,
-                    "commands_hash": cmd_hash,
-                    "skills_ref": resolve_skills_ref(None),
-                    "skills": [p.name for p in paths],
-                }
-                for p in paths:
-                    console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
-
-            save_skills_state(state)
-            console.print(
-                "\n[green]Skills installed![/green] "
-                "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+            report = install_skills_for(
+                selected,
+                state,
+                commands=collect_command_metadata(),
+                version=version,
+                best_effort=True,
             )
+            for gen in selected:
+                for p in report.written.get(gen.cli_name, []):
+                    console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
+            for gen in report.unsupported:
+                console.print(f"[yellow]  {gen.manual_hint()}[/yellow]")
+            # Someone else's skill folder has one of these names, so the
+            # tool was skipped rather than have their work overwritten.
+            for display_name, path in report.conflicts:
+                console.print(
+                    f"[yellow]  Skipped {display_name}: {path} is not "
+                    "deepctl's to replace.[/yellow]"
+                )
+            for display_name, exc in report.failures:
+                console.print(
+                    f"[yellow]  {display_name}: {exc}. Run 'dg skills install' "
+                    "to retry.[/yellow]"
+                )
+            save_skills_state(state)
+
+            if report.total_written:
+                console.print(
+                    "\n[green]Skills installed![/green] "
+                    "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+                )
         except Exception:
             pass  # Best-effort — never fail the login
 

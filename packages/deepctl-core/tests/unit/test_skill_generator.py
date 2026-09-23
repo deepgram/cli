@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from deepctl_core import skill_generator
-from deepctl_core.skill_bundle import SkillFetchError
+from deepctl_core.skill_bundle import DEFAULT_SKILLS_REF, SkillFetchError
 from deepctl_core.skill_generator import (
     AiderGenerator,
     AmazonQGenerator,
@@ -501,6 +501,24 @@ class TestOwnership:
         assert target.is_dir()
         assert (target / "SKILL.md").is_file()
 
+    def test_remove_reports_nothing_for_a_folder_it_could_not_delete(self, tmp_path):
+        """The caller drops the record on the strength of this list."""
+        gen, root = self._gen(tmp_path)
+        skills = [_fake_skill(tmp_path, "api")]
+
+        def denied(path, ignore_errors=False, **kwargs):
+            """What rmtree(ignore_errors=True) does on a read-only mount."""
+            if not ignore_errors:
+                raise PermissionError(13, "Permission denied", str(path))
+
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(skills)
+                with patch.object(skill_generator.shutil, "rmtree", denied):
+                    assert gen.remove(written) == []
+
+        assert (root / "api" / "SKILL.md").is_file()
+
     # -- install -----------------------------------------------------
 
     def test_install_refuses_a_same_name_collision(self, tmp_path):
@@ -550,6 +568,35 @@ class TestOwnership:
                 gen.install_skills(skills)
                 # Recorded under the other spelling of the same directory.
                 assert gen.install_conflicts(skills, [str(link_root / "api")]) == []
+
+    def test_a_symlink_to_another_skill_in_the_same_root_is_not_owned(self, tmp_path):
+        """A recorded name replaced by a symlink is dropped wherever it points.
+
+        Resolving alone is not enough: `skills/api -> skills/mine` has the
+        same parent once resolved, so the resolved-parent check called it
+        deepctl's, and an update would have unlinked the name and buried
+        the user's folder under the Deepgram skill.
+        """
+        gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root, "my-private-skill")
+        link = root / "api"
+        try:
+            link.symlink_to(mine, target_is_directory=True)
+        except (OSError, NotImplementedError):  # unprivileged Windows
+            pytest.skip("this filesystem does not allow creating symlinks")
+
+        skills = [_fake_skill(tmp_path, "api")]
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                assert gen.owned_skill_paths([str(link)]) == []
+                assert gen.installed_skill_paths([str(link)]) == []
+                # Recorded or not, it is a destination deepctl must refuse.
+                assert gen.install_conflicts(skills, [str(link)]) == [link]
+                with pytest.raises(SkillOwnershipError):
+                    gen.install_skills(skills, [str(link)])
+
+        assert link.is_symlink()
+        assert (mine / "SKILL.md").read_text().endswith("mine\n")
 
     def test_install_conflicts_lists_every_unowned_destination(self, tmp_path):
         gen, root = self._gen(tmp_path)
@@ -838,3 +885,155 @@ class TestDetectAiClis:
             detected = detect_ai_clis()
             claude = [g for g in detected if g.cli_name == "claude"]
             assert len(claude) >= 1
+
+
+class TestInstallSkillsForKeepsOwnership:
+    """Every route that writes skill folders shares this one contract.
+
+    `dg skills install` already fetched once, preflighted every
+    destination and saved after each tool. Login and the plugin refresh
+    looped over `gen.install()` instead and saved once at the end, so a
+    failure part-way through left folders on disk with no ownership
+    record -- exactly the unowned litter the primary flow was redesigned
+    to prevent. They all call this helper now.
+    """
+
+    def _gen(self, tmp_path, cli_name):
+        gen = ClaudeCodeGenerator()
+        gen.cli_name = cli_name
+        gen.display_name = cli_name
+        root = tmp_path / cli_name / "skills"
+        root.mkdir(parents=True)
+        return gen, root
+
+    def _run(self, generators, roots, skills, state, **kwargs):
+        def skills_root(self, _roots=roots):
+            return _roots[self.cli_name]
+
+        with (
+            patch.object(ClaudeCodeGenerator, "skills_root", skills_root),
+            patch.object(ClaudeCodeGenerator, "legacy_paths", lambda self: []),
+            patch.object(skill_generator, "save_skills_state") as save,
+            patch.object(skill_generator, "fetch_repo_skills", return_value=skills),
+        ):
+            report = skill_generator.install_skills_for(
+                generators,
+                state,
+                commands=[_make_command()],
+                version="9.9.9",
+                **kwargs,
+            )
+        return report, save
+
+    def test_a_second_tool_failing_leaves_the_first_recorded(self, tmp_path):
+        """The bug: tool one's folders became litter when tool two raised."""
+        first, first_root = self._gen(tmp_path, "claude")
+        second, second_root = self._gen(tmp_path, "cursor")
+        roots = {"claude": first_root, "cursor": second_root}
+        skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
+        state = {"installed_skills": {}}
+
+        real_install = ClaudeCodeGenerator.install_skills
+
+        def install_skills(self, bundle, recorded=()):
+            if self.cli_name == "cursor":
+                raise OSError(30, "Read-only file system")
+            return real_install(self, bundle, recorded)
+
+        with patch.object(ClaudeCodeGenerator, "install_skills", install_skills):
+            with pytest.raises(OSError):
+                self._run([first, second], roots, skills, state)
+
+        entry = state["installed_skills"]["claude"]
+        assert [Path(p).name for p in entry["paths"]] == ["api", "docs"]
+        assert entry["skills_ref"] == DEFAULT_SKILLS_REF
+        assert (first_root / "api" / "SKILL.md").is_file()
+        # Nothing was written for the tool that failed, so nothing claims
+        # it was -- but the tool that succeeded stays deepctl's.
+        assert "cursor" not in state["installed_skills"]
+
+    def test_best_effort_reports_the_failure_instead_of_raising(self, tmp_path):
+        """Login and the plugin refresh must not fail their own command."""
+        first, first_root = self._gen(tmp_path, "claude")
+        second, second_root = self._gen(tmp_path, "cursor")
+        roots = {"claude": first_root, "cursor": second_root}
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {}}
+
+        real_install = ClaudeCodeGenerator.install_skills
+
+        def install_skills(self, bundle, recorded=()):
+            if self.cli_name == "cursor":
+                raise OSError(30, "Read-only file system")
+            return real_install(self, bundle, recorded)
+
+        with patch.object(ClaudeCodeGenerator, "install_skills", install_skills):
+            report, _ = self._run(
+                [first, second], roots, skills, state, best_effort=True
+            )
+
+        assert [name for name, _ in report.failures] == ["cursor"]
+        assert list(report.written) == ["claude"]
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+        assert "cursor" not in state["installed_skills"]
+
+    def test_a_half_written_bundle_is_still_recorded_as_owned(self, tmp_path):
+        """Whatever landed before the error must stay deepctl's to fix."""
+        gen, root = self._gen(tmp_path, "claude")
+        skills = [_fake_skill(tmp_path, n) for n in ("api", "docs", "cli")]
+        state = {"installed_skills": {}}
+        real_copytree = shutil.copytree
+
+        def copytree(src, dst, *args, **kwargs):
+            if Path(dst).name == "cli":
+                raise OSError(28, "No space left on device")
+            return real_copytree(src, dst, *args, **kwargs)
+
+        with patch.object(skill_generator.shutil, "copytree", copytree):
+            with pytest.raises(OSError):
+                self._run([gen], {"claude": root}, skills, state)
+
+        entry = state["installed_skills"]["claude"]
+        assert [Path(p).name for p in entry["paths"]] == ["api", "docs"]
+
+    def test_a_collision_in_the_last_tool_writes_nothing_at_all(self, tmp_path):
+        """Preflight covers every destination before the first byte lands."""
+        first, first_root = self._gen(tmp_path, "claude")
+        second, second_root = self._gen(tmp_path, "cursor")
+        theirs = second_root / "api"
+        theirs.mkdir()
+        (theirs / "SKILL.md").write_text("---\nname: api\n---\n\nmine\n")
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {}}
+
+        with pytest.raises(SkillOwnershipError):
+            self._run(
+                [first, second],
+                {"claude": first_root, "cursor": second_root},
+                skills,
+                state,
+            )
+
+        assert not (first_root / "api").exists()
+        assert state["installed_skills"] == {}
+        assert (theirs / "SKILL.md").read_text().endswith("mine\n")
+
+    def test_nothing_installable_means_nothing_downloaded(self, tmp_path):
+        """A tool with no skills directory must not trigger a download."""
+        gen, _ = self._gen(tmp_path, "amazonq")
+        state = {"installed_skills": {"amazonq": {"paths": []}}}
+
+        with (
+            patch.object(ClaudeCodeGenerator, "skills_root", lambda self: None),
+            patch.object(ClaudeCodeGenerator, "legacy_paths", lambda self: []),
+            patch.object(skill_generator, "save_skills_state"),
+            patch.object(skill_generator, "fetch_repo_skills") as fetch,
+        ):
+            report = skill_generator.install_skills_for(
+                [gen], state, commands=[_make_command()], version="9.9.9"
+            )
+
+        fetch.assert_not_called()
+        assert report.unsupported == [gen]
+        # Nothing was written for it, so nothing may claim it was.
+        assert state["installed_skills"] == {}

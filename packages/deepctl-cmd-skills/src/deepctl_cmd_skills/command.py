@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,15 +16,21 @@ from deepctl_core.skill_bundle import (
     DEFAULT_SKILLS_REF,
     REF_ENV_VAR,
     SkillFetchError,
-    resolve_skills_ref,
 )
 from rich.console import Console
 from rich.table import Table
 
 if TYPE_CHECKING:
     from deepctl_core.skill_bundle import RepoSkill
+    from deepctl_core.skill_generator import SkillInstallReport
 
 console = Console()
+
+#: Printed after a successful install: the one skill that needs a follow-up.
+_MCP_HINT = (
+    "One of the installed skills is 'setup-mcp' — ask your assistant to "
+    "set up the Deepgram MCP server, or run 'dg mcp' to start it directly."
+)
 
 
 class SkillsCommand(BaseGroupCommand):
@@ -279,31 +284,47 @@ class SkillsCommand(BaseGroupCommand):
                 "deepgram/skills revision."
             )
 
-    def _refuse_unowned_destinations(
+    def _install_for(
         self,
         generators: list[Any],
-        skills: list[RepoSkill],
         state: dict[str, Any],
-    ) -> None:
-        """Stop before writing if any destination is not deepctl's to replace.
+        ref: str | None,
+    ) -> SkillInstallReport:
+        """Install for every selected tool, then report what landed.
 
-        Checked across every selected tool first, so a collision in the
-        last one does not leave the earlier ones half-updated.
+        The ownership contract lives in
+        :func:`deepctl_core.skill_generator.install_skills_for`, which
+        login and the plugin refresh call too. All this adds is the exit
+        code: a collision is a failed command, not a warning, so it
+        becomes the ClickException main.py turns into exit 1.
         """
         from deepctl_core.skill_generator import (
             SkillOwnershipError,
-            recorded_skill_paths,
+            collect_command_metadata,
+            install_skills_for,
         )
 
-        conflicts: list[tuple[str, Path]] = []
-        for gen in generators:
-            recorded = recorded_skill_paths(state, gen.cli_name)
-            conflicts.extend(
-                (gen.display_name, path)
-                for path in gen.install_conflicts(skills, recorded)
+        try:
+            report = install_skills_for(
+                generators,
+                state,
+                commands=collect_command_metadata(),
+                version=_deepctl_version(),
+                ref=ref,
+                fetch=lambda: self._fetch_skills(ref),
             )
-        if conflicts:
-            raise click.ClickException(str(SkillOwnershipError(conflicts)))
+        except SkillOwnershipError as exc:
+            raise click.ClickException(str(exc))
+
+        for gen in generators:
+            paths = report.written.get(gen.cli_name)
+            if paths is not None:
+                print_success(
+                    f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
+                )
+        for gen in report.unsupported:
+            print_warning(f"  {gen.manual_hint()}")
+        return report
 
     # ------------------------------------------------------------------
     # Handlers
@@ -371,13 +392,9 @@ class SkillsCommand(BaseGroupCommand):
     ) -> None:
         """Detect AI CLIs, prompt the user, and install the Deepgram skills."""
         from deepctl_core.skill_generator import (
-            _commands_hash,
-            collect_command_metadata,
             detect_ai_clis,
             get_all_generators,
             get_skills_state,
-            installable_generators,
-            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -413,10 +430,6 @@ class SkillsCommand(BaseGroupCommand):
                 print_info(f"  - {g.display_name}")
             return
 
-        # Collect metadata
-        commands = collect_command_metadata()
-        version = _deepctl_version()
-
         selected = [
             g
             for g in generators
@@ -427,65 +440,25 @@ class SkillsCommand(BaseGroupCommand):
                 default=True,
             )
         ]
-        supported, unsupported = installable_generators(selected)
 
         state = get_skills_state()
-        total_written: list[Path] = []
-
-        if supported:
-            skills = self._fetch_skills(ref)
-            self._refuse_unowned_destinations(supported, skills, state)
-            for gen in supported:
-                recorded = recorded_skill_paths(state, gen.cli_name)
-                paths = gen.install_skills(skills, recorded)
-                state["installed_skills"][gen.cli_name] = {
-                    "paths": [str(p) for p in paths],
-                    "installed_at": datetime.now(timezone.utc).isoformat(),
-                    "version": version,
-                    "commands_hash": _commands_hash(commands),
-                    "skills_ref": resolve_skills_ref(ref),
-                    "skills": [s.name for s in skills],
-                }
-                # Record each tool as it lands. If the next one raises —
-                # a read-only mount, a full disk — the folders already
-                # written stay deepctl's to update and remove, instead of
-                # becoming unowned litter it will later refuse to touch.
-                save_skills_state(state)
-                gen.prune_retired(recorded, skills)
-                total_written.extend(paths)
-                print_success(
-                    f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
-                )
-
-        for gen in unsupported:
-            # Nothing was written, so nothing is recorded as installed.
-            gen.clean_legacy()
-            state["installed_skills"].pop(gen.cli_name, None)
-            print_warning(f"  {gen.manual_hint()}")
-
+        report = self._install_for(selected, state, ref)
         save_skills_state(state)
 
-        if total_written:
+        if report.total_written:
             print_success(
-                f"\nInstalled {len(total_written)} skill folder(s) "
-                f"from deepgram/skills@{resolve_skills_ref(ref)}"
+                f"\nInstalled {report.total_written} skill folder(s) "
+                f"from deepgram/skills@{report.ref}"
             )
-            print_info(
-                "One of the installed skills is 'setup-mcp' — ask your "
-                "assistant to set up the Deepgram MCP server, or run 'dg mcp' "
-                "to start it directly."
-            )
-        elif not unsupported:
+            print_info(_MCP_HINT)
+        elif not report.unsupported:
             print_info("No skills were installed.")
 
     def _handle_update(self, ref: str | None = None) -> None:
         """Reinstall every installed tool's skills from upstream."""
         from deepctl_core.skill_generator import (
-            _commands_hash,
-            collect_command_metadata,
             get_all_generators,
             get_skills_state,
-            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -495,9 +468,6 @@ class SkillsCommand(BaseGroupCommand):
         if not installed:
             print_info("No skills installed. Run 'deepctl skills install' first.")
             return
-
-        commands = collect_command_metadata()
-        version = _deepctl_version()
 
         generators = {g.cli_name: g for g in get_all_generators()}
         targets = []
@@ -515,36 +485,12 @@ class SkillsCommand(BaseGroupCommand):
             print_info("Nothing to update.")
             return
 
-        skills = self._fetch_skills(ref)
-        self._refuse_unowned_destinations(targets, skills, state)
-        for gen in targets:
-            recorded = recorded_skill_paths(state, gen.cli_name)
-            paths = gen.install_skills(skills, recorded)
-            state["installed_skills"][gen.cli_name].update(
-                {
-                    "paths": [str(p) for p in paths],
-                    "version": version,
-                    "commands_hash": _commands_hash(commands),
-                    "skills_ref": resolve_skills_ref(ref),
-                    "skills": [s.name for s in skills],
-                }
-            )
-            save_skills_state(state)
-            gen.prune_retired(recorded, skills)
-            print_success(
-                f"  {gen.display_name}: {len(paths)} skills -> {gen.skills_root()}"
-            )
-
+        report = self._install_for(targets, state, ref)
         save_skills_state(state)
         print_success(
-            f"Updated {len(targets)} tool(s) from "
-            f"deepgram/skills@{resolve_skills_ref(ref)}"
+            f"Updated {len(report.written)} tool(s) from deepgram/skills@{report.ref}"
         )
-        print_info(
-            "One of the installed skills is 'setup-mcp' — ask your "
-            "assistant to set up the Deepgram MCP server, or run 'dg mcp' "
-            "to start it directly."
-        )
+        print_info(_MCP_HINT)
 
     def _handle_remove(
         self,
@@ -592,22 +538,49 @@ class SkillsCommand(BaseGroupCommand):
             return
 
         total_removed = 0
+        cleared = 0
         for cli_key in targets:
             gen = generators.get(cli_key)
-            if gen:
-                removed = gen.remove(recorded_skill_paths(state, cli_key))
-                for p in removed:
-                    print_info(f"  Removed {p}")
-                total_removed += len(removed)
+            if gen is None:
+                # No generator, so no skills root to check a path against
+                # and nothing deepctl can prove about these folders. The
+                # record is the only thing it can honestly drop.
+                del state["installed_skills"][cli_key]
+                cleared += 1
+                continue
+
+            recorded = recorded_skill_paths(state, cli_key)
+            owned = gen.owned_skill_paths(recorded)
+            removed = gen.remove(recorded)
+            for p in removed:
+                print_info(f"  Removed {p}")
+            total_removed += len(removed)
+
+            # Ownership outlives a failed deletion. rmtree can lose to a
+            # permission error or a read-only mount, and dropping the
+            # record then would strand Deepgram's own folders: the next
+            # update refuses to overwrite what it cannot prove is its,
+            # and the next remove has nothing left to act on.
+            stranded = [p for p in owned if p.exists() or p.is_symlink()]
+            if stranded:
+                entry = state["installed_skills"][cli_key]
+                entry["paths"] = [str(p) for p in stranded]
+                entry["skills"] = [p.name for p in stranded]
+                print_warning(
+                    f"  {gen.display_name}: {len(stranded)} folder(s) could not "
+                    "be removed and are still recorded as deepctl's. Fix the "
+                    f"permissions and run 'dg skills remove --cli {cli_key}' "
+                    "again."
+                )
+            else:
+                del state["installed_skills"][cli_key]
+                cleared += 1
                 if not removed:
                     print_warning(f"  {gen.display_name}: nothing left to remove.")
-            del state["installed_skills"][cli_key]
 
         save_skills_state(state)
         if total_removed:
-            print_success(
-                f"Removed {total_removed} folder(s) from {len(targets)} tool(s)."
-            )
+            print_success(f"Removed {total_removed} folder(s) from {cleared} tool(s).")
         else:
             print_info("Nothing was removed.")
 
@@ -656,13 +629,9 @@ class SkillsCommand(BaseGroupCommand):
         import sys
 
         from deepctl_core.skill_generator import (
-            _commands_hash,
-            collect_command_metadata,
             detect_ai_clis,
             get_all_generators,
             get_skills_state,
-            installable_generators,
-            recorded_skill_paths,
             save_skills_state,
         )
 
@@ -718,53 +687,19 @@ class SkillsCommand(BaseGroupCommand):
 
         # 3. Install the upstream skills for each selected tool
         console.print("\n[blue]Installing Deepgram skills...[/blue]")
-        commands = collect_command_metadata()
-        version = _deepctl_version()
-        supported, unsupported = installable_generators(selected)
 
         state = get_skills_state()
-        total_written: list[Path] = []
-
-        if supported:
-            skills = self._fetch_skills(ref)
-            self._refuse_unowned_destinations(supported, skills, state)
-            for gen in supported:
-                recorded = recorded_skill_paths(state, gen.cli_name)
-                paths = gen.install_skills(skills, recorded)
-                state["installed_skills"][gen.cli_name] = {
-                    "paths": [str(p) for p in paths],
-                    "installed_at": datetime.now(timezone.utc).isoformat(),
-                    "version": version,
-                    "commands_hash": _commands_hash(commands),
-                    "skills_ref": resolve_skills_ref(ref),
-                    "skills": [s.name for s in skills],
-                }
-                save_skills_state(state)
-                gen.prune_retired(recorded, skills)
-                total_written.extend(paths)
-                print_success(
-                    f"  {gen.display_name} -> {gen.skills_root()} ({len(paths)} skills)"
-                )
-
-        for gen in unsupported:
-            gen.clean_legacy()
-            state["installed_skills"].pop(gen.cli_name, None)
-            print_warning(f"  {gen.manual_hint()}")
-
+        report = self._install_for(selected, state, ref)
         save_skills_state(state)
 
-        if total_written:
+        if report.total_written:
             console.print()
             print_success(
-                f"Setup complete - {len(total_written)} skill folder(s) from "
-                f"deepgram/skills@{resolve_skills_ref(ref)}"
+                f"Setup complete - {report.total_written} skill folder(s) from "
+                f"deepgram/skills@{report.ref}"
             )
-            print_info(
-                "One of the installed skills is 'setup-mcp' — ask your "
-                "assistant to set up the Deepgram MCP server, or run 'dg mcp' "
-                "to start it directly."
-            )
-        elif not unsupported:
+            print_info(_MCP_HINT)
+        elif not report.unsupported:
             print_info("No skills were installed.")
 
 

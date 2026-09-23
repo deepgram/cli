@@ -12,6 +12,7 @@ from deepctl_cmd_login.command import (
 from deepctl_cmd_login.models import LoginResult, LogoutResult
 from deepctl_core import AuthManager, Config, DeepgramClient
 from deepctl_core.models import ProfileInfo, ProfilesResult
+from deepctl_core.skill_bundle import RepoSkill
 
 
 @pytest.fixture(autouse=True)
@@ -501,13 +502,18 @@ class TestLoginRecordsTheSameStateAsSkillsInstall:
         gen.cli_name = cli_name
         gen.display_name = display_name
         gen.skills_root.return_value = root
-        gen.install.return_value = paths
+        gen.install_conflicts.return_value = []
+        gen.install_skills.return_value = paths
+        gen.prune_retired.return_value = []
         gen.manual_hint.return_value = f"{display_name} has no skills directory."
         return gen
 
-    def _run(self, generators, state):
+    def _run(self, generators, state, skills=("api", "docs")):
         cmd = LoginCommand()
         cmd._guided = True
+        bundle = [
+            RepoSkill(name=name, path=Path("/upstream") / name) for name in skills
+        ]
         with (
             patch("sys.stdout") as mock_stdout,
             patch(
@@ -521,10 +527,14 @@ class TestLoginRecordsTheSameStateAsSkillsInstall:
                 "deepctl_core.skill_generator.collect_command_metadata",
                 return_value=[],
             ),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=bundle
+            ) as fetch,
             patch("deepctl_cmd_login.command.Prompt.ask", return_value="all"),
         ):
             mock_stdout.isatty.return_value = True
             cmd._maybe_prompt_skills_setup()
+        self.fetch = fetch
         return state
 
     def test_it_records_the_upstream_ref_and_skill_names(self, tmp_path):
@@ -547,3 +557,39 @@ class TestLoginRecordsTheSameStateAsSkillsInstall:
         gen = self._generator("amazonq", "Amazon Q Developer", None, [])
         state = self._run([gen], {"installed_skills": {}})
         assert state["installed_skills"] == {}
+
+    def test_a_second_tool_failing_leaves_the_first_recorded(self, tmp_path):
+        """Login used to save state only after the whole loop.
+
+        It installed tool by tool, refetching the bundle each time, and a
+        later failure hit the bare `except` before `save_skills_state`.
+        Whatever the earlier tools had written was then folders deepctl
+        would neither update nor remove.
+        """
+        root = tmp_path / ".claude" / "skills"
+        first = self._generator("claude", "Claude Code", root, [root / "api"])
+        second = self._generator(
+            "cursor", "Cursor", tmp_path / ".cursor" / "skills", []
+        )
+        second.install_skills.side_effect = OSError(30, "Read-only file system")
+
+        state = self._run([first, second], {"installed_skills": {}}, skills=("api",))
+
+        entry = state["installed_skills"]["claude"]
+        assert [Path(p).name for p in entry["paths"]] == ["api"]
+        assert "cursor" not in state["installed_skills"]
+
+    def test_the_bundle_is_fetched_once_for_every_tool(self, tmp_path):
+        """Two fetches could install two different revisions side by side."""
+        claude_root = tmp_path / ".claude" / "skills"
+        cursor_root = tmp_path / ".cursor" / "skills"
+        generators = [
+            self._generator(
+                "claude", "Claude Code", claude_root, [claude_root / "api"]
+            ),
+            self._generator("cursor", "Cursor", cursor_root, [cursor_root / "api"]),
+        ]
+
+        self._run(generators, {"installed_skills": {}}, skills=("api",))
+
+        assert self.fetch.call_count == 1

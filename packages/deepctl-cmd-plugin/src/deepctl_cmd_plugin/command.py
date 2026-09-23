@@ -1173,14 +1173,11 @@ except:
     def _maybe_update_skills(self) -> None:
         """Regenerate AI CLI skills if installed (best-effort)."""
         try:
-            from deepctl_core.skill_bundle import resolve_skills_ref
             from deepctl_core.skill_generator import (
-                SkillOwnershipError,
-                _commands_hash,
                 collect_command_metadata,
                 get_all_generators,
                 get_skills_state,
-                recorded_skill_paths,
+                install_skills_for,
                 save_skills_state,
             )
 
@@ -1188,38 +1185,46 @@ except:
             if not state.get("installed_skills") or not state.get("auto_update", True):
                 return
 
-            commands = collect_command_metadata()
-            version = importlib.metadata.version("deepctl")
             generators = {g.cli_name: g for g in get_all_generators()}
+            # Only the tools already recorded, and only those deepctl can
+            # install to. A tool with no skills directory keeps whatever
+            # record it has: this refresh is not the place to revise it.
+            targets = [
+                gen
+                for cli_name in state["installed_skills"]
+                if (gen := generators.get(cli_name)) is not None
+                and gen.skills_root() is not None
+            ]
+            if not targets:
+                return
 
-            for cli_name, info in state["installed_skills"].items():
-                gen = generators.get(cli_name)
-                if gen and gen.skills_root() is not None:
-                    try:
-                        paths = gen.install(
-                            commands,
-                            version,
-                            recorded=recorded_skill_paths(state, cli_name),
-                        )
-                    except SkillOwnershipError:
-                        # Not deepctl's folder to replace. Leave it, and
-                        # leave the recorded state describing the install
-                        # that is actually on disk.
-                        continue
-                    # Same keys 'dg skills install' records, so a refresh
-                    # triggered from here does not blank the ref and skill
-                    # list that 'dg skills list' prints.
-                    info.update(
-                        {
-                            "paths": [str(p) for p in paths],
-                            "version": version,
-                            "commands_hash": _commands_hash(commands),
-                            "skills_ref": resolve_skills_ref(None),
-                            "skills": [p.name for p in paths],
-                        }
-                    )
-
+            # The shared helper 'dg skills update' uses, so a refresh
+            # triggered by a plugin change obeys the same contract: one
+            # fetch, every destination preflighted, and the ownership
+            # record saved as each tool lands. Best-effort only in that a
+            # failure is reported instead of failing the plugin command.
+            report = install_skills_for(
+                targets,
+                state,
+                commands=collect_command_metadata(),
+                version=importlib.metadata.version("deepctl"),
+                best_effort=True,
+            )
             save_skills_state(state)
-            console.print("[dim]AI assistant skills updated[/dim]")
+
+            for display_name, path in report.conflicts:
+                # Not deepctl's folder to replace. Left alone, and so is
+                # the record describing the install that is on disk.
+                console.print(
+                    f"[yellow]Skipped {display_name} skills: {path} is not "
+                    "deepctl's to replace[/yellow]"
+                )
+            for display_name, exc in report.failures:
+                console.print(
+                    f"[yellow]{display_name} skills not updated: {exc}. "
+                    "Run 'dg skills update' to retry[/yellow]"
+                )
+            if report.written:
+                console.print("[dim]AI assistant skills updated[/dim]")
         except Exception:
             pass  # Non-fatal

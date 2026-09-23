@@ -83,7 +83,9 @@ class TestSkillsCommand:
         generator.detect.return_value = False
         root = tmp_path / ".claude" / "skills"
         generator.skills_root.return_value = root
+        generator.install_conflicts.return_value = []
         generator.install_skills.return_value = [root / "api"]
+        generator.prune_retired.return_value = []
 
         with (
             patch(
@@ -346,6 +348,9 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         cmd = SkillsCommand()
         generator, root = self._generator(tmp_path)
         recorded = [str(root / "api"), str(root / "docs")]
+        # Everything it owned is gone, so the record has nothing left to
+        # describe. Only then may the tool's entry go.
+        generator.owned_skill_paths.return_value = [root / "api", root / "docs"]
         state = {"installed_skills": {"claude": {"paths": list(recorded)}}}
 
         with (
@@ -384,6 +389,67 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         save.assert_not_called()
         captured = capsys.readouterr()
         assert "by hand" in " ".join((captured.out + captured.err).split())
+
+    def test_a_failed_deletion_keeps_the_record_and_can_be_retried(
+        self, tmp_path, capsys
+    ):
+        """Ownership has to outlive an rmtree that could not delete.
+
+        `SkillGenerator.remove()` asks the filesystem before reporting a
+        folder gone, but the command used to drop the tool's whole
+        skills.json entry regardless. One permission error or read-only
+        mount then stranded Deepgram's own folders: the next update
+        refuses to overwrite what deepctl cannot prove is its, and the
+        next remove has no record left to act on.
+        """
+        from deepctl_core.skill_generator import ClaudeCodeGenerator
+
+        cmd = SkillsCommand()
+        gen = ClaudeCodeGenerator()
+        root = tmp_path / ".claude" / "skills"
+        (root / "api").mkdir(parents=True)
+        (root / "api" / "SKILL.md").write_text("---\nname: api\n---\n")
+        state = {
+            "installed_skills": {
+                "claude": {"paths": [str(root / "api")], "skills": ["api"]}
+            }
+        }
+
+        def denied(path, ignore_errors=False, **kwargs):
+            """What rmtree(ignore_errors=True) does on a read-only mount."""
+            if not ignore_errors:
+                raise PermissionError(13, "Permission denied", str(path))
+
+        with (
+            patch.object(gen, "skills_root", return_value=root),
+            patch.object(gen, "legacy_paths", return_value=[]),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators", return_value=[gen]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch("deepctl_core.skill_generator.shutil.rmtree", denied),
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        assert (root / "api" / "SKILL.md").is_file()
+        assert state["installed_skills"]["claude"]["paths"] == [str(root / "api")]
+        assert "could not" in " ".join(capsys.readouterr().err.split())
+
+        # Retried once the permission is fixed, and now the record goes.
+        with (
+            patch.object(gen, "skills_root", return_value=root),
+            patch.object(gen, "legacy_paths", return_value=[]),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators", return_value=[gen]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+        ):
+            cmd._handle_remove(cli_name="claude")
+
+        assert not (root / "api").exists()
+        assert state["installed_skills"] == {}
 
     def test_status_asks_the_generator_only_for_recorded_folders(
         self, tmp_path, capsys

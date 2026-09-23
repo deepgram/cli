@@ -16,6 +16,7 @@ from deepctl_cmd_update.installation import InstallMethod
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
+from deepctl_core.skill_bundle import RepoSkill
 
 
 # Captured before the autouse fixture below replaces the attribute, so the
@@ -635,12 +636,18 @@ class TestSkillsRefreshAfterAPluginChange:
     def _generator(self, cli_name, root, paths):
         gen = MagicMock()
         gen.cli_name = cli_name
+        gen.display_name = cli_name
         gen.skills_root.return_value = root
-        gen.install.return_value = paths
+        gen.install_conflicts.return_value = []
+        gen.install_skills.return_value = paths
+        gen.prune_retired.return_value = []
         return gen
 
-    def _run(self, generators, state):
+    def _run(self, generators, state, skills=("api", "docs")):
         command = PluginCommand()
+        bundle = [
+            RepoSkill(name=name, path=Path("/upstream") / name) for name in skills
+        ]
         with (
             patch(
                 "deepctl_core.skill_generator.get_skills_state", return_value=state
@@ -654,9 +661,13 @@ class TestSkillsRefreshAfterAPluginChange:
                 "deepctl_core.skill_generator.get_all_generators",
                 return_value=generators,
             ),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=bundle
+            ) as fetch,
         ):
             # The autouse fixture stubs this out for every other test here.
             _REAL_MAYBE_UPDATE_SKILLS(command)
+        self.fetch = fetch
         return state
 
     def test_it_keeps_the_upstream_ref_and_skill_names(self, tmp_path):
@@ -685,5 +696,49 @@ class TestSkillsRefreshAfterAPluginChange:
         }
         self._run([gen], state)
 
-        gen.install.assert_not_called()
+        gen.install_skills.assert_not_called()
+        self.fetch.assert_not_called()
         assert state["installed_skills"]["amazonq"] == {"paths": []}
+
+    def test_a_second_tool_failing_leaves_the_first_recorded(self, tmp_path):
+        """The refresh used to save state only after the whole loop.
+
+        A later failure reached the bare `except` with the earlier tool's
+        new folders already written and nothing recording them.
+        """
+        claude_root = tmp_path / ".claude" / "skills"
+        cursor_root = tmp_path / ".cursor" / "skills"
+        first = self._generator("claude", claude_root, [claude_root / "api"])
+        second = self._generator("cursor", cursor_root, [])
+        second.install_skills.side_effect = OSError(30, "Read-only file system")
+        state = {
+            "installed_skills": {
+                "claude": {"paths": [], "skills_ref": "old", "skills": []},
+                "cursor": {"paths": [], "skills_ref": "old", "skills": []},
+            },
+            "auto_update": True,
+        }
+
+        self._run([first, second], state, skills=("api",))
+
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+        # Nothing landed for the tool that failed, so its record still
+        # describes the install that is actually on disk.
+        assert state["installed_skills"]["cursor"]["skills_ref"] == "old"
+
+    def test_the_bundle_is_fetched_once_for_every_tool(self, tmp_path):
+        """Two fetches could install two different revisions side by side."""
+        claude_root = tmp_path / ".claude" / "skills"
+        cursor_root = tmp_path / ".cursor" / "skills"
+        generators = [
+            self._generator("claude", claude_root, [claude_root / "api"]),
+            self._generator("cursor", cursor_root, [cursor_root / "api"]),
+        ]
+        state = {
+            "installed_skills": {"claude": {"paths": []}, "cursor": {"paths": []}},
+            "auto_update": True,
+        }
+
+        self._run(generators, state, skills=("api",))
+
+        assert self.fetch.call_count == 1

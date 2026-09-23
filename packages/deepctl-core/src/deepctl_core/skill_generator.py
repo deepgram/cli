@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from deepctl_core.skill_bundle import fetch_skill_bundle
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from deepctl_core.skill_bundle import RepoSkill
 
@@ -802,17 +802,25 @@ class SkillGenerator(ABC):
         """The recorded paths this tool may safely write to or delete.
 
         ``recorded`` comes from :func:`recorded_skill_paths`. Each entry
-        has to survive two checks before it counts as deepctl's:
+        has to survive three checks before it counts as deepctl's:
 
-        * it is absolute, and
+        * it is absolute,
+        * its own final component is not a symlink, and
         * it resolves to a *direct child* of this tool's skills root,
           with symlinks followed on both sides.
 
-        The second check is what makes a hand-edited or stale
-        ``skills.json`` harmless: an entry pointing at ``~/Documents`` or
-        at ``~/.claude/skills/api/../../..`` resolves outside the root and
-        is dropped, and a skill folder someone replaced with a symlink
-        resolves to its target and is dropped too.
+        Those last two are what make a hand-edited or stale
+        ``skills.json`` harmless. The resolved-parent check drops an entry
+        pointing at ``~/Documents`` or at
+        ``~/.claude/skills/api/../../..``. The symlink check drops a skill
+        folder someone replaced with a symlink *wherever it points*:
+        resolving alone would let ``skills/api -> skills/my-own-skill``
+        pass, because the target is a direct child of the same root, and
+        deepctl would then unlink the name and bury their work.
+
+        Only the final component is tested, so a record written through a
+        symlinked ancestor -- ``/tmp`` for ``/private/tmp`` on macOS, a
+        home directory reached through a link -- still counts as ours.
         """
         root = self.skills_root()
         if root is None:
@@ -823,6 +831,8 @@ class SkillGenerator(ABC):
         for entry in recorded:
             path = Path(entry).expanduser()
             if not path.is_absolute():
+                continue
+            if path.is_symlink():
                 continue
             if path.resolve().parent != resolved_root:
                 continue
@@ -866,7 +876,12 @@ class SkillGenerator(ABC):
         conflicts: list[Path] = []
         for skill in skills:
             dest = root / skill.name
-            if (dest.exists() or dest.is_symlink()) and dest.resolve() not in owned:
+            if not (dest.exists() or dest.is_symlink()):
+                continue
+            # A symlink standing where a skill folder belongs is never
+            # ours, whatever it points at -- including another folder in
+            # this same root, which would otherwise resolve into `owned`.
+            if dest.is_symlink() or dest.resolve() not in owned:
                 conflicts.append(dest)
         return conflicts
 
@@ -1288,3 +1303,190 @@ def installable_generators(
     supported = [g for g in generators if g.skills_root() is not None]
     unsupported = [g for g in generators if g.skills_root() is None]
     return supported, unsupported
+
+
+@dataclass
+class SkillInstallReport:
+    """What :func:`install_skills_for` did, tool by tool.
+
+    Callers render this; the core never prints. ``conflicts`` and
+    ``failures`` are only ever non-empty in best-effort mode, because
+    otherwise the corresponding exception is raised instead.
+    """
+
+    #: The deepgram/skills revision that was installed.
+    ref: str
+    #: The bundle that was fetched, empty when nothing needed fetching.
+    skills: list[RepoSkill]
+    #: cli_name -> the skill folders written for it, in install order.
+    written: dict[str, list[Path]]
+    #: Selected tools that have no skills directory to install into.
+    unsupported: list[SkillGenerator]
+    #: (display_name, destination) pairs deepctl refused to overwrite.
+    conflicts: list[tuple[str, Path]]
+    #: (display_name, error) for tools that raised part-way through.
+    failures: list[tuple[str, Exception]]
+
+    @property
+    def total_written(self) -> int:
+        return sum(len(paths) for paths in self.written.values())
+
+
+def _ownership_after_failure(
+    gen: SkillGenerator,
+    skills: list[RepoSkill],
+    recorded: Iterable[str | Path],
+) -> list[Path]:
+    """Every folder of this tool's that deepctl must stay able to touch.
+
+    Used when an install raises part-way: whatever landed at a
+    destination the preflight already cleared as ours, plus anything
+    previously recorded that is still on disk. Recording less would turn
+    a half-written bundle into folders deepctl will neither update nor
+    remove, and would later refuse to overwrite.
+    """
+    root = gen.skills_root()
+    landed = (
+        {root / skill.name for skill in skills if (root / skill.name).exists()}
+        if root is not None
+        else set()
+    )
+    surviving = {p for p in gen.owned_skill_paths(recorded) if p.exists()}
+    return sorted(landed | surviving)
+
+
+def install_skills_for(
+    generators: Sequence[SkillGenerator],
+    state: dict[str, Any],
+    *,
+    commands: list[CommandMetadata],
+    version: str,
+    ref: str | None = None,
+    fetch: Callable[[], list[RepoSkill]] | None = None,
+    best_effort: bool = False,
+) -> SkillInstallReport:
+    """Install the upstream skills for several tools under one contract.
+
+    Every route that writes skill folders goes through here -- ``dg
+    skills install`` and ``update``, the post-login prompt, and the
+    refresh a plugin change triggers -- so they cannot drift apart on the
+    one thing that matters: a folder on disk always has an ownership
+    record.
+
+    The contract is:
+
+    * **Fetch once.** One bundle for every tool, so two destinations
+      cannot end up holding different revisions.
+    * **Preflight every destination first.** A collision in the last tool
+      stops the first from being written at all, rather than leaving a
+      half-applied update.
+    * **Save after each tool.** If a later one fails, the folders already
+      written stay deepctl's to update and remove.
+    * **Record what landed even on failure**, so a tool that raises
+      part-way still owns the folders that exist.
+    * **Prune retired skills after recording**, never before: a crash in
+      between should leave a stale folder, not an untracked one.
+
+    ``state`` is mutated and saved in place.
+
+    Args:
+        generators: The tools to install for. Ones with no skills
+            directory are reported in ``unsupported`` and never recorded.
+        state: The loaded ``skills.json``.
+        commands: Command metadata, for the recorded ``commands_hash``.
+        version: The deepctl version to record.
+        ref: The deepgram/skills revision, or ``None`` for the default.
+        fetch: Overrides how the bundle is obtained, for a caller that
+            reports a download failure in its own words. Called at most
+            once, and only when there is something to install.
+        best_effort: Collect conflicts and errors into the report and
+            keep going instead of raising, for callers such as login that
+            must not fail the command they are attached to.
+
+    Returns:
+        A :class:`SkillInstallReport` for the caller to render.
+
+    Raises:
+        SkillFetchError: Upstream could not be fetched or trusted. Raised
+            in both modes, because nothing has been written yet.
+        SkillOwnershipError: A destination exists that deepctl did not
+            install. Not raised when ``best_effort`` is set.
+    """
+    from datetime import datetime, timezone
+
+    from deepctl_core.skill_bundle import resolve_skills_ref
+
+    supported, unsupported = installable_generators(list(generators))
+    report = SkillInstallReport(
+        ref=resolve_skills_ref(ref),
+        skills=[],
+        written={},
+        unsupported=unsupported,
+        conflicts=[],
+        failures=[],
+    )
+    installed = state.setdefault("installed_skills", {})
+    for gen in unsupported:
+        # Nothing was written, so nothing may claim it was. An entry here
+        # would make 'dg skills list' show a tool as installed with no
+        # skills, and 'dg skills update' chase it every run.
+        gen.clean_legacy()
+        installed.pop(gen.cli_name, None)
+
+    if not supported:
+        # Nothing to install means nothing to download.
+        return report
+
+    skills = fetch() if fetch is not None else fetch_repo_skills(ref, force=True)
+    report.skills = skills
+
+    targets: list[SkillGenerator] = []
+    for gen in supported:
+        found = gen.install_conflicts(skills, recorded_skill_paths(state, gen.cli_name))
+        if found:
+            report.conflicts.extend((gen.display_name, p) for p in found)
+        else:
+            targets.append(gen)
+    if report.conflicts and not best_effort:
+        raise SkillOwnershipError(report.conflicts)
+
+    commands_hash = _commands_hash(commands)
+    now = datetime.now(timezone.utc).isoformat()
+    for gen in targets:
+        recorded = recorded_skill_paths(state, gen.cli_name)
+        try:
+            paths = gen.install_skills(skills, recorded)
+        except Exception as exc:
+            kept = _ownership_after_failure(gen, skills, recorded)
+            if kept:
+                installed[gen.cli_name] = {
+                    "paths": [str(p) for p in kept],
+                    "installed_at": now,
+                    "version": version,
+                    "commands_hash": commands_hash,
+                    "skills_ref": report.ref,
+                    "skills": [p.name for p in kept],
+                }
+                save_skills_state(state)
+            report.failures.append((gen.display_name, exc))
+            if not best_effort:
+                raise
+            continue
+
+        installed[gen.cli_name] = {
+            "paths": [str(p) for p in paths],
+            "installed_at": now,
+            "version": version,
+            "commands_hash": commands_hash,
+            "skills_ref": report.ref,
+            "skills": [s.name for s in skills],
+        }
+        # Record each tool as it lands. If the next one raises -- a
+        # read-only mount, a full disk -- the folders already written
+        # stay deepctl's to update and remove, instead of becoming
+        # unowned litter it will later refuse to touch.
+        save_skills_state(state)
+        gen.prune_retired(recorded, skills)
+        report.written[gen.cli_name] = paths
+
+    return report
