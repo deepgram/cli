@@ -1,5 +1,6 @@
 """Tests for the login command."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
@@ -11,6 +12,22 @@ from deepctl_cmd_login.command import (
 from deepctl_cmd_login.models import LoginResult, LogoutResult
 from deepctl_core import AuthManager, Config, DeepgramClient
 from deepctl_core.models import ProfileInfo, ProfilesResult
+from deepctl_core.skill_bundle import RepoSkill
+
+
+@pytest.fixture(autouse=True)
+def _no_real_skill_installs():
+    """Keep the post-login skills prompt off this machine.
+
+    A successful login calls ``_maybe_prompt_skills_setup()``, whose only
+    guard is ``sys.stdout.isatty()``. Under ``pytest -s`` that is True, and
+    the prompt then downloads the deepgram/skills bundle and installs it
+    into the real ``~/.claude/skills`` and friends. Reporting no detected
+    tools stops it at the first branch; the tests that exercise the prompt
+    itself patch this same function and win over this fixture.
+    """
+    with patch("deepctl_core.skill_generator.detect_ai_clis", return_value=[]):
+        yield
 
 
 @pytest.fixture
@@ -475,3 +492,122 @@ class TestWhoamiKeySource:
             profile_key=None,
         )
         assert result.key_source == "DEEPGRAM_API_KEY (env)"
+
+
+class TestLoginRecordsTheSameStateAsSkillsInstall:
+    """`dg login` writes the record `dg skills list/update/remove` then read."""
+
+    def _generator(self, cli_name, display_name, root, paths):
+        gen = MagicMock()
+        gen.cli_name = cli_name
+        gen.display_name = display_name
+        gen.skills_root.return_value = root
+        gen.install_conflicts.return_value = []
+        gen.install_skills.return_value = paths
+        gen.prune_retired.return_value = []
+        gen.manual_hint.return_value = f"{display_name} has no skills directory."
+        return gen
+
+    def _run(self, generators, state, skills=("api", "docs")):
+        cmd = LoginCommand()
+        cmd._guided = True
+        bundle = [
+            RepoSkill(name=name, path=Path("/upstream") / name) for name in skills
+        ]
+        with (
+            patch("sys.stdout") as mock_stdout,
+            patch(
+                "deepctl_core.skill_generator.detect_ai_clis", return_value=generators
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state", return_value=state
+            ),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata",
+                return_value=[],
+            ),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills", return_value=bundle
+            ) as fetch,
+            patch("deepctl_cmd_login.command.Prompt.ask", return_value="all"),
+        ):
+            mock_stdout.isatty.return_value = True
+            cmd._maybe_prompt_skills_setup()
+        self.fetch = fetch
+        return state
+
+    def test_it_records_the_upstream_ref_and_skill_names(self, tmp_path):
+        """Without these, `dg skills list` prints '?' for the ref it pinned."""
+        from deepctl_core.skill_bundle import DEFAULT_SKILLS_REF
+
+        root = tmp_path / ".claude" / "skills"
+        gen = self._generator(
+            "claude", "Claude Code", root, [root / "api", root / "docs"]
+        )
+        state = self._run([gen], {"installed_skills": {}})
+
+        entry = state["installed_skills"]["claude"]
+        assert entry["skills_ref"] == DEFAULT_SKILLS_REF
+        assert entry["skills"] == ["api", "docs"]
+        assert [Path(p).name for p in entry["paths"]] == ["api", "docs"]
+
+    def test_a_tool_with_no_skills_directory_is_not_recorded(self):
+        """Nothing was written for it, so nothing may claim it was."""
+        gen = self._generator("amazonq", "Amazon Q Developer", None, [])
+        with patch("deepctl_cmd_login.command.console") as printer:
+            state = self._run([gen], {"installed_skills": {}})
+
+        assert state["installed_skills"] == {}
+        # The empty map is also what this started as, so on its own it
+        # would pass if the whole block had thrown into login's bare
+        # `except`. The hint only prints from the far side of the
+        # install, which is what pins down that it ran and declined.
+        printed = " ".join(str(c) for c in printer.print.call_args_list)
+        assert "Amazon Q Developer has no skills directory." in printed
+        gen.install_skills.assert_not_called()
+
+    def test_a_second_tool_failing_leaves_the_first_recorded(self, tmp_path):
+        """Login used to save state only after the whole loop.
+
+        It installed tool by tool, refetching the bundle each time, and a
+        later failure hit the bare `except` before `save_skills_state`.
+        Whatever the earlier tools had written was then folders deepctl
+        would neither update nor remove.
+        """
+        root = tmp_path / ".claude" / "skills"
+        first = self._generator("claude", "Claude Code", root, [root / "api"])
+        second = self._generator(
+            "cursor", "Cursor", tmp_path / ".cursor" / "skills", []
+        )
+        second.install_skills.side_effect = OSError(30, "Read-only file system")
+
+        with patch("deepctl_cmd_login.command.console") as printer:
+            state = self._run(
+                [first, second], {"installed_skills": {}}, skills=("api",)
+            )
+
+        entry = state["installed_skills"]["claude"]
+        assert [Path(p).name for p in entry["paths"]] == ["api"]
+        assert "cursor" not in state["installed_skills"]
+        # And the user is told, rather than the login going quiet on it.
+        # Not just "Cursor" -- every detected tool is named in the menu
+        # printed before the install, so that would match either way.
+        printed = " ".join(str(c) for c in printer.print.call_args_list)
+        assert "Cursor: [Errno 30] Read-only file system" in printed
+        assert "Run 'dg skills install' to retry" in printed
+
+    def test_the_bundle_is_fetched_once_for_every_tool(self, tmp_path):
+        """Two fetches could install two different revisions side by side."""
+        claude_root = tmp_path / ".claude" / "skills"
+        cursor_root = tmp_path / ".cursor" / "skills"
+        generators = [
+            self._generator(
+                "claude", "Claude Code", claude_root, [claude_root / "api"]
+            ),
+            self._generator("cursor", "Cursor", cursor_root, [cursor_root / "api"]),
+        ]
+
+        self._run(generators, {"installed_skills": {}}, skills=("api",))
+
+        assert self.fetch.call_count == 1

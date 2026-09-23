@@ -1,5 +1,6 @@
 """Login command for deepctl."""
 
+from pathlib import Path
 from typing import Any
 
 from deepctl_core import (
@@ -237,41 +238,72 @@ class LoginCommand(BaseCommand):
                 console.print("[dim]No tools selected.[/dim]")
                 return
 
-            # Install skills for selected tools
+            # Install skills for selected tools. The same shared helper
+            # 'dg skills install' uses, so login cannot drift from the
+            # ownership contract: one fetch for every tool, every
+            # destination preflighted before anything is written, and the
+            # record saved as each tool lands rather than at the end.
+            # Best-effort here only in that a failure is reported and the
+            # login still succeeds -- never in that a folder is written
+            # without deepctl recording that it owns it.
+            from deepctl_core.skill_bundle import SkillFetchError
             from deepctl_core.skill_generator import (
-                _commands_hash,
                 collect_command_metadata,
+                install_skills_for,
                 save_skills_state,
             )
 
             console.print("\n[blue]Installing Deepgram skills...[/blue]")
 
             import importlib.metadata
-            from datetime import datetime, timezone
 
-            commands = collect_command_metadata()
             try:
                 version = importlib.metadata.version("deepctl")
             except importlib.metadata.PackageNotFoundError:
                 version = "0.0.0"
 
-            for gen in selected:
-                paths = gen.install(commands, version)
-                cmd_hash = _commands_hash(commands)
-                state["installed_skills"][gen.cli_name] = {
-                    "paths": [str(p) for p in paths],
-                    "installed_at": datetime.now(timezone.utc).isoformat(),
-                    "version": version,
-                    "commands_hash": cmd_hash,
-                }
+            def announce(gen: Any, paths: list[Path]) -> None:
                 for p in paths:
                     console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
 
+            try:
+                report = install_skills_for(
+                    selected,
+                    state,
+                    commands=collect_command_metadata(),
+                    version=version,
+                    on_installed=announce,
+                    best_effort=True,
+                )
+            except SkillFetchError as exc:
+                # Nothing was written, so there is no ownership to save.
+                # Say so rather than leaving the banner above unanswered.
+                console.print(
+                    f"[yellow]  Could not download the Deepgram skills: "
+                    f"{exc}. Run 'dg skills install' to retry.[/yellow]"
+                )
+                return
+            for gen in report.unsupported:
+                console.print(f"[yellow]  {gen.manual_hint()}[/yellow]")
+            # Someone else's skill folder has one of these names, so the
+            # tool was skipped rather than have their work overwritten.
+            for display_name, path in report.conflicts:
+                console.print(
+                    f"[yellow]  Skipped {display_name}: {path} is not "
+                    "deepctl's to replace.[/yellow]"
+                )
+            for display_name, failure in report.failures:
+                console.print(
+                    f"[yellow]  {display_name}: {failure}. Run "
+                    "'dg skills install' to retry.[/yellow]"
+                )
             save_skills_state(state)
-            console.print(
-                "\n[green]Skills installed![/green] "
-                "[dim]Run 'dg skills update' after plugin changes.[/dim]"
-            )
+
+            if report.total_written:
+                console.print(
+                    "\n[green]Skills installed![/green] "
+                    "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+                )
         except Exception:
             pass  # Best-effort — never fail the login
 

@@ -275,13 +275,107 @@ Add to your editor's MCP config:
 
 ### AI Tool Integration
 
-Automatically detect and configure AI coding assistants with Deepgram skills.
+Install the Deepgram agent skills from
+[`deepgram/skills`](https://github.com/deepgram/skills) into the AI coding
+tools on this machine. Each skill is installed as a folder, into the
+user-scope skills directory the tool's own documentation names.
 
 ```bash
-dg skills status                          # Detect AI tools
+dg skills status                          # Detect AI tools and show their skills directories
 dg skills setup                           # Interactive setup wizard
 dg skills install --all                   # Install for all detected tools
+dg skills list                            # Show what is installed, and from which ref
+dg skills update                          # Reinstall from upstream
+dg skills remove --all                    # Uninstall (--cli NAME for one tool)
 ```
+
+| Tool | Skills directory |
+| --- | --- |
+| Claude Code | `~/.claude/skills/` |
+| OpenAI Codex | `~/.agents/skills/` |
+| Gemini CLI | `~/.gemini/skills/` |
+| Cursor | `~/.cursor/skills/` |
+| OpenCode | `~/.config/opencode/skills/` |
+| Cline | `~/.cline/skills/` |
+
+Amazon Q Developer and Aider have no skills mechanism, so `dg skills` prints
+`npx skills add deepgram/skills` for those rather than writing a file they
+would not read.
+
+Installs are pinned to a released `deepgram/skills` tag so the same deepctl
+version always installs the same skills. Override with `--ref` or the
+`DEEPCTL_SKILLS_REF` environment variable:
+
+```bash
+dg skills install --all --ref main        # track the upstream default branch
+```
+
+A failed download, an unknown ref, or an upstream manifest that does not match
+the directories it lists is a hard failure (exit 1) with nothing written — a
+partial install is indistinguishable from a complete one once it is on disk.
+
+**deepctl only ever touches skill folder paths it installed.** Those
+directories are shared: your own skills and other publishers' skills live in
+them too. So `dg skills` records every folder it writes in
+`~/.deepctl/skills/skills.json` and works on that list alone.
+
+- `install`, `update` and `setup` refuse to overwrite a folder that is not on
+  the list — if you already have a skill called `api`, the install exits 1 and
+  writes nothing, naming the folder so you can rename it.
+- `remove` deletes only the recorded folders. An unrelated skill in the same
+  directory stays. A recorded folder it *could not* delete — a permission
+  error, a read-only mount — stays recorded and `remove` exits 1, so the next
+  `remove` or `update` can still reach it. Dropping the record there would
+  leave Deepgram's own folders behind with nothing able to touch them.
+- `status` counts only the recorded folders, not everything with a `SKILL.md`.
+- Those exit codes are for the `dg skills` subcommands. Two other commands
+  install skills. `dg login` offers the same install after a successful
+  login, but only at an interactive prompt and only while nothing is
+  recorded as installed yet. `dg plugin install/update/remove` refreshes what
+  is already installed, unless `auto_update` is set to `false` in
+  `skills.json`. Both go through the same ownership rules, but a collision
+  or a download failure there is a warning rather than a failure — a skills
+  problem never changes whether the login or the plugin operation succeeded.
+  Run `dg skills install` to see the error and get the exit code.
+- If you delete `skills.json`, deepctl can no longer prove it installed
+  anything: `remove` deletes nothing and `install` reports the collision rather
+  than reclaiming the folders. Delete them by hand, then install again.
+- The list holds *paths*, not fingerprints. Delete a folder deepctl installed
+  and put your own folder — or a file — at the same path without running
+  `dg skills remove --cli <tool>`, and deepctl still counts it as its own: the
+  next `update` replaces it and `remove` deletes it. Where the filesystem
+  ignores case, as macOS and Windows do by default, `API` and `api` are one path
+  for this purpose. So run `dg skills remove --cli <tool>` first, or drop the
+  entry from `skills.json`, before reusing a name deepctl installed under.
+- A *symlink* is the exception: deepctl never writes or deletes through one.
+  Put a symlink where a recorded skill folder was and that path stops being
+  deepctl's — `install`, `update` and `setup` exit 1 naming it rather than
+  replacing it, and `remove` reports where it is, drops it from the list and
+  leaves it on disk rather than following it to whatever it points at. Delete
+  the symlink yourself to hand the name back; until you do, installing under
+  that name keeps failing.
+
+#### Upgrading from deepctl 0.2.16 through 0.3.0
+
+Those versions wrote to paths that are not skills directories, so `install`,
+`update`, `setup` and `remove` clear them for the tools that run — a command
+that exits early, such as an install that hits a collision or cannot download,
+clears nothing. Otherwise four stale skills would sit next to fourteen fresh
+ones. These paths are the only thing `dg skills` touches outside its own skill
+folders and its own `~/.deepctl/` directory, and the list is scoped to what
+0.3.0 wrote:
+
+| Path | What happens |
+| --- | --- |
+| `~/.claude/commands/deepgram/` | Deletes `api.md`, `docs.md`, `setup-mcp.md`, `starters.md` and `deepgram.md` by name, whoever wrote them; a command you added under any other name stays, and the directory goes only if that empties it. If `deepgram` is itself a symlink — dotfiles kept in a repo — nothing is deleted through it |
+| `~/.codex/instructions.md`, `~/.gemini/GEMINI.md`, `~/.opencode/agents.md` | Cuts out only the section between `<!-- BEGIN deepctl CLI Reference (auto-generated by deepctl) -->` and `<!-- END deepctl CLI Reference -->`; the rest of the file is yours and is kept. If the opening marker is there without the closing one — what a write cut short leaves behind — everything after it counts as that unfinished section and goes. These files are followed through a symlink, because only deepctl's own marked section is ever touched |
+| `~/.cursor/rules/deepctl.mdc`, `~/.cline/rules/deepctl.md`, `~/.amazonq/rules/deepctl.md` | Deleted — 0.3.0 created these files and nothing else writes them |
+| `~/.aider.conf.yml` | Drops the stale `read:` entry pointing at deepctl's old conventions file |
+
+deepctl 0.2.15 and earlier wrote one combined file at
+`~/.claude/commands/deepctl.md` instead, with no marker around it. Nothing
+distinguishes it from a `/deepctl` slash command you wrote yourself, so the
+cleanup leaves it alone. Delete it by hand if it is there.
 
 ### Starter Apps
 
