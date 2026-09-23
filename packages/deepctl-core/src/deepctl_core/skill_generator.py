@@ -43,8 +43,10 @@ SKILLS_CLI_HINT = "npx skills add deepgram/skills"
 #: Filename that marks a directory as a skill.
 SKILL_ENTRY_FILE = "SKILL.md"
 
-#: Exactly what deepctl <= 0.3.0 wrote into ~/.claude/commands/deepgram/:
-#: one file per repo skill it knew about, plus the generated guide.
+#: What deepctl <= 0.3.0 could put in ~/.claude/commands/deepgram/: one
+#: file per repo skill it knew about. `deepgram.md` is the generated
+#: guide, which only a dead `generate()` path ever produced -- listed so
+#: a machine that has one is cleaned, not because a release wrote it.
 _LEGACY_CLAUDE_COMMAND_FILES = (
     "api.md",
     "docs.md",
@@ -137,8 +139,16 @@ def recorded_skill_paths(state: dict[str, Any], cli_name: str) -> list[str]:
     prove it owns anything: install refuses to overwrite the folders it
     previously wrote, and remove deletes nothing. That is the safe
     direction to fail in — the folders are still there to delete by hand.
+
+    Every shape a hand-edited file can hold is tolerated by claiming
+    nothing: ``installed_skills`` set to a list or a string, one tool's
+    entry set to a null, ``paths`` that is not a list, and a non-string
+    inside it all yield an empty result rather than an exception. Callers
+    render tables and loops from this, so raising here turns a bad file
+    into an error message naming a Python type instead of the file.
     """
-    entry = (state.get("installed_skills") or {}).get(cli_name)
+    installed = state.get("installed_skills")
+    entry = installed.get(cli_name) if isinstance(installed, dict) else None
     if not isinstance(entry, dict):
         return []
     paths = entry.get("paths")
@@ -971,8 +981,12 @@ class SkillGenerator(ABC):
         becomes something deepctl will neither update nor remove — and
         something it would refuse to overwrite if the name ever came back.
 
-        Call it after the install has been recorded, never before: a
-        crash in between should leave a stale folder, not an untracked one.
+        Call it after the install has been recorded, never before. The
+        record is what makes the folders just written deepctl's, so it
+        has to land first; the cost is that a crash between the two
+        leaves a retired folder behind with no record of it. That is the
+        cheaper of the two failures — a stale folder the user can delete,
+        rather than fourteen fresh ones deepctl would refuse to touch.
         """
         keep = {skill.name for skill in skills}
         pruned: list[Path] = []
@@ -1015,12 +1029,11 @@ class SkillGenerator(ABC):
             # caller drops the record on the strength of this list.
             if not path.exists():
                 removed.append(path)
-        root = self.skills_root()
-        if root is not None and root.is_dir() and not any(root.iterdir()):
-            try:
-                root.rmdir()
-            except OSError:
-                pass
+        # The skills root itself is left standing even when this emptied
+        # it. deepctl did not necessarily create it -- ~/.agents/skills
+        # is Codex's and `npx skills add`'s too -- and "only ever touch
+        # folders deepctl installed" has to hold for the directory those
+        # folders sat in as well. An empty directory costs nothing.
         return removed
 
     def clean_legacy(self) -> list[Path]:
@@ -1123,10 +1136,8 @@ class ClaudeCodeGenerator(SkillGenerator):
         # Code will not read a references/ folder next to a file there, and
         # a command file does not accept the `name:` key every SKILL.md has.
         #
-        # Scoped to the exact filenames 0.3.0 wrote here — the four repo
-        # skills it knew about plus the generated guide. A `*.md` glob
-        # would take a slash command the user added alongside, and a
-        # slash command is a .md file, so the glob is not safe.
+        # Scoped to named filenames, never a `*.md` glob: a slash command
+        # the user added here is also a .md file, so a glob would take it.
         return [
             LegacyArtifact(
                 Path.home() / ".claude" / "commands" / "deepgram",

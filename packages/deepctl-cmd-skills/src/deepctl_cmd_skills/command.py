@@ -143,7 +143,7 @@ class SkillsCommand(BaseGroupCommand):
 
         @click.command(
             name="install",
-            help="Detect AI CLIs and install skill files",
+            help="Detect AI CLIs and install the Deepgram skill folders",
         )
         @click.option(
             "--all",
@@ -273,6 +273,30 @@ class SkillsCommand(BaseGroupCommand):
     # Helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _installed_records(state: dict[str, Any]) -> dict[str, Any] | None:
+        """``installed_skills`` as a map of tool to record, or None.
+
+        A hand-edited ``skills.json`` can carry a list or a string here,
+        and every handler below iterates it. None means the file cannot
+        be read as records, so the caller says which file is wrong --
+        ``main.py`` would otherwise turn the attribute error into
+        "Error: 'list' object has no attribute 'keys'", which names a
+        Python type rather than the file to fix.
+        """
+        installed = state.get("installed_skills")
+        return installed if isinstance(installed, dict) else None
+
+    @staticmethod
+    def _unreadable_records(consequence: str) -> str:
+        """Message for a ``skills.json`` whose records are not a map."""
+        from deepctl_core.skill_generator import _STATE_FILE
+
+        return (
+            "deepctl cannot read its own records: 'installed_skills' in "
+            f"{_STATE_FILE} is not a set of entries. {consequence}"
+        )
+
     def _fetch_skills(self, ref: str | None) -> list[RepoSkill]:
         """Fetch the upstream skills, or fail the command outright.
 
@@ -351,7 +375,7 @@ class SkillsCommand(BaseGroupCommand):
 
         generators = get_all_generators()
         state = get_skills_state()
-        installed = state.get("installed_skills", {})
+        installed = self._installed_records(state)
 
         table = Table(title="AI Coding Assistant Status")
         table.add_column("CLI", style="cyan", no_wrap=True)
@@ -382,6 +406,17 @@ class SkillsCommand(BaseGroupCommand):
             )
 
         console.print(table)
+
+        if installed is None:
+            # The table above is still worth printing -- it is how a user
+            # finds which tools are present and where their skills go --
+            # but every count in it read as zero, so say why.
+            print_warning(
+                self._unreadable_records(
+                    "Nothing is counted as deepctl's until that file is "
+                    "fixed or deleted."
+                )
+            )
 
         if any(g.detect() and g.skills_root() is None for g in generators):
             print_info(
@@ -427,8 +462,8 @@ class SkillsCommand(BaseGroupCommand):
                     # Abort rather than return: these subcommands are plain
                     # click callbacks, so nothing maps a returned result to an
                     # exit code and a bare return exits 0 -- indistinguishable
-                    # from a successful install. main.py turns Abort into the
-                    # documented exit 2 for user cancellation.
+                    # from a successful install. main.py turns Abort into
+                    # exit 2, which it reserves for user cancellation.
                     raise click.Abort()
         else:
             generators = detect_ai_clis()
@@ -473,7 +508,16 @@ class SkillsCommand(BaseGroupCommand):
         )
 
         state = get_skills_state()
-        installed = state.get("installed_skills", {})
+        installed = self._installed_records(state)
+
+        if installed is None:
+            print_info(
+                self._unreadable_records(
+                    "There is no list of tools to update. Fix or delete "
+                    "that file, then run 'dg skills install'."
+                )
+            )
+            return
 
         if not installed:
             print_info("No skills installed. Run 'deepctl skills install' first.")
@@ -486,9 +530,12 @@ class SkillsCommand(BaseGroupCommand):
             if gen is None:
                 print_warning(f"Unknown CLI '{cli_key}', skipping.")
                 continue
-            if gen.skills_root() is None:
-                print_warning(f"  {gen.manual_hint()}")
-                continue
+            # A tool with no skills directory is handed on rather than
+            # filtered out here. install_skills_for() is what cleans up
+            # its deepctl <= 0.3.0 files and drops the record that should
+            # never have existed; skipping it meant update printed the
+            # same "no skills directory" warning on every run forever,
+            # with no command on this path that would ever resolve it.
             targets.append(gen)
 
         if not targets:
@@ -497,10 +544,14 @@ class SkillsCommand(BaseGroupCommand):
 
         report = self._install_for(targets, state, ref)
         save_skills_state(state)
-        print_success(
-            f"Updated {len(report.written)} tool(s) from deepgram/skills@{report.ref}"
-        )
-        print_info(_MCP_HINT)
+        if report.written:
+            print_success(
+                f"Updated {len(report.written)} tool(s) from "
+                f"deepgram/skills@{report.ref}"
+            )
+            print_info(_MCP_HINT)
+        elif not report.unsupported:
+            print_info("Nothing to update.")
 
     def _handle_remove(
         self,
@@ -515,7 +566,6 @@ class SkillsCommand(BaseGroupCommand):
         which case there is nothing deepctl can prove it owns.
         """
         from deepctl_core.skill_generator import (
-            _STATE_FILE,
             get_all_generators,
             get_skills_state,
             recorded_skill_paths,
@@ -523,19 +573,18 @@ class SkillsCommand(BaseGroupCommand):
         )
 
         state = get_skills_state()
-        installed = state.get("installed_skills")
+        installed = self._installed_records(state)
 
-        # A hand-edited skills.json can carry a list or a string here, and
-        # list(installed.keys()) below would raise rather than say what is
-        # wrong. Reported separately from "nothing installed": the records
-        # were not deleted, the file is unreadable, and only one of those
-        # two is fixed by deleting folders.
-        if not isinstance(installed, dict):
+        # Reported separately from "nothing installed": the records were
+        # not deleted, the file is unreadable, and only one of those two
+        # is fixed by deleting folders.
+        if installed is None:
             print_info(
-                "deepctl cannot read its own records: 'installed_skills' in "
-                f"{_STATE_FILE} is not a set of entries. It will not guess "
-                "which folders are its, so nothing was removed. Fix or "
-                "delete that file, then remove the skill folders by hand."
+                self._unreadable_records(
+                    "It will not guess which folders are its, so nothing "
+                    "was removed. Fix or delete that file, then remove "
+                    "the skill folders by hand."
+                )
             )
             return
 
@@ -559,14 +608,15 @@ class SkillsCommand(BaseGroupCommand):
         elif remove_all:
             targets = list(installed.keys())
         else:
-            # A usage error, which the README's exit-code table documents
-            # as 1. Printing the hint and exiting 0 made "you forgot a
-            # flag" indistinguishable from "everything was removed".
+            # A usage error, which main.py turns into exit 1. Printing
+            # the hint and exiting 0 made "you forgot a flag"
+            # indistinguishable from "everything was removed".
             raise click.UsageError("Specify --all to remove all, or --cli NAME.")
 
         total_removed = 0
         tools_cleaned = 0
         stranded_total = 0
+        cleaned_in_place = 0
         # A filesystem call in here can raise -- clean_legacy unlinks
         # and rewrites files without a guard. The records already
         # updated describe deletions that have happened, so they are
@@ -600,6 +650,13 @@ class SkillsCommand(BaseGroupCommand):
                     else:
                         print_info(f"  Removed {p}")
                 total_removed += len(deleted)
+                # Counted apart from total_removed, which is a count of
+                # *folders that are gone*. A path deepctl only cut its own
+                # content out of is still there, so it must not inflate
+                # that number -- but it did happen, and the closing
+                # "Nothing was removed." would contradict the line naming
+                # it that was just printed.
+                cleaned_in_place += len(removed) - len(deleted)
                 if deleted:
                     tools_cleaned += 1
 
@@ -641,7 +698,7 @@ class SkillsCommand(BaseGroupCommand):
             print_success(
                 f"Removed {total_removed} folder(s) from {tools_cleaned} tool(s)."
             )
-        elif not stranded_total:
+        elif not stranded_total and not cleaned_in_place:
             print_info("Nothing was removed.")
 
         if stranded_total:
@@ -688,7 +745,16 @@ class SkillsCommand(BaseGroupCommand):
         from deepctl_core.skill_generator import get_skills_state
 
         state = get_skills_state()
-        installed = state.get("installed_skills", {})
+        installed = self._installed_records(state)
+
+        if installed is None:
+            print_info(
+                self._unreadable_records(
+                    "There is nothing it can list. Fix or delete that "
+                    "file, then run 'dg skills install'."
+                )
+            )
+            return
 
         if not installed:
             print_info(

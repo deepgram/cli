@@ -700,6 +700,31 @@ class TestSkillsRefreshAfterAPluginChange:
         self.fetch.assert_not_called()
         assert state["installed_skills"]["amazonq"] == {"paths": []}
 
+    def test_only_the_tool_with_no_skills_directory_is_left_alone(self, tmp_path):
+        """The three negatives above also hold if the refresh threw.
+
+        `_maybe_update_skills` ends in a bare `except Exception: pass`,
+        so "nothing happened" is what a crash on line one looks like
+        too. A sibling that must be refreshed in the same run is the
+        positive signal that the code reached the per-tool loop.
+        """
+        root = tmp_path / ".claude" / "skills"
+        claude = self._generator("claude", root, [root / "api"])
+        amazonq = self._generator("amazonq", None, [])
+        state = {
+            "installed_skills": {
+                "claude": {"paths": [], "skills": []},
+                "amazonq": {"paths": []},
+            },
+            "auto_update": True,
+        }
+        self._run([claude, amazonq], state, skills=("api",))
+
+        claude.install_skills.assert_called_once()
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+        amazonq.install_skills.assert_not_called()
+        assert state["installed_skills"]["amazonq"] == {"paths": []}
+
     def test_a_second_tool_failing_leaves_the_first_recorded(self, tmp_path):
         """The refresh used to save state only after the whole loop.
 

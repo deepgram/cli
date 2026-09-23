@@ -75,7 +75,15 @@ def _deepctl_executable() -> Path:
         candidate = Path(sys.executable).parent / name
         if candidate.exists():
             return candidate
-    pytest.skip("deepctl console script is not installed in this environment")
+    # A failure, not a skip. RUN_SKILLS_E2E=1 is an explicit request to
+    # run this suite; reporting "skipped" for a missing console script
+    # tells the person who asked for it that it ran and found nothing
+    # wrong. Install the package into the interpreter running pytest.
+    raise AssertionError(
+        "RUN_SKILLS_E2E=1 was set but no deepctl console script sits "
+        f"next to {sys.executable}. Install deepctl into this "
+        "interpreter's environment (e.g. 'uv sync') and run it again."
+    )
 
 
 def _run(args: list[str], home: Path) -> subprocess.CompletedProcess[str]:

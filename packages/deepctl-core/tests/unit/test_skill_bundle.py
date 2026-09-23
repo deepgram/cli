@@ -119,9 +119,18 @@ class TestReadManifestSkills:
         assert [s.name for s in skills] == SKILL_NAMES
         assert len(skills) == 14
 
-    def test_skill_paths_are_directories_with_an_entry_file(self, tmp_path):
-        for skill in read_manifest_skills(_build_repo(tmp_path)):
-            assert skill.path.is_dir()
+    def test_skill_paths_point_into_the_bundle_that_was_read(self, tmp_path):
+        """read_manifest_skills() only returns folders that exist, so the
+        interesting part is *where*: a caller copies from these paths, and
+        one resolving outside the extracted bundle would copy the wrong
+        tree. The entry file is named too, because that is what the
+        installer and `status` look for.
+        """
+        root = _build_repo(tmp_path)
+        for skill in read_manifest_skills(root):
+            assert skill.path.parent == root / "skills"
+            assert skill.path.name == skill.name
+            assert skill.entry_file == skill.path / "SKILL.md"
             assert skill.entry_file.is_file()
 
     def test_missing_manifest(self, tmp_path):
@@ -173,8 +182,11 @@ class TestReadManifestSkills:
             read_manifest_skills(tmp_path)
 
     def test_traversing_manifest_entry_is_rejected(self, tmp_path):
+        # Matched on the message: without the traversal guard the entry
+        # falls through to "that directory is not in the bundle", which
+        # is also a SkillFetchError, so a bare raises() proves nothing.
         _build_repo(tmp_path, names=["api"], manifest=_manifest(["../../etc"]))
-        with pytest.raises(SkillFetchError):
+        with pytest.raises(SkillFetchError, match="escapes the bundle root"):
             read_manifest_skills(tmp_path)
 
 

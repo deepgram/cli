@@ -644,6 +644,10 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         )
         assert "Removed deepctl's content from" in combined
         assert "Removed 1 folder(s)" not in combined
+        # ...and does not then deny it. The path is excluded from the
+        # folder count because the folder is still there, which is not
+        # the same as deepctl having done nothing to it.
+        assert "Nothing was removed" not in combined
         assert shared.read_text() == "my own notes\n"
 
     def test_update_reports_the_tools_it_refreshed(self, tmp_path, capsys):
@@ -690,6 +694,45 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         rendered = " ".join(capsys.readouterr().err.split())
         assert "retired-tool" in rendered
         assert "Nothing to update" in rendered
+
+    def test_update_retires_a_tool_it_cannot_install_to(self, capsys):
+        """The warning has to stop, and only dropping the record stops it.
+
+        Filtering these out before the shared installer meant `update`
+        never reached the code that cleans up their deepctl <= 0.3.0
+        files and drops the record, so it reprinted the same hint on
+        every run with nothing on that path that would ever resolve it.
+        """
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "amazonq"
+        generator.display_name = "Amazon Q Developer"
+        generator.skills_root.return_value = None
+        generator.manual_hint.return_value = "Amazon Q Developer has no ..."
+        state = {"installed_skills": {"amazonq": {"paths": []}}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata", return_value=[]
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch("deepctl_core.skill_generator.fetch_repo_skills") as fetch,
+        ):
+            cmd._handle_update()
+
+        generator.clean_legacy.assert_called_once()
+        assert state["installed_skills"] == {}
+        # Nothing to install into means nothing to download.
+        fetch.assert_not_called()
+        rendered = " ".join(capsys.readouterr().err.split())
+        assert "Amazon Q Developer has no" in rendered
+        # ...and it does not then claim a tool was refreshed.
+        assert "Updated" not in rendered
 
     def test_list_shows_the_ref_and_count_it_recorded(self, tmp_path, capsys):
         """`dg skills list` is how a user checks which revision they have."""
@@ -780,8 +823,125 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
             cmd._handle_status()
 
         generator.installed_skill_paths.assert_called_once_with(recorded)
-        # And the table shows that count, not a directory listing.
-        assert "1" in " ".join(capsys.readouterr().out.split())
+        # And the table shows that count, not a directory listing. Read
+        # out of the row rather than searched for in the whole screen:
+        # the skills directory is a tmp_path, and a "1" anywhere in it
+        # would pass for a skill count even when the cell reads "No".
+        row = next(
+            line
+            for line in capsys.readouterr().out.splitlines()
+            if "Claude Code" in line
+        )
+        assert [c.strip() for c in row.split("│")][3] == "1"
+
+
+class TestARecordsFileThatIsNotRecords:
+    """`installed_skills` holding something other than a map of tools.
+
+    The README tells users to drop an entry from skills.json by hand, so
+    the file does get edited. Every handler here iterates that value, and
+    main.py turns the resulting attribute error into "Error: 'list'
+    object has no attribute 'keys'" -- a message that names a Python type
+    instead of the file to fix. Each one has to name the file instead.
+    """
+
+    BROKEN = [["claude"], "claude", 7]
+
+    def _generator(self):
+        generator = MagicMock()
+        generator.cli_name = "claude"
+        generator.display_name = "Claude Code"
+        generator.detect.return_value = True
+        generator.skills_root.return_value = Path("/nowhere/.claude/skills")
+        generator.installed_skill_paths.return_value = []
+        return generator
+
+    @staticmethod
+    def _said(capsys):
+        captured = capsys.readouterr()
+        return " ".join((captured.out + captured.err).split())
+
+    @pytest.mark.parametrize("broken", BROKEN)
+    def test_status_still_prints_the_table_and_names_the_file(
+        self, broken, capsys
+    ):
+        """Status is how a user finds their tools, so it must still run."""
+        cmd = SkillsCommand()
+        generator = self._generator()
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": broken},
+            ),
+        ):
+            cmd._handle_status()
+
+        said = self._said(capsys)
+        assert "Claude Code" in said
+        assert "cannot read its own records" in said
+
+    @pytest.mark.parametrize("broken", BROKEN)
+    def test_list_names_the_file(self, broken, capsys):
+        cmd = SkillsCommand()
+        with patch(
+            "deepctl_core.skill_generator.get_skills_state",
+            return_value={"installed_skills": broken},
+        ):
+            cmd._handle_list()
+
+        assert "cannot read its own records" in self._said(capsys)
+
+    @pytest.mark.parametrize("broken", BROKEN)
+    def test_update_names_the_file_and_downloads_nothing(self, broken, capsys):
+        cmd = SkillsCommand()
+        generator = self._generator()
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": broken},
+            ),
+            patch(
+                "deepctl_core.skill_generator.fetch_repo_skills"
+            ) as fetch,
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+        ):
+            cmd._handle_update()
+
+        assert "cannot read its own records" in self._said(capsys)
+        fetch.assert_not_called()
+        save.assert_not_called()
+
+    @pytest.mark.parametrize("broken", BROKEN)
+    def test_remove_names_the_file_and_deletes_nothing(self, broken, capsys):
+        cmd = SkillsCommand()
+        generator = self._generator()
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": broken},
+            ),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        assert "cannot read its own records" in self._said(capsys)
+        generator.remove.assert_not_called()
+        save.assert_not_called()
 
 
 class TestSkillsStartupCheck:

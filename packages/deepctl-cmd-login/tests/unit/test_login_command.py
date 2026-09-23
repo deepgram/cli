@@ -555,8 +555,17 @@ class TestLoginRecordsTheSameStateAsSkillsInstall:
     def test_a_tool_with_no_skills_directory_is_not_recorded(self):
         """Nothing was written for it, so nothing may claim it was."""
         gen = self._generator("amazonq", "Amazon Q Developer", None, [])
-        state = self._run([gen], {"installed_skills": {}})
+        with patch("deepctl_cmd_login.command.console") as printer:
+            state = self._run([gen], {"installed_skills": {}})
+
         assert state["installed_skills"] == {}
+        # The empty map is also what this started as, so on its own it
+        # would pass if the whole block had thrown into login's bare
+        # `except`. The hint only prints from the far side of the
+        # install, which is what pins down that it ran and declined.
+        printed = " ".join(str(c) for c in printer.print.call_args_list)
+        assert "Amazon Q Developer has no skills directory." in printed
+        gen.install_skills.assert_not_called()
 
     def test_a_second_tool_failing_leaves_the_first_recorded(self, tmp_path):
         """Login used to save state only after the whole loop.
@@ -582,9 +591,11 @@ class TestLoginRecordsTheSameStateAsSkillsInstall:
         assert [Path(p).name for p in entry["paths"]] == ["api"]
         assert "cursor" not in state["installed_skills"]
         # And the user is told, rather than the login going quiet on it.
+        # Not just "Cursor" -- every detected tool is named in the menu
+        # printed before the install, so that would match either way.
         printed = " ".join(str(c) for c in printer.print.call_args_list)
-        assert "Cursor" in printed
-        assert "Read-only file system" in printed
+        assert "Cursor: [Errno 30] Read-only file system" in printed
+        assert "Run 'dg skills install' to retry" in printed
 
     def test_the_bundle_is_fetched_once_for_every_tool(self, tmp_path):
         """Two fetches could install two different revisions side by side."""

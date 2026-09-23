@@ -383,7 +383,14 @@ class TestInstallSkills:
                 "api",
                 "docs",
             ]
-            assert gen.installed_skill_paths(written) != []
+            # A folder nobody recorded is not reported, even though it
+            # sits in the same directory and has a SKILL.md of its own.
+            (root / "mine").mkdir()
+            (root / "mine" / "SKILL.md").write_text("---\nname: mine\n---\n")
+            assert [p.name for p in gen.installed_skill_paths(written)] == [
+                "api",
+                "docs",
+            ]
 
     def test_remove_deletes_every_installed_skill(self, tmp_path):
         skills = [_fake_skill(tmp_path, n) for n in ("api", "docs")]
@@ -393,7 +400,9 @@ class TestInstallSkills:
                 removed = gen.remove(written)
                 assert len(removed) == 2
                 assert gen.installed_skill_paths(written) == []
-        assert not root.exists()
+        # Every skill folder is gone; the shared directory they sat in
+        # stays, because deepctl does not own that either.
+        assert sorted(p.name for p in root.iterdir()) == []
 
     def test_install_propagates_a_fetch_failure(self, tmp_path):
         """A partial install must never look like a complete one."""
@@ -540,6 +549,24 @@ class TestOwnership:
 
         assert (root / "api" / "SKILL.md").is_file()
 
+    def test_remove_leaves_the_shared_skills_root_standing(self, tmp_path):
+        """The directory is not deepctl's either, only the folders in it.
+
+        ~/.agents/skills is Codex's and `npx skills add`'s as much as
+        deepctl's, and none of the six roots is created by deepctl alone.
+        Emptying one is not a licence to delete it.
+        """
+        gen, root = self._gen(tmp_path)
+        skills = [_fake_skill(tmp_path, "api")]
+
+        with patch.object(gen, "skills_root", return_value=root):
+            with patch.object(gen, "legacy_paths", return_value=[]):
+                written = gen.install_skills(skills)
+                assert gen.remove(written) == written
+
+        assert root.is_dir()
+        assert list(root.iterdir()) == []
+
     # -- install -----------------------------------------------------
 
     def test_install_refuses_a_same_name_collision(self, tmp_path):
@@ -564,6 +591,7 @@ class TestOwnership:
 
     def test_install_replaces_only_what_deepctl_recorded(self, tmp_path):
         gen, root = self._gen(tmp_path)
+        mine = self._unrelated(root, "mine")
         skills = [_fake_skill(tmp_path, "api", references=("old.md",))]
         with patch.object(gen, "skills_root", return_value=root):
             with patch.object(gen, "legacy_paths", return_value=[]):
@@ -572,6 +600,9 @@ class TestOwnership:
                 again = gen.install_skills(skills, written)
         assert again == written
         assert (root / "api" / "references" / "old.md").is_file()
+        # "only": the neighbour in the same directory that deepctl never
+        # recorded came through both installs untouched.
+        assert (mine / "SKILL.md").read_text().endswith("mine\n")
 
     def test_a_record_written_through_a_symlinked_home_still_counts(self, tmp_path):
         """/tmp vs /private/tmp is the same folder, so it is still ours."""
@@ -689,6 +720,12 @@ class TestOwnership:
         assert recorded_skill_paths({}, "claude") == []
         assert recorded_skill_paths({"installed_skills": None}, "claude") == []
         assert recorded_skill_paths({"installed_skills": {}}, "claude") == []
+        # A truthy non-map got as far as calling .get() on it, which is
+        # an attribute error, not an empty result. The status table calls
+        # this once per tool, so it took `dg skills status` down with it.
+        assert recorded_skill_paths({"installed_skills": ["claude"]}, "claude") == []
+        assert recorded_skill_paths({"installed_skills": "claude"}, "claude") == []
+        assert recorded_skill_paths({"installed_skills": 7}, "claude") == []
         assert (
             recorded_skill_paths({"installed_skills": {"claude": "nope"}}, "claude")
             == []
@@ -937,6 +974,11 @@ class TestInstallSkillsForKeepsOwnership:
             patch.object(skill_generator, "save_skills_state") as save,
             patch.object(skill_generator, "fetch_repo_skills", return_value=skills),
         ):
+            # Also hung off the instance, because the tests that matter
+            # most here run inside pytest.raises and never see a return
+            # value. Mutating `state` is not the contract -- reaching
+            # save_skills_state before the exception does is.
+            self.save = save
             report = skill_generator.install_skills_for(
                 generators,
                 state,
@@ -969,6 +1011,10 @@ class TestInstallSkillsForKeepsOwnership:
         assert [Path(p).name for p in entry["paths"]] == ["api", "docs"]
         assert entry["skills_ref"] == DEFAULT_SKILLS_REF
         assert (first_root / "api" / "SKILL.md").is_file()
+        # And it was written out before cursor raised. Asserting only the
+        # in-memory dict would still pass with the per-tool save moved
+        # back after the loop, which is the bug itself.
+        self.save.assert_called_once_with(state)
         # Nothing was written for the tool that failed, so nothing claims
         # it was -- but the tool that succeeded stays deepctl's.
         assert "cursor" not in state["installed_skills"]
@@ -1016,6 +1062,9 @@ class TestInstallSkillsForKeepsOwnership:
 
         entry = state["installed_skills"]["claude"]
         assert [Path(p).name for p in entry["paths"]] == ["api", "docs"]
+        # On disk, not just in the dict: the folders outlive the process
+        # that wrote them, so the record has to as well.
+        self.save.assert_called_once_with(state)
 
     def test_a_collision_in_the_last_tool_writes_nothing_at_all(self, tmp_path):
         """Preflight covers every destination before the first byte lands."""
