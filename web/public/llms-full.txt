@@ -297,7 +297,7 @@ dg debug probe                       # Analyze WebSocket stream
 ## Global Options
 
 Most of these go on `dg` itself, before the command: `dg --profile staging listen call.mp3`.
-`--output`/`-o`, `--quiet`/`-q`, `--verbose`/`-v`, and `--non-interactive` are also accepted after a leaf command, so `dg listen call.mp3 -o json` works. The remaining options fail after a leaf command; command groups such as `dg debug` reject every trailing global option.
+`--quiet`/`-q`, `--verbose`/`-v`, and `--non-interactive` are also accepted after a leaf command. `--output`/`-o` can follow a leaf command that does not define its own output option, so `dg listen call.mp3 -o json` works. Speak owns `-o` as an audio-file path; use `dg -o json speak ...` for structured Speak output. The remaining options fail after a leaf command; command groups such as `dg debug` reject every trailing global option.
 
 | Flag | Description |
 |------|-------------|

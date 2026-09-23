@@ -355,7 +355,7 @@ Three explicit ways to skip every prompt and run with defaults — useful from a
 real terminal where auto-detection wouldn't otherwise trigger:
 
 ```bash
-# Global flag (works at any position)
+# Global flag (before any command, or after a leaf command)
 dg --non-interactive listen recording.wav
 dg listen --non-interactive recording.wav
 
