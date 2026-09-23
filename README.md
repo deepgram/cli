@@ -330,21 +330,21 @@ them too. So `dg skills` records every folder it writes in
 - `status` counts only the recorded folders, not everything with a `SKILL.md`.
 - Those exit codes are for the `dg skills` subcommands. `dg login` offers the
   same install after a successful login, and `dg plugin install/update/remove`
-  refreshes what is already installed; both follow the identical ownership
-  rules, but a collision or a download failure there is a warning rather than
-  a failure — a skills problem never changes whether the login or the plugin
-  operation succeeded. Run `dg skills install` to see the error and get the
-  exit code.
+  refreshes what is already installed, unless `auto_update` is set to `false`
+  in `skills.json`. Both go through the same ownership rules, but a collision
+  or a download failure there is a warning rather than a failure — a skills
+  problem never changes whether the login or the plugin operation succeeded.
+  Run `dg skills install` to see the error and get the exit code.
 - If you delete `skills.json`, deepctl can no longer prove it installed
   anything: `remove` deletes nothing and `install` reports the collision rather
   than reclaiming the folders. Delete them by hand, then install again.
 - The list holds *paths*, not fingerprints. Delete a folder deepctl installed
   and put your own folder — or a file — at the same path without running
-  `dg skills remove`, and deepctl still counts that path as its own: the next
-  `update` replaces it and `remove` deletes it. Where the filesystem ignores
-  case, as macOS and Windows do by default, `API` and `api` are the same path
-  for this purpose. So run `dg skills remove` first, or drop the entry from
-  `skills.json`, before reusing a name deepctl installed under.
+  `dg skills remove --cli <tool>`, and deepctl still counts it as its own: the
+  next `update` replaces it and `remove` deletes it. Where the filesystem
+  ignores case, as macOS and Windows do by default, `API` and `api` are one path
+  for this purpose. So run `dg skills remove --cli <tool>` first, or drop the
+  entry from `skills.json`, before reusing a name deepctl installed under.
 - A *symlink* is the exception: deepctl never writes or deletes through one.
   Put a symlink where a recorded skill folder was and that path stops being
   deepctl's — `install`, `update` and `setup` exit 1 naming it rather than
@@ -358,10 +358,9 @@ them too. So `dg skills` records every folder it writes in
 Those versions wrote to paths that are not skills directories, so `install`,
 `update`, `setup` and `remove` clear them for the tools that run — a command
 that exits early, such as an install that hits a collision or cannot download,
-clears nothing. Otherwise
-otherwise four stale skills sit next to fourteen fresh ones. This is the one
-thing `dg skills` touches outside its own skill folders, and it is scoped to
-what 0.3.0 wrote:
+clears nothing. Otherwise four stale skills would sit next to fourteen fresh
+ones. This is the one thing `dg skills` touches outside its own skill folders,
+and it is scoped to what 0.3.0 wrote:
 
 | Path | What happens |
 | --- | --- |

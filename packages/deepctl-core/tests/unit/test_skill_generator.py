@@ -1204,6 +1204,71 @@ class TestInstallSkillsForKeepsOwnership:
         save.assert_called_once()
         assert state["installed_skills"] == {}
 
+    def test_a_null_record_for_an_unsupported_tool_is_dropped_and_saved(
+        self, tmp_path
+    ):
+        """pop()'s return cannot tell "absent" from "present but null".
+
+        A hand-edited skills.json holding a null for a tool left the key
+        gone in memory but the save skipped, so the bad record came back
+        on the next run and 'dg skills update' kept chasing it.
+        """
+        unsupported, _ = self._gen(tmp_path, "amazonq")
+        state = {"installed_skills": {"amazonq": None}}
+
+        with (
+            patch.object(ClaudeCodeGenerator, "skills_root", lambda self: None),
+            patch.object(ClaudeCodeGenerator, "legacy_paths", lambda self: []),
+            patch.object(skill_generator, "save_skills_state") as save,
+            patch.object(skill_generator, "fetch_repo_skills"),
+        ):
+            skill_generator.install_skills_for(
+                [unsupported], state, commands=[_make_command()], version="9.9.9"
+            )
+
+        assert state["installed_skills"] == {}
+        save.assert_called_once()
+
+    def test_legacy_cleanup_failing_does_not_abort_the_whole_install(
+        self, tmp_path
+    ):
+        """Those files belong to a tool nothing is being installed to.
+
+        Cleanup moved ahead of the writes so no later failure could skip
+        it; unguarded, an unreadable ~/.gemini/GEMINI.md then took down
+        an install that was about to write folders for every other tool.
+        """
+        supported, root = self._gen(tmp_path, "claude")
+        unsupported, _ = self._gen(tmp_path, "amazonq")
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {}}
+
+        def skills_root(self):
+            return root if self.cli_name == "claude" else None
+
+        with (
+            patch.object(ClaudeCodeGenerator, "skills_root", skills_root),
+            patch.object(ClaudeCodeGenerator, "legacy_paths", lambda self: []),
+            patch.object(
+                unsupported,
+                "clean_legacy",
+                side_effect=PermissionError(13, "Permission denied"),
+            ),
+            patch.object(skill_generator, "save_skills_state"),
+            patch.object(
+                skill_generator, "fetch_repo_skills", return_value=skills
+            ),
+        ):
+            report = skill_generator.install_skills_for(
+                [supported, unsupported],
+                state,
+                commands=[_make_command()],
+                version="9.9.9",
+            )
+
+        assert list(report.written) == ["claude"]
+        assert (root / "api" / "SKILL.md").is_file()
+
     def test_a_fetch_failure_leaves_an_unsupported_tool_alone(self, tmp_path):
         """Nothing was installed, so nothing of theirs may be cleaned up."""
         supported, root = self._gen(tmp_path, "claude")

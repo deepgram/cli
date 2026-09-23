@@ -1408,8 +1408,19 @@ def _retire_unsupported(
     """
     changed = False
     for gen in unsupported:
-        gen.clean_legacy()
-        if installed.pop(gen.cli_name, None) is not None:
+        try:
+            gen.clean_legacy()
+        except OSError:
+            # Best-effort: these are deepctl <= 0.3.0 leftovers for a tool
+            # nothing is being installed to. An unreadable ~/.gemini/GEMINI.md
+            # must not abort an install that is about to write real skill
+            # folders for every other tool.
+            pass
+        # `in` rather than the return of pop(): a hand-edited skills.json
+        # can hold a null for a tool, and popping that would look like
+        # nothing was dropped and leave the record unsaved.
+        if gen.cli_name in installed:
+            del installed[gen.cli_name]
             changed = True
     return changed
 

@@ -523,6 +523,9 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         rendered = "".join(capsys.readouterr().err.split())
         assert str(link) in rendered
         assert "byhand" in rendered
+        # The record goes, because the path is not deepctl's any more and
+        # nothing it can do would ever clear it. README documents this.
+        assert state["installed_skills"] == {}
 
     def test_a_tilde_record_is_not_reported_twice_when_it_cannot_be_removed(
         self, tmp_path, capsys, monkeypatch
@@ -608,14 +611,15 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         save.assert_not_called()
         assert "by hand" in " ".join(capsys.readouterr().err.split())
 
-    def test_remove_does_not_claim_it_deleted_a_file_it_only_edited(
+    def test_remove_does_not_claim_it_deleted_a_path_that_survived(
         self, tmp_path, capsys
     ):
-        """clean_legacy cuts deepctl's section out of files users own.
+        """clean_legacy leaves the user's half of a shared path behind.
 
-        Those files are still on disk afterwards, so reporting them as
-        removed points the user at something they can still see -- and
-        counted them towards the "Removed N folder(s)" total.
+        A context file keeps their own text, and the legacy command
+        directory keeps a command they added. Both are still on disk
+        afterwards, so a bare "Removed" points at something they can
+        still see -- and counted towards "Removed N folder(s)".
         """
         cmd = SkillsCommand()
         generator, root = self._generator(tmp_path)
@@ -638,7 +642,7 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
         combined = " ".join(
             (lambda c: c.out + c.err)(capsys.readouterr()).split()
         )
-        assert "Cleaned deepctl's section out of" in combined
+        assert "Removed deepctl's content from" in combined
         assert "Removed 1 folder(s)" not in combined
         assert shared.read_text() == "my own notes\n"
 

@@ -515,6 +515,7 @@ class SkillsCommand(BaseGroupCommand):
         which case there is nothing deepctl can prove it owns.
         """
         from deepctl_core.skill_generator import (
+            _STATE_FILE,
             get_all_generators,
             get_skills_state,
             recorded_skill_paths,
@@ -526,8 +527,19 @@ class SkillsCommand(BaseGroupCommand):
 
         # A hand-edited skills.json can carry a list or a string here, and
         # list(installed.keys()) below would raise rather than say what is
-        # wrong. install_skills_for() tolerates the same damage.
-        if not isinstance(installed, dict) or not installed:
+        # wrong. Reported separately from "nothing installed": the records
+        # were not deleted, the file is unreadable, and only one of those
+        # two is fixed by deleting folders.
+        if not isinstance(installed, dict):
+            print_info(
+                "deepctl cannot read its own records: 'installed_skills' in "
+                f"{_STATE_FILE} is not a set of entries. It will not guess "
+                "which folders are its, so nothing was removed. Fix or "
+                "delete that file, then remove the skill folders by hand."
+            )
+            return
+
+        if not installed:
             print_info(
                 "No skills are installed according to deepctl's records. "
                 "deepctl only removes folders it recorded installing, so if "
@@ -577,13 +589,14 @@ class SkillsCommand(BaseGroupCommand):
                 owned = gen.owned_skill_paths(recorded)
                 removed = gen.remove(recorded)
                 # remove() also reports the deepctl <= 0.3.0 artifacts it
-                # cleaned, and a shared context file it only cut deepctl's
-                # marked section out of is still there. Saying "Removed" for
-                # one of those names a file the user can still see.
+                # cleaned up, and those do not always go away: a shared
+                # context file keeps the user's own text, and the legacy
+                # command directory keeps a command they added. A bare
+                # "Removed" would name a path they can still see.
                 deleted = [p for p in removed if not p.exists()]
                 for p in removed:
                     if p.exists():
-                        print_info(f"  Cleaned deepctl's section out of {p}")
+                        print_info(f"  Removed deepctl's content from {p}")
                     else:
                         print_info(f"  Removed {p}")
                 total_removed += len(deleted)
