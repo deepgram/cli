@@ -591,7 +591,10 @@ def render_developer_guide(
     lines.append("dg login                    # Authenticate")
     lines.append("dg listen audio.wav         # Transcribe a file")
     lines.append("dg listen --mic             # Live transcription from mic")
-    lines.append('dg speak "Hello world"      # Text-to-speech')
+    lines.append(
+        'dg speak "Hello from Deepgram" --play  # Text-to-speech, played aloud'
+    )
+    lines.append("dg speak --list-voices      # List available TTS voices")
     lines.append("dg projects list            # List projects")
     lines.append("dg usage                    # View API usage")
     lines.append("dg mcp                      # Start MCP server")
