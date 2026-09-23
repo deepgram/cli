@@ -1137,6 +1137,52 @@ class TestInstallSkillsForKeepsOwnership:
 
         assert state["installed_skills"]["claude"]["skills"] == ["api"]
 
+    def test_a_tool_failing_still_retires_the_unsupported_ones(self, tmp_path):
+        """Cleanup ran after the loop, so a raise part-way skipped it.
+
+        The unsupported tool's stale record then survived an install that
+        had already written and recorded another tool's folders.
+        """
+        first, first_root = self._gen(tmp_path, "claude")
+        second, second_root = self._gen(tmp_path, "cursor")
+        unsupported, _ = self._gen(tmp_path, "amazonq")
+        roots = {"claude": first_root, "cursor": second_root, "amazonq": None}
+        skills = [_fake_skill(tmp_path, "api")]
+        state = {"installed_skills": {"amazonq": {"paths": []}}}
+
+        real_install = ClaudeCodeGenerator.install_skills
+
+        def install_skills(self, bundle, recorded=()):
+            if self.cli_name == "cursor":
+                raise OSError(30, "Read-only file system")
+            return real_install(self, bundle, recorded)
+
+        with patch.object(ClaudeCodeGenerator, "install_skills", install_skills):
+            with pytest.raises(OSError):
+                self._run([first, second, unsupported], roots, skills, state)
+
+        assert state["installed_skills"]["claude"]["skills"] == ["api"]
+        assert "amazonq" not in state["installed_skills"]
+
+    def test_retiring_an_unsupported_tool_is_saved_by_the_core(self, tmp_path):
+        """The pop is the whole point, so it cannot wait for the caller."""
+        unsupported, _ = self._gen(tmp_path, "amazonq")
+        state = {"installed_skills": {"amazonq": {"paths": []}}}
+
+        with (
+            patch.object(ClaudeCodeGenerator, "skills_root", lambda self: None),
+            patch.object(ClaudeCodeGenerator, "legacy_paths", lambda self: []),
+            patch.object(skill_generator, "save_skills_state") as save,
+            patch.object(skill_generator, "fetch_repo_skills") as fetch,
+        ):
+            skill_generator.install_skills_for(
+                [unsupported], state, commands=[_make_command()], version="9.9.9"
+            )
+
+        fetch.assert_not_called()
+        save.assert_called_once()
+        assert state["installed_skills"] == {}
+
     def test_a_fetch_failure_leaves_an_unsupported_tool_alone(self, tmp_path):
         """Nothing was installed, so nothing of theirs may be cleaned up."""
         supported, root = self._gen(tmp_path, "claude")

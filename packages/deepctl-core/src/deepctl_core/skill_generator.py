@@ -1396,16 +1396,22 @@ def _ownership_after_failure(
 def _retire_unsupported(
     unsupported: Iterable[SkillGenerator],
     installed: dict[str, Any],
-) -> None:
+) -> bool:
     """Clean up after tools deepctl cannot install to, and un-record them.
 
     Nothing was written for them, so nothing may claim it was: an entry
     here would make ``dg skills list`` show a tool as installed with no
     skills, and ``dg skills update`` chase it every run.
+
+    Returns:
+        True when a record was dropped, so the caller knows to save.
     """
+    changed = False
     for gen in unsupported:
         gen.clean_legacy()
-        installed.pop(gen.cli_name, None)
+        if installed.pop(gen.cli_name, None) is not None:
+            changed = True
+    return changed
 
 
 def install_skills_for(
@@ -1491,7 +1497,8 @@ def install_skills_for(
 
     if not supported:
         # Nothing to install means nothing to download.
-        _retire_unsupported(unsupported, installed)
+        if _retire_unsupported(unsupported, installed):
+            save_skills_state(state)
         return report
 
     skills = fetch() if fetch is not None else fetch_repo_skills(ref, force=True)
@@ -1506,6 +1513,13 @@ def install_skills_for(
             targets.append(gen)
     if report.conflicts and not best_effort:
         raise SkillOwnershipError(report.conflicts)
+
+    # After the fetch and the preflight, so a download failure or a
+    # collision leaves these tools' files alone -- but before the writes,
+    # so a tool failing part-way through the loop cannot skip it and
+    # leave a stale record behind.
+    if _retire_unsupported(unsupported, installed):
+        save_skills_state(state)
 
     commands_hash = _commands_hash(commands)
     now = datetime.now(timezone.utc).isoformat()
@@ -1560,5 +1574,4 @@ def install_skills_for(
         if on_installed is not None:
             on_installed(gen, paths)
 
-    _retire_unsupported(unsupported, installed)
     return report

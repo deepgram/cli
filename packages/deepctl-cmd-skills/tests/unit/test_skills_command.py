@@ -575,6 +575,73 @@ class TestTheCommandTouchesOnlyWhatItInstalled:
             str(root / "api")
         ]
 
+    def test_remove_without_all_or_cli_is_a_usage_error(self):
+        """Forgetting a flag must not look like a successful removal."""
+        cmd = SkillsCommand()
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": {"claude": {"paths": []}}},
+            ),
+            patch("deepctl_core.skill_generator.get_all_generators", return_value=[]),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+        ):
+            with pytest.raises(click.UsageError) as excinfo:
+                cmd._handle_remove()
+
+        assert "--all" in str(excinfo.value)
+        save.assert_not_called()
+
+    def test_remove_survives_a_hand_edited_state_file(self, capsys):
+        """A list where a dict belongs must not raise AttributeError."""
+        cmd = SkillsCommand()
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": ["claude"]},
+            ),
+            patch("deepctl_core.skill_generator.get_all_generators", return_value=[]),
+            patch("deepctl_core.skill_generator.save_skills_state") as save,
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        save.assert_not_called()
+        assert "by hand" in " ".join(capsys.readouterr().err.split())
+
+    def test_remove_does_not_claim_it_deleted_a_file_it_only_edited(
+        self, tmp_path, capsys
+    ):
+        """clean_legacy cuts deepctl's section out of files users own.
+
+        Those files are still on disk afterwards, so reporting them as
+        removed points the user at something they can still see -- and
+        counted them towards the "Removed N folder(s)" total.
+        """
+        cmd = SkillsCommand()
+        generator, root = self._generator(tmp_path)
+        shared = tmp_path / "GEMINI.md"
+        shared.write_text("my own notes\n")
+        generator.remove.return_value = [shared]
+        generator.owned_skill_paths.return_value = []
+        state = {"installed_skills": {"claude": {"paths": []}}}
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch("deepctl_core.skill_generator.get_skills_state", return_value=state),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+        ):
+            cmd._handle_remove(remove_all=True)
+
+        combined = " ".join(
+            (lambda c: c.out + c.err)(capsys.readouterr()).split()
+        )
+        assert "Cleaned deepctl's section out of" in combined
+        assert "Removed 1 folder(s)" not in combined
+        assert shared.read_text() == "my own notes\n"
+
     def test_update_reports_the_tools_it_refreshed(self, tmp_path, capsys):
         cmd = SkillsCommand()
         generator, root = self._generator(tmp_path)

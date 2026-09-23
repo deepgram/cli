@@ -61,11 +61,13 @@ class SkillsCommand(BaseGroupCommand):
         "publishers', so every subcommand operates only on the folders "
         "deepctl recorded installing: install refuses to overwrite an "
         "unrecorded folder of the same name and remove never deletes one. "
+        "'skills setup' runs the same install, so the same rules apply to it. "
         "A recorded path that is now a symlink is not deepctl's either — "
         "install and update exit non-zero naming it, and remove reports it "
         "instead of deleting through it. A recorded folder remove cannot "
         "delete stays recorded and remove exits non-zero, so a later remove "
-        "or update can still reach it."
+        "or update can still reach it. 'dg login' and 'dg plugin' follow the "
+        "same ownership rules but warn and exit 0 instead of failing."
     )
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
@@ -520,9 +522,12 @@ class SkillsCommand(BaseGroupCommand):
         )
 
         state = get_skills_state()
-        installed = state.get("installed_skills", {})
+        installed = state.get("installed_skills")
 
-        if not installed:
+        # A hand-edited skills.json can carry a list or a string here, and
+        # list(installed.keys()) below would raise rather than say what is
+        # wrong. install_skills_for() tolerates the same damage.
+        if not isinstance(installed, dict) or not installed:
             print_info(
                 "No skills are installed according to deepctl's records. "
                 "deepctl only removes folders it recorded installing, so if "
@@ -542,67 +547,83 @@ class SkillsCommand(BaseGroupCommand):
         elif remove_all:
             targets = list(installed.keys())
         else:
-            print_info("Specify --all to remove all, or --cli NAME.")
-            return
+            # A usage error, which the README's exit-code table documents
+            # as 1. Printing the hint and exiting 0 made "you forgot a
+            # flag" indistinguishable from "everything was removed".
+            raise click.UsageError("Specify --all to remove all, or --cli NAME.")
 
         total_removed = 0
         tools_cleaned = 0
         stranded_total = 0
-        for cli_key in targets:
-            gen = generators.get(cli_key)
-            if gen is None:
-                # No generator, so no skills root to check a path against
-                # and nothing deepctl can prove about these folders. The
-                # record is the only thing it can honestly drop.
-                print_warning(
-                    f"  Unknown CLI '{cli_key}': dropping its record. Delete "
-                    "any folders it left behind by hand."
-                )
-                del state["installed_skills"][cli_key]
-                continue
+        # A filesystem call in here can raise -- clean_legacy unlinks
+        # and rewrites files without a guard. The records already
+        # updated describe deletions that have happened, so they are
+        # saved either way rather than thrown away with the traceback.
+        try:
+            for cli_key in targets:
+                gen = generators.get(cli_key)
+                if gen is None:
+                    # No generator, so no skills root to check a path against
+                    # and nothing deepctl can prove about these folders. The
+                    # record is the only thing it can honestly drop.
+                    print_warning(
+                        f"  Unknown CLI '{cli_key}': dropping its record. Delete "
+                        "any folders it left behind by hand."
+                    )
+                    del state["installed_skills"][cli_key]
+                    continue
 
-            recorded = recorded_skill_paths(state, cli_key)
-            owned = gen.owned_skill_paths(recorded)
-            removed = gen.remove(recorded)
-            for p in removed:
-                print_info(f"  Removed {p}")
-            total_removed += len(removed)
-            if removed:
-                tools_cleaned += 1
+                recorded = recorded_skill_paths(state, cli_key)
+                owned = gen.owned_skill_paths(recorded)
+                removed = gen.remove(recorded)
+                # remove() also reports the deepctl <= 0.3.0 artifacts it
+                # cleaned, and a shared context file it only cut deepctl's
+                # marked section out of is still there. Saying "Removed" for
+                # one of those names a file the user can still see.
+                deleted = [p for p in removed if not p.exists()]
+                for p in removed:
+                    if p.exists():
+                        print_info(f"  Cleaned deepctl's section out of {p}")
+                    else:
+                        print_info(f"  Removed {p}")
+                total_removed += len(deleted)
+                if deleted:
+                    tools_cleaned += 1
 
-            # A recorded path deepctl can no longer claim — the folder
-            # was replaced by a symlink, or the entry was hand-edited to
-            # point outside the skills root. Never deleted, so say where
-            # it is instead of dropping the record silently.
-            for path in self._unownable(recorded, owned):
-                print_warning(
-                    f"  {gen.display_name}: {path} is no longer deepctl's to "
-                    "delete. Remove it by hand."
-                )
+                # A recorded path deepctl can no longer claim — the folder
+                # was replaced by a symlink, or the entry was hand-edited to
+                # point outside the skills root. Never deleted, so say where
+                # it is instead of dropping the record silently.
+                for path in self._unownable(recorded, owned):
+                    print_warning(
+                        f"  {gen.display_name}: {path} is no longer deepctl's to "
+                        "delete. Remove it by hand."
+                    )
 
-            # Ownership outlives a failed deletion. rmtree can lose to a
-            # permission error or a read-only mount, and dropping the
-            # record then would strand Deepgram's own folders: the next
-            # update refuses to overwrite what it cannot prove is its,
-            # and the next remove has nothing left to act on.
-            stranded = [p for p in owned if p.exists()]
-            if stranded:
-                stranded_total += len(stranded)
-                entry = state["installed_skills"][cli_key]
-                entry["paths"] = [str(p) for p in stranded]
-                entry["skills"] = [p.name for p in stranded]
-                print_warning(
-                    f"  {gen.display_name}: {len(stranded)} folder(s) could not "
-                    "be removed and are still recorded as deepctl's. Fix the "
-                    f"permissions and run 'dg skills remove --cli {cli_key}' "
-                    "again."
-                )
-            else:
-                del state["installed_skills"][cli_key]
-                if not removed:
-                    print_warning(f"  {gen.display_name}: nothing left to remove.")
+                # Ownership outlives a failed deletion. rmtree can lose to a
+                # permission error or a read-only mount, and dropping the
+                # record then would strand Deepgram's own folders: the next
+                # update refuses to overwrite what it cannot prove is its,
+                # and the next remove has nothing left to act on.
+                stranded = [p for p in owned if p.exists()]
+                if stranded:
+                    stranded_total += len(stranded)
+                    entry = state["installed_skills"][cli_key]
+                    entry["paths"] = [str(p) for p in stranded]
+                    entry["skills"] = [p.name for p in stranded]
+                    print_warning(
+                        f"  {gen.display_name}: {len(stranded)} folder(s) could not "
+                        "be removed and are still recorded as deepctl's. Fix the "
+                        f"permissions and run 'dg skills remove --cli {cli_key}' "
+                        "again."
+                    )
+                else:
+                    del state["installed_skills"][cli_key]
+                    if not removed:
+                        print_warning(f"  {gen.display_name}: nothing left to remove.")
+        finally:
+            save_skills_state(state)
 
-        save_skills_state(state)
         if total_removed:
             print_success(
                 f"Removed {total_removed} folder(s) from {tools_cleaned} tool(s)."
