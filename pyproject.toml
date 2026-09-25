@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl"
-version = "0.3.0" # x-release-please-version
+version = "0.3.1" # x-release-please-version
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
 license = "MIT"
@@ -35,8 +35,8 @@ requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
     "deepgram-sdk>=7.7.0,<8",
-    "deepctl-core>=0.2.16",
-    "deepctl-cmd-login>=0.1.17",
+    "deepctl-core>=0.2.17",
+    "deepctl-cmd-login>=0.1.18",
     "deepctl-cmd-projects>=0.2.0",
     "deepctl-cmd-transcribe>=0.1.12",
     "deepctl-cmd-usage>=0.2.0",
@@ -49,11 +49,11 @@ dependencies = [
     "deepctl-cmd-debug-probe>=0.0.2",
     "deepctl-cmd-debug-toolkit>=0.1.0",
     "deepctl-cmd-ffprobe>=0.0.2",
-    "deepctl-cmd-update>=0.2.6",
-    "deepctl-cmd-plugin>=0.1.12",
-    "deepctl-cmd-skills>=0.0.7",
+    "deepctl-cmd-update>=0.2.7",
+    "deepctl-cmd-plugin>=0.1.13",
+    "deepctl-cmd-skills>=0.0.8",
     "deepctl-cmd-init>=0.0.4",
-    "deepctl-cmd-models>=0.1.0",
+    "deepctl-cmd-models>=0.1.1",
     "deepctl-cmd-speak>=0.0.4",
     "deepctl-cmd-keys>=0.1.0",
     "deepctl-cmd-read>=0.1.0",
