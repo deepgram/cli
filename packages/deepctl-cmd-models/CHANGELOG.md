@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.1](https://github.com/deepgram/cli/compare/deepctl-cmd-models-v0.1.0...deepctl-cmd-models-v0.1.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* show complete model catalog data and flag legacy conversational AI models ([#108](https://github.com/deepgram/cli/issues/108)) ([62c2e47](https://github.com/deepgram/cli/commit/62c2e47aa0634deae84a420ea350f866b3bd57f1))
+* **models:** show canonical model IDs and languages, flag legacy conversational AI models, and warn when a catalog category is empty ([ff05174](https://github.com/deepgram/cli/commit/ff05174a16f9262d8045c81b65859ef5e24bdfdc))
+* **models:** show model architecture and clarify output-format options ([0db9172](https://github.com/deepgram/cli/commit/0db91723b99d1f9e55061dcccd19070f8f4a0231))
+
 ## [0.1.0](https://github.com/deepgram/cli/compare/deepctl-cmd-models-v0.0.2...deepctl-cmd-models-v0.1.0) (2026-08-19)
 
 
