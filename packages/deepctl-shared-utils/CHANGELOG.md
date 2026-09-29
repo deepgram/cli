@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-shared-utils-v0.1.12...deepctl-shared-utils-v0.1.13) (2026-09-29)
+
+
+### Bug Fixes
+
+* **ffprobe,debug-audio:** keep stdout for the payload ([8d17d4b](https://github.com/deepgram/cli/commit/8d17d4b1f63920c98a55b60b67cddf7e7f4e5d3e))
+* keep stdout parseable, correct advertised examples and the auto-JSON claim ([#107](https://github.com/deepgram/cli/issues/107)) ([9d434a3](https://github.com/deepgram/cli/commit/9d434a3b8cf4fb2d5aa2777eace35b969df9834e))
+* **output:** keep shared diagnostics plain in CI ([6ec0668](https://github.com/deepgram/cli/commit/6ec06688822d5dae91bbd39c4e70b0f9ec0383ef))
+
 ## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-shared-utils-v0.1.11...deepctl-shared-utils-v0.1.12) (2026-05-09)
 
 

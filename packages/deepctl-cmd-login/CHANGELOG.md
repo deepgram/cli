@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.18...deepctl-cmd-login-v0.1.19) (2026-09-29)
+
+
+### Bug Fixes
+
+* keep stdout parseable, correct advertised examples and the auto-JSON claim ([#107](https://github.com/deepgram/cli/issues/107)) ([9d434a3](https://github.com/deepgram/cli/commit/9d434a3b8cf4fb2d5aa2777eace35b969df9834e))
+
 ## [0.1.18](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.17...deepctl-cmd-login-v0.1.18) (2026-09-23)
 
 

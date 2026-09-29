@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.7](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.6...deepctl-telemetry-v0.0.7) (2026-09-29)
+
+
+### Bug Fixes
+
+* **docs:** correct 11 advertised commands the CLI rejects, and guard them ([9ef3b58](https://github.com/deepgram/cli/commit/9ef3b5850b4e124a9c29bc744c0e575e2cec28e7))
+* keep stdout parseable, correct advertised examples and the auto-JSON claim ([#107](https://github.com/deepgram/cli/issues/107)) ([9d434a3](https://github.com/deepgram/cli/commit/9d434a3b8cf4fb2d5aa2777eace35b969df9834e))
+
 ## [0.0.6](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.5...deepctl-telemetry-v0.0.6) (2026-08-17)
 
 
