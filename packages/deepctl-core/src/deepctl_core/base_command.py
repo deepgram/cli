@@ -4,15 +4,20 @@ from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 import click
-from rich.console import Console
 
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config
-from .output import _agentic, print_error, print_info, print_warning, stderr_console
+from .models import ErrorResult
+from .output import _agentic, print_error, stderr_console
+from .output import console as stdout_console
 from .timing import TimingContext
 
-console = Console()
+# The PAYLOAD console -- stdout, deliberately. Tables, JSON and raw text
+# written by _output_* are the machine-readable result and belong there.
+# Shared instance rather than a bare Console() so it honours the agentic
+# no-color/highlight settings; diagnostics use stderr_console instead.
+console = stdout_console
 
 
 class BaseCommand(ABC):
@@ -99,16 +104,52 @@ class BaseCommand(ABC):
                                 "explicit flags",
                                 "environment variables",
                             ]:
-                                print_info(f"Using credentials from {source}")
+                                # Diagnostics, not the result. print_info /
+                                # print_warning still write to stdout outside
+                                # agentic mode, so with an explicit `-o json`
+                                # these three lines landed in front of the
+                                # payload and broke `| jq` (#104, success
+                                # path). Route them straight to stderr; the
+                                # prefixes mirror output.py so the rendering
+                                # is unchanged in both modes.
+                                info = "INFO:" if _agentic else "[blue]ℹ[/blue]"
+                                stderr_console.print(
+                                    f"{info} Using credentials from {source}"
+                                )
                                 if project_id:
-                                    print_info(f"Affecting project: {project_id}")
+                                    stderr_console.print(
+                                        f"{info} Affecting project: {project_id}"
+                                    )
                                 else:
-                                    print_warning("No project ID specified")
+                                    warn = "WARN:" if _agentic else "[yellow]⚠[/yellow]"
+                                    stderr_console.print(
+                                        f"{warn} No project ID specified"
+                                    )
 
-                    except Exception:
-                        # guard() already printed helpful error messages;
-                        # exit without duplicating them.
-                        raise SystemExit(1)
+                    except Exception as auth_error:
+                        # guard() already wrote the human-readable diagnosis to
+                        # stderr, so don't duplicate it -- but stdout must still
+                        # carry a parseable payload in a machine-readable
+                        # format. A CI step doing `dg -o json ... > out.json`
+                        # and parsing the result should get a structured error,
+                        # not an empty file. output_result is a no-op in
+                        # default mode, so this adds nothing for humans.
+                        self._tag_telemetry_status("error")
+                        try:
+                            self.output_result(
+                                ErrorResult(error=str(auth_error)), config
+                            )
+                        except OSError:
+                            # Downstream stream closed. BrokenPipeError is an
+                            # OSError, so one clause covers both.
+                            pass
+                        except ValueError as exc:
+                            # Rich raises ValueError("I/O operation on closed
+                            # file") when the stream went away mid-write; any
+                            # other ValueError is a real bug.
+                            if "closed file" not in str(exc):
+                                raise
+                        raise SystemExit(1) from auth_error
 
             # Check project ID if required
             if self.requires_project:
@@ -139,10 +180,11 @@ class BaseCommand(ABC):
                     with TimingContext("output_processing"):
                         try:
                             self.output_result(result, config)
-                        except (BrokenPipeError, OSError):
+                        except OSError:
                             # Downstream stream closed (e.g. an MCP host disconnected
                             # stdio after `dg mcp` finished). Nothing useful to log
                             # here because the logger writes to the same closed stream.
+                            # BrokenPipeError is an OSError, so one clause covers both.
                             pass
                         except ValueError as exc:
                             if "closed file" not in str(exc):

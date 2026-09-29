@@ -7,16 +7,35 @@ import shutil
 import subprocess
 from typing import Any
 
-from deepctl_core import AuthManager, BaseCommand, BaseResult, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseCommand,
+    BaseResult,
+    Config,
+    DeepgramClient,
+    get_console,
+    get_output_format,
+    get_status_console,
+)
 from deepctl_shared_utils import (
     get_ffprobe_path,
     print_ffprobe_install_instructions,
 )
-from rich.console import Console
 
 from .models import FfprobeResult
 
-console = Console()
+# Two channels, deliberately (#104):
+#   console        -> stdout, the human rendering of the FfprobeResult.
+#                     Written only in default (human) output mode, so
+#                     `dg -o json ffprobe | jq` sees the payload alone.
+#   status_console -> stderr, always: errors and install instructions.
+console = get_console()
+status_console = get_status_console()
+
+
+def _human_output() -> bool:
+    """True when stdout is for a person, not a parser."""
+    return get_output_format() == "default"
 
 
 class FfprobeCommand(BaseCommand):
@@ -74,7 +93,9 @@ class FfprobeCommand(BaseCommand):
         reset = kwargs.get("reset", False)
 
         if path and reset:
-            console.print("[red]Error:[/red] Cannot use --path and --reset together")
+            status_console.print(
+                "[red]Error:[/red] Cannot use --path and --reset together"
+            )
             return BaseResult(
                 status="error",
                 message="Cannot use --path and --reset together",
@@ -92,11 +113,11 @@ class FfprobeCommand(BaseCommand):
         """Store a custom ffprobe path."""
         # Validate the path
         if not os.path.isfile(path):
-            console.print(f"[red]Error:[/red] File not found: {path}")
+            status_console.print(f"[red]Error:[/red] File not found: {path}")
             return BaseResult(status="error", message=f"File not found: {path}")
 
         if not os.access(path, os.X_OK):
-            console.print(f"[red]Error:[/red] File is not executable: {path}")
+            status_console.print(f"[red]Error:[/red] File is not executable: {path}")
             return BaseResult(status="error", message=f"File is not executable: {path}")
 
         # Store in config
@@ -104,9 +125,10 @@ class FfprobeCommand(BaseCommand):
         config.save()
 
         version = self._get_version(path)
-        console.print(f"[green]✓[/green] ffprobe path stored: {path}")
-        if version:
-            console.print(f"  Version: {version}")
+        if _human_output():
+            console.print(f"[green]✓[/green] ffprobe path stored: {path}")
+            if version:
+                console.print(f"  Version: {version}")
 
         return FfprobeResult(
             status="success",
@@ -121,14 +143,14 @@ class FfprobeCommand(BaseCommand):
         config._config.tools.ffprobe_path = None
         config.save()
 
-        console.print("[green]✓[/green] Stored ffprobe path cleared")
-
         # Show auto-detected path
         auto_path = shutil.which("ffprobe")
-        if auto_path:
-            console.print(f"  Auto-detected: {auto_path}")
-        else:
-            console.print("  [yellow]ffprobe not found in PATH[/yellow]")
+        if _human_output():
+            console.print("[green]✓[/green] Stored ffprobe path cleared")
+            if auto_path:
+                console.print(f"  Auto-detected: {auto_path}")
+            else:
+                console.print("  [yellow]ffprobe not found in PATH[/yellow]")
 
         return FfprobeResult(
             status="success",
@@ -143,17 +165,19 @@ class FfprobeCommand(BaseCommand):
         auto_path = shutil.which("ffprobe")
         effective_path = get_ffprobe_path(config)
 
-        if stored_path:
-            console.print(f"  Stored path:    {stored_path}")
-        if auto_path:
-            console.print(f"  Auto-detected:  {auto_path}")
+        if _human_output():
+            if stored_path:
+                console.print(f"  Stored path:    {stored_path}")
+            if auto_path:
+                console.print(f"  Auto-detected:  {auto_path}")
 
         if effective_path:
             version = self._get_version(effective_path)
-            console.print(f"  Active path:    [green]{effective_path}[/green]")
-            if version:
-                console.print(f"  Version:        {version}")
-            console.print("\n[green]✓[/green] ffprobe is available")
+            if _human_output():
+                console.print(f"  Active path:    [green]{effective_path}[/green]")
+                if version:
+                    console.print(f"  Version:        {version}")
+                console.print("\n[green]✓[/green] ffprobe is available")
 
             return FfprobeResult(
                 status="success",

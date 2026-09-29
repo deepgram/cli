@@ -244,3 +244,105 @@ class TestAudioCommand:
 
         audio_info = command.parse_audio_info(multi_channel_data)
         assert audio_info.streams[0].channels > 2
+
+
+class TestOutputChannels:
+    """Which stream each line lands on (#104).
+
+    `dg -o json debug audio -f missing.wav` used to put a rich failure panel
+    on stdout ahead of the serialized AudioDebugResult, so `json.loads(stdout)`
+    raised. Progress lines and failure panels belong on stderr always; the
+    human rendering of the analysis belongs on stdout only in default mode.
+    """
+
+    @pytest.fixture
+    def command(self):
+        return AudioCommand()
+
+    @pytest.fixture
+    def mocks(self):
+        return Mock(spec=Config), Mock(spec=AuthManager), Mock(spec=DeepgramClient)
+
+    @pytest.fixture
+    def probe_data(self):
+        return {
+            "format": {
+                "filename": "test.mp3",
+                "format_name": "mp3",
+                "format_long_name": "MP2/3 (MPEG audio layer 2/3)",
+                "duration": "120.456",
+                "size": "2890752",
+                "bit_rate": "192000",
+                "nb_streams": 1,
+            },
+            "streams": [
+                {
+                    "codec_type": "audio",
+                    "codec_name": "mp3",
+                    "codec_long_name": "MP3 (MPEG audio layer 3)",
+                    "sample_rate": "44100",
+                    "channels": 2,
+                    "channel_layout": "stereo",
+                }
+            ],
+        }
+
+    @pytest.mark.parametrize("fmt", ["json", "yaml", "csv", "table"])
+    @patch("deepctl_cmd_debug_audio.command.get_output_format")
+    @patch.object(AudioCommand, "check_ffmpeg_installed", return_value=False)
+    def test_ffmpeg_missing_panel_goes_to_stderr(
+        self, _ffmpeg, mock_format, fmt, command, mocks, capsys
+    ):
+        mock_format.return_value = fmt
+
+        result = command.handle(*mocks, file="recording.wav")
+        captured = capsys.readouterr()
+
+        assert result.status == "error"
+        assert captured.out == ""
+        assert "FFmpeg" in captured.err
+
+    @patch("deepctl_cmd_debug_audio.command.get_output_format", return_value="json")
+    @patch.object(AudioCommand, "check_ffmpeg_installed", return_value=True)
+    @patch.object(AudioCommand, "run_ffprobe", side_effect=RuntimeError("boom"))
+    def test_analysis_failure_panel_goes_to_stderr(
+        self, _probe, _ffmpeg, _format, command, mocks, capsys
+    ):
+        result = command.handle(*mocks, file="missing.wav")
+        captured = capsys.readouterr()
+
+        assert result.status == "error"
+        assert captured.out == ""
+        assert "Analyzing audio file" in captured.err
+        assert "boom" in captured.err
+
+    @patch("deepctl_cmd_debug_audio.command.get_output_format", return_value="json")
+    @patch.object(AudioCommand, "check_ffmpeg_installed", return_value=True)
+    def test_human_rendering_is_suppressed_for_machines(
+        self, _ffmpeg, _format, command, mocks, probe_data, capsys
+    ):
+        with patch.object(
+            AudioCommand, "run_ffprobe", return_value=probe_data
+        ):
+            result = command.handle(*mocks, file="test.mp3")
+        captured = capsys.readouterr()
+
+        assert result.status == "success"
+        assert captured.out == ""
+        assert "Analyzing audio file" in captured.err
+
+    @patch(
+        "deepctl_cmd_debug_audio.command.get_output_format", return_value="default"
+    )
+    @patch.object(AudioCommand, "check_ffmpeg_installed", return_value=True)
+    def test_human_rendering_still_prints_for_humans(
+        self, _ffmpeg, _format, command, mocks, probe_data, capsys
+    ):
+        with patch.object(
+            AudioCommand, "run_ffprobe", return_value=probe_data
+        ):
+            command.handle(*mocks, file="test.mp3")
+        captured = capsys.readouterr()
+
+        assert "Audio File Analysis Complete" in captured.out
+        assert "Deepgram Compatibility Check" in captured.out

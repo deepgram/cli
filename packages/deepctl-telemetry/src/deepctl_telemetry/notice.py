@@ -10,9 +10,12 @@ if TYPE_CHECKING:
     from deepctl_core import Config
 
 
+# There is no `dg config` command, so the notice names the two opt-outs that
+# actually exist: the env var for one run, and the config file to persist it.
 NOTICE_ON = (
     "Telemetry is on (anonymous error reports). "
-    "Disable: dg config set telemetry.enabled false"
+    "Disable: DEEPCTL_TELEMETRY_DISABLED=1, "
+    "or set telemetry.enabled: false in your deepctl config.yaml"
 )
 NOTICE_OFF = "Telemetry is off."
 

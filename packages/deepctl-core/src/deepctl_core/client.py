@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Any, cast
 from deepgram import DeepgramClient as DGClient
 from deepgram import DeepgramClientEnvironment
 from deepgram.core.api_error import ApiError
-from rich.console import Console
+
+from .output import stderr_console
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -18,7 +19,10 @@ if TYPE_CHECKING:
     from .auth import AuthManager
     from .config import Config
 
-console = Console()
+# Diagnostics only: everything printed here is status or error chrome, so
+# it goes to stderr and can never corrupt the machine-readable payload a
+# command writes to stdout. See get_status_console() in output.py.
+console = stderr_console
 
 
 def _split_base_url(base_url: str) -> tuple[str, str, str]:

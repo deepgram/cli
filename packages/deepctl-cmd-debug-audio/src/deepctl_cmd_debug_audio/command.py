@@ -10,15 +10,34 @@ from urllib.parse import urlparse
 
 import ffmpeg  # type: ignore[import-untyped]
 import httpx
-from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseCommand,
+    Config,
+    DeepgramClient,
+    get_console,
+    get_output_format,
+    get_status_console,
+)
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .models import AudioDebugResult, AudioFormat, AudioInfo, AudioStream
 
-console = Console()
+# Two channels, deliberately (#104):
+#   console        -> stdout, the human rendering of the analysis. Only
+#                     written in default (human) output mode; in json/yaml/
+#                     csv/table mode the serialized AudioDebugResult is the
+#                     whole of stdout, so `dg -o json debug audio | jq` parses.
+#   status_console -> stderr, always: progress lines and failure panels.
+console = get_console()
+status_console = get_status_console()
+
+
+def _human_output() -> bool:
+    """True when stdout is for a person, not a parser."""
+    return get_output_format() == "default"
 
 
 class AudioCommand(BaseCommand):
@@ -87,7 +106,7 @@ class AudioCommand(BaseCommand):
 
     def _download_url(self, url: str) -> str:
         """Download a URL to a temporary file and return the path."""
-        console.print(f"[blue]Downloading:[/blue] {url}")
+        status_console.print(f"[blue]Downloading:[/blue] {url}")
 
         parsed = urlparse(url)
         ext = os.path.splitext(parsed.path)[1] or ".audio"
@@ -107,7 +126,7 @@ class AudioCommand(BaseCommand):
                         tmp.write(chunk)
                         total += len(chunk)
                 size_mb = total / (1024 * 1024)
-                console.print(
+                status_console.print(
                     f"[green]Downloaded[/green] {size_mb:.2f} MB → {tmp_name}"
                 )
                 return tmp_name
@@ -406,7 +425,7 @@ class AudioCommand(BaseCommand):
 
         # Check if ffmpeg is installed
         if not self.check_ffmpeg_installed():
-            console.print(
+            status_console.print(
                 Panel(
                     "[red]✗ FFmpeg not found![/red]\n\n"
                     "The audio debug command requires FFmpeg to be installed "
@@ -438,7 +457,7 @@ class AudioCommand(BaseCommand):
                 downloaded_file = self._download_url(audio_file)
                 file_to_analyze = downloaded_file
             except Exception as e:
-                console.print(
+                status_console.print(
                     Panel(
                         f"[red]✗ Failed to download URL[/red]\n\n[dim]{e!s}[/dim]",
                         title="Download Failed",
@@ -454,7 +473,9 @@ class AudioCommand(BaseCommand):
 
         # Process the audio file
         try:
-            console.print(f"[blue]Analyzing audio file:[/blue] {file_to_analyze}")
+            status_console.print(
+                f"[blue]Analyzing audio file:[/blue] {file_to_analyze}"
+            )
 
             # Run ffprobe
             probe_data = self.run_ffprobe(file_to_analyze, ffprobe_args)
@@ -462,45 +483,52 @@ class AudioCommand(BaseCommand):
             # Parse the data
             audio_info = self.parse_audio_info(probe_data)
 
-            # Display results based on verbosity
-            if extra_verbose or ffprobe_args:
-                self.display_extra_verbose_info(audio_info)
-            elif verbose:
-                self.display_verbose_info(audio_info)
-            else:
-                self.display_basic_info(audio_info)
+            # Everything below is the human rendering of the analysis. It is
+            # the same information the returned AudioDebugResult carries, so
+            # in a machine-readable format it would be duplicate prose sitting
+            # in front of the payload -- exactly the #104 break. Print it only
+            # when stdout is for a person.
+            if _human_output():
+                # Display results based on verbosity
+                if extra_verbose or ffprobe_args:
+                    self.display_extra_verbose_info(audio_info)
+                elif verbose:
+                    self.display_verbose_info(audio_info)
+                else:
+                    self.display_basic_info(audio_info)
 
-            # Check for Deepgram compatibility
-            console.print("\n[bold]Deepgram Compatibility Check:[/bold]")
-            compatibility_issues = []
+                # Check for Deepgram compatibility
+                console.print("\n[bold]Deepgram Compatibility Check:[/bold]")
+                compatibility_issues = []
 
-            if audio_info.streams:
-                for stream in audio_info.streams:
-                    # Check sample rate
-                    if stream.sample_rate and int(stream.sample_rate) < 8000:
-                        compatibility_issues.append(
-                            f"⚠️  Low sample rate ({stream.sample_rate} Hz) - "
-                            f"Deepgram works best with 8kHz or higher"
-                        )
+                if audio_info.streams:
+                    for stream in audio_info.streams:
+                        # Check sample rate
+                        if stream.sample_rate and int(stream.sample_rate) < 8000:
+                            compatibility_issues.append(
+                                f"⚠️  Low sample rate ({stream.sample_rate} Hz) - "
+                                f"Deepgram works best with 8kHz or higher"
+                            )
 
-                    # Check channels
-                    if stream.channels and stream.channels > 2:
-                        compatibility_issues.append(
-                            f"⚠️  Multi-channel audio ({stream.channels} "
-                            f"channels) - Consider converting to mono or "
-                            f"stereo"
-                        )
+                        # Check channels
+                        if stream.channels and stream.channels > 2:
+                            compatibility_issues.append(
+                                f"⚠️  Multi-channel audio ({stream.channels} "
+                                f"channels) - Consider converting to mono or "
+                                f"stereo"
+                            )
 
-            if compatibility_issues:
-                for issue in compatibility_issues:
-                    console.print(f"  {issue}")
-            else:
-                console.print(
-                    "  [green]✓[/green] Audio appears to be compatible with Deepgram"
-                )
+                if compatibility_issues:
+                    for issue in compatibility_issues:
+                        console.print(f"  {issue}")
+                else:
+                    console.print(
+                        "  [green]✓[/green] Audio appears to be compatible "
+                        "with Deepgram"
+                    )
 
-            # Encoding suggestions
-            self._suggest_encoding(audio_info)
+                # Encoding suggestions
+                self._suggest_encoding(audio_info)
 
             return AudioDebugResult(
                 status="success",
@@ -510,7 +538,7 @@ class AudioCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(
+            status_console.print(
                 Panel(
                     f"[red]✗ Error analyzing audio file[/red]\n\n[dim]{e!s}[/dim]",
                     title="Analysis Failed",

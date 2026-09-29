@@ -316,8 +316,12 @@ dg keys --list -o csv
 dg usage --last-week -o yaml
 ```
 
-When running in a non-TTY environment (pipes, CI, or AI coding tools), the CLI
-automatically switches to structured JSON output with plain-text status messages.
+In CI, in AI coding tools, and in any fully non-interactive environment with
+no terminal attached (cron, systemd, `docker run` without `-t`), the CLI
+detects the context and automatically switches to structured JSON output with
+plain-text status messages. A plain pipe on its own does not trigger this —
+`dg projects | jq` from an interactive shell still gets the human-readable
+table, so pass `-o json` explicitly when you are piping by hand.
 
 ### Exit codes
 
@@ -334,8 +338,14 @@ Note that `dg` reports `2` for an interrupt rather than the shell's
 conventional `130`, so the code is the same whether the cancellation came from
 Ctrl-C or from declining a prompt.
 
-If a CI step relied on `dg` always exiting `0` (every command did, before
-0.3.0), it will now fail where it previously passed silently.
+Human-readable status and error messages go to stderr, and stdout carries the
+result. With an explicit structured-output mode, authentication-guard failures
+and commands that return an error result write a payload with `"status":
+"error"` to stdout — authentication failures, `dg ffprobe`, and `dg debug
+audio` included. Usage errors and handler-raised exceptions report on stderr
+and can leave stdout empty. Branch on the exit code rather than on whether
+stdout parsed. If a CI step relied on `dg` always exiting `0` (every command
+did, before 0.3.0), it will now fail where it previously passed silently.
 
 ### Forcing non-interactive mode
 
@@ -343,7 +353,7 @@ Three explicit ways to skip every prompt and run with defaults — useful from a
 real terminal where auto-detection wouldn't otherwise trigger:
 
 ```bash
-# Global flag (works at any position)
+# Global flag (before any command, or after a leaf command)
 dg --non-interactive listen recording.wav
 dg listen --non-interactive recording.wav
 
@@ -395,10 +405,14 @@ The CLI phones home anonymous error reports to help us catch crashes and regress
 
 ### Opt out
 
-Persistent (recommended):
+Persistent (recommended) — add this to your `config.yaml`
+(`~/.config/deepctl/config.yaml` on Linux,
+`~/Library/Application Support/deepctl/config.yaml` on macOS,
+`%LOCALAPPDATA%\deepgram\deepctl\config.yaml` on Windows):
 
-```bash
-dg config set telemetry.enabled false
+```yaml
+telemetry:
+  enabled: false
 ```
 
 One-shot (CI, scripts, single command):

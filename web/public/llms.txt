@@ -27,12 +27,12 @@
 - `dg api <endpoint>` — Direct authenticated HTTP proxy to any Deepgram endpoint
 - `dg whoami` — Show current auth status, profile, and key source
 - `dg completion bash|zsh|fish` — Generate shell completion scripts
-- `dg --agent-friendly` — Output machine-readable JSON metadata for any command
+- `dg <command> --agent-friendly` — Output machine-readable JSON metadata for that command
 
 ## Key Features
 
-- Auto-detects AI agent context (Claude Code, Aider, Codex, Gemini) — disables prompts, outputs JSON, routes status to stderr
-- Multiple output formats: `--output json|yaml|table|csv`
+- Auto-detects AI agent context (Claude Code, Aider, Codex) and fully non-interactive environments — disables prompts, outputs JSON, routes status to stderr
+- Multiple output formats: `dg -o json|yaml|table|csv <command>` (before the command or after a leaf command without its own output option; Speak's `-o` is an audio-file path)
 - Named credential profiles for multi-environment workflows
 - Plugin system: `dg plugin install <package>` installs community extensions in isolated venv
 - `--dry-run` on all destructive operations (key deletion, member removal)
