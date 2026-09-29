@@ -5,8 +5,8 @@
 
 ### Bug Fixes
 
-* **update,skills:** exit 1 when the command fails ([1799c21](https://github.com/deepgram/cli/commit/1799c213911f2fbc1d0c2430bb3ce7d4389c7afc))
-* **update,skills:** exit 2 when the user declines, as documented ([0497ac1](https://github.com/deepgram/cli/commit/0497ac1892333c09d2a482f0b10ccd59d1f1dba2))
+* **skills:** return exit code 1 when a skills command fails so automation can detect the error ([1799c21](https://github.com/deepgram/cli/commit/1799c213911f2fbc1d0c2430bb3ce7d4389c7afc))
+* **skills:** return exit code 2 when a skills install is cancelled ([0497ac1](https://github.com/deepgram/cli/commit/0497ac1892333c09d2a482f0b10ccd59d1f1dba2))
 
 ## [0.0.7](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.6...deepctl-cmd-skills-v0.0.7) (2026-08-17)
 
