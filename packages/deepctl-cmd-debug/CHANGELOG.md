@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-cmd-debug-v0.1.12...deepctl-cmd-debug-v0.1.13) (2026-09-29)
+
+
+### Bug Fixes
+
+* **commands:** correct advertised examples that don't parse ([1b3a738](https://github.com/deepgram/cli/commit/1b3a73866637d961e27a30f55edfa206fac6191f))
+* keep stdout parseable, correct advertised examples and the auto-JSON claim ([#107](https://github.com/deepgram/cli/issues/107)) ([9d434a3](https://github.com/deepgram/cli/commit/9d434a3b8cf4fb2d5aa2777eace35b969df9834e))
+
 ## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-cmd-debug-v0.1.11...deepctl-cmd-debug-v0.1.12) (2026-03-31)
 
 

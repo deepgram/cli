@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2](https://github.com/deepgram/cli/compare/v0.3.1...v0.3.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* keep stdout parseable, correct advertised examples and the auto-JSON claim ([#107](https://github.com/deepgram/cli/issues/107)) ([9d434a3](https://github.com/deepgram/cli/commit/9d434a3b8cf4fb2d5aa2777eace35b969df9834e))
+
+
+### Documentation
+
+* **llms:** qualify the command-group flag rule ([395841e](https://github.com/deepgram/cli/commit/395841e421d132fe0c36829e36bd6756d5b14f79))
+
 ## [0.3.1](https://github.com/deepgram/cli/compare/v0.3.0...v0.3.1) (2026-09-23)
 
 
