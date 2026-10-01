@@ -1730,7 +1730,7 @@ class TestSpeakCommand:
 
         assert result is not None
         assert result.status == "error"
-        assert "can only play PCM/WAV" in result.message
+        assert "cannot decode mp3" in result.message
         mock_client.speak_text.assert_not_called()
 
 
@@ -1817,13 +1817,45 @@ class TestAudioPlayerHelpers:
         assert aura_raw is not None
         assert "no container" in aura_raw
 
-    def test_check_playable_rejects_compressed_audio_on_pcm_only_players(self):
-        for player in ("paplay", "aplay"):
+    def test_check_playable_aplay_rejects_every_compressed_encoding(self):
+        for encoding in ("mp3", "aac", "opus", "flac"):
             problem = _check_playable(
-                player, is_flux=False, encoding="mp3", container=None
+                "aplay", is_flux=False, encoding=encoding, container=None
             )
             assert problem is not None
-            assert "can only play PCM/WAV" in problem
+            assert f"cannot decode {encoding}" in problem
+            assert "linear16 (WAV)" in problem
+
+    def test_check_playable_paplay_decodes_flac_and_ogg_but_not_mp3_or_aac(self):
+        """paplay reads FLAC and Ogg through libsndfile; only mp3/aac are out.
+
+        Regression for the review finding that paplay was gated like aplay and
+        refused FLAC and Opus it can play.
+        """
+        for encoding in ("flac", "opus"):
+            assert (
+                _check_playable(
+                    "paplay", is_flux=False, encoding=encoding, container=None
+                )
+                is None
+            )
+        for encoding in ("mp3", "aac"):
+            problem = _check_playable(
+                "paplay", is_flux=False, encoding=encoding, container=None
+            )
+            assert problem is not None
+            assert f"'paplay' cannot decode {encoding}" in problem
+            assert "flac" in problem and "opus" in problem
+
+    def test_check_playable_ffplay_and_afplay_accept_every_compressed_encoding(self):
+        for player in ("ffplay", "afplay"):
+            for encoding in ("mp3", "aac", "opus", "flac"):
+                assert (
+                    _check_playable(
+                        player, is_flux=False, encoding=encoding, container=None
+                    )
+                    is None
+                )
 
     def test_play_audio_pipes_to_stdin_player(self, stub_stdin_player):
         """The bytes handed to a stdin player are exactly the audio."""

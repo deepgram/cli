@@ -214,9 +214,11 @@ dg speak "Hola, bienvenido a Deepgram" -o hola.mp3 -m aura-2-selena-es
 `--play` uses the first available system player (`ffplay`, `afplay`, `paplay`,
 or `aplay`); install `ffmpeg` if none is present. With the Flux default the
 audio is streamed into the player as it arrives, so playback starts at
-first-audio latency rather than after the whole utterance. `paplay` and `aplay`
-decode PCM/WAV only, so playing Aura's MP3 output needs `ffplay` (or `afplay`
-on macOS).
+first-audio latency rather than after the whole utterance. Each fallback
+player is checked against the requested format before the API call: `aplay`
+plays PCM/WAV only and `paplay` adds FLAC and Opus but not MP3 or AAC, while
+`ffplay` and `afplay` (macOS) play every format. Playing Aura's default MP3 on
+Linux needs `ffplay` or `--encoding flac`.
 
 ### Text Intelligence
 

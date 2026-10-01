@@ -22,6 +22,7 @@ from deepctl_core import (
     Config,
     DeepgramClient,
     get_output_format,
+    get_status_console,
 )
 from rich.console import Console
 from rich.markup import escape
@@ -32,7 +33,7 @@ from .models import SpeakResult, SpeakVoicesResult, VoiceInfo
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-console = Console(stderr=True)
+console = get_status_console()
 # Tables and other stdout-bound rendering (only used when no audio goes to
 # stdout, i.e. --list-voices).
 stdout_console = Console()
@@ -63,16 +64,22 @@ _STDIN_PLAYER_ARGV = {
 # Players with no stdin mode, which are handed a temp file by path instead.
 _FILE_PLAYER_ARGV = {"afplay": ["afplay"]}
 
-# paplay and aplay decode PCM/WAV only -- they cannot play a compressed
-# container such as Aura's default mp3.
-_PCM_ONLY_PLAYERS = ("paplay", "aplay")
-
 # Compressed, self-describing encodings: a player can sniff these from the
 # byte stream. The PCM encodings cannot be sniffed — Speak v1 wraps them in a
 # WAV container unless `--container none` is passed, and Flux wraps its
 # linear16 stream itself.
 _COMPRESSED_ENCODINGS = ("mp3", "aac", "opus", "flac")
 _PCM_ENCODINGS = ("linear16", "mulaw", "alaw")
+
+# Compressed encodings each fallback player cannot decode, checked before the
+# API call. ffplay (ffmpeg) and afplay (CoreAudio) play everything deepctl
+# emits, so they have no entry. paplay decodes through libsndfile, which reads
+# WAV, FLAC, and Ogg (Vorbis and Opus) but not mp3 or aac on the distro builds
+# in common use. aplay plays PCM/WAV only.
+_UNPLAYABLE_BY_PLAYER: dict[str, tuple[str, ...]] = {
+    "paplay": ("mp3", "aac"),
+    "aplay": _COMPRESSED_ENCODINGS,
+}
 
 # Encoding/container -> temp-file suffix, so the temp file handed to afplay is
 # sniffed correctly by CoreAudio.
@@ -145,10 +152,17 @@ def _check_playable(
             "--container wav (Aura), or save it with -o."
         )
 
-    if compressed and player in _PCM_ONLY_PLAYERS:
+    unplayable = _UNPLAYABLE_BY_PLAYER.get(player, ())
+    if compressed and eff_encoding in unplayable:
+        playable = ", ".join(
+            "linear16 (WAV)" if e == "linear16" else e
+            for e in ("linear16", *_COMPRESSED_ENCODINGS)
+            if e not in unplayable
+        )
         return (
-            f"'{player}' can only play PCM/WAV audio, not {eff_encoding}. "
-            "Install ffmpeg (ffplay) to play it, or save it with -o."
+            f"'{player}' cannot decode {eff_encoding}; it plays {playable}. "
+            "Pick one of those with --encoding, install ffmpeg (ffplay) to play "
+            f"{eff_encoding}, or save it with -o."
         )
     return None
 
