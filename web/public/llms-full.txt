@@ -144,10 +144,12 @@ ffmpeg -i audio.mp3 -f s16le -ar 16000 -ac 1 - | dg listen --encoding linear16 -
 ## Text-to-Speech
 
 ```bash
+dg speak "Hello from Deepgram" --play            # Synthesize and play it
+dg speak --list-voices                            # Discover voices
 dg speak "Hello from Deepgram"
-dg speak "Hello" --output output.mp3
-dg speak "Hello" | ffplay -nodisp -autoexit -   # Pipe to player
-echo "Hello world" | dg speak                    # Stdin input
+dg speak "Hello" --output output.wav              # Flux emits WAV; use -m aura-* for mp3
+dg speak "Hello" | ffplay -nodisp -autoexit -    # Pipe to player
+echo "Hello world" | dg speak                     # Stdin input
 dg speak --file script.txt                        # From file
 ```
 
@@ -161,6 +163,8 @@ dg speak --file script.txt                        # From file
 | `--encoding` | Audio encoding — Aura: mp3, linear16, flac, mulaw, alaw, opus, aac; Flux: linear16 (default), mulaw, alaw |
 | `--container` | Audio container — none, wav, ogg (Aura only; Flux auto-wraps linear16 in WAV) |
 | `--file` | Read text from file |
+| `--play` | Play the audio through a local player (ffplay, afplay, paplay, aplay); combine with `--output` to save and play |
+| `--list-voices` | List available TTS voices and exit, without generating speech |
 
 ---
 
