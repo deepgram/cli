@@ -17,7 +17,15 @@ from deepctl_core.auth import AuthManager
 from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
-from deepctl_core.output import print_error, print_info, print_success, print_warning
+from deepctl_core.output import (
+    get_console,
+    get_status_console,
+    is_agentic,
+    print_error,
+    print_info,
+    print_success,
+    print_warning,
+)
 from deepctl_core.plugin_env import (
     PLUGIN_DIR,
     PLUGIN_STATE_FILE,
@@ -27,6 +35,12 @@ from deepctl_core.plugin_env import (
     get_venv_python,
     is_frozen,
     save_plugin_state,
+)
+from deepctl_core.skill_generator import (
+    SkillsStateError,
+    SkillsStateLockTimeout,
+    skills_state_file,
+    with_advice,
 )
 from rich.console import Console
 from rich.table import Table
@@ -41,6 +55,77 @@ from .models import (
 )
 
 console = Console()
+
+
+def _removal_finished(display_name: str) -> str:
+    """What the refresh says after finishing a remove that had failed."""
+    return (
+        f"{display_name} skills: finished the earlier 'dg skills remove', "
+        "so none were reinstalled."
+    )
+
+
+def _skills_warning(message: str) -> None:
+    """A warning from the skills refresh, always on stderr.
+
+    ``print_warning`` writes to stdout outside agentic mode, and the
+    README promises these warnings on stderr. Same glyph and prefix as
+    that helper, and still silenced by ``--quiet``.
+    """
+    if get_console().quiet:
+        return
+    get_status_console().print(
+        f"WARN: {message}" if is_agentic() else f"[yellow]⚠[/yellow] {message}"
+    )
+
+
+def _skills_info(message: str) -> None:
+    """An informational line from the skills refresh, on stderr like the rest."""
+    if get_console().quiet:
+        return
+    get_status_console().print(
+        f"INFO: {message}" if is_agentic() else f"[blue]ℹ[/blue] {message}"
+    )
+
+
+def _refresh_ref(installed: dict[str, Any]) -> str | None:
+    """The ref a plugin refresh reinstalls, or None for core's default.
+
+    The rule ``dg skills update`` applies in ``SkillsCommand._update_ref``,
+    minus ``--ref``, which a plugin command does not take. That method
+    lives in deepctl-cmd-skills, which this package does not depend on,
+    so the rule is restated here rather than imported:
+    ``DEEPCTL_SKILLS_REF`` wins (core resolves it from ``None``), then the
+    ref every recorded tool agrees on, then the pinned release. Without
+    the middle step a refresh moved an install from ``main`` back to the
+    pinned tag.
+    """
+    import os
+
+    from deepctl_core.skill_bundle import REF_ENV_VAR
+
+    if os.environ.get(REF_ENV_VAR, "").strip():
+        return None
+    recorded = {
+        ref
+        for info in installed.values()
+        if isinstance(info, dict)
+        and isinstance(ref := info.get("skills_ref"), str)
+        and ref
+    }
+    if len(recorded) == 1:
+        return recorded.pop()
+    if len(recorded) > 1:
+        _skills_warning(
+            "The skill records name more than one deepgram/skills ref "
+            f"({', '.join(sorted(recorded))}), so the refresh uses the pinned "
+            "release. Run 'dg skills update --ref REF' to choose one."
+        )
+    return None
+
+
+class _NothingToRefresh(Exception):
+    """The records re-read under the lock no longer ask for a refresh."""
 
 
 class PluginCommand(BaseGroupCommand):
@@ -1171,37 +1256,224 @@ except:
         return "varies"
 
     def _maybe_update_skills(self) -> None:
-        """Regenerate AI CLI skills if installed (best-effort)."""
+        """Regenerate AI CLI skills if installed (best-effort).
+
+        Best-effort means the plugin operation's exit code never depends on
+        this. It does not mean silent: a failure here is printed as a
+        warning naming what went wrong, with 'dg skills install' as the
+        retry.
+        """
+        state_file = str(skills_state_file())
+
+        def not_a_map() -> Exception:
+            return SkillsStateError(
+                f"'installed_skills' in {state_file} is not a set of entries."
+            )
+
         try:
+            from deepctl_core.skill_bundle import (
+                SkillFetchError,
+                SkillRefInvalidError,
+                SkillRefNotFoundError,
+            )
             from deepctl_core.skill_generator import (
-                _commands_hash,
+                SkillWriteError,
                 collect_command_metadata,
                 get_all_generators,
                 get_skills_state,
-                save_skills_state,
+                install_skills_for,
+                removals_finished_by,
             )
 
+            # A first look, without the lock: most plugin operations find
+            # nothing recorded and return here without holding anything.
             state = get_skills_state()
-            if not state.get("installed_skills") or not state.get("auto_update", True):
+            if not state.get("auto_update", True) or "installed_skills" not in state:
+                return
+            installed = state["installed_skills"]
+            if not isinstance(installed, dict):
+                # Damaged, not empty: warned the way an unreadable file
+                # is, by the state-error branch below, rather than skipped
+                # in silence.
+                raise not_a_map()
+            if not installed:
                 return
 
-            commands = collect_command_metadata()
-            version = importlib.metadata.version("deepctl")
+            # A development checkout has no installed `deepctl`
+            # distribution. That is not a reason to skip the refresh, and
+            # letting it fall through to the broad except below reported
+            # a packaging detail as a skills failure.
+            try:
+                version = importlib.metadata.version("deepctl")
+            except importlib.metadata.PackageNotFoundError:
+                version = "0.0.0"
+
             generators = {g.cli_name: g for g in get_all_generators()}
+            # Every tool already recorded, as 'dg skills update' builds
+            # its list. One with no skills directory is handed on too:
+            # core clears its deepctl <= 0.3.0 files and drops the record
+            # nothing was ever installed for, as update does, so the
+            # refresh does not leave those files behind for update alone.
+            targets = [
+                gen
+                for cli_name in installed
+                if (gen := generators.get(cli_name)) is not None
+            ]
+            if not targets:
+                return
 
-            for cli_name, info in state["installed_skills"].items():
-                gen = generators.get(cli_name)
-                if gen:
-                    paths = gen.install(commands, version)
-                    info.update(
-                        {
-                            "paths": [str(p) for p in paths],
-                            "version": version,
-                            "commands_hash": _commands_hash(commands),
-                        }
+            def load_state() -> dict[str, Any]:
+                # Called by the installer under its lock, after the fetch.
+                # The copy above was read without the lock, and saving it
+                # would overwrite whatever another deepctl recorded since.
+                fresh = get_skills_state()
+                records = fresh.get("installed_skills")
+                if "installed_skills" in fresh and not isinstance(records, dict):
+                    raise not_a_map()
+                if not records or not fresh.get("auto_update", True):
+                    raise _NothingToRefresh
+                return fresh
+
+            # The shared helper 'dg skills update' uses, so a refresh
+            # triggered by a plugin change obeys the same contract: one
+            # fetch with no lock held, then every destination preflighted
+            # and the ownership record saved as each tool lands, under
+            # the lock. Best-effort only in that a failure is reported
+            # instead of failing the plugin command.
+            refresh_ref = _refresh_ref(installed)
+
+            def fetch() -> list[Any]:
+                # Core's default fetch, plus where the ref came from, so a
+                # 404 names the skill records rather than every source.
+                from deepctl_core.skill_generator import fetch_repo_skills
+
+                return fetch_repo_skills(
+                    refresh_ref,
+                    force=True,
+                    ref_source=(
+                        f"the last install's record in {state_file}"
+                        if refresh_ref is not None
+                        else None
+                    ),
+                )
+
+            try:
+                report = install_skills_for(
+                    targets,
+                    {},
+                    commands=collect_command_metadata(),
+                    version=version,
+                    ref=refresh_ref,
+                    fetch=fetch,
+                    best_effort=True,
+                    load_state=load_state,
+                    # A tool removed while the download ran is no longer
+                    # recorded by the time core re-reads; leave it alone.
+                    only_recorded=True,
+                )
+            except Exception as exc:
+                # A remove left pending was finished before this failed.
+                # It is done and saved, so say so ahead of the failure,
+                # which the handlers below report.
+                for _cli, display_name in removals_finished_by(exc):
+                    _skills_info(_removal_finished(display_name))
+                if isinstance(exc, _NothingToRefresh):
+                    return
+                if not isinstance(exc, SkillFetchError):
+                    raise
+                # Nothing was written, so the records still describe
+                # what is on disk. Say the refresh did not happen. A ref
+                # missing upstream, or one refused for its shape, fails the
+                # same way on every retry, so those get the way to choose
+                # another ref instead.
+                _skills_warning(
+                    with_advice(
+                        f"AI assistant skills not updated: {exc}",
+                        exc.advice("dg skills update")
+                        if isinstance(
+                            exc, (SkillRefNotFoundError, SkillRefInvalidError)
+                        )
+                        else "Run 'dg skills update' to retry.",
                     )
+                )
+                return
 
-            save_skills_state(state)
-            console.print("[dim]AI assistant skills updated[/dim]")
-        except Exception:
-            pass  # Non-fatal
+            for name in report.skipped_unrecorded:
+                _skills_info(
+                    f"{name} skills: removed while the update ran, so they "
+                    "were left alone."
+                )
+            # A recorded skill the ref no longer ships was deleted; say so.
+            for notice in report.pruned_notices:
+                _skills_info(notice)
+            # A record that is a remove still to finish was retried, not
+            # reinstalled: the user asked for those skills to go.
+            for _cli, display_name in report.removals_finished:
+                _skills_info(_removal_finished(display_name))
+            for cli, display_name in report.removals_pending:
+                _skills_warning(
+                    f"{display_name} skills: an earlier 'dg skills remove' has "
+                    "not finished, so none were reinstalled. Fix the "
+                    f"permissions and run 'dg skills remove --cli {cli}' again."
+                )
+            for display_name, path in report.conflicts:
+                # Not deepctl's folder to replace. Left alone, and so is
+                # the record describing the install that is on disk.
+                # Move it and the next update installs there, as it does
+                # for any recorded tool whose folder is missing.
+                _skills_warning(
+                    f"Skipped {display_name} skills: {path} is not deepctl's "
+                    "to replace. Move it aside, then run 'dg skills update'."
+                )
+            for display_name, failure in report.failures:
+                _skills_warning(
+                    with_advice(
+                        f"{display_name} skills not updated: {failure}",
+                        # Names the skills directory: retrying as-is
+                        # fails the same way until its permissions change.
+                        failure.advice("dg skills update")
+                        if isinstance(failure, SkillWriteError)
+                        else "Run 'dg skills update' to retry.",
+                    )
+                )
+            # A deepctl <= 0.3.0 file the cleanup found but would not
+            # touch, because the content was not deepctl's or the file
+            # could not be edited safely. Named, so it is not a surprise.
+            for display_name, path, reason in report.legacy_skipped:
+                _skills_warning(f"{display_name}: left {path} in place: {reason}")
+            if report.written:
+                # stderr like every other line of this step, so
+                # `-o json plugin ...` leaves stdout to the payload.
+                _skills_info("AI assistant skills updated")
+        except SkillsStateLockTimeout as exc:
+            # Before its parent class: the file is fine, it is busy. "Fix
+            # or delete the file" would have the user delete good records.
+            # Core's message already says to wait; only the command is ours.
+            _skills_warning(
+                with_advice(
+                    f"AI assistant skills not updated: {exc}",
+                    "Then run 'dg skills update'.",
+                )
+            )
+        except SkillsStateError as exc:
+            # Core's message already names the file; one from anywhere
+            # else gets it appended, so the user knows what to fix.
+            detail = str(exc)
+            if str(state_file) not in detail:
+                detail = f"{detail} (deepctl cannot read {state_file})"
+            # Core's message already says how to fix it; adding a second,
+            # differently worded fix read as two instructions.
+            if "dg skills install" not in detail:
+                detail = with_advice(
+                    detail, "Fix or delete that file, then run 'dg skills install'."
+                )
+            _skills_warning(f"AI assistant skills not updated: {detail}")
+        except Exception as exc:
+            # Non-fatal for the plugin operation, which has already
+            # succeeded. Reported rather than swallowed.
+            _skills_warning(
+                with_advice(
+                    f"AI assistant skills not updated: {type(exc).__name__}: {exc}",
+                    "Run 'dg skills install' to retry.",
+                )
+            )

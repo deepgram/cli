@@ -1,5 +1,6 @@
 """Login command for deepctl."""
 
+from pathlib import Path
 from typing import Any
 
 from deepctl_core import (
@@ -12,12 +13,42 @@ from deepctl_core import (
     ProfilesResult,
     get_output_format,
 )
+from deepctl_core.output import get_console, get_status_console, is_agentic
+from deepctl_core.skill_generator import (
+    SkillsStateError,
+    SkillsStateLockTimeout,
+    skills_state_file,
+    with_advice,
+)
 from rich.console import Console
 from rich.prompt import Prompt
 
 from .models import LoginResult, LogoutResult, WhoamiResult
 
 console = Console()
+
+
+def _skills_warning(message: str) -> None:
+    """A warning from the post-login skills step, always on stderr.
+
+    ``print_warning`` writes to stdout outside agentic mode, and the
+    README promises these warnings on stderr. Same glyph and prefix as
+    that helper, and still silenced by ``--quiet``.
+    """
+    if get_console().quiet:
+        return
+    get_status_console().print(
+        f"WARN: {message}" if is_agentic() else f"[yellow]⚠[/yellow] {message}"
+    )
+
+
+def _skills_info(message: str) -> None:
+    """An informational line from the skills step, on stderr like the rest."""
+    if get_console().quiet:
+        return
+    get_status_console().print(
+        f"INFO: {message}" if is_agentic() else f"[blue]ℹ[/blue] {message}"
+    )
 
 
 class LoginCommand(BaseCommand):
@@ -186,12 +217,16 @@ class LoginCommand(BaseCommand):
         if not sys.stdout.isatty() or not getattr(self, "_guided", True):
             return  # Non-interactive — skip
 
+        state_file = str(skills_state_file())
+
         try:
             from deepctl_core.skill_generator import (
                 detect_ai_clis,
                 get_skills_state,
             )
 
+            # A first look, before the prompt. Nothing is decided on this
+            # copy except whether to ask at all.
             state = get_skills_state()
             if state.get("installed_skills"):
                 return  # Skills already installed
@@ -211,10 +246,16 @@ class LoginCommand(BaseCommand):
                 console.print(f"  [green]{i}.[/green] {gen.display_name}")
             console.print()
 
-            raw = Prompt.ask(
-                "Install skills for (comma-separated numbers, [bold]all[/bold], or [bold]none[/bold])",
-                default="all",
-            )
+            try:
+                raw = Prompt.ask(
+                    "Install skills for (comma-separated numbers, [bold]all[/bold], or [bold]none[/bold])",
+                    default="all",
+                )
+            except (EOFError, KeyboardInterrupt):
+                # Nobody answered: stdin closed, or Ctrl-C at the prompt.
+                # The login already succeeded, so this is a "none", not
+                # a failed skills install.
+                raw = "none"
             raw = raw.strip().lower()
 
             if raw in ("none", "n", "0", ""):
@@ -237,43 +278,156 @@ class LoginCommand(BaseCommand):
                 console.print("[dim]No tools selected.[/dim]")
                 return
 
-            # Install skills for selected tools
+            # Install skills for selected tools. The same shared helper
+            # 'dg skills install' uses, so login cannot drift from the
+            # ownership contract: one fetch for every tool, every
+            # destination preflighted before anything is written, and the
+            # record saved as each tool lands rather than at the end.
+            # Best-effort here only in that a failure is reported and the
+            # login still succeeds -- never in that a folder is written
+            # without deepctl recording that it owns it.
+            from deepctl_core.skill_bundle import (
+                SkillFetchError,
+                SkillRefInvalidError,
+                SkillRefNotFoundError,
+            )
             from deepctl_core.skill_generator import (
-                _commands_hash,
+                SkillWriteError,
                 collect_command_metadata,
-                save_skills_state,
+                install_skills_for,
             )
 
             console.print("\n[blue]Installing Deepgram skills...[/blue]")
 
             import importlib.metadata
-            from datetime import datetime, timezone
 
-            commands = collect_command_metadata()
             try:
                 version = importlib.metadata.version("deepctl")
             except importlib.metadata.PackageNotFoundError:
                 version = "0.0.0"
 
-            for gen in selected:
-                paths = gen.install(commands, version)
-                cmd_hash = _commands_hash(commands)
-                state["installed_skills"][gen.cli_name] = {
-                    "paths": [str(p) for p in paths],
-                    "installed_at": datetime.now(timezone.utc).isoformat(),
-                    "version": version,
-                    "commands_hash": cmd_hash,
-                }
+            def announce(gen: Any, paths: list[Path]) -> None:
                 for p in paths:
                     console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
 
-            save_skills_state(state)
-            console.print(
-                "\n[green]Skills installed![/green] "
-                "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+            def load_state() -> dict[str, Any]:
+                # Called by the installer under its lock, after the fetch.
+                # The copy read above predates the prompt, which can sit
+                # open for minutes: saving it would overwrite whatever
+                # another deepctl recorded meanwhile. Records that are not
+                # a map are refused rather than replaced with an empty one.
+                fresh = get_skills_state()
+                if "installed_skills" in fresh and not isinstance(
+                    fresh["installed_skills"], dict
+                ):
+                    raise SkillsStateError(
+                        f"'installed_skills' in {state_file} is not a set of entries."
+                    )
+                return fresh
+
+            # No lock held here: the installer fetches first and only then
+            # takes it, so a slow download never makes another deepctl wait.
+            try:
+                report = install_skills_for(
+                    selected,
+                    {},
+                    commands=collect_command_metadata(),
+                    version=version,
+                    on_installed=announce,
+                    best_effort=True,
+                    load_state=load_state,
+                )
+            except SkillFetchError as exc:
+                # Nothing was written, so there is no ownership to save.
+                # Say so rather than leaving the banner above unanswered.
+                # A ref missing upstream (DEEPCTL_SKILLS_REF or the pinned
+                # tag), or a DEEPCTL_SKILLS_REF refused for its shape before
+                # any download, fails the same way on every retry, so those
+                # get the way to choose another ref instead. Anything else
+                # is a download that failed, and a retry can work.
+                _skills_warning(
+                    with_advice(
+                        f"Could not install the Deepgram skills: {exc}",
+                        exc.advice("dg skills install")
+                        if isinstance(
+                            exc, (SkillRefNotFoundError, SkillRefInvalidError)
+                        )
+                        else "Run 'dg skills install' to retry.",
+                    )
+                )
+                return
+
+            for gen in report.unsupported:
+                _skills_warning(f"{gen.manual_hint()}")
+            # A recorded skill the ref no longer ships was deleted; say so.
+            for notice in report.pruned_notices:
+                _skills_info(notice)
+            # Someone else's skill folder has one of these names, so the
+            # tool was skipped rather than have their work overwritten.
+            for display_name, path in report.conflicts:
+                # The same collision 'dg skills install' refuses, and the
+                # same way out: move the folder, then install again.
+                _skills_warning(
+                    f"Skipped {display_name}: {path} is not deepctl's to "
+                    "replace. Move it aside, then run 'dg skills install'."
+                )
+            for display_name, failure in report.failures:
+                _skills_warning(
+                    with_advice(
+                        f"{display_name}: {failure}",
+                        # Names the skills directory: retrying as-is
+                        # fails the same way until its permissions change.
+                        failure.advice("dg skills install")
+                        if isinstance(failure, SkillWriteError)
+                        else "Run 'dg skills install' to retry.",
+                    )
+                )
+            # A deepctl <= 0.3.0 file the cleanup found but would not
+            # touch, because the content was not deepctl's or the file
+            # could not be edited safely. Named, so it is not a surprise.
+            for display_name, path, reason in report.legacy_skipped:
+                _skills_warning(f"{display_name}: left {path} in place: {reason}")
+
+            if report.total_written:
+                console.print(
+                    "\n[green]Skills installed![/green] "
+                    "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+                )
+        except SkillsStateLockTimeout as exc:
+            # Before its parent class: the file is fine, it is busy. "Fix
+            # or delete the file" would have the user delete good records.
+            # Core's message already says to wait; only the command is ours.
+            _skills_warning(
+                with_advice(
+                    f"Skipped the Deepgram skills install: {exc}",
+                    "Then run 'dg skills install'.",
+                )
             )
-        except Exception:
-            pass  # Best-effort — never fail the login
+        except SkillsStateError as exc:
+            # The login succeeded; the skills step did not run. Say so, and
+            # name the file (core's message already does; a message from
+            # anywhere else gets it appended), rather than going quiet.
+            detail = str(exc)
+            if str(state_file) not in detail:
+                detail = f"{detail} (deepctl cannot read {state_file})"
+            # Core's message already says how to fix it; adding a second,
+            # differently worded fix read as two instructions.
+            if "dg skills install" not in detail:
+                detail = with_advice(
+                    detail, "Fix or delete that file, then run 'dg skills install'."
+                )
+            _skills_warning(f"Skipped the Deepgram skills install: {detail}")
+        except Exception as exc:
+            # Best-effort: a skills problem never fails the login. But it is
+            # reported -- a silent pass left the user with nothing installed
+            # and no hint that anything had gone wrong.
+            _skills_warning(
+                with_advice(
+                    f"Could not install the Deepgram skills: "
+                    f"{type(exc).__name__}: {exc}",
+                    "Run 'dg skills install' to retry.",
+                )
+            )
 
     def _cli_auth(
         self,
