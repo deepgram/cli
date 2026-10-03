@@ -275,13 +275,191 @@ Add to your editor's MCP config:
 
 ### AI Tool Integration
 
-Automatically detect and configure AI coding assistants with Deepgram skills.
+Install the Deepgram agent skills from
+[`deepgram/skills`](https://github.com/deepgram/skills) into the AI coding
+tools on this machine. Each skill is installed as a folder, into the
+user-scope skills directory the tool's own documentation names.
 
 ```bash
-dg skills status                          # Detect AI tools
+dg skills status                          # Detect AI tools and show their skills directories
 dg skills setup                           # Interactive setup wizard
 dg skills install --all                   # Install for all detected tools
+dg skills list                            # Show what is installed, and from which ref
+dg skills update                          # Reinstall from upstream
+dg skills remove --all                    # Uninstall (--cli NAME for one tool)
 ```
+
+| Tool | Skills directory |
+| --- | --- |
+| Claude Code | `~/.claude/skills/` |
+| OpenAI Codex | `~/.agents/skills/` |
+| Gemini CLI | `~/.gemini/skills/` |
+| Cursor | `~/.cursor/skills/` |
+| OpenCode | `~/.config/opencode/skills/` |
+| Cline | `~/.cline/skills/` |
+
+Amazon Q Developer and Aider have no skills mechanism, so `dg skills` prints
+`npx skills add deepgram/skills` for those rather than writing a file they
+would not read.
+
+Installs are pinned to a released `deepgram/skills` tag so the same deepctl
+version always installs the same skills. Override with `--ref` or the
+`DEEPCTL_SKILLS_REF` environment variable:
+
+```bash
+dg skills install --all --ref main        # track the upstream default branch
+dg skills update                          # stays on main: update reinstalls the recorded ref
+dg skills update --ref <tag>              # move to a tag explicitly
+```
+
+`install` resolves its ref as `--ref`, then `DEEPCTL_SKILLS_REF`, then the
+pinned tag. `update` adds one step: `--ref`, then `DEEPCTL_SKILLS_REF`, then
+the ref recorded in `skills.json` by the last install, then the pinned tag. So
+an install from a branch stays on that branch until you say otherwise, and
+`update` prints which ref it is updating to and where that choice came from.
+If the recorded tools disagree on the ref, `update` warns and uses the pinned
+release unless `--ref` or `DEEPCTL_SKILLS_REF` is given.
+An empty `--ref ""` is refused with exit 1, since it is more likely a quoting
+slip than a request for the default. An empty or blank `DEEPCTL_SKILLS_REF`
+is treated as unset.
+`dg skills status` and `dg skills list` both show the installed ref.
+
+Those two commands return a document under `-o json` or `-o yaml`, with the
+human table only in the default mode, so they are safe to pipe. `-o table`
+prints the same table as the default mode, and `-o csv` prints one row per
+tool under that table's column names:
+
+```bash
+dg -o json skills status | jq '.tools[].skills_ref'
+dg -o json skills list | jq '.installed[].count'
+dg -o csv skills list
+```
+
+A failed download, an unknown ref, or an upstream manifest that does not match
+the directories it lists is a hard failure (exit 1) with nothing written. A
+partial install is indistinguishable from a complete one once it is on disk.
+When the bad ref came from `DEEPCTL_SKILLS_REF`, whether it is missing upstream
+or not shaped like a ref, the error names the variable and says to set it to
+another ref or unset it.
+
+**deepctl only ever touches skill folder paths it installed.** Those
+directories are shared: your own skills and other publishers' skills live in
+them too. So `dg skills` records every folder it writes in
+`~/.deepctl/skills/skills.json` and works on that list alone.
+
+- `install`, `update` and `setup` refuse to overwrite a folder that is not on
+  the list. If you already have a skill called `api`, the install exits 1 and
+  writes nothing, naming the folder so you can rename it.
+- `remove` deletes only the recorded folders. An unrelated skill in the same
+  directory stays. A recorded folder it *could not* delete, after a permission
+  error or on a read-only mount, stays recorded and `remove` exits 1, so the next
+  `remove` or `update` can still reach it. Dropping the record there would
+  leave Deepgram's own folders behind with nothing able to touch them.
+- `status` counts only the recorded folders, not everything with a `SKILL.md`.
+- A prompt you decline, or one that reads no answer because stdin is at end of
+  input, exits 2 with nothing installed. So does an answer to the
+  `dg skills setup` prompt that names no detected tool, such as `9` with two
+  tools listed. `dg skills install --all` and `dg skills setup --all` install
+  for every detected tool without prompting.
+- `update` installs only the tools still recorded once its download finishes.
+  Remove a tool with `dg skills remove --cli <tool>` while an update is
+  downloading and it stays removed: the update leaves it alone and says so on
+  stderr. The refresh after a plugin change follows the same rule.
+- A skills directory deepctl cannot write to, after a permission error, a full
+  disk or a read-only mount, fails only that tool. `update`, `setup` and
+  `install` without `--cli` still try every other tool, print one line on
+  stderr for each tool that failed naming its skills directory and the
+  reason, then exit 1 saying how many tools were installed and how many
+  failed. Those lines print under `--quiet` too, which silences only the
+  progress around them. A failed tool that was installed before the run stays
+  recorded at its previous release, with any deepctl 0.3.x files still in
+  place, and the exit message names it. Fixing the directory and running the
+  same command again finishes it. `install --cli <tool>` exits 1 with that
+  one tool's error.
+- Those exit codes are for the `dg skills` subcommands. Two other commands
+  install skills. `dg login` offers the same install after a successful
+  login, but only at an interactive prompt and only while nothing is
+  recorded as installed yet. No answer at that prompt, from end of input or
+  Ctrl-C, is the same as answering `none`: nothing is installed and the login
+  still exits 0. `dg plugin install`, `dg plugin update`, and
+  `dg plugin remove` refresh what is already installed, unless `auto_update` is set to `false` in
+  `skills.json`. Both go through the same ownership rules, but any skills
+  problem there, a collision, a download failure, a `skills.json` deepctl
+  cannot read, or a crash in the step itself, prints a warning on stderr that
+  names it and says which `dg skills` command retries it. For a bad
+  `DEEPCTL_SKILLS_REF` it says to change the variable first, since a retry
+  would fail the same way. The warning never changes
+  whether the login or the plugin operation succeeded, or its exit code. Run
+  `dg skills install` to see the error and get the exit code.
+- If you delete `skills.json`, deepctl can no longer prove it installed
+  anything: `remove` deletes nothing and `install` reports the collision rather
+  than reclaiming the folders. Delete them by hand, then install again. A
+  `skills.json` deepctl cannot parse is an error, not a reset: every `dg skills`
+  subcommand exits 1 naming the file, so a hand edit that went wrong cannot
+  quietly turn Deepgram's folders into somebody else's. Under `-o json` or
+  `-o yaml`, `status` and `list` still print their document, with `status`
+  set to `error` and a message naming the file.
+- The list holds *paths*, not fingerprints. Delete a folder deepctl installed
+  and put your own folder, or a file, at the same path without running
+  `dg skills remove --cli <tool>`, and deepctl still counts it as its own: the
+  next `update` replaces it and `remove` deletes it. Where the filesystem
+  ignores case, as macOS and Windows do by default, `API` and `api` are one path
+  for this purpose. So run `dg skills remove --cli <tool>` first, or drop the
+  entry from `skills.json`, before reusing a name deepctl installed under.
+- When a skill deepctl recorded installing is no longer in the deepgram/skills
+  ref being installed, because upstream renamed or retired it, `install`,
+  `update` and `setup` delete that skill folder, and so does the plugin
+  refresh. Only a folder on deepctl's list goes, and each one is named on
+  stderr, for example
+  `Removed retired skill self-hosted from Claude Code (no longer in deepgram/skills@v1.8.0)`.
+  `-q` hides the line, not the deletion, so copy a retired skill somewhere else
+  first if you want to keep it.
+- A *symlink* is the exception: deepctl never writes or deletes through one.
+  Put a symlink where a recorded skill folder was and that path stops being
+  deepctl's: `install`, `update` and `setup` exit 1 naming it rather than
+  replacing it, and `remove` reports where it is, drops it from the list and
+  leaves it on disk rather than following it to whatever it points at. Delete
+  the symlink yourself to hand the name back; until you do, installing under
+  that name keeps failing.
+
+#### Upgrading from deepctl 0.2.16 through 0.3.0
+
+Those versions wrote to paths that are not skills directories, so `install`,
+`update`, `setup` and `remove` clear them for the tools that run. A command
+that exits early, such as an install that hits a collision or cannot download,
+clears nothing. Otherwise four stale skills would sit next to fourteen fresh
+ones. These paths are the only thing `dg skills` touches outside its own skill
+folders and its own `~/.deepctl/` directory, and the list is scoped to what
+0.3.0 wrote. A tool those versions recorded counts as installed, so
+`dg skills update` and the plugin refresh upgrade it to skill folders and clear
+these paths as they go:
+
+| Path | What happens |
+| --- | --- |
+| `~/.claude/commands/deepgram/` | Deletes `api.md`, `docs.md`, `setup-mcp.md`, `starters.md` and `deepgram.md`, but only a file that starts with the header deepctl wrote. A file with one of those names that does not is left in place with a warning that names it. A command you added under any other name stays, and the directory goes only if that empties it. If `deepgram` is itself a symlink, as with dotfiles kept in a repo, nothing is deleted through it |
+| `~/.codex/instructions.md`, `~/.gemini/GEMINI.md`, `~/.opencode/agents.md` | Cuts out only the section between `<!-- BEGIN deepctl CLI Reference (auto-generated by deepctl) -->` and `<!-- END deepctl CLI Reference -->`; the rest of the file is yours and is kept. If the opening marker is there without the closing one, which is what a write cut short leaves behind, everything after it counts as that unfinished section and goes. These files are followed through a symlink, because only deepctl's own marked section is ever touched |
+| `~/.cursor/rules/deepctl.mdc`, `~/.cline/rules/deepctl.md`, `~/.amazonq/rules/deepctl.md` | Deleted, but only when the file starts with the header deepctl wrote. Otherwise it is left in place with a warning that names it. A symlink, or a folder with that name, is never deleted and gets the same warning |
+| `~/.aider.conf.yml` | Drops the stale `read:` entry pointing at deepctl's old conventions file, from a block list, a one-line `[a, b]` list or a single value. Everything else comes back as it was, including comments, spacing and CRLF or LF line endings. A symlink, a file that is not UTF-8 text, a read-only file, or a `read:` list too irregular to edit safely is left in place with a warning that names the entry to remove by hand. A symlinked or non-UTF-8 config that does not mention the entry is left alone with no warning |
+
+A file deepctl finds but does not have permission to read, edit or delete is
+left in place with a warning that names it and the reason. The command carries
+on with every other tool. `install`, `update` and `setup` still exit 0, and so
+do `dg login` and the plugin refresh. Once you fix the permissions, the next
+`dg skills install` or `dg skills update` finishes the cleanup. Aider is the
+exception: deepctl never records it as installed, so after an install only
+`dg skills install --cli aider` retries the `~/.aider.conf.yml` edit.
+
+`remove` exits 1 and keeps that tool recorded, marked as a remove that has not
+finished. `list` and `status` show it as `remove pending`, and `update` retries
+that remove instead of reinstalling the tool's skills. Once you fix the
+permissions, running `dg skills remove --cli <tool>` again finishes the job, and
+so does `dg skills update`. An `install` for that tool clears the mark only once
+it completes; one that fails part-way leaves the tool marked.
+
+deepctl 0.2.15 and earlier wrote one combined file at
+`~/.claude/commands/deepctl.md` instead, with no marker around it. Nothing
+distinguishes it from a `/deepctl` slash command you wrote yourself, so the
+cleanup leaves it alone. Delete it by hand if it is there.
 
 ### Starter Apps
 
@@ -332,7 +510,7 @@ code, not on parsing output:
 | --- | --- |
 | `0` | Success |
 | `1` | Error — a failed command, a crash, or a usage error (bad flag, unknown command) |
-| `2` | Cancelled by the user (Ctrl-C, or declining a confirmation prompt) |
+| `2` | Cancelled by the user (Ctrl-C, declining a confirmation prompt, or a prompt that read no answer because stdin was at end of input) |
 
 Note that `dg` reports `2` for an interrupt rather than the shell's
 conventional `130`, so the code is the same whether the cancellation came from
