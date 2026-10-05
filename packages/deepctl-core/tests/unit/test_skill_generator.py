@@ -172,6 +172,9 @@ class TestRenderDeveloperGuide:
         assert "deepctl CLI" in content
         assert "dg listen" in content
         assert "dg login" in content
+        # The speak quickstart leads with playback and voice discovery.
+        assert 'dg speak "Hello from Deepgram" --play' in content
+        assert "dg speak --list-voices" in content
 
     def test_frontmatter(self):
         content = render_developer_guide("1.0.0", include_frontmatter=True)

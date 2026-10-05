@@ -184,8 +184,15 @@ container so it is directly playable. Pass an `aura-*` model to use the Speak v1
 batch REST API instead, which supports containerized formats like MP3.
 
 ```bash
+# Quickstart — synthesize and hear it straight away
+dg speak "Hello from Deepgram" --play
+
+# Discover voices
+dg speak --list-voices
+
 # Flux TTS (v2, WebSocket streaming) — the default
 dg speak "Hello from Flux" -o hello.wav
+dg speak "Save it and play it" -o hello.wav --play
 # Piped audio is a streaming WAV; -loglevel error hides ffmpeg's cosmetic
 # end-of-stream notice (the audio is complete).
 dg speak "Hello from Flux" | ffplay -loglevel error -nodisp -autoexit -
@@ -203,6 +210,15 @@ echo "Hello" | dg speak -o greeting.mp3 -m aura-2-asteria-en
 # for the full, current list.
 dg speak "Hola, bienvenido a Deepgram" -o hola.mp3 -m aura-2-selena-es
 ```
+
+`--play` uses the first available system player (`ffplay`, `afplay`, `paplay`,
+or `aplay`); install `ffmpeg` if none is present. With the Flux default the
+audio is streamed into the player as it arrives, so playback starts at
+first-audio latency rather than after the whole utterance. Each fallback
+player is checked against the requested format before the API call: `aplay`
+plays PCM/WAV only and `paplay` adds FLAC and Opus but not MP3 or AAC, while
+`ffplay` and `afplay` (macOS) play every format. Playing Aura's default MP3 on
+Linux needs `ffplay` or `--encoding flac`.
 
 ### Text Intelligence
 
