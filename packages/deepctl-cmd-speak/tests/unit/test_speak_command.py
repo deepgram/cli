@@ -1506,7 +1506,7 @@ class TestSpeakCommand:
 
     @patch("deepctl_cmd_speak.command.shutil")
     @patch("deepctl_cmd_speak.command.sys")
-    def test_handle_aura_mp3_play_pipes_container_bytes(
+    def test_handle_aura_play_pipes_container_bytes(
         self,
         mock_sys,
         mock_shutil,
@@ -1516,7 +1516,7 @@ class TestSpeakCommand:
         mock_client,
         stub_stdin_player,
     ):
-        """Explicit Aura mp3 --play pipes the container bytes to the player."""
+        """Aura --play pipes the container bytes (mp3) straight to the player."""
         mock_sys.stdin.isatty.return_value = True
         mock_sys.stdout.isatty.return_value = True
         mock_shutil.which.side_effect = _only("ffplay")
@@ -1529,7 +1529,6 @@ class TestSpeakCommand:
             text="Hello world",
             output=None,
             model="aura-2-asteria-en",
-            encoding="mp3",
             play=True,
         )
 
@@ -1538,82 +1537,6 @@ class TestSpeakCommand:
         assert result.played is True
         assert result.bytes_written == 11
         assert stub_stdin_player.read_bytes() == b"ID3mp3-data"
-
-    @patch("deepctl_cmd_speak.command.shutil")
-    @patch("deepctl_cmd_speak.command.sys")
-    def test_handle_aura_default_play_works_with_aplay(
-        self,
-        mock_sys,
-        mock_shutil,
-        command,
-        mock_config,
-        mock_auth_manager,
-        mock_client,
-        stub_stdin_player,
-        monkeypatch,
-    ):
-        """Aura defaults to Linear16 WAV, which aplay can play."""
-        mock_sys.stdin.isatty.return_value = True
-        mock_sys.stdout.isatty.return_value = True
-        mock_shutil.which.side_effect = _only("aplay")
-        monkeypatch.setitem(_STDIN_PLAYER_ARGV, "aplay", _STDIN_PLAYER_ARGV["ffplay"])
-        wav = b"RIFF" + b"default-aura-wav"
-        mock_client.speak_text.return_value = iter([wav])
-
-        result = command.handle(
-            config=mock_config,
-            auth_manager=mock_auth_manager,
-            client=mock_client,
-            text="Hello world",
-            output=None,
-            model="aura-2-asteria-en",
-            play=True,
-        )
-
-        assert isinstance(result, SpeakResult)
-        assert result.status == "success"
-        assert stub_stdin_player.read_bytes() == wav
-        mock_client.speak_text.assert_called_once_with(
-            text="Hello world",
-            model="aura-2-asteria-en",
-            encoding=None,
-            container=None,
-            sample_rate=None,
-        )
-
-    @patch("deepctl_cmd_speak.command.shutil")
-    @patch("deepctl_cmd_speak.command.sys")
-    def test_handle_aura_default_afplay_gets_wav_temp_file(
-        self,
-        mock_sys,
-        mock_shutil,
-        command,
-        mock_config,
-        mock_auth_manager,
-        mock_client,
-        stub_file_player,
-    ):
-        """Aura's default WAV gets a matching suffix for afplay."""
-        mock_sys.stdin.isatty.return_value = True
-        mock_sys.stdout.isatty.return_value = True
-        mock_shutil.which.side_effect = _only("afplay")
-        wav = b"RIFF" + b"default-aura-wav"
-        mock_client.speak_text.return_value = iter([wav])
-
-        result = command.handle(
-            config=mock_config,
-            auth_manager=mock_auth_manager,
-            client=mock_client,
-            text="Hello world",
-            output=None,
-            model="aura-2-asteria-en",
-            play=True,
-        )
-
-        assert isinstance(result, SpeakResult)
-        assert result.status == "success"
-        assert stub_file_player.copy_path.read_bytes() == wav
-        assert stub_file_player.arg_path.endswith(".wav")
 
     @patch("deepctl_cmd_speak.command.shutil")
     @patch("deepctl_cmd_speak.command.sys")
@@ -1802,45 +1725,12 @@ class TestSpeakCommand:
             text="Hello",
             output=None,
             model="aura-2-asteria-en",
-            encoding="mp3",
             play=True,
         )
 
         assert result is not None
         assert result.status == "error"
         assert "cannot decode mp3" in result.message
-        mock_client.speak_text.assert_not_called()
-
-    @patch("deepctl_cmd_speak.command.shutil")
-    @patch("deepctl_cmd_speak.command.sys")
-    def test_handle_aura_default_play_rejects_raw_container(
-        self,
-        mock_sys,
-        mock_shutil,
-        command,
-        mock_config,
-        mock_auth_manager,
-        mock_client,
-    ):
-        """An explicit raw container makes Aura's default Linear16 unplayable."""
-        mock_sys.stdin.isatty.return_value = True
-        mock_sys.stdout.isatty.return_value = True
-        mock_shutil.which.side_effect = _only("ffplay")
-
-        result = command.handle(
-            config=mock_config,
-            auth_manager=mock_auth_manager,
-            client=mock_client,
-            text="Hello",
-            output=None,
-            model="aura-2-asteria-en",
-            container="none",
-            play=True,
-        )
-
-        assert result is not None
-        assert result.status == "error"
-        assert "raw linear16" in result.message
         mock_client.speak_text.assert_not_called()
 
 
@@ -1888,7 +1778,7 @@ class TestAudioPlayerHelpers:
         assert _play_suffix(is_flux=True, encoding=None, container=None) == ".wav"
         assert _play_suffix(is_flux=True, encoding="mulaw", container=None) == ".raw"
         assert _play_suffix(is_flux=False, encoding="mp3", container=None) == ".mp3"
-        assert _play_suffix(is_flux=False, encoding=None, container=None) == ".wav"
+        assert _play_suffix(is_flux=False, encoding=None, container=None) == ".mp3"
         assert _play_suffix(is_flux=False, encoding=None, container="wav") == ".wav"
         assert _play_suffix(is_flux=False, encoding="opus", container="ogg") == ".ogg"
         assert _play_suffix(is_flux=False, encoding="flac", container=None) == ".flac"
@@ -1910,10 +1800,6 @@ class TestAudioPlayerHelpers:
             is None
         )
         assert (
-            _check_playable("aplay", is_flux=False, encoding=None, container=None)
-            is None
-        )
-        assert (
             _check_playable("afplay", is_flux=False, encoding="mp3", container=None)
             is None
         )
@@ -1926,7 +1812,7 @@ class TestAudioPlayerHelpers:
         assert "raw alaw" in flux_raw
 
         aura_raw = _check_playable(
-            "ffplay", is_flux=False, encoding=None, container="none"
+            "ffplay", is_flux=False, encoding="linear16", container="none"
         )
         assert aura_raw is not None
         assert "no container" in aura_raw

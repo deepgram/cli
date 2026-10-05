@@ -119,7 +119,7 @@ def _play_suffix(*, is_flux: bool, encoding: str | None, container: str | None) 
         return ".wav"
     if container == "ogg":
         return ".ogg"
-    eff_encoding = (encoding or "linear16").lower()
+    eff_encoding = (encoding or "mp3").lower()
     if eff_encoding in _PCM_ENCODINGS:
         # Speak v1 defaults these to a WAV container; `--container none` is
         # the only way to get them bare.
@@ -135,7 +135,7 @@ def _check_playable(
     Checked before the API call so a format the chosen player cannot decode
     fails with an explanation instead of silence or a decoder error.
     """
-    eff_encoding = (encoding or "linear16").lower()
+    eff_encoding = (encoding or ("linear16" if is_flux else "mp3")).lower()
     compressed = eff_encoding in _COMPRESSED_ENCODINGS
 
     # Raw PCM with no container is undetectable: the player has no way to know

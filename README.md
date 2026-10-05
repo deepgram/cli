@@ -217,8 +217,8 @@ audio is streamed into the player as it arrives, so playback starts at
 first-audio latency rather than after the whole utterance. Each fallback
 player is checked against the requested format before the API call: `aplay`
 plays PCM/WAV only and `paplay` adds FLAC and Opus but not MP3 or AAC, while
-`ffplay` and `afplay` (macOS) play every format. Playing Aura MP3 on Linux
-needs `ffplay` or `--encoding flac`.
+`ffplay` and `afplay` (macOS) play every format. Playing Aura's default MP3 on
+Linux needs `ffplay` or `--encoding flac`.
 
 ### Text Intelligence
 
