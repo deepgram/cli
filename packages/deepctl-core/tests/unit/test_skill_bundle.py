@@ -194,12 +194,20 @@ class TestPinnedDefault:
         assert len(download.calls) == 1
         assert (target / "skills" / "api" / "SKILL.md").is_file()
 
+    @pytest.mark.parametrize("via", ["env", "argument"])
     def test_user_ref_equal_to_the_pin_is_still_hash_checked(
-        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+        self, via: str, cache: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv(REF_ENV_VAR, DEFAULT_SKILLS_COMMIT)
+        ref = None
+        if via == "env":
+            monkeypatch.setenv(REF_ENV_VAR, DEFAULT_SKILLS_COMMIT)
+        else:
+            ref = DEFAULT_SKILLS_COMMIT
+        tampered = _serve(_tarball(_members(version="evil")))
         with pytest.raises(SkillFetchError, match="sha256"):
-            fetch_skill_bundle(cache_dir=cache, download=_serve(_tarball(_members())))
+            fetch_skill_bundle(ref, cache_dir=cache, download=tampered)
+        assert tampered.calls == [bundle_url(DEFAULT_SKILLS_COMMIT)]
+        assert not cache.exists()
 
     def test_user_ref_is_not_hash_checked_and_always_downloads(
         self, cache: Path
@@ -238,6 +246,8 @@ class TestRefs:
             "a..b",
             "../x",
             "a//b",
+            "a/./b",
+            "a/.b",
             "a/",
             "a.",
             "a b",
@@ -254,16 +264,23 @@ class TestRefs:
         with pytest.raises(SkillRefInvalidError):
             validate_ref(ref)
 
-    def test_cache_name_byte_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # The longest ref under the 100-character cap needs 4 + 50 + 49 * 3 =
-        # 201 bytes, so the guard is lowered to prove it trips on its own.
-        ref = "a/" * 49 + "a"
-        assert len(ref) <= 100
-        assert len(("ref-" + ref.replace("/", "%2F")).encode()) == 201
-        assert validate_ref(ref) == ref
-        monkeypatch.setattr(skill_bundle, "_MAX_CACHE_NAME_BYTES", 200)
-        with pytest.raises(SkillRefInvalidError, match="200 bytes"):
+    @pytest.mark.parametrize("ref", ["v1.7.", "release/"])
+    def test_trailing_dot_or_slash_is_named_in_the_error(self, ref: str) -> None:
+        with pytest.raises(SkillRefInvalidError, match=r"or end in '\.' or '/'"):
             validate_ref(ref)
+
+    def test_cache_name_byte_cap(self) -> None:
+        # Each '/' spells as '%2F', so a slash-heavy ref under the 100-character
+        # cap still trips the 120-byte cache name cap.
+        slashy = "a/" * 30 + "a"
+        assert len(slashy) <= 100
+        assert len(("ref-" + slashy.replace("/", "%2F")).encode()) == 125
+        with pytest.raises(SkillRefInvalidError, match="120 bytes"):
+            validate_ref(slashy)
+        plain = "a" * 100
+        assert validate_ref(plain) == plain
+        assert len(f"pinned-{DEFAULT_SKILLS_COMMIT}") == 47
+        assert validate_ref(DEFAULT_SKILLS_COMMIT) == DEFAULT_SKILLS_COMMIT
 
     def test_env_var_is_used_and_validated(
         self, monkeypatch: pytest.MonkeyPatch, cache: Path
@@ -306,14 +323,17 @@ class TestDownload:
             skill_bundle._download("https://x.test/a", transport=_transport(500))
         assert not isinstance(info.value, SkillRefNotFoundError)
 
-    def test_network_error(self) -> None:
+    @pytest.mark.parametrize("text", ["no route", "no route."])
+    def test_network_error(self, text: str) -> None:
         def fail(request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("no route", request=request)
+            raise httpx.ConnectError(text, request=request)
 
-        with pytest.raises(SkillFetchError, match="Could not download"):
+        with pytest.raises(SkillFetchError) as info:
             skill_bundle._download(
                 "https://x.test/a", transport=httpx.MockTransport(fail)
             )
+        # One final period, even when httpx's own text already ends in one.
+        assert str(info.value) == "Could not download https://x.test/a: no route."
 
     def test_size_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(skill_bundle, "_MAX_BUNDLE_BYTES", 10)
@@ -361,6 +381,8 @@ BAD_TARS = {
     ),
     "reserved-con": (_with([(f"{TOP}/CON", b"x")]), UNSAFE),
     "reserved-ext": (_with([(f"{TOP}/skills/nul.txt", b"x")]), UNSAFE),
+    "reserved-superscript": (_with([(f"{TOP}/COM\u00b9", b"x")]), UNSAFE),
+    "reserved-conout": (_with([(f"{TOP}/CONOUT$.txt", b"x")]), UNSAFE),
     "trailing-dot": (_with([(f"{TOP}/a./x", b"x")]), UNSAFE),
     "trailing-space": (_with([(f"{TOP}/a ", b"x")]), UNSAFE),
 }
@@ -466,7 +488,7 @@ class TestManifest:
         monkeypatch.setattr(
             skill_bundle, "RepoSkill", lambda name, path: built.append(name)
         )
-        with pytest.raises(SkillFetchError, match=r"not \./skills/<name>"):
+        with pytest.raises(SkillFetchError, match=r"not \./skills/<portable name>"):
             fetch_skill_bundle(
                 USER_REF, cache_dir=cache, download=_serve(_tarball(members))
             )
@@ -560,7 +582,7 @@ class TestPublish:
     @pytest.mark.parametrize(
         ("restore_error", "expected", "match"),
         [
-            (OSError("disk full"), SkillFetchError, "previous copy is in"),
+            (OSError("disk full"), SkillFetchError, "what was there is kept in"),
             # A second Ctrl-C during the restore must not delete the only copy.
             (KeyboardInterrupt(), KeyboardInterrupt, None),
         ],
@@ -659,3 +681,175 @@ class TestPublish:
         assert len(download.calls) == 1  # Not a cache hit.
         assert link.is_symlink()
         assert _snapshot(real) == before
+
+    def test_failed_move_aside_keeps_the_cache(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        before = _good_user_cache(cache)
+        real_replace = os.replace
+
+        def flaky(src: object, dst: object) -> None:
+            if Path(str(dst)).name == "previous":
+                raise OSError("busy")
+            real_replace(src, dst)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(skill_bundle.os, "replace", flaky)
+        data = _tarball(_members(version="2"))
+        with pytest.raises(SkillFetchError, match="busy"):
+            fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+        assert _snapshot(cache) == before
+
+    def test_ctrl_c_on_the_final_rename_is_not_swallowed(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = cache / f"ref-{USER_REF}"
+
+        def racing(src: object, dst: object) -> None:
+            # Another process publishes a valid marked cache, then Ctrl-C.
+            shutil.copytree(str(src), target)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(skill_bundle.os, "replace", racing)
+        data = _tarball(_members(version="2"))
+        with pytest.raises(KeyboardInterrupt):
+            fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+
+    @pytest.mark.parametrize("restore_fails", [False, True])
+    def test_unmarked_swap_in_after_the_check_is_put_back(
+        self, restore_fails: bool, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _good_user_cache(cache)
+        target = cache / f"ref-{USER_REF}"
+        real_cache = cache / "moved-away"
+        real_replace = os.replace
+
+        def swapped(src: object, dst: object) -> None:
+            if Path(str(dst)).name == "previous":
+                # Something replaces our cache after the ownership check.
+                real_replace(target, real_cache)
+                target.mkdir()
+                (target / "notes.txt").write_text("not ours")
+            elif restore_fails and Path(str(src)).name == "previous":
+                raise OSError("busy")
+            real_replace(src, dst)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(skill_bundle.os, "replace", swapped)
+        data = _tarball(_members(version="2"))
+        with pytest.raises(SkillFetchError, match="so it was not replaced"):
+            fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+        assert (real_cache / "skills" / "api" / "SKILL.md").read_text() == "# api v1\n"
+        staged = list(cache.glob(".tmp-*/previous/notes.txt"))
+        if restore_fails:  # Not ours and not restored: kept in staging.
+            assert not target.exists()
+            assert [p.read_text() for p in staged] == ["not ours"]
+        else:
+            assert (target / "notes.txt").read_text() == "not ours"
+            assert not (target / ".deepctl-skills-cache").exists()
+            assert list(cache.glob(".tmp-*")) == []
+
+    @pytest.mark.parametrize("kind", ["file", "dangling symlink", "live symlink"])
+    def test_non_directory_swapped_in_after_the_check_is_kept_in_staging(
+        self, kind: str, cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        if kind != "file":
+            try:
+                os.symlink(tmp_path / "probe-missing", tmp_path / "probe")
+            except (OSError, NotImplementedError):
+                pytest.skip("symlinks cannot be created here")
+        _good_user_cache(cache)
+        target = cache / f"ref-{USER_REF}"
+        real_cache = tmp_path / "moved-away"
+        # Relative, so Windows readlink returns it as written (no \\?\ prefix).
+        link_to = ".." if kind == "live symlink" else "user-link-target-missing"
+        real_replace = os.replace
+
+        def swapped(src: object, dst: object) -> None:
+            if Path(str(dst)).name == "previous":
+                # A user file or symlink replaces our cache after the check.
+                real_replace(target, real_cache)
+                if kind == "file":
+                    target.write_text("user file")
+                else:
+                    os.symlink(link_to, target, target_is_directory=link_to == "..")
+            real_replace(src, dst)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(skill_bundle.os, "replace", swapped)
+        data = _tarball(_members(version="2"))
+        with pytest.raises(SkillFetchError, match="changed while publishing") as info:
+            fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+        # Glob the staging dirs: Python 3.10 glob skips a dangling symlink.
+        kept = [d / "previous" for d in cache.glob(".tmp-*")]
+        assert len(kept) == 1
+        assert str(kept[0]) in str(info.value)
+        if kind == "file":
+            assert not kept[0].is_symlink()
+            assert kept[0].read_text() == "user file"
+        else:
+            assert kept[0].is_symlink()
+            assert os.readlink(kept[0]) == link_to
+        assert not os.path.lexists(target)
+        assert kind != "dangling symlink" or not (cache / link_to).exists()
+        assert (real_cache / "skills" / "api" / "SKILL.md").read_text() == "# api v1\n"
+
+    def test_second_file_at_target_before_the_restore_is_not_overwritten(
+        self, cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _good_user_cache(cache)
+        target = cache / f"ref-{USER_REF}"
+        real_cache = tmp_path / "moved-away"
+        real_replace, real_is_ours = os.replace, skill_bundle._is_our_cache
+
+        def swapped(src: object, dst: object) -> None:
+            if Path(str(dst)).name == "previous":
+                real_replace(target, real_cache)
+                target.write_text("X")  # Swapped in after the check.
+            real_replace(src, dst)  # type: ignore[arg-type]
+
+        def is_ours(path: Path) -> bool:
+            ours = real_is_ours(path)
+            if path.name == "previous" and not os.path.lexists(target):
+                target.write_text("Y")  # A second file appears before the restore.
+            return ours
+
+        monkeypatch.setattr(skill_bundle.os, "replace", swapped)
+        monkeypatch.setattr(skill_bundle, "_is_our_cache", is_ours)
+        data = _tarball(_members(version="2"))
+        with pytest.raises(SkillFetchError, match="what was there is kept in"):
+            fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+        assert target.read_text() == "Y"
+        kept = list(cache.glob(".tmp-*/previous"))
+        assert [p.read_text() for p in kept] == ["X"]
+        assert (real_cache / "skills" / "api" / "SKILL.md").read_text() == "# api v1\n"
+
+    def test_foreign_dir_kept_after_a_double_race_is_named(
+        self, cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _good_user_cache(cache)
+        target = cache / f"ref-{USER_REF}"
+        real_cache = tmp_path / "moved-away"
+        real_replace, real_is_ours = os.replace, skill_bundle._is_our_cache
+
+        def swapped(src: object, dst: object) -> None:
+            if Path(str(dst)).name == "previous":
+                real_replace(target, real_cache)  # A user dir is swapped in.
+                target.mkdir()
+                (target / "notes.txt").write_text("not ours")
+            real_replace(src, dst)  # type: ignore[arg-type]
+
+        def is_ours(path: Path) -> bool:
+            ours = real_is_ours(path)
+            if path.name == "previous" and not os.path.lexists(target):
+                # A marked cache lands at target first, so the restore fails.
+                shutil.copytree(real_cache, target)
+            return ours
+
+        monkeypatch.setattr(skill_bundle.os, "replace", swapped)
+        monkeypatch.setattr(skill_bundle, "_is_our_cache", is_ours)
+        data = _tarball(_members(version="2"))
+        with pytest.raises(SkillFetchError, match="changed while publishing") as info:
+            fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+        kept = [d / "previous" for d in cache.glob(".tmp-*")]
+        assert len(kept) == 1
+        assert f"; what was there is kept in {kept[0]}." in str(info.value)
+        assert (kept[0] / "notes.txt").read_text() == "not ours"
+        assert (target / "skills" / "api" / "SKILL.md").read_text() == "# api v1\n"
