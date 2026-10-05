@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tarfile
 from pathlib import Path
 
@@ -222,7 +223,7 @@ class TestPinnedDefault:
 class TestRefs:
     @pytest.mark.parametrize(
         "ref",
-        ["main", "v1.2.3", "release/1.x", "a_b-c", DEFAULT_SKILLS_COMMIT, "a" * 200],
+        ["main", "v1.2.3", "release/1.x", "a_b-c", DEFAULT_SKILLS_COMMIT, "a" * 100],
     )
     def test_good_refs(self, ref: str) -> None:
         assert validate_ref(ref) == ref
@@ -246,18 +247,22 @@ class TestRefs:
             "a%2Fb",
             "a~1",
             "é",
-            "a" * 201,
+            "a" * 101,
         ],
     )
     def test_bad_refs(self, ref: str) -> None:
         with pytest.raises(SkillRefInvalidError):
             validate_ref(ref)
 
-    def test_cache_name_byte_cap(self) -> None:
-        # 199 characters, under the length cap, but each '/' becomes '%2F'.
-        ref = "a/" * 99 + "a"
-        assert len(ref) <= 200
-        with pytest.raises(SkillRefInvalidError, match="255 bytes"):
+    def test_cache_name_byte_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The longest ref under the 100-character cap needs 4 + 50 + 49 * 3 =
+        # 201 bytes, so the guard is lowered to prove it trips on its own.
+        ref = "a/" * 49 + "a"
+        assert len(ref) <= 100
+        assert len(("ref-" + ref.replace("/", "%2F")).encode()) == 201
+        assert validate_ref(ref) == ref
+        monkeypatch.setattr(skill_bundle, "_MAX_CACHE_NAME_BYTES", 200)
+        with pytest.raises(SkillRefInvalidError, match="200 bytes"):
             validate_ref(ref)
 
     def test_env_var_is_used_and_validated(
@@ -349,7 +354,15 @@ BAD_TARS = {
     "unc": (_with([("\\\\server\\x", b"x")]), UNSAFE),
     "two-top-dirs": (_with([("other/x", b"x")]), "single top-level"),
     "duplicate": (_with([(f"{TOP}/skills/api/SKILL.md", b"again")]), "exists"),
-    "long-name": (_with([(f"{TOP}/" + "a" * 600, b"x")]), "too long"),
+    # Short components the OS accepts, but over the module's 512-byte cap.
+    "long-name": (
+        _with([(f"{TOP}/" + "a/" * 300 + "x", b"x")]),
+        "member name that is too long",
+    ),
+    "reserved-con": (_with([(f"{TOP}/CON", b"x")]), UNSAFE),
+    "reserved-ext": (_with([(f"{TOP}/skills/nul.txt", b"x")]), UNSAFE),
+    "trailing-dot": (_with([(f"{TOP}/a./x", b"x")]), UNSAFE),
+    "trailing-space": (_with([(f"{TOP}/a ", b"x")]), UNSAFE),
 }
 
 
@@ -416,6 +429,9 @@ class TestTarSafety:
 
 
 BAD_NAMES = ["..", "a/b", "a\\b", "/abs", "C:\\x", ".", "C:x", "", "a.", "-a"]
+# Windows device names. No such directory is in the bundle, so these must be
+# refused by the name check alone, which also keeps the test Windows-safe.
+BAD_NAMES += ["con", "NUL", "com1", "lpt9.x", "Aux.md"]
 BAD_ENTRIES = [
     "/abs",
     "./skills/../x",
@@ -541,20 +557,36 @@ class TestPublish:
             fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
         assert _snapshot(cache) == before
 
+    @pytest.mark.parametrize(
+        ("restore_error", "expected", "match"),
+        [
+            (OSError("disk full"), SkillFetchError, "previous copy is in"),
+            # A second Ctrl-C during the restore must not delete the only copy.
+            (KeyboardInterrupt(), KeyboardInterrupt, None),
+        ],
+    )
     def test_failed_restore_keeps_the_old_copy_in_staging(
-        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        restore_error: BaseException,
+        expected: type[BaseException],
+        match: str | None,
+        cache: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _good_user_cache(cache)
         real_replace = os.replace
 
         def flaky(src: object, dst: object) -> None:
-            if Path(str(src)).name in ("new", "previous"):
+            name = Path(str(src)).name
+            if name == "new":
                 raise OSError("disk full")
+            if name == "previous":
+                raise restore_error
             real_replace(src, dst)  # type: ignore[arg-type]
 
         monkeypatch.setattr(skill_bundle.os, "replace", flaky)
         data = _tarball(_members(version="2"))
-        with pytest.raises(SkillFetchError, match="previous copy is in"):
+        with pytest.raises(expected, match=match):
             fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
         kept = list(cache.glob(".tmp-*/previous/skills/api/SKILL.md"))
         assert [p.read_text() for p in kept] == ["# api v1\n"]
@@ -582,3 +614,48 @@ class TestPublish:
             fetch_skill_bundle(cache_dir=cache, download=download)
         assert len(download.calls) == 1
         assert foreign.is_dir()
+
+    @pytest.mark.parametrize("with_previous", [False, True])
+    def test_concurrent_publish_uses_the_other_copy(
+        self, with_previous: bool, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        if with_previous:
+            _good_user_cache(cache)  # So ours moves it into staging first.
+        target = cache / f"ref-{USER_REF}"
+        real_replace = os.replace
+
+        def racing(src: object, dst: object) -> None:
+            if Path(str(src)).name == "new":
+                # Another process publishes a valid marked cache into the gap.
+                shutil.copytree(str(src), target)
+                (target / "skills" / "api" / "SKILL.md").write_text("# other\n")
+            real_replace(src, dst)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(skill_bundle.os, "replace", racing)
+        data = _tarball(_members(version="2"))
+        skills = fetch_skill_bundle(USER_REF, cache_dir=cache, download=_serve(data))
+        assert skills == [RepoSkill(n, target / "skills" / n) for n in NAMES]
+        assert (target / "skills" / "api" / "SKILL.md").read_text() == "# other\n"
+        assert [p.name for p in cache.iterdir()] == [target.name]
+
+    def test_symlinked_pinned_cache_is_not_served(
+        self, cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        data = _tarball(_members())
+        _pin(monkeypatch, data)
+        elsewhere = tmp_path / "elsewhere"
+        fetch_skill_bundle(cache_dir=elsewhere, download=_serve(data))
+        real = elsewhere / f"pinned-{DEFAULT_SKILLS_COMMIT}"
+        before = _snapshot(real)
+        link = cache / real.name
+        cache.mkdir()
+        try:
+            link.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available here")
+        download = _serve(data)
+        with pytest.raises(SkillFetchError, match="not created by deepctl"):
+            fetch_skill_bundle(cache_dir=cache, download=download)
+        assert len(download.calls) == 1  # Not a cache hit.
+        assert link.is_symlink()
+        assert _snapshot(real) == before

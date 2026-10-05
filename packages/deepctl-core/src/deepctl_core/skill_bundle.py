@@ -44,18 +44,26 @@ _SKILL_ENTRY_FILE = "SKILL.md"
 _DOWNLOAD_TIMEOUT = 30.0
 # Caps on the download and what it may unpack to. The real bundle is about
 # 160 KB with 65 members, so anything near these is not the bundle we expect.
+# They bound member count, names and file data. tarfile reads pax/GNU long-name
+# header metadata before they run; that is accepted because the pin is
+# hash-checked first and the download itself is capped.
 _MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 _MAX_EXTRACTED_BYTES = 256 * 1024 * 1024
 _MAX_MEMBERS = 10_000
 _MAX_MEMBER_NAME_BYTES = 512
 
-_MAX_REF_LENGTH = 200
-# 255 bytes is the file-name limit on every filesystem deepctl supports.
+# Short enough to keep cache paths well inside the Windows MAX_PATH of 260.
+_MAX_REF_LENGTH = 100
+# 255 bytes is the file-name limit on every filesystem deepctl supports. With
+# the length cap, '%2F' spelling reaches at most 201 bytes; this stays a guard.
 _MAX_CACHE_NAME_BYTES = 255
 _REF_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 # A manifest entry must be exactly ``./skills/<name>`` or ``skills/<name>``,
 # and ``<name>`` must be one plain directory name.
 _ENTRY_PATTERN = re.compile(r"(?:\./)?skills/([A-Za-z0-9][A-Za-z0-9._-]*)")
+# A path component Windows cannot store as written: a reserved device name,
+# with or without an extension, or a name it would strip a trailing ' '/'.' from.
+_WINDOWS_UNSAFE = re.compile(r"(?i)(?:CON|PRN|AUX|NUL|COM\d|LPT\d)(?:\..*)?|.*[ .]")
 
 # Written into every cache directory this module publishes. A directory at a
 # cache path without it was not made here, so it is never moved or deleted.
@@ -152,7 +160,9 @@ def fetch_skill_bundle(
     cache. Its directory is published only after the hash check and full
     validation pass, and is validated again on every hit. Other refs may move,
     so they are always downloaded. ``force`` skips the cache hit. ``cache_dir``
-    must be a directory deepctl owns. ``download`` returns a URL's bytes.
+    must be a directory deepctl owns. ``download`` returns a URL's bytes. The
+    returned paths are valid until the next fetch of the same ref replaces
+    the cache.
 
     Raises :class:`SkillRefInvalidError`, :class:`SkillRefNotFoundError` or,
     for any other failure, :class:`SkillFetchError`.
@@ -205,9 +215,8 @@ def read_manifest_skills(root: Path) -> list[RepoSkill]:
     seen: set[str] = set()
     for entry in entries:
         match = _ENTRY_PATTERN.fullmatch(entry) if isinstance(entry, str) else None
-        # The pattern already refuses '/', '\\', ':', '.' and '..'. A trailing
-        # '.' is refused too, because Windows drops it from directory names.
-        if match is None or match.group(1).endswith("."):
+        # The pattern already refuses '/', '\\', ':', '.' and '..'.
+        if match is None or _WINDOWS_UNSAFE.fullmatch(match.group(1)):
             raise SkillFetchError(
                 f"The skills manifest entry {entry!r} is not ./skills/<name>."
             )
@@ -287,6 +296,7 @@ def _safe_members(tar: tarfile.TarFile) -> list[tuple[tarfile.TarInfo, str]]:
         parts = [p for p in name.split("/") if p not in ("", ".")]
         # '\\' and ':' cover Windows separators, drives (C:\x, C:x) and streams.
         windows = "\\" in name or ":" in name
+        windows = windows or any(_WINDOWS_UNSAFE.fullmatch(p) for p in parts)
         if not parts or ".." in parts or name.startswith("/") or windows:
             raise SkillFetchError(f"The bundle member {name!r} is not a safe path.")
         total += member.size if member.isreg() else 0
@@ -331,19 +341,19 @@ def _publish(data: bytes, target: Path) -> list[RepoSkill]:
     rename stays on one filesystem. A previous cache is renamed into staging,
     the new tree is renamed into place, and the old copy is put back if that
     fails or is interrupted. ``target`` is absent between the two renames, but
-    the old copy stays on disk until the new one is in place.
+    the old copy stays on disk until the new one is in place. If another
+    process publishes the same ref first, its copy is used.
     """
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=target.parent))
     except OSError as exc:
         raise SkillFetchError(f"Could not prepare the skills cache: {exc}")
-    keep_staging = False
+    new, previous = staging / "new", staging / "previous"
     try:
-        new = staging / "new"
         _extract(data, new)
         skills = read_manifest_skills(new)
-        previous = staging / "previous"
+        swapping = False
         try:
             (new / _CACHE_MARKER).write_text(target.name, encoding="utf-8")
             if target.is_symlink() or target.exists():
@@ -352,23 +362,29 @@ def _publish(data: bytes, target: Path) -> list[RepoSkill]:
                         f"{target} was not created by deepctl, so it was left alone."
                     )
                 os.replace(target, previous)
+            swapping = True
             os.replace(new, target)
         except BaseException as exc:  # Ctrl-C too: never rmtree the only copy.
+            if swapping and isinstance(exc, OSError) and _is_our_cache(target):
+                # Another process published this ref after ours moved aside.
+                return read_manifest_skills(target)
             try:
                 if previous.exists():  # The swap failed: put the old copy back.
                     os.replace(previous, target)
             except OSError:
-                keep_staging = True  # The old copy now exists only in staging.
+                pass  # The finally sees that staging holds the only copy.
             if not isinstance(exc, OSError):
                 raise
-            where = f" The previous copy is in {previous}." if keep_staging else ""
+            kept = previous.exists() and not _is_our_cache(target)
+            where = f" The previous copy is in {previous}." if kept else ""
             raise SkillFetchError(
                 f"Could not publish the skills bundle to {target}: {exc}.{where}"
             )
         return [RepoSkill(s.name, target / "skills" / s.name) for s in skills]
     finally:
-        # Ownership: ``staging`` was made by mkdtemp in this call, and all it
-        # holds is the tree unpacked here and, after a swap, the old cache,
-        # which carried this module's marker before it was moved in.
-        if not keep_staging:
+        # Ownership: mkdtemp made ``staging`` in this call; ``previous`` is a
+        # marked cache this call moved there. Keep staging only while
+        # ``previous`` is the sole copy (no valid cache at ``target``). Checking
+        # state, not a flag, holds even if a second Ctrl-C hits the restore.
+        if not previous.exists() or _is_our_cache(target):
             shutil.rmtree(staging, ignore_errors=True)
