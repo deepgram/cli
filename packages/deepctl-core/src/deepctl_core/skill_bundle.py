@@ -105,6 +105,12 @@ def _cache_name(ref: str) -> str:
     return "ref-" + ref.replace("/", "%2F")
 
 
+def portable_name(name: str) -> bool:
+    """True if ``name`` is one plain folder name safe on every OS (as entries)."""
+    match = _ENTRY_PATTERN.fullmatch(f"skills/{name}")
+    return bool(match) and not _WINDOWS_UNSAFE.fullmatch(name)
+
+
 def validate_ref(ref: str) -> str:
     """Return ``ref`` if it is safe in a URL path and a cache name, else raise."""
     if len(ref) > _MAX_REF_LENGTH:
