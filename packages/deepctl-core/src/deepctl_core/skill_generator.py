@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import ctypes
 import errno
+import functools
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import stat
@@ -82,6 +85,15 @@ _WINDOWS = os.name == "nt"  # patched by tests to exercise the Windows branch
 _LOCK_TIMEOUT = 30.0  # seconds; tests patch it
 _LOCAL = threading.local()  # .fd: this thread's lock, so nested takes never wait
 _BUSY = (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES, errno.EDEADLK, errno.ENOENT)
+_NO_EXCL = "this filesystem cannot move a folder without the risk of replacing one; deepctl needs this folder on a local disk"
+_NO_EXCL_SYS = "this system cannot move a folder without the risk of replacing one; deepctl needs macOS, Windows, or Linux 3.15 or later on a supported architecture with a Python that matches the kernel's word size"
+# renameat2 numbers by uname machine for [64-bit, 32-bit] Python. Linux calls them raw, so errno is the kernel's
+# (glibc 2.28+ turns ENOSYS into EINVAL); other pairs, such as x32, need the renameat2 wrapper or fail closed.
+_NR_RENAMEAT2 = (
+    {"x86_64": 316, "aarch64": 276, "arm64": 276, "riscv64": 276, "s390x": 347}
+    | {"ppc64": 357, "ppc64le": 357},
+    {"i386": 353, "i686": 353, "armv7l": 382, "armv6l": 382, "arm": 382},
+)
 
 # One sentence each. {file} is skills.json; {display} and {root} name the tool.
 _MSG = {
@@ -938,11 +950,29 @@ def _ownership(path: Path, cli: str, name: str, rec: dict[str, Any] | None) -> s
     return "ok" if fp in want else "edited"
 
 
+def _rename_excl(src: Path, dest: Path) -> None:
+    """Rename ``src`` to ``dest`` in one step that fails if anything is at ``dest``."""
+    if _WINDOWS:
+        os.rename(src, dest)  # Windows rename refuses any existing dest.
+        return
+    mac, libc = sys.platform == "darwin", ctypes.CDLL(None, use_errno=True)
+    fn = getattr(libc, "renamex_np" if mac else "renameat2", None)
+    nr = _NR_RENAMEAT2[sys.maxsize < 2**32].get(platform.machine())
+    if nr and sys.platform == "linux" and hasattr(libc, "syscall"):  # Every glibc.
+        fn = functools.partial(libc.syscall, ctypes.c_long(nr))  # The kernel's errno.
+    if fn is None:  # No call to make on this OS, machine or Python.
+        raise OSError(errno.ENOSYS, _NO_EXCL_SYS, str(dest))
+    a, b = os.fsencode(src), os.fsencode(dest)
+    if (fn(a, b, 4) if mac else fn(-100, a, -100, b, 1)) != 0:  # RENAME_EXCL/NOREPLACE
+        e = ctypes.get_errno() or errno.EIO  # Never "Success" for a failed call.
+        bad = e in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP)  # The filesystem.
+        why = _NO_EXCL_SYS if e == errno.ENOSYS else _NO_EXCL if bad else None
+        raise OSError(e, why or os.strerror(e), str(dest))  # ENOSYS: kernel < 3.15.
+
+
 def _place(src: Path, dest: Path) -> None:
-    """Move ``src`` to ``dest``, refusing if anything is at ``dest``."""
-    if os.path.lexists(dest):
-        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(dest))
-    os.rename(src, dest)
+    """Move ``src`` to ``dest``; if anything is at ``dest``, the OS refuses atomically (B2)."""
+    _rename_excl(src, dest)
 
 
 @dataclass(frozen=True)
@@ -1061,7 +1091,8 @@ def _stage(
     """Copy each skill into staging/new, add its marker, and fingerprint the copy."""
     fps: dict[str, str] = {}
     os.mkdir(staging / "new")
-    os.mkdir(staging / "old")
+    _place(staging / "new", staging / "old")  # Fails closed before anything moves (B2).
+    os.mkdir(staging / "new")
     for s in skills:
         copy_ = staging / "new" / s.name
         shutil.copytree(s.path, copy_)
@@ -1304,7 +1335,8 @@ def remove_tool(gen: SkillGenerator) -> RemoveResult:
     if any(os.path.lexists(root / n) for n in folders):
         try:
             staging = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=root))
-            os.mkdir(staging / "old")
+            os.mkdir(staging / "new")
+            _place(staging / "new", staging / "old")  # Fails closed first (B2).
         except BaseException as exc:  # Ctrl-C too: never leave this run's empty dirs.
             if staging:
                 _cleanup(staging, cli, {})

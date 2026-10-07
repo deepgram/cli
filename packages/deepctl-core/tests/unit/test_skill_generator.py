@@ -429,6 +429,114 @@ class TestB5:
         assert "api" not in records()
         assert staging_dirs(root()) == []
 
+    @pytest.mark.parametrize("racer", ["made", "remade"])
+    def test_empty_dir_made_right_before_the_move_survives(
+        self, tmp_path, monkeypatch, racer
+    ):
+        """Greg r1 B2: the real no-replace move refuses another process's empty dir."""
+        skills = make_bundle(tmp_path)
+        api, made = root() / "api", []
+
+        def race(src, dest):
+            if Path(dest) == api and not made:
+                api.mkdir()
+                if racer == "remade":  # Greg's case: removed and made again.
+                    api.rmdir()
+                    api.mkdir()
+                made.append(os.lstat(api).st_ino)
+
+        wrap(monkeypatch, sg, "_rename_excl", race)
+        with pytest.raises(SkillOwnershipError) as exc:
+            install(skills)
+        assert str(exc.value) == _msg("E2", gen("claude"), dest=api)
+        assert os.lstat(api).st_ino == made[0] and os.listdir(api) == []
+        assert "api" not in disk_state().get("skill_folders", {}).get("claude", {})
+        assert staging_dirs(root()) == []
+
+    def test_empty_dir_made_right_before_the_update_move_survives(
+        self, tmp_path, monkeypatch
+    ):
+        install(make_bundle(tmp_path))
+        api, docs, made = root() / "api", root() / "docs", []
+        old, docs_rec = sha_tree(api), records()["docs"]
+
+        def race(src, dest):
+            if Path(dest) == api and Path(src).parent.name == "new":
+                api.mkdir()  # After the move aside, before the place.
+                made.append(os.lstat(api).st_ino)
+
+        wrap(monkeypatch, sg, "_rename_excl", race)
+        with pytest.raises(SkillInstallError) as exc:
+            install(make_bundle(tmp_path, body="v2"))
+        aside = exc.value.leftover / "old" / "api"
+        assert str(exc.value) == _msg("E6", gen("claude"), name="api", aside=aside)
+        assert os.lstat(api).st_ino == made[0] and os.listdir(api) == []
+        assert sha_tree(aside) == old
+        assert records()["docs"] == docs_rec
+        assert _ownership(docs, "claude", "docs", docs_rec) == "ok"
+
+    def test_old_copy_put_back_after_the_racer_leaves_keeps_its_record(
+        self, tmp_path, monkeypatch
+    ):
+        """The racer's empty dir is gone by cleanup, so the old copy goes back proven."""
+        install(make_bundle(tmp_path))
+        docs, real_upd = root() / "docs", sg._update_state
+        old = sha_tree(docs)
+
+        def race(src, dest):
+            if Path(dest) == docs and Path(src).parent.name == "new":
+                docs.mkdir()
+
+        def settle_then_leave(mutate, *a, **k):
+            real_upd(mutate, *a, **k)
+            if mutate.__name__ == "settle" and os.path.isdir(docs):
+                docs.rmdir()  # After the settle write, before cleanup.
+
+        with monkeypatch.context() as m:
+            wrap(m, sg, "_rename_excl", race)
+            m.setattr(sg, "_update_state", settle_then_leave)
+            with pytest.raises(SkillInstallError) as exc:
+                install(make_bundle(tmp_path, body="v2"))
+        assert str(exc.value) == _msg("E6b", gen("claude"), name="docs")
+        assert str(exc.value) == (
+            "docs was not updated for Claude Code because something appeared at"
+            " its folder during the update, so its previous copy is back in place;"
+            " check that folder, then run the command again."
+        )
+        assert exc.value.leftover is None and staging_dirs(root()) == []
+        assert sha_tree(docs) == old
+        assert _ownership(docs, "claude", "docs", records()["docs"]) == "ok"
+        install(make_bundle(tmp_path, body="v3"))
+        assert b"v3" in (docs / "SKILL.md").read_bytes()
+
+    @pytest.mark.parametrize("other", ["takes the old copy", "copies it to dest"])
+    def test_old_copy_not_put_back_by_cleanup_still_gives_e6(
+        self, tmp_path, monkeypatch, other
+    ):
+        install(make_bundle(tmp_path))
+        docs, real_cleanup = root() / "docs", sg._cleanup
+
+        def race(src, dest):
+            if Path(dest) == docs and Path(src).parent.name == "new":
+                docs.mkdir()
+
+        def cleanup(staging, *a):
+            old = staging / "old" / "docs"
+            if other == "takes the old copy":
+                shutil.move(old, tmp_path / "taken")  # Gone, but not back at dest.
+            else:
+                docs.rmdir()
+                shutil.copytree(old, docs, symlinks=True)  # Proves, but not moved.
+            return real_cleanup(staging, *a)
+
+        wrap(monkeypatch, sg, "_rename_excl", race)
+        monkeypatch.setattr(sg, "_cleanup", cleanup)
+        with pytest.raises(SkillInstallError) as exc:
+            install(make_bundle(tmp_path, body="v2"))
+        assert str(exc.value).startswith("Could not install docs for Claude Code,")
+        if exc.value.leftover:
+            assert os.path.isdir(exc.value.leftover / "old" / "docs")
+
     @pytest.mark.parametrize(
         "kind", ["empty dir", "dir", "file", "dir link", "dangling link"]
     )
@@ -476,6 +584,255 @@ class TestB5:
             _place(src, dest)
         assert os.lstat(dest).st_ino == before.st_ino
         assert src.read_bytes() == b"again"
+
+    def test_windows_branch_uses_one_plain_rename(self, tmp_path, monkeypatch):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        src.mkdir()
+        calls = []
+        wrap(monkeypatch, os, "rename", lambda a, b, *x, **k: calls.append((a, b)))
+        monkeypatch.setattr(sg, "_WINDOWS", True)
+        monkeypatch.setattr(sg.ctypes, "CDLL", None)  # Never reached on Windows.
+        _place(src, dest)
+        assert [(Path(a), Path(b)) for a, b in calls] == [(src, dest)]
+        assert dest.is_dir()
+
+    @pytest.mark.parametrize(
+        ("code", "why"),
+        [
+            (errno.EINVAL, sg._NO_EXCL),
+            (errno.ENOSYS, sg._NO_EXCL_SYS),  # The kernel, not the filesystem.
+            (errno.EXDEV, os.strerror(errno.EXDEV)),
+        ]
+        + [(e, sg._NO_EXCL) for e in sorted({errno.ENOTSUP, errno.EOPNOTSUPP})],
+    )
+    def test_no_replace_call_errors(self, tmp_path, monkeypatch, code, why):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        src.mkdir()
+        monkeypatch.setattr(sg, "_WINDOWS", False)
+        fake = SimpleNamespace(renameat2=lambda *a: -1, renamex_np=lambda *a: -1)
+        monkeypatch.setattr(sg.ctypes, "CDLL", lambda *a, **k: fake)
+        monkeypatch.setattr(sg.ctypes, "get_errno", lambda: code)
+        with pytest.raises(OSError) as exc:
+            _place(src, dest)
+        assert (exc.value.errno, exc.value.strerror) == (code, why)
+        monkeypatch.setattr(sg.ctypes, "CDLL", lambda *a, **k: SimpleNamespace())
+        with pytest.raises(OSError) as exc:  # The call itself is missing.
+            _place(src, dest)
+        assert (exc.value.errno, exc.value.strerror) == (errno.ENOSYS, sg._NO_EXCL_SYS)
+        assert src.is_dir() and not os.path.lexists(dest)
+
+    @staticmethod
+    def _old_glibc(monkeypatch, machine, *, bits64=True, plat="linux", ret=0, **libc):
+        """A libc with ``syscall`` (plus any ``libc`` names); record syscall args."""
+        calls = []
+
+        def syscall(*args):
+            calls.append(args)
+            return ret
+
+        monkeypatch.setattr(sg, "_WINDOWS", False)
+        monkeypatch.setattr(
+            sg,
+            "sys",
+            SimpleNamespace(platform=plat, maxsize=2**63 - 1 if bits64 else 2**31 - 1),
+        )
+        monkeypatch.setattr(sg, "platform", SimpleNamespace(machine=lambda: machine))
+        monkeypatch.setattr(
+            sg.ctypes,
+            "CDLL",
+            lambda *a, **k: SimpleNamespace(syscall=syscall, **libc),
+        )
+        return calls
+
+    @pytest.mark.parametrize(
+        ("machine", "bits64", "raw"),
+        [
+            ("x86_64", True, True),
+            ("armv7l", False, True),
+            ("mips64", True, False),  # No number: the wrapper.
+            ("x86_64", False, False),  # x32 or 32-bit Python: the wrapper.
+        ],
+    )
+    def test_listed_linux_machines_skip_the_glibc_wrapper(
+        self, tmp_path, monkeypatch, machine, bits64, raw
+    ):
+        """glibc 2.28+ turns ENOSYS into EINVAL, so listed machines call the kernel."""
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        wrapped = []
+        calls = self._old_glibc(
+            monkeypatch,
+            machine,
+            bits64=bits64,
+            renameat2=lambda *a: wrapped.append(a) or 0,
+        )
+        _place(src, dest)
+        assert (len(calls), len(wrapped)) == ((1, 0) if raw else (0, 1))
+        args = [-100, os.fsencode(src), -100, os.fsencode(dest), 1]
+        assert list((calls or wrapped)[0][raw:]) == args
+
+    _NR = sg._NR_RENAMEAT2[sys.maxsize < 2**32].get(sg.platform.machine())
+
+    @pytest.mark.skipif(
+        sys.platform != "linux" or _NR is None, reason="Linux on a listed machine"
+    )
+    def test_real_linux_move_goes_through_the_raw_syscall(self, tmp_path, monkeypatch):
+        real, used = sg.ctypes.CDLL(None, use_errno=True), []
+
+        def syscall(*args):
+            used.append(args[0].value)
+            return real.syscall(*args)
+
+        monkeypatch.setattr(
+            sg.ctypes, "CDLL", lambda *a, **k: SimpleNamespace(syscall=syscall)
+        )
+        src, empty, dest = tmp_path / "src", tmp_path / "empty", tmp_path / "dest"
+        src.mkdir()
+        empty.mkdir()
+        ino = os.lstat(empty).st_ino
+        with pytest.raises(FileExistsError):
+            _place(src, empty)
+        assert os.lstat(empty).st_ino == ino and os.listdir(empty) == []
+        _place(src, dest)
+        assert dest.is_dir() and not os.path.lexists(src)
+        assert used == [self._NR, self._NR]
+
+    @pytest.mark.parametrize(
+        ("machine", "bits64", "nr"),
+        [
+            ("x86_64", True, 316),
+            ("aarch64", True, 276),
+            ("arm64", True, 276),
+            ("riscv64", True, 276),
+            ("ppc64", True, 357),
+            ("ppc64le", True, 357),
+            ("s390x", True, 347),
+            ("i386", False, 353),
+            ("i686", False, 353),
+            ("armv7l", False, 382),
+            ("armv6l", False, 382),
+            ("arm", False, 382),
+        ],
+    )
+    def test_old_glibc_calls_the_renameat2_syscall_by_number(
+        self, tmp_path, monkeypatch, machine, bits64, nr
+    ):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        calls = self._old_glibc(monkeypatch, machine, bits64=bits64)
+        _place(src, dest)
+        [(num, *rest)] = calls
+        assert isinstance(num, sg.ctypes.c_long) and num.value == nr
+        assert rest == [-100, os.fsencode(src), -100, os.fsencode(dest), 1]
+
+    @pytest.mark.parametrize(
+        ("machine", "bits64", "plat"),
+        [
+            ("mips64", True, "linux"),
+            ("armv8l", False, "linux"),
+            ("", True, "linux"),
+            # 32-bit Python on a 64-bit kernel, or x32: fail closed, never guess.
+            ("x86_64", False, "linux"),
+            ("aarch64", False, "linux"),
+            # A 64-bit Python under the linux32 personality.
+            ("i686", True, "linux"),
+            ("armv7l", True, "linux"),
+            # Only Linux has these numbers.
+            ("x86_64", True, "freebsd14"),
+            ("arm64", True, "darwin"),
+        ],
+    )
+    def test_old_glibc_without_a_known_number_fails_closed(
+        self, tmp_path, monkeypatch, machine, bits64, plat
+    ):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        src.mkdir()
+        calls = self._old_glibc(monkeypatch, machine, bits64=bits64, plat=plat)
+        with pytest.raises(OSError) as exc:
+            _place(src, dest)
+        assert (exc.value.errno, exc.value.strerror) == (errno.ENOSYS, sg._NO_EXCL_SYS)
+        assert calls == [] and src.is_dir() and not os.path.lexists(dest)
+
+    def test_old_glibc_without_syscall_fails_closed(self, tmp_path, monkeypatch):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        self._old_glibc(monkeypatch, "x86_64")
+        monkeypatch.setattr(sg.ctypes, "CDLL", lambda *a, **k: SimpleNamespace())
+        with pytest.raises(OSError) as exc:
+            _place(src, dest)
+        assert (exc.value.errno, exc.value.strerror) == (errno.ENOSYS, sg._NO_EXCL_SYS)
+
+    @pytest.mark.parametrize(
+        ("code", "want", "why"),
+        [
+            (errno.ENOSYS, errno.ENOSYS, sg._NO_EXCL_SYS),  # A kernel older than 3.15.
+            (errno.EINVAL, errno.EINVAL, sg._NO_EXCL),
+            (errno.ENOTSUP, errno.ENOTSUP, sg._NO_EXCL),
+            (errno.EOPNOTSUPP, errno.EOPNOTSUPP, sg._NO_EXCL),
+            (errno.EEXIST, errno.EEXIST, os.strerror(errno.EEXIST)),
+            (0, errno.EIO, os.strerror(errno.EIO)),  # Never "Success".
+        ],
+    )
+    def test_raw_syscall_errors(self, tmp_path, monkeypatch, code, want, why):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        unused = lambda *a: pytest.fail("the glibc wrapper hides ENOSYS")  # noqa: E731
+        self._old_glibc(monkeypatch, "aarch64", ret=-1, renameat2=unused)
+        monkeypatch.setattr(sg.ctypes, "get_errno", lambda: code)
+        with pytest.raises(OSError) as exc:
+            _place(src, dest)
+        assert (exc.value.errno, exc.value.strerror) == (want, why)
+
+    def test_a_failed_call_that_leaves_errno_zero_never_reads_success(
+        self, tmp_path, monkeypatch
+    ):
+        src, dest = tmp_path / "src", tmp_path / "dest"
+        src.mkdir()
+        monkeypatch.setattr(sg, "_WINDOWS", False)
+        fake = SimpleNamespace(renameat2=lambda *a: -1, renamex_np=lambda *a: -1)
+        monkeypatch.setattr(sg.ctypes, "CDLL", lambda *a, **k: fake)
+        monkeypatch.setattr(sg.ctypes, "get_errno", lambda: 0)
+        with pytest.raises(OSError) as exc:
+            _place(src, dest)
+        assert (exc.value.errno, exc.value.strerror) == (
+            errno.EIO,
+            os.strerror(errno.EIO),
+        )
+        assert src.is_dir() and not os.path.lexists(dest)
+
+    def test_ctrl_c_at_the_remove_probe_leaves_no_staging(self, tmp_path, monkeypatch):
+        install(make_bundle(tmp_path))
+        saved, tree = state_bytes(), sha_tree(root())
+
+        def interrupt(src, dest):
+            if Path(dest).name == "old":
+                raise KeyboardInterrupt
+
+        wrap(monkeypatch, sg, "_rename_excl", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            remove_tool(gen("claude"))
+        assert staging_dirs(root()) == []
+        assert (state_bytes(), sha_tree(root())) == (saved, tree)
+
+    @pytest.mark.parametrize("op", ["install", "update", "remove"])
+    def test_unsupported_no_replace_move_changes_nothing(
+        self, tmp_path, monkeypatch, op
+    ):
+        if op != "install":
+            install(make_bundle(tmp_path))
+        root().mkdir(parents=True, exist_ok=True)
+        saved, tree = state_bytes(), sha_tree(root())
+
+        def unsupported(src, dest):
+            raise OSError(errno.EINVAL, sg._NO_EXCL, str(dest))
+
+        monkeypatch.setattr(sg, "_rename_excl", unsupported)
+        with pytest.raises(SkillInstallError) as exc:
+            if op == "remove":
+                remove_tool(gen("claude"))
+            else:
+                install(make_bundle(tmp_path, body="v2"))
+        if op == "remove":
+            assert str(exc.value) == _msg("E21", root=root(), reason=sg._NO_EXCL)
+        else:
+            assert str(exc.value) == _msg("E5", gen("claude"), reason=sg._NO_EXCL)
+        assert (state_bytes(), sha_tree(root())) == (saved, tree)
 
     @NT
     def test_windows_rename_refuses_dest_created_just_before(
@@ -1954,7 +2311,7 @@ class TestSurvivors:
         self, tmp_path, monkeypatch, when
     ):
         skills = make_bundle(tmp_path)
-        docs, real, fired = root() / "docs", sg._place, []
+        docs, real, fired = root() / "docs", sg._rename_excl, []
 
         def interrupt(src, dest):
             if Path(dest) == docs and not fired:
@@ -1965,7 +2322,7 @@ class TestSurvivors:
             return real(src, dest)
 
         with monkeypatch.context() as m:
-            m.setattr(sg, "_place", interrupt)
+            m.setattr(sg, "_rename_excl", interrupt)
             with pytest.raises(KeyboardInterrupt):
                 install(skills)
         assert fired and os.path.lexists(docs) == (when == "after")
@@ -2648,6 +3005,8 @@ class TestStateLock:
             text = _msg(key, lock=Path("x"), reason="r")
             assert text.endswith(", then run the command again.")
         assert "on a local disk" in _msg("E28", lock=Path("x"), reason="r")
+        assert sg._NO_EXCL.endswith("deepctl needs this folder on a local disk")
+        assert "Linux 3.15 or later" in sg._NO_EXCL_SYS
 
     def test_ctrl_c_right_after_the_lock_is_taken_never_keeps_it(self, monkeypatch):
         win = sys.platform == "win32"
