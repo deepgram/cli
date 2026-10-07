@@ -16,7 +16,10 @@ import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,8 +30,13 @@ from typing import TYPE_CHECKING, Any
 from deepctl_core import skill_bundle
 from deepctl_core.skill_bundle import portable_name
 
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
+
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     from deepctl_core.skill_bundle import RepoSkill
 
@@ -71,6 +79,9 @@ _FP_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 _FP_DOMAIN = b"deepctl-skill-tree-v1\0"
 _NO_REPLACE = (errno.EEXIST, errno.ENOTEMPTY, errno.ENOTDIR)
 _WINDOWS = os.name == "nt"  # patched by tests to exercise the Windows branch
+_LOCK_TIMEOUT = 30.0  # seconds; tests patch it
+_LOCAL = threading.local()  # .fd: this thread's lock, so nested takes never wait
+_BUSY = (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES, errno.EDEADLK, errno.ENOENT)
 
 # One sentence each. {file} is skills.json; {display} and {root} name the tool.
 _MSG = {
@@ -100,6 +111,9 @@ _MSG = {
     "E24": "{dest} was edited since deepctl installed it, so 'dg skills remove' leaves it alone and 'dg skills update' stops until you rename or move it to keep your edits, or delete it to get deepctl's copy back.",
     "E25": "deepctl could not read {dest}, so it cannot tell whether that folder is still its own copy; check its permissions or close any tool using it, then run the command again.",
     "E26": "deepctl cannot prove it installed {dest}, so it left it in place and no longer tracks it.",
+    "E27": "Another deepctl command is installing or removing skills, so this one waited 30 seconds and changed nothing; wait for it to finish, then run the command again.",
+    "E29": "An interrupted deepctl run left the previous copy of {dest} in {aside}; delete it, or move it out of the skills folder if you want to keep it, then run the command again.",
+    "E28": "Could not lock {lock}: {reason}, so deepctl changed nothing; check that you own that file and its folder and that they are on a local disk, then run the command again.",
 }
 
 
@@ -204,12 +218,63 @@ def _write_state(state: dict[str, Any]) -> None:
         raise
 
 
+def _try_lock(lock: Path) -> int:  # Lock without waiting: fd, -1 if busy, or E28.
+    fd = -1
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(lock, flags, 0o600)  # Never truncates, writes or deletes it.
+        if sys.platform == "win32":  # Windows cannot delete or replace an open file.
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if not os.path.samestat(os.fstat(fd), os.lstat(lock)):  # Deleted/replaced.
+                raise FileNotFoundError(errno.ENOENT, "replaced")  # Lock the new one.
+        fd, got = -1, fd  # Ours now: the finally must not close it.
+        return got
+    except OSError as exc:
+        if fd < 0 or exc.errno not in _BUSY:  # Busy, or deleted or replaced.
+            raise _err("E28", lock=lock, reason=_reason(exc)) from exc
+        return -1
+    finally:
+        if fd >= 0:
+            os.close(fd)  # Busy, E28 or Ctrl-C: never keep this file open.
+
+
+@contextlib.contextmanager
+def _state_lock() -> Iterator[None]:
+    """Hold skills.json.lock against other deepctl processes and threads (B1).
+
+    Re-entrant per thread. The OS drops it when its holder exits, even on a
+    kill, so the file is never deleted and a stale lock cannot exist.
+    """
+    if getattr(_LOCAL, "fd", None) is not None:
+        yield  # This thread already holds it.
+        return
+    lock, deadline = _STATE_FILE.with_name("skills.json.lock"), time.monotonic()
+    while (fd := _try_lock(lock)) < 0:
+        if time.monotonic() >= deadline + _LOCK_TIMEOUT:
+            raise _err("E27")
+        time.sleep(0.05)
+    try:
+        _LOCAL.fd = fd
+        yield
+    finally:
+        _LOCAL.fd = None
+        if sys.platform == "win32":
+            with contextlib.suppress(OSError):
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        os.close(fd)  # Releases the POSIX lock.
+
+
+@_state_lock()
 def _update_state(
     mutate: Callable[[dict[str, Any]], None],
     failure: str = "E9c",
     gen: SkillGenerator | None = None,
 ) -> None:
     """Read skills.json, apply ``mutate`` and write it: every write goes here."""
+    # Re-entrant: install_tool and remove_tool hold it for the whole operation (B1).
     state = get_skills_state()  # E7 and E8 pass through unchanged (N5).
     mutate(state)
     try:
@@ -1065,6 +1130,25 @@ def _cleanup(staging: Path, cli: str, before: dict[str, Any]) -> Path | None:
     return staging if os.path.lexists(staging) else None
 
 
+def _real_dir(path: Path) -> bool:
+    """True for a real directory, never a link to one."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return not _is_link(st) and stat.S_ISDIR(st.st_mode)
+
+
+def _old_copy(staging: Path, cli: str, name: str) -> Path | None:
+    """A marked old copy of cli/name in a real staging folder; anything else is ignored."""
+    old = staging / "old" / name
+    try:
+        ok = _real_dir(staging) and _real_dir(old.parent) and _marker_ok(old, cli, name)
+    except OSError:
+        return None
+    return old if ok else None
+
+
 def _scan(path: Path) -> list[Path]:
     try:
         return [Path(e.path) for e in os.scandir(path)]
@@ -1072,6 +1156,7 @@ def _scan(path: Path) -> list[Path]:
         return []
 
 
+@_state_lock()
 def install_tool(
     gen: SkillGenerator, skills: Sequence[RepoSkill], *, ref: str, version: str
 ) -> tuple[list[Path], Path | None]:
@@ -1173,6 +1258,7 @@ class RemoveResult:
     left_alone: list[Path] = field(default_factory=list)
     edited: list[Path] = field(default_factory=list)
     moved: list[tuple[Path, Path]] = field(default_factory=list)
+    stranded: list[tuple[Path, Path]] = field(default_factory=list)  # E29
     leftover: Path | None = None
 
     def refused(self, dest: Path, kind: str) -> None:
@@ -1182,19 +1268,30 @@ class RemoveResult:
             (self.edited if kind == "edited" else self.left_alone).append(dest)
 
 
+@_state_lock()
 def remove_tool(gen: SkillGenerator) -> RemoveResult:
     """Delete ``gen``'s recorded folders that prove ours; leave everything else."""
     cli, root, res, staging = gen.cli_name, gen.skills_root(), RemoveResult(), None
     folders = dict(_folders(get_skills_state(), cli))
-    held: set[str] = set()  # Being moved aside; kept recorded while stuck in staging.
 
     def settle(state: dict[str, Any]) -> None:  # Keeps only what proves on disk.
-        fs = _folders(state, cli)
+        fs, res.stranded = _folders(state, cli), []
+        dirs = (
+            [d for d in _scan(root) if d.name.startswith(_STAGING_PREFIX)]
+            if root
+            else []
+        )
         for n in list(fs):
             kind = _ownership(root / n, cli, n, fs[n]) if root else "unproven"
-            stuck = n in held and staging and os.path.lexists(staging / "old" / n)
+            # An old copy in staging, even a killed run's, keeps its record (S1).
+            olds = [a for d in dirs if (a := _old_copy(d, cli, n))]
+            stuck = [a for a in olds if a.parents[2] / n not in res.removed]
             if kind not in ("ok", "unreadable") and not stuck:
                 del fs[n]  # Gone, edited or unproven: no longer deepctl's.
+                continue  # Removed or replaced here: an old copy is only a leftover.
+            res.stranded += [
+                (a.parents[2] / n, a) for a in stuck if a.parents[1] != staging
+            ]
         if not fs:
             state.get(_RECORDS_KEY, {}).pop(cli, None)
             state["installed_skills"].pop(cli, None)
@@ -1223,7 +1320,6 @@ def remove_tool(gen: SkillGenerator) -> RemoveResult:
             if (kind := _ownership(dest, cli, name, rec)) != "ok":  # The pre-check.
                 res.refused(dest, kind)
                 continue
-            held.add(name)  # Before the move: settle keeps it only while stuck.
             try:  # Covers the move too, so a Ctrl-C right after it puts it back.
                 os.rename(dest, aside)
                 kind = _ownership(aside, cli, name, rec)  # The real proof (SF1).
@@ -1237,13 +1333,11 @@ def remove_tool(gen: SkillGenerator) -> RemoveResult:
                     _place(aside, dest)
                 raise
             if kind == "ok":
-                held.discard(name)
                 shutil.rmtree(aside, ignore_errors=True)
                 res.removed.append(dest)
                 continue
             try:
                 _place(aside, dest)
-                held.discard(name)
                 res.refused(dest, kind)
             except OSError:
                 res.moved.append((dest, aside))

@@ -342,6 +342,66 @@ class TestSkillsFlows:
         assert "claude" not in sg.get_skills_state().get("skill_folders", {})
         assert docs.is_dir() and os.listdir(docs) == []
 
+    def test_install_while_another_command_holds_the_lock_exits_one(
+        self, bundle, monkeypatch
+    ):
+        detect("claude")
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 0.3)
+        fd = sg._try_lock(sg._STATE_FILE.with_name("skills.json.lock"))
+        assert fd >= 0  # As another deepctl process would.
+        try:
+            with pytest.raises(click.ClickException) as exc:
+                SkillsCommand()._handle_install(install_all=True)
+        finally:
+            if sys.platform == "win32":
+                sg.msvcrt.locking(fd, sg.msvcrt.LK_UNLCK, 1)
+            os.close(fd)
+        assert (exc.value.exit_code, exc.value.message) == (1, _msg("E27"))
+        assert not sg._STATE_FILE.exists()
+        assert not gen("claude").skills_root().exists()
+
+    def test_remove_waits_for_the_lock_once_for_all_tools(
+        self, bundle, monkeypatch, capsys
+    ):
+        detect("claude", "cursor")
+        SkillsCommand()._handle_install(install_all=True)
+        roots = [gen(c).skills_root() for c in ("claude", "cursor")]
+        before = sg._STATE_FILE.read_bytes(), [sha_tree(r) for r in roots]
+        capsys.readouterr()
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 0.5)
+        calls = []
+        real_remove = sg.remove_tool
+        monkeypatch.setattr(
+            sg, "remove_tool", lambda g: calls.append(g) or real_remove(g)
+        )
+        fd = sg._try_lock(sg._STATE_FILE.with_name("skills.json.lock"))
+        assert fd >= 0  # As another deepctl process would.
+        try:
+            start = time.monotonic()
+            with pytest.raises(click.ClickException) as exc:
+                SkillsCommand()._handle_remove(remove_all=True)
+            took = time.monotonic() - start
+        finally:
+            if sys.platform == "win32":
+                sg.msvcrt.locking(fd, sg.msvcrt.LK_UNLCK, 1)
+            os.close(fd)
+        assert (exc.value.exit_code, exc.value.message) == (1, _msg("E27"))
+        assert 0.5 <= took < 1.0  # One wait, not one per tool.
+        assert calls == [] and _msg("E27") not in err_text(capsys)
+        assert (sg._STATE_FILE.read_bytes(), [sha_tree(r) for r in roots]) == before
+
+    def test_fetch_runs_without_the_lock(self, bundle, monkeypatch):
+        detect("claude")
+        real = skill_bundle.fetch_skill_bundle
+
+        def fetch(ref=None):
+            assert getattr(sg._LOCAL, "fd", None) is None
+            return real(ref)
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+        SkillsCommand()._handle_install(install_all=True)
+        assert bundle and (gen("claude").skills_root() / "api").is_dir()
+
     @pytest.mark.parametrize("cli", ["claude", "cursor"])
     def test_setup_mcp_hint_only_after_claude_install(self, bundle, capsys, cli):
         detect(cli)

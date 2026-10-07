@@ -1495,6 +1495,31 @@ class TestUpdate:
 
 
 class TestRemove:
+    def test_a_user_made_staging_lookalike_without_a_marker_is_ignored(self, tmp_path):
+        install(make_bundle(tmp_path))
+        notes = root() / ".deepctl-staging-x" / "old" / "api" / "notes.txt"
+        notes.parent.mkdir(parents=True)
+        notes.write_text("user data\n")
+        shutil.rmtree(root() / "api")
+        res = remove_tool(gen("claude"))
+        assert res.removed == [root() / "docs"]
+        assert (res.stranded, res.kept, res.moved, res.leftover) == ([], [], [], None)
+        assert records() == {} and notes.read_text() == "user data\n"
+
+    def test_a_symlinked_staging_folder_is_ignored(self, tmp_path):
+        install(make_bundle(tmp_path))
+        outside = tmp_path / "outside" / "old" / "api"
+        outside.mkdir(parents=True)  # A marked copy: ignored only for the link.
+        (outside / sg._MARKER).write_bytes(sg._marker_text("claude", "api").encode())
+        before = sha_tree(outside)
+        link = root() / ".deepctl-staging-lnk"
+        symlink_or_skip(link, rel(tmp_path / "outside", link), is_dir=True)
+        shutil.rmtree(root() / "api")
+        res = remove_tool(gen("claude"))
+        assert res.removed == [root() / "docs"]
+        assert (res.stranded, res.kept, res.moved, res.leftover) == ([], [], [], None)
+        assert records() == {} and sha_tree(outside) == before
+
     def test_remove_deletes_only_proven_recorded_folders(self, tmp_path):
         install(make_bundle(tmp_path))
         mine = root() / "my-skill"
@@ -1832,7 +1857,7 @@ class TestState:
         monkeypatch.setattr(os, "fsync", interrupt)
         with pytest.raises(KeyboardInterrupt):
             save_skills_state({"installed_skills": {}})
-        assert os.listdir(sg._STATE_FILE.parent) == []
+        assert os.listdir(sg._STATE_FILE.parent) == ["skills.json.lock"]
 
     def test_symlinked_state_file_stays_a_symlink(self, tmp_path):
         real = tmp_path / "dotfiles" / "skills.json"
@@ -2176,6 +2201,47 @@ class TestConcurrency:
         assert sha_tree(root("claude")) == claude
         assert "cursor" not in disk_state()["skill_folders"]
 
+    def test_concurrent_runs_never_drop_each_others_records(
+        self, tmp_path, monkeypatch
+    ):
+        """B holds the lock in _stage; A waits for it, then installs over B (B1)."""
+        skills = make_bundle(tmp_path, ("api", "docs", "starters"))
+        b_staging, a_waiting = threading.Event(), threading.Event()
+        real_stage, real_try, results = sg._stage, sg._try_lock, {}
+
+        def stage(g, s, staging):
+            if threading.current_thread().name == "B":
+                b_staging.set()
+                assert a_waiting.wait(10)  # A is blocked on the lock B holds.
+            return real_stage(g, s, staging)
+
+        def try_lock(lock):
+            got = real_try(lock)
+            if threading.current_thread().name == "A" and got < 0:
+                a_waiting.set()
+            return got
+
+        def run(tag):
+            try:
+                results[tag] = [p.name for p in install(skills)[0]]
+            except SkillInstallError as exc:
+                results[tag] = str(exc)
+
+        monkeypatch.setattr(sg, "_stage", stage)
+        monkeypatch.setattr(sg, "_try_lock", try_lock)
+        b = threading.Thread(target=run, args=("B",), name="B")
+        b.start()
+        assert b_staging.wait(10)
+        a = threading.Thread(target=run, args=("A",), name="A")
+        a.start()
+        a.join(20)
+        b.join(20)
+        assert results == {"A": ["api", "docs", "starters"], "B": results["A"]}
+        for n in ("api", "docs", "starters"):
+            assert records()[n]["state"] == "installed"
+            assert _ownership(root() / n, "claude", n, records()[n]) == "ok"
+        assert staging_dirs(root()) == []
+
     def test_another_runs_pending_record_is_kept_and_a_crashed_one_settles(
         self, tmp_path, monkeypatch
     ):
@@ -2272,3 +2338,359 @@ class TestConcurrency:
                 install(skills)
         assert not os.path.lexists(root() / "docs")
         assert set(records()) == {"api"}  # This run's tag: absent, so dropped.
+
+
+# ---------------------------------------------------------------------------
+# B1: one skills.json lock across each tool's whole install and remove
+# ---------------------------------------------------------------------------
+
+
+def _hold_lock_child(home, mode, held, release, base=""):
+    """Spawned child: hold the lock, or park inside an install that holds it.
+
+    Module level so a spawned interpreter can import it by name. The parent's
+    monkeypatches do not cross the process boundary, so the home comes in.
+    """
+    home = Path(home)
+    Path.home = staticmethod(lambda: home)  # type: ignore[method-assign]
+    sg._STATE_FILE = home / ".deepctl" / "skills" / "skills.json"
+
+    def park(*a, **k):
+        held.set()
+        release.wait(60)
+
+    if mode == "hold":
+        with sg._state_lock():
+            park()
+        return
+    real_swap, real_place = sg._swap, sg._place
+
+    def swap(*a, **k):
+        sg._swap = real_swap
+        park()
+        return real_swap(*a, **k)
+
+    def place(src, dest):  # Parks after _swap moved the old copy aside (S1).
+        if Path(src).parent.name == "new":
+            park()
+        return real_place(src, dest)
+
+    if mode == "aside":
+        sg._place = place
+    else:
+        sg._swap = swap
+    skills = [RepoSkill(n, Path(base) / n) for n in ("api", "docs")]
+    install_tool(gen("claude"), skills, ref="child-ref", version="1")
+
+
+@contextlib.contextmanager
+def lock_child(monkeypatch, mode="hold", base=""):
+    """A real second interpreter holding the lock until the block ends."""
+    # pytest's importlib mode does not put the test root on sys.path; a
+    # spawned child gets the parent's sys.path, so add it to import this file.
+    depth = len(__name__.split("."))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[depth - 1]))
+    ctx = multiprocessing.get_context("spawn")
+    held, release = ctx.Event(), ctx.Event()
+    args = (str(Path.home()), mode, held, release, base)
+    child = ctx.Process(target=_hold_lock_child, args=args, daemon=True)
+    child.start()
+    try:
+        deadline = time.monotonic() + 60
+        while not held.wait(0.05):  # Fails fast if the child dies on startup.
+            assert child.is_alive(), f"the child exited ({child.exitcode})"
+            assert time.monotonic() < deadline, "the child never took the lock"
+        yield child, release
+    finally:
+        if child.is_alive():  # A killed sleeper would deadlock Event.set().
+            release.set()
+            child.join(30)
+        if child.is_alive():
+            child.kill()
+
+
+@contextlib.contextmanager
+def held_elsewhere():
+    """Hold the lock on a second open file, as another process would."""
+    lock = sg._STATE_FILE.with_name("skills.json.lock")
+    fd = sg._try_lock(lock)
+    assert fd >= 0
+    try:
+        yield lock
+    finally:
+        if sys.platform == "win32":
+            sg.msvcrt.locking(fd, sg.msvcrt.LK_UNLCK, 1)
+        os.close(fd)
+
+
+class TestStateLock:
+    def test_lock_held_by_another_process_gives_e27_and_changes_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        install(make_bundle(tmp_path))
+        saved, tree = state_bytes(), sha_tree(root())
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 0.3)
+        with lock_child(monkeypatch) as (child, _):
+            for op in (
+                lambda: install(make_bundle(tmp_path, body="v2")),
+                lambda: remove_tool(gen("claude")),
+                lambda: save_skills_state(get_skills_state()),
+            ):
+                with pytest.raises(SkillInstallError) as exc:
+                    op()
+                assert str(exc.value) == _msg("E27")
+            assert (state_bytes(), sha_tree(root())) == (saved, tree)
+        assert child.exitcode == 0
+        with sg._state_lock():  # Released when the child let go.
+            pass
+
+    def test_second_process_waits_then_installs_over_the_first(
+        self, tmp_path, monkeypatch
+    ):
+        v1, v2 = make_bundle(tmp_path), make_bundle(tmp_path, body="v2")
+        done = {}
+        with lock_child(monkeypatch, "install", str(v1[0].path.parent)) as (c, go):
+            t = threading.Thread(
+                target=lambda: done.update(r=install(v2, ref="parent-ref"))
+            )
+            t.start()
+            t.join(0.5)
+            assert t.is_alive()  # Waiting: the child is mid-install.
+            go.set()
+            t.join(30)
+            c.join(30)
+        assert c.exitcode == 0
+        assert [p.name for p in done["r"][0]] == ["api", "docs"]
+        for n in ("api", "docs"):
+            assert records()[n]["state"] == "installed"
+            assert _ownership(root() / n, "claude", n, records()[n]) == "ok"
+            assert b"v2" in (root() / n / "SKILL.md").read_bytes()
+        assert disk_state()["skill_folders"]["claude"]["skills_ref"] == "parent-ref"
+        assert staging_dirs(root()) == []
+
+    def test_a_killed_holder_never_leaves_a_stale_lock(self, monkeypatch):
+        with lock_child(monkeypatch) as (child, _):
+            child.kill()  # SIGKILL on POSIX, TerminateProcess on Windows.
+            child.join(30)
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 1.0)
+        start = time.monotonic()
+        with sg._state_lock():
+            pass
+        assert time.monotonic() - start < 1.0
+        assert sg._STATE_FILE.with_name("skills.json.lock").exists()
+
+    def test_a_killed_replacement_keeps_its_record_and_old_copy(
+        self, tmp_path, monkeypatch
+    ):
+        install(make_bundle(tmp_path))
+        old = sha_tree(root() / "api")
+        v2 = make_bundle(tmp_path, body="v2")
+        with lock_child(monkeypatch, "aside", str(v2[0].path.parent)) as (child, _):
+            child.kill()  # Old api is in the child's staging/old; new not placed.
+            child.join(30)
+        [aside] = [root() / d / "old" / "api" for d in staging_dirs(root())]
+        assert not os.path.lexists(root() / "api") and sha_tree(aside) == old
+        res = remove_tool(gen("claude"))
+        assert res.removed == [root() / "docs"]
+        assert res.stranded == [(root() / "api", aside)]
+        assert set(records()) == {"api"} and sha_tree(aside) == old
+        st = tool_status(gen("claude"), get_skills_state())
+        assert st.leftovers == [aside.parents[1]]
+        install(v2)  # Replaces api: its record is this run's now.
+        res = remove_tool(gen("claude"))
+        assert set(res.removed) == {root() / "api", root() / "docs"}
+        assert (res.stranded, res.kept, res.moved, res.leftover) == ([], [], [], None)
+        assert records() == {} and sha_tree(aside) == old  # Left for the user.
+
+    def test_a_killed_update_then_install_then_remove_does_not_fail(
+        self, tmp_path, monkeypatch
+    ):
+        install(make_bundle(tmp_path))
+        old = sha_tree(root() / "api")
+        v2 = make_bundle(tmp_path, body="v2")
+        with lock_child(monkeypatch, "aside", str(v2[0].path.parent)) as (child, _):
+            child.kill()
+            child.join(30)
+        [aside] = [root() / d / "old" / "api" for d in staging_dirs(root())]
+        install(v2)
+        assert records()["api"]["state"] == "installed"
+        res = remove_tool(gen("claude"))
+        assert set(res.removed) == {root() / "api", root() / "docs"}
+        assert (res.stranded, res.kept, res.moved, res.leftover) == ([], [], [], None)
+        assert records() == {} and sha_tree(aside) == old
+
+    def test_lock_is_reentrant_in_one_thread_only(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 0.3)
+        seen = []
+
+        def other():
+            try:
+                with sg._state_lock():
+                    seen.append("took it")
+            except SkillInstallError as exc:
+                seen.append(str(exc))
+
+        with sg._state_lock(), sg._state_lock():  # Nested: never waits.
+            install(make_bundle(tmp_path))  # Takes it again, and _update_state too.
+            t = threading.Thread(target=other)
+            t.start()
+            t.join(10)
+        assert seen == [_msg("E27")]
+        assert getattr(sg._LOCAL, "fd", None) is None
+        t = threading.Thread(target=other)
+        t.start()
+        t.join(10)
+        assert seen[1:] == ["took it"]
+
+    def test_lock_file_sits_next_to_skills_json_and_is_never_rewritten(self, tmp_path):
+        lock = sg._STATE_FILE.with_name("skills.json.lock")
+        install(make_bundle(tmp_path))
+        assert lock.is_file()
+        if os.name != "nt":
+            assert stat.S_IMODE(os.lstat(lock).st_mode) == 0o600
+        lock.write_bytes(b"keep")
+        install(make_bundle(tmp_path, body="v2"))
+        remove_tool(gen("claude"))
+        assert lock.read_bytes() == b"keep"
+
+    @POSIX
+    def test_symlinked_lock_or_read_only_folder_gives_e28(self, tmp_path):
+        if os.geteuid() == 0:
+            pytest.skip("root ignores file permissions")
+        install(make_bundle(tmp_path))
+        lock, target = sg._STATE_FILE.with_name("skills.json.lock"), tmp_path / "t"
+        target.write_bytes(b"theirs")
+        lock.unlink()
+        lock.symlink_to(target)
+        saved, tree = state_bytes(), sha_tree(root())
+        with pytest.raises(SkillInstallError) as exc:
+            install(make_bundle(tmp_path, body="v2"))
+        reason = os.strerror(errno.ELOOP)
+        assert str(exc.value) == _msg("E28", lock=lock, reason=reason)
+        assert target.read_bytes() == b"theirs" and lock.is_symlink()
+        lock.unlink()
+        lock.parent.chmod(0o500)
+        try:
+            with pytest.raises(SkillInstallError) as exc:
+                remove_tool(gen("claude"))
+            reason = os.strerror(errno.EACCES)
+            assert str(exc.value) == _msg("E28", lock=lock, reason=reason)
+            st = tool_status(gen("claude"), get_skills_state())  # Status needs none.
+            assert [p.name for p in st.kinds["ok"]] == ["api", "docs"]
+            assert install_conflicts([gen("claude")], make_bundle(tmp_path)) == ([], [])
+        finally:
+            lock.parent.chmod(0o700)
+        assert (state_bytes(), sha_tree(root())) == (saved, tree)
+
+    @pytest.mark.parametrize(
+        ("code", "key"), [(errno.ENOLCK, "E28"), (errno.EAGAIN, "E27")]
+    )
+    def test_only_a_busy_lock_is_waited_for(self, tmp_path, monkeypatch, code, key):
+        def fail(*a):
+            raise OSError(code, os.strerror(code))
+
+        owner = sg.msvcrt if sys.platform == "win32" else sg.fcntl
+        monkeypatch.setattr(
+            owner, "locking" if sys.platform == "win32" else "flock", fail
+        )
+        wait = 5.0 if key == "E28" else 0.5  # E28 must return long before 5 s.
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", wait)
+        skills = make_bundle(tmp_path)
+        start = time.monotonic()
+        with pytest.raises(SkillInstallError) as exc:
+            install(skills)
+        took = time.monotonic() - start
+        lock = sg._STATE_FILE.with_name("skills.json.lock")
+        assert str(exc.value) == _msg(key, lock=lock, reason=os.strerror(code))
+        assert took < 2.0 if key == "E28" else took >= 0.5
+        assert state_bytes() is None and not root().exists()
+
+    def test_ctrl_c_while_waiting_closes_the_lock_and_writes_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        install(make_bundle(tmp_path))
+        saved, tree, opened, closed = state_bytes(), sha_tree(root()), [], []
+        real_open = os.open
+
+        def open_(path, *a, **k):
+            fd = real_open(path, *a, **k)
+            if Path(path).name == "skills.json.lock":
+                opened.append(fd)
+            return fd
+
+        def interrupt(seconds):
+            raise KeyboardInterrupt
+
+        with held_elsewhere(), monkeypatch.context() as m:
+            m.setattr(os, "open", open_)
+            wrap(m, os, "close", closed.append)
+            m.setattr(sg.time, "sleep", interrupt)
+            with pytest.raises(KeyboardInterrupt):
+                install(make_bundle(tmp_path, body="v2"))
+        assert len(opened) == 1 and opened[0] in closed
+        assert getattr(sg._LOCAL, "fd", None) is None
+        assert (state_bytes(), sha_tree(root())) == (saved, tree)
+        assert staging_dirs(root()) == []
+
+    def test_fetch_runs_without_the_lock(self, tmp_path, monkeypatch):
+        skills = make_bundle(tmp_path)
+
+        def fetch(ref=None):
+            assert getattr(sg._LOCAL, "fd", None) is None
+            return skills
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+        gen("claude").install([], "x")
+        assert set(records()) == {"api", "docs"}
+
+    def test_lock_messages_end_with_the_retry_phrase(self):
+        for key in ("E27", "E28"):
+            text = _msg(key, lock=Path("x"), reason="r")
+            assert text.endswith(", then run the command again.")
+        assert "on a local disk" in _msg("E28", lock=Path("x"), reason="r")
+
+    def test_ctrl_c_right_after_the_lock_is_taken_never_keeps_it(self, monkeypatch):
+        win = sys.platform == "win32"
+        owner, name = (sg.msvcrt, "locking") if win else (sg.fcntl, "flock")
+        real = getattr(owner, name)
+
+        def locked_then_interrupted(*a):
+            real(*a)
+            raise KeyboardInterrupt
+
+        with monkeypatch.context() as m:
+            m.setattr(owner, name, locked_then_interrupted)
+            with pytest.raises(KeyboardInterrupt), sg._state_lock():
+                pass
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 5.0)
+        start = time.monotonic()
+        with sg._state_lock():  # The interrupted take did not keep the file locked.
+            pass
+        assert time.monotonic() - start < (5.0 if win else 1.0)
+        assert getattr(sg._LOCAL, "fd", None) is None
+
+    @POSIX
+    def test_lock_file_replaced_before_the_lock_is_never_entered(self, monkeypatch):
+        """Another run deletes and remakes the file between our open and our lock."""
+        lock, real, other = (
+            sg._STATE_FILE.with_name("skills.json.lock"),
+            sg.fcntl.flock,
+            [],
+        )
+
+        def flock(fd, op):
+            if not other:
+                other.append(-1)
+                os.unlink(lock)
+                other[0] = sg._try_lock(lock)  # Holds the new file.
+            return real(fd, op)
+
+        monkeypatch.setattr(sg.fcntl, "flock", flock)
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 0.3)
+        try:
+            with pytest.raises(SkillInstallError) as exc, sg._state_lock():
+                pass  # Never runs: the file it locked is no longer the lock.
+        finally:
+            os.close(other[0])
+        assert other[0] >= 0 and str(exc.value) == _msg("E27")
+        assert getattr(sg._LOCAL, "fd", None) is None

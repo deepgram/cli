@@ -417,7 +417,7 @@ class SkillsCommand(BaseGroupCommand):
             return
 
         removed, tools, failed = 0, 0, False
-        with _clean_errors():
+        with _clean_errors(), sg._state_lock():  # Once for all tools: no wait per tool.
             for cli_key in targets:
                 gen = generators.get(cli_key)
                 if gen is None:
@@ -432,6 +432,7 @@ class SkillsCommand(BaseGroupCommand):
                 notes = [sg._msg("E26", dest=p) for p in res.left_alone]
                 notes += [sg._msg("E23", dest=p) for p in res.edited]
                 notes += [sg._msg("E4", dest=d, aside=a) for d, a in res.moved]
+                notes += [sg._msg("E29", dest=d, aside=a) for d, a in res.stranded]
                 notes += [sg._msg("E13", dest=d, reason=why) for d, why in res.kept]
                 notes += [sg._msg("E12", staging=res.leftover)] if res.leftover else []
                 for note in notes:
@@ -446,7 +447,9 @@ class SkillsCommand(BaseGroupCommand):
                     c10 = f"{gen.display_name} has no skill folders recorded, so nothing was removed{'; ' + v03 if old else '.'}"
                 if old or cli_key not in recs:
                     print_info(escape(c10))
-                failed = failed or bool(res.kept or res.moved or res.leftover)
+                failed = failed or bool(
+                    res.kept or res.moved or res.stranded or res.leftover
+                )
                 removed, tools = removed + len(res.removed), tools + bool(res.removed)
         if failed:
             c11 = "Some skill folders were not fully removed; fix the problems listed above."
