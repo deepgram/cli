@@ -291,13 +291,33 @@ Add to your editor's MCP config:
 
 ### AI Tool Integration
 
-Automatically detect and configure AI coding assistants with Deepgram skills.
+Install the Deepgram skills as folders in each AI coding assistant's skills folder.
 
 ```bash
 dg skills status                          # Detect AI tools
 dg skills setup                           # Interactive setup wizard
 dg skills install --all                   # Install for all detected tools
+dg skills update                          # Replace the folders deepctl installed
+dg skills remove --all                    # Delete the folders deepctl installed
 ```
+
+| Tool | Skills folder |
+|---|---|
+| Claude Code | `~/.claude/skills` |
+| OpenAI Codex | `~/.agents/skills` |
+| Gemini CLI | `~/.gemini/skills` |
+| Cursor | `~/.cursor/skills` |
+| OpenCode | `~/.config/opencode/skills` |
+| Cline | `~/.cline/skills` |
+| Amazon Q Developer, Aider | none: deepctl prints where to get the skills |
+
+deepctl replaces or deletes a folder only if skills.json records it for that tool, it is a real folder directly in that tool's skills folder, it holds deepctl's `.deepctl-skill` marker, and its contents are exactly what deepctl installed. So folders from `npx skills add`, and symlinked skill folders, are left alone.
+
+These commands abort if the filesystem cannot provide locking or no-replace directory moves. Installed skill folders and skills.json stay as they were, though the tool's skills folder and `~/.deepctl/skills/skills.json.lock` may already have been created. While another `dg skills` command is changing skills, the next one waits up to 30 seconds for it to finish.
+
+If you edit a deepctl folder, or add a file or link to it, deepctl leaves it alone: `update` stops without changing anything and `remove` won't delete it. To get updates again, rename or move your edited copy, or delete it yourself. Opening a skill folder in Finder or Explorer can add `.DS_Store`, `Thumbs.db` or `desktop.ini`, which counts as an edit.
+
+Files from deepctl 0.3.x, such as `~/.claude/commands/deepgram/*.md` and the rules files like `~/.cursor/rules/deepctl.mdc`, are currently kept, and `dg skills remove` doesn't delete them.
 
 ### Starter Apps
 
