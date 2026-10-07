@@ -2587,24 +2587,75 @@ class TestInstallFor:
         from deepctl_core import output
 
         output._output_config["agentic"] = agentic
-        sg.warn_install_failure("Step did not finish", SkillInstallError("[b]x[/b]."))
-        sg.warn_install_failure("Step did not finish", RuntimeError())
+        retry = "run 'dg x' to try again"
+        sg.warn_install_failure("Step did not finish", SkillInstallError("[b]x[/b]."), retry)
+        sg.warn_install_failure("Step did not finish", RuntimeError(), retry)
         out, err = capsys.readouterr()
         assert out == ""
         lines = err.splitlines()
         assert len(lines) == 2
-        assert lines[0].endswith("Step did not finish: [b]x[/b].")
-        assert lines[1].endswith("Step did not finish: RuntimeError")
+        assert lines[0].endswith("Step did not finish: [b]x[/b]; run 'dg x' to try again.")
+        assert lines[1].endswith("Step did not finish: RuntimeError; run 'dg x' to try again.")
+
+    def test_warn_install_failure_names_the_retry_command_not_a_rerun(self, capsys):
+        e1 = _msg("E1", paths="/p")
+        sg.warn_install_failure("Step", SkillInstallError(e1), "run 'dg x' to try again")
+        _, err = capsys.readouterr()
+        assert "run the command again" not in err
+        assert err.splitlines() == [
+            "WARN: Step: deepctl cannot prove it installed /p, so it will not replace"
+            " anything there; move or rename what is there, then run 'dg x' to try again."
+        ]
+
+    def test_warn_install_failure_names_the_retry_in_every_sentence(
+        self, capsys, monkeypatch
+    ):
+        from deepctl_core import output
+
+        monkeypatch.setattr(output.stderr_console, "_width", 2000)
+        home = Path.home()
+        p1, p2, p3 = home / "a", home / "b", home / "c"
+        sg.warn_install_failure("Step", SkillOwnershipError([p1], [p2, p3]), "retry")
+        _, err = capsys.readouterr()
+        [line] = err.splitlines()
+        assert "run the command again" not in line
+        assert line.count(", then retry.") == 3
+        for p in (p1, p2, p3):
+            assert str(p) in line
+        assert line.endswith(", then retry.")
+
+    def test_warn_install_failure_e27_says_stopped_not_changed_nothing(self, capsys):
+        # Earlier tools may already be installed, so "changed nothing" is not true.
+        sg.warn_install_failure("Step", SkillInstallError(_msg("E27")), "retry")
+        _, err = capsys.readouterr()
+        assert "changed nothing" not in err
+        assert err.splitlines() == [
+            "WARN: Step: "
+            + _msg("E27")
+            .replace("changed nothing", "stopped")
+            .replace(", then run the command again.", ", then retry.")
+        ]
+
+    def test_warn_install_failure_e9b_has_no_not_updated_prefix(
+        self, capsys, monkeypatch
+    ):
+        from deepctl_core import output
+
+        monkeypatch.setattr(output.stderr_console, "_width", 2000)
+        e9b = sg._err("E9b", gen("claude"), reason="disk full")
+        sg.warn_install_failure("Step did not finish", e9b, "retry")
+        _, err = capsys.readouterr()
+        assert err.splitlines() == ["WARN: " + str(e9b).rstrip(".") + "; retry."]
 
     def test_warn_install_failure_reports_leftover_staging_first(self, capsys):
         exc = SkillInstallError("boom.")
         exc.leftover = Path.home() / ".deepctl-staging-1"
-        sg.warn_install_failure("Step did not finish", exc)
+        sg.warn_install_failure("Step did not finish", exc, "retry")
         out, err = capsys.readouterr()
         assert out == ""
         assert err.splitlines() == [
             "WARN: " + _msg("E12", staging=exc.leftover),
-            "WARN: Step did not finish: boom.",
+            "WARN: Step did not finish: boom; retry.",
         ]
 
 

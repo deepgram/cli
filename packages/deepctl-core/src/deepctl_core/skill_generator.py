@@ -1318,12 +1318,24 @@ def install_for(
         yield gen, placed, leftover
 
 
-def warn_install_failure(prefix: str, exc: Exception) -> None:
-    """One plain warning on stderr for a best-effort caller (login, plugin)."""
+def warn_install_failure(prefix: str, exc: Exception, retry: str) -> None:
+    """A plain warning on stderr, after an E12 line when staging was left.
+
+    For best-effort callers (login, plugin): rerunning them does not retry the
+    skills step, so ``retry`` names the command that does.
+    """
     leftover = getattr(exc, "leftover", None)
     if leftover:
         print_warning(escape(_msg("E12", staging=leftover)), stderr=True)
-    print_warning(escape(f"{prefix}: {str(exc) or type(exc).__name__}"), stderr=True)
+    text = str(exc) or type(exc).__name__
+    text = text.replace("and changed nothing;", "and stopped;")  # E27
+    again = ", then run the command again."
+    if again in text:  # Every sentence: an ownership error joins one per folder.
+        text = text.replace(again, f", then {retry}.")
+    else:
+        text = f"{text.rstrip('.')}; {retry}."
+    head = "" if " are installed, but " in text else f"{prefix}: "  # E9b
+    print_warning(escape(f"{head}{text}"), stderr=True)
 
 
 @dataclass

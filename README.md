@@ -313,7 +313,9 @@ dg skills remove --all                    # Delete the folders deepctl installed
 
 deepctl replaces or deletes a folder only if skills.json records it for that tool, it is a real folder directly in that tool's skills folder, it holds deepctl's `.deepctl-skill` marker, and its contents are exactly what deepctl installed. So folders from `npx skills add`, and symlinked skill folders, are left alone.
 
-These commands abort if the filesystem cannot provide locking or no-replace directory moves. Installed skill folders and skills.json stay as they were, though the tool's skills folder and `~/.deepctl/skills/skills.json.lock` may already have been created. While another `dg skills` command is changing skills, the next one waits up to 30 seconds for it to finish.
+These commands abort if the filesystem cannot provide locking or no-replace directory moves. Installed skill folders and skills.json stay as they were, though the tool's skills folder and `~/.deepctl/skills/skills.json.lock` may already have been created. While another `dg skills`, `dg login` or `dg plugin` command is changing skills, the next one waits up to 30 seconds for it to finish.
+
+`dg login` offers to install the skills, and `dg plugin install`, `update` and `remove` refresh the installed ones, through the same path as `dg skills install` and `update`. A skills installation failure prints a warning on stderr and does not change those commands' exit codes. Ctrl-C still cancels the command.
 
 If you edit a deepctl folder, or add a file or link to it, deepctl leaves it alone: `update` stops without changing anything and `remove` won't delete it. To get updates again, rename or move your edited copy, or delete it yourself. Opening a skill folder in Finder or Explorer can add `.DS_Store`, `Thumbs.db` or `desktop.ini`, which counts as an edit.
 

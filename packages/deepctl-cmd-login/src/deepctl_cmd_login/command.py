@@ -12,7 +12,9 @@ from deepctl_core import (
     ProfilesResult,
     get_output_format,
 )
+from deepctl_core.output import print_warning
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Prompt
 
 from .models import LoginResult, LogoutResult, WhoamiResult
@@ -237,43 +239,35 @@ class LoginCommand(BaseCommand):
                 console.print("[dim]No tools selected.[/dim]")
                 return
 
-            # Install skills for selected tools
-            from deepctl_core.skill_generator import (
-                _commands_hash,
-                collect_command_metadata,
-                save_skills_state,
-            )
+            # The path 'dg skills install' uses (B3): one fetch, every tool
+            # preflighted, each tool recorded as it lands.
+            from deepctl_core import skill_generator as sg
+            from deepctl_core.skill_bundle import resolve_skills_ref
 
             console.print("\n[blue]Installing Deepgram skills...[/blue]")
-
-            import importlib.metadata
-            from datetime import datetime, timezone
-
-            commands = collect_command_metadata()
-            try:
-                version = importlib.metadata.version("deepctl")
-            except importlib.metadata.PackageNotFoundError:
-                version = "0.0.0"
-
             for gen in selected:
-                paths = gen.install(commands, version)
-                cmd_hash = _commands_hash(commands)
-                state["installed_skills"][gen.cli_name] = {
-                    "paths": [str(p) for p in paths],
-                    "installed_at": datetime.now(timezone.utc).isoformat(),
-                    "version": version,
-                    "commands_hash": cmd_hash,
-                }
-                for p in paths:
-                    console.print(f"  [green]✓[/green] {gen.display_name} → {p}")
+                if gen.skills_root() is None:
+                    print_warning(escape(sg._msg("E15", gen)), stderr=True)
+            ref, count = resolve_skills_ref(), 0
+            for gen, paths, leftover in sg.install_for([(g, ref) for g in selected]):
+                count += len(paths)
+                line = f"{gen.display_name} → {gen.skills_root()} ({len(paths)} skills)"
+                console.print(f"  [green]✓[/green] {escape(line)}")
+                if leftover:
+                    print_warning(escape(sg._msg("E12", staging=leftover)), stderr=True)
+            if count:
+                console.print(
+                    "\n[green]Skills installed![/green] "
+                    "[dim]Run 'dg skills update' to get newer skills.[/dim]"
+                )
+        except Exception as exc:  # Never fails the login, and never silent (B3).
+            from deepctl_core.skill_generator import warn_install_failure
 
-            save_skills_state(state)
-            console.print(
-                "\n[green]Skills installed![/green] "
-                "[dim]Run 'dg skills update' after plugin changes.[/dim]"
+            warn_install_failure(
+                "Skills setup did not finish",
+                exc,
+                "run 'dg skills install' to try again",
             )
-        except Exception:
-            pass  # Best-effort — never fail the login
 
     def _cli_auth(
         self,

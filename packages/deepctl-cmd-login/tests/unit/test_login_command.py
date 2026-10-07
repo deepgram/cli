@@ -1,16 +1,140 @@
 """Tests for the login command."""
 
+import errno
+import hashlib
+import json
+import shutil
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, patch
 
+import click
 import pytest
+from deepctl_cmd_login import command as login_module
 from deepctl_cmd_login.command import (
     LoginCommand,
     LogoutCommand,
     ProfilesCommand,
 )
 from deepctl_cmd_login.models import LoginResult, LogoutResult
-from deepctl_core import AuthManager, Config, DeepgramClient
+from deepctl_core import AuthManager, Config, DeepgramClient, output, skill_bundle
+from deepctl_core import skill_generator as sg
 from deepctl_core.models import ProfileInfo, ProfilesResult
+from deepctl_core.skill_bundle import RepoSkill, SkillFetchError
+
+
+@pytest.fixture(autouse=True)
+def _no_real_skills_state(tmp_path, monkeypatch):
+    """No test here reads or writes the developer's real skills.json (T19)."""
+    skills_dir = tmp_path / "deepctl-skills"
+    monkeypatch.setattr(sg, "_SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(sg, "_STATE_FILE", skills_dir / "skills.json")
+
+
+def use_home(monkeypatch, home):
+    """Point every home lookup the skills step makes at ``home``."""
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(sg, "_SKILLS_DIR", home / ".deepctl" / "skills")
+    monkeypatch.setattr(sg, "_STATE_FILE", home / ".deepctl" / "skills" / "skills.json")
+    return home
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """A throwaway HOME with the output mode pinned (S4) and no PATH detection."""
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.delenv(skill_bundle.REF_ENV_VAR, raising=False)
+    for con in (output.console, output.stderr_console, login_module.console):
+        monkeypatch.setattr(con, "_width", 400)
+    saved = dict(output._output_config)
+    output._output_config.update(agentic=True, format="default", quiet=False)
+    yield use_home(monkeypatch, tmp_path / "home")
+    output._output_config.clear()
+    output._output_config.update(saved)
+
+
+@pytest.fixture
+def bundle(tmp_path, monkeypatch):
+    """Patch the one fetch point; return the list of refs fetched."""
+    fetched = []
+
+    def fetch(ref=None):
+        fetched.append(ref)
+        skills = []
+        for name in ("api", "docs"):
+            folder = tmp_path / "bundle" / "skills" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "SKILL.md").write_bytes(f"---\nname: {name}\n---\n{ref}\n".encode())
+            skills.append(RepoSkill(name, folder))
+        return skills
+
+    monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+    return fetched
+
+
+def detect(*clis):
+    for cli in clis:
+        Path.home().joinpath(*gen(cli).homes[0]).mkdir(parents=True, exist_ok=True)
+
+
+def gen(cli):
+    return next(g for g in sg.get_all_generators() if g.cli_name == cli)
+
+
+def run_skills_step(monkeypatch, capsys, answer="all"):
+    """Run login's skills step as a TTY user typing ``answer``; return (out, err)."""
+    capsys.readouterr()
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+    cmd = LoginCommand()
+    cmd._guided = True
+    with patch.object(login_module.Prompt, "ask", return_value=answer) as ask:
+        cmd._maybe_prompt_skills_setup()
+    out, err = capsys.readouterr()
+    return click.unstyle(out), click.unstyle(err), ask
+
+
+def normalized(home):
+    """skills.json with paths rebased on ``home`` and timestamps dropped."""
+    text = sg._STATE_FILE.read_text(encoding="utf-8")
+    state = json.loads(text.replace(json.dumps(str(home))[1:-1], "~"))
+    for section in ("skill_folders", "installed_skills"):
+        for tool in state.get(section, {}).values():
+            tool.pop("installed_at", None)
+    return state
+
+
+def sha_tree(path):
+    return {
+        str(p.relative_to(path)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(Path(path).rglob("*"))
+        if p.is_file()
+    }
+
+
+RETRY = "run 'dg skills install' to try again"
+AGAIN = ", then run the command again."
+
+
+def retried(msg):
+    """Login's warning text for ``msg``: it names the retry, not a rerun of login."""
+    if AGAIN in msg:
+        return msg.replace(AGAIN, f", then {RETRY}.")
+    assert msg.endswith(".")
+    return msg[:-1] + f"; {RETRY}."
+
+
+def fail_for(monkeypatch, cli, exc):
+    real = sg.install_tool
+
+    def install_tool(g, *a, **k):
+        if g.cli_name == cli:
+            raise exc
+        return real(g, *a, **k)
+
+    monkeypatch.setattr(sg, "install_tool", install_tool)
 
 
 @pytest.fixture
@@ -475,3 +599,250 @@ class TestWhoamiKeySource:
             profile_key=None,
         )
         assert result.key_source == "DEEPGRAM_API_KEY (env)"
+
+
+class TestLoginSkillsThroughSharedInstaller:
+    """B3: login installs through the path 'dg skills install' uses."""
+
+    def test_login_writes_the_records_dg_skills_install_would(
+        self, home, bundle, monkeypatch, capsys, tmp_path
+    ):
+        from deepctl_cmd_skills.command import SkillsCommand
+
+        detect("claude", "cursor")
+        out, err, _ = run_skills_step(monkeypatch, capsys)
+        assert err == ""
+        root = gen("claude").skills_root()
+        assert f"✓ Claude Code → {root} (2 skills)" in out
+        assert "Skills installed!" in out
+        from_login = normalized(home)
+
+        other = use_home(monkeypatch, tmp_path / "other")
+        detect("claude", "cursor")
+        SkillsCommand()._handle_install(install_all=True)
+        assert normalized(other) == from_login
+        assert set(from_login["skill_folders"]) == {"claude", "cursor"}
+
+    @pytest.mark.parametrize("leftover", [False, True])
+    def test_login_second_tool_failure_keeps_first_recorded_warns_once_exit_zero(
+        self,
+        home,
+        bundle,
+        monkeypatch,
+        capsys,
+        leftover,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+    ):
+        detect("claude", "cursor")
+        exc = sg._err("E5", gen("cursor"), reason="No space left on device")
+        staging = gen("cursor").skills_root() / ".deepctl-staging-x"
+        exc.leftover = staging if leftover else None
+        fail_for(monkeypatch, "cursor", exc)
+        ok = LoginResult(status="success", message="ok", profile="default")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+        cmd = LoginCommand()
+        cmd._guided = True
+        capsys.readouterr()
+        with (
+            patch.object(cmd, "_web_auth", return_value=ok),
+            patch.object(login_module.Prompt, "ask", return_value="all"),
+        ):
+            result = cmd.handle(
+                config=mock_config, auth_manager=mock_auth_manager, client=mock_client
+            )
+        out, err = (click.unstyle(t) for t in capsys.readouterr())
+        assert result.status == "success"
+        warning = "WARN: Skills setup did not finish: " + retried(str(exc))
+        e12 = "WARN: " + sg._msg("E12", staging=staging)
+        assert err.splitlines() == ([e12] if leftover else []) + [warning]
+        assert "did not finish" not in out
+        assert f"✓ Claude Code → {gen('claude').skills_root()} (2 skills)" in out
+        assert "Skills installed!" not in out  # As 'dg skills install': no summary.
+        claude = sg.get_skills_state()["skill_folders"]["claude"]["folders"]
+        assert {n: r["state"] for n, r in claude.items()} == {
+            "api": "installed",
+            "docs": "installed",
+        }
+        assert (gen("claude").skills_root() / "api" / "SKILL.md").is_file()
+        assert "cursor" not in sg.get_skills_state()["skill_folders"]
+
+    def test_login_uses_the_skills_ref_env_var_and_records_it(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        detect("claude")
+        monkeypatch.setenv(skill_bundle.REF_ENV_VAR, " v9.9.9 ")
+        _, err, _ = run_skills_step(monkeypatch, capsys)
+        assert err == ""
+        assert bundle == ["v9.9.9"]
+        record = sg.get_skills_state()["skill_folders"]["claude"]
+        assert record["skills_ref"] == "v9.9.9"
+
+    def test_login_markup_in_home_path_prints_literally(
+        self, tmp_path, bundle, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        monkeypatch.delenv(skill_bundle.REF_ENV_VAR, raising=False)
+        monkeypatch.setitem(output._output_config, "agentic", True)
+        for con in (output.console, output.stderr_console, login_module.console):
+            monkeypatch.setattr(con, "_width", 400)
+        use_home(monkeypatch, tmp_path / "[dim]home")
+        detect("claude")
+        out, err, _ = run_skills_step(monkeypatch, capsys)
+        root = gen("claude").skills_root()
+        assert "[dim]home" in str(root)
+        assert err == ""
+        assert f"  ✓ Claude Code → {root} (2 skills)" in out.splitlines()
+
+    def test_login_warning_is_on_stderr_outside_agentic_mode(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        output._output_config["agentic"] = False
+        detect("claude")
+        fail_for(monkeypatch, "claude", sg._err("E5", gen("claude"), reason="nope"))
+        out, err, _ = run_skills_step(monkeypatch, capsys)
+        assert "did not finish" not in out
+        assert err.strip().startswith("⚠ Skills setup did not finish: ")
+        assert err.strip().endswith(f"; {RETRY}.")
+
+    def test_login_conflict_in_any_tool_writes_nothing(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        detect("claude", "cursor")
+        mine = gen("cursor").skills_root() / "api"
+        mine.mkdir(parents=True)
+        (mine / "notes.md").write_bytes(b"mine")
+        before = sha_tree(mine)
+        out, err, _ = run_skills_step(monkeypatch, capsys)
+        e1 = sg._msg("E1", paths=str(mine))
+        assert err.splitlines() == [
+            "WARN: Skills setup did not finish: " + e1.removesuffix(AGAIN) + ", then "
+            "run 'dg skills install' to try again."
+        ]
+        assert not gen("claude").skills_root().exists()
+        assert sha_tree(mine) == before
+        assert not sg._STATE_FILE.exists()
+        assert "Skills installed!" not in out
+
+    def test_login_fetch_failure_warns_and_writes_nothing(
+        self, home, monkeypatch, capsys
+    ):
+        detect("claude")
+
+        def fetch(ref=None):
+            raise SkillFetchError("Could not download the skills.")
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+        _, err, _ = run_skills_step(monkeypatch, capsys)
+        assert err.splitlines() == [
+            "WARN: Skills setup did not finish: Could not download the skills; "
+            "run 'dg skills install' to try again."
+        ]
+        assert not gen("claude").skills_root().exists()
+        assert not sg._STATE_FILE.exists()
+
+    @pytest.mark.parametrize(("agentic", "prefix"), [(True, "WARN: "), (False, "⚠ ")])
+    def test_login_hint_only_selection_warns_e15_on_stderr_installs_nothing(
+        self, home, bundle, monkeypatch, capsys, agentic, prefix
+    ):
+        output._output_config["agentic"] = agentic
+        detect("amazonq")
+        out, err, _ = run_skills_step(monkeypatch, capsys)
+        assert err.splitlines() == [prefix + sg._msg("E15", gen("amazonq"))]
+        assert bundle == []
+        assert not sg._STATE_FILE.exists()
+        assert "Skills installed!" not in out
+
+    def test_login_prompt_text_is_unchanged(self, home, bundle, monkeypatch, capsys):
+        detect("claude", "cursor")
+        out, _, ask = run_skills_step(monkeypatch, capsys, answer="none")
+        ask.assert_called_once_with(
+            "Install skills for (comma-separated numbers, [bold]all[/bold], or [bold]none[/bold])",
+            default="all",
+        )
+        assert "AI coding tools detected:" in out
+        assert "  1. Claude Code" in out
+        assert "  2. Cursor" in out
+        assert "You can run 'dg skills setup' later." in out
+        assert bundle == []
+        assert not sg._STATE_FILE.exists()
+
+    def test_login_numbered_selection_installs_only_that_tool(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        detect("claude", "cursor")
+        run_skills_step(monkeypatch, capsys, answer="2")
+        assert set(sg.get_skills_state()["skill_folders"]) == {"cursor"}
+
+    def test_login_does_not_prompt_when_skills_recorded(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        detect("claude")
+        rule = Path.home() / ".amazonq" / "rules" / "deepctl.md"
+        sg._STATE_FILE.parent.mkdir(parents=True)
+        sg._STATE_FILE.write_text(
+            json.dumps({"installed_skills": {"amazonq": {"paths": [str(rule)]}}})
+        )
+        saved = sg._STATE_FILE.read_bytes()
+        out, err, ask = run_skills_step(monkeypatch, capsys)
+        ask.assert_not_called()
+        assert (out, err) == ("", "")
+        assert sg._STATE_FILE.read_bytes() == saved
+
+    def test_login_corrupt_skills_json_warns_once_and_does_not_prompt(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        detect("claude")
+        sg._STATE_FILE.parent.mkdir(parents=True)
+        sg._STATE_FILE.write_bytes(b"{not json")
+        out, err, ask = run_skills_step(monkeypatch, capsys)
+        ask.assert_not_called()
+        assert err.splitlines() == [
+            "WARN: Skills setup did not finish: " + retried(sg._msg("E7"))
+        ]
+        assert out == ""
+        assert sg._STATE_FILE.read_bytes() == b"{not json"
+
+    def test_login_ctrl_c_at_prompt_propagates_and_writes_nothing(
+        self, home, bundle, monkeypatch
+    ):
+        detect("claude")
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+        cmd = LoginCommand()
+        cmd._guided = True
+        with (
+            patch.object(login_module.Prompt, "ask", side_effect=KeyboardInterrupt),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            cmd._maybe_prompt_skills_setup()
+        assert bundle == []
+        assert not sg._STATE_FILE.exists()
+        assert not gen("claude").skills_root().exists()
+
+    def test_login_disk_error_mid_install_warns_and_exits_zero(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        detect("claude")
+
+        def full(*a, **k):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(sg, "_swap", full)
+        _, err, _ = run_skills_step(monkeypatch, capsys)
+        e5 = sg._msg("E5", gen("claude"), reason="No space left on device")
+        assert err.splitlines()[-1] == f"WARN: Skills setup did not finish: {retried(e5)}"
+
+    def test_login_leftover_staging_after_success_warns_on_stderr(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        output._output_config["agentic"] = False
+        detect("claude")
+        staging = gen("claude").skills_root() / ".deepctl-staging-x"
+        real = sg.install_tool
+        monkeypatch.setattr(
+            sg, "install_tool", lambda *a, **k: (real(*a, **k)[0], staging)
+        )
+        out, err, _ = run_skills_step(monkeypatch, capsys)
+        assert err.splitlines() == ["⚠ " + sg._msg("E12", staging=staging)]
+        assert "Skills installed!" in out

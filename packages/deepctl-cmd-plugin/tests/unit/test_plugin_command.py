@@ -1,21 +1,174 @@
 """Unit tests for plugin command."""
 
+import ast
+import hashlib
+import inspect
 import json
+import os
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click
 import pytest
 from click.testing import CliRunner
+from deepctl_cmd_plugin import command as plugin_module
 from deepctl_cmd_plugin.command import PluginCommand
 from deepctl_cmd_plugin.models import (
     PluginInstallOptions,
     PluginOperationResult,
 )
 from deepctl_cmd_update.installation import InstallMethod
+from deepctl_core import output, skill_bundle
+from deepctl_core import skill_generator as sg
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
+from deepctl_core.skill_bundle import RepoSkill, SkillFetchError
+
+REF = skill_bundle.DEFAULT_SKILLS_COMMIT
+RETRY = "run 'dg skills update' to try again"
+AGAIN = ", then run the command again."
+
+
+def retried(msg):
+    """The refresh's warning for ``msg``: it names the retry, not a plugin rerun."""
+    if AGAIN in msg:
+        return msg.replace(AGAIN, f", then {RETRY}.")
+    assert msg.endswith(".")
+    return msg[:-1] + f"; {RETRY}."
+
+
+def invoke_install(cmd=None):
+    """Run ``dg plugin install p`` through click with the pip step stubbed out."""
+    cmd = cmd or PluginCommand()
+    ok = PluginOperationResult(
+        success=True, action="install", package="p", message="Installed p"
+    )
+    group = click.Group("plugin", commands=cmd.setup_commands())
+    obj = {"config": MagicMock(), "auth_manager": MagicMock(), "client": MagicMock()}
+    with patch.object(cmd, "install_plugin", return_value=ok):
+        return CliRunner().invoke(group, ["install", "p"], obj=obj)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_skills_state(tmp_path, monkeypatch):
+    """No test here reads or writes the developer's real skills.json (T19).
+
+    Handler tests that succeed run the real skills refresh; with no records
+    under this throwaway path it returns before any fetch.
+    """
+    skills_dir = tmp_path / "deepctl-skills"
+    monkeypatch.setattr(sg, "_SKILLS_DIR", skills_dir)
+    monkeypatch.setattr(sg, "_STATE_FILE", skills_dir / "skills.json")
+
+
+def use_home(monkeypatch, home):
+    """Point every home lookup the skills refresh makes at ``home``."""
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(sg, "_SKILLS_DIR", home / ".deepctl" / "skills")
+    monkeypatch.setattr(sg, "_STATE_FILE", home / ".deepctl" / "skills" / "skills.json")
+    return home
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """A throwaway HOME with the output mode pinned (S4) and no PATH detection."""
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.delenv(skill_bundle.REF_ENV_VAR, raising=False)
+    for con in (output.console, output.stderr_console, plugin_module.console):
+        monkeypatch.setattr(con, "_width", 400)
+    saved = dict(output._output_config)
+    output._output_config.update(agentic=True, format="default", quiet=False)
+    yield use_home(monkeypatch, tmp_path / "home")
+    output._output_config.clear()
+    output._output_config.update(saved)
+
+
+@pytest.fixture
+def bundle(tmp_path, monkeypatch):
+    """Patch the one fetch point; return the list of refs fetched."""
+    fetched = []
+
+    def fetch(ref=None):
+        fetched.append(ref)
+        skills = []
+        for name in ("api", "docs"):
+            folder = tmp_path / "bundle" / "skills" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "SKILL.md").write_bytes(f"---\nname: {name}\n---\n{ref}\n".encode())
+            skills.append(RepoSkill(name, folder))
+        return skills
+
+    monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+    return fetched
+
+
+def gen(cli):
+    return next(g for g in sg.get_all_generators() if g.cli_name == cli)
+
+
+def write_state(state):
+    sg._STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    sg._STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+
+
+def state_bytes():
+    try:
+        return sg._STATE_FILE.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def normalized(home):
+    """skills.json with paths rebased on ``home`` and timestamps dropped."""
+    text = sg._STATE_FILE.read_text(encoding="utf-8")
+    state = json.loads(text.replace(json.dumps(str(home))[1:-1], "~"))
+    for section in ("skill_folders", "installed_skills"):
+        for tool in state.get(section, {}).values():
+            tool.pop("installed_at", None)
+    return state
+
+
+def sha_tree(path):
+    path = Path(path)
+    if path.is_symlink():
+        return {"": "link:" + os.readlink(path)}
+    return {
+        str(p.relative_to(path)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(path.rglob("*"))
+        if p.is_file()
+    }
+
+
+def staging_dirs(where):
+    if not where.is_dir():
+        return []
+    return [n for n in os.listdir(where) if n.startswith(sg._STAGING_PREFIX)]
+
+
+def fail_for(monkeypatch, cli, exc):
+    real = sg.install_tool
+
+    def install_tool(g, *a, **k):
+        if g.cli_name == cli:
+            raise exc
+        return real(g, *a, **k)
+
+    monkeypatch.setattr(sg, "install_tool", install_tool)
+
+
+def refresh(capsys):
+    capsys.readouterr()
+    PluginCommand()._maybe_update_skills()
+    return capsys.readouterr()
+
+
+def warnings(err):
+    return [line for line in err.splitlines() if line.startswith(("WARN:", "⚠"))]
 
 
 class TestPluginCommand:
@@ -607,3 +760,315 @@ class TestPluginCommand:
         assert self.command._needs_isolated_venv(InstallMethod.PIP) is False
         assert self.command._needs_isolated_venv(InstallMethod.PIPX) is False
         assert self.command._needs_isolated_venv(InstallMethod.UV) is False
+
+
+class TestSkillsRefresh:
+    """B3: the plugin refresh installs through the path 'dg skills update' uses."""
+
+    def test_refresh_writes_the_records_dg_skills_update_would(
+        self, home, bundle, monkeypatch, capsys, tmp_path
+    ):
+        from deepctl_cmd_skills.command import SkillsCommand
+
+        homes = [home, use_home(monkeypatch, tmp_path / "other")]
+        for h in homes:
+            use_home(monkeypatch, h)
+            for cli in ("claude", "cursor"):
+                h.joinpath(*gen(cli).homes[0]).mkdir(parents=True)
+            SkillsCommand()._handle_install(install_all=True)
+        use_home(monkeypatch, homes[0])
+        out, err = refresh(capsys)
+        assert (out, err) == ("", "")
+        use_home(monkeypatch, homes[1])
+        SkillsCommand()._handle_update()
+        after_update = normalized(homes[1])
+        use_home(monkeypatch, homes[0])
+        assert normalized(homes[0]) == after_update
+        assert set(after_update["skill_folders"]) == {"claude", "cursor"}
+
+    @pytest.mark.parametrize("quiet", [False, True])
+    def test_successful_refresh_keeps_skills_off_stdout_and_quiet_silent(
+        self, home, bundle, quiet
+    ):
+        output._output_config.update(agentic=False, quiet=quiet)
+        write_state({"installed_skills": {"claude": {"paths": []}}})
+        result = invoke_install()
+        assert result.exit_code == 0, result.output
+        assert bundle == [REF]
+        assert "skills" not in result.stdout.lower()
+        assert "skills" not in result.stderr.lower()
+        if quiet:
+            assert (result.stdout, result.stderr) == ("", "")
+
+    @pytest.mark.parametrize("agentic", [False, True])
+    def test_refresh_second_tool_failure_keeps_first_recorded_warns_once_exit_zero(
+        self, home, bundle, monkeypatch, agentic
+    ):
+        output._output_config["agentic"] = agentic
+        write_state(
+            {"installed_skills": {"claude": {"paths": []}, "cursor": {"paths": []}}}
+        )
+        exc = sg._err("E5", gen("cursor"), reason="No space left on device")
+        fail_for(monkeypatch, "cursor", exc)
+        result = invoke_install()
+        assert result.exit_code == 0, result.output
+        assert "not updated" not in result.stdout
+        assert len(warnings(result.stderr)) == 1
+        assert warnings(result.stderr)[0].endswith(
+            "AI assistant skills were not updated: " + retried(str(exc))
+        )
+        claude = sg.get_skills_state()["skill_folders"]["claude"]["folders"]
+        assert {n: r["state"] for n, r in claude.items()} == {
+            "api": "installed",
+            "docs": "installed",
+        }
+        assert "cursor" not in sg.get_skills_state()["skill_folders"]
+
+    def test_refresh_keeps_03x_and_hint_only_records_byte_identical(
+        self, home, bundle, capsys
+    ):
+        old = Path.home() / ".claude" / "commands" / "deepgram" / "api.md"
+        rule = Path.home() / ".amazonq" / "rules" / "deepctl.md"
+        conf = Path.home() / ".aider.conf.yml"
+        legacy = {
+            "claude": {"paths": [str(old)], "version": "0.3.0", "commands_hash": "h"},
+            "amazonq": {"paths": [str(rule)], "version": "0.3.0"},
+            "aider": {"paths": [str(conf)], "commands_hash": "h"},
+        }
+        write_state({"installed_skills": legacy})
+        _, err = refresh(capsys)
+        assert warnings(err) == []
+        state = sg.get_skills_state()
+        assert state["installed_skills"] == legacy
+        assert set(state["skill_folders"]) == {"claude"}
+        assert state["skill_folders"]["claude"]["v03"] is True
+        assert (gen("claude").skills_root() / "api" / "SKILL.md").is_file()
+        assert bundle == [REF]
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            None,
+            {"installed_skills": {}},
+            {"installed_skills": {"claude": {"paths": []}}, "auto_update": False},
+            {"installed_skills": {"amazonq": {"paths": []}, "aider": {"paths": []}}},
+        ],
+        ids=["no-file", "empty", "auto-update-off", "hint-only"],
+    )
+    def test_refresh_noops_without_fetch(self, home, bundle, capsys, state):
+        if state is not None:
+            write_state(state)
+        saved = state_bytes()
+        out, err = refresh(capsys)
+        assert bundle == []
+        assert state_bytes() == saved
+        assert (out, err) == ("", "")
+        assert not gen("claude").skills_root().exists()
+
+    @pytest.mark.parametrize("agentic", [False, True])
+    def test_refresh_fetch_failure_warns_once_exit_zero_keeps_records(
+        self, home, monkeypatch, agentic
+    ):
+        output._output_config["agentic"] = agentic
+        write_state({"installed_skills": {"claude": {"paths": []}}})
+        saved = state_bytes()
+
+        def fetch(ref=None):
+            raise SkillFetchError("Could not download the skills.")
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+        result = invoke_install()
+        assert result.exit_code == 0, result.output
+        assert "not updated" not in result.stdout
+        assert "skills updated" not in result.stdout
+        assert warnings(result.stderr) == [
+            ("WARN: " if agentic else "⚠ ")
+            + "AI assistant skills were not updated: Could not download the skills; "
+            "run 'dg skills update' to try again."
+        ]
+        assert state_bytes() == saved
+        assert not gen("claude").skills_root().exists()
+
+    def test_refresh_invalid_recorded_ref_warns_once_exit_zero_keeps_records(
+        self, home, bundle
+    ):
+        list(sg.install_for([(gen("claude"), REF)]))
+        state = json.loads(state_bytes())
+        state["skill_folders"]["claude"]["skills_ref"] = "../evil"
+        write_state(state)
+        saved, tree = state_bytes(), sha_tree(gen("claude").skills_root())
+        result = invoke_install()
+        assert result.exit_code == 0, result.output
+        assert "updated" not in result.stdout
+        [line] = warnings(result.stderr)
+        assert line.startswith("WARN: AI assistant skills were not updated: ")
+        assert "'../evil'" in line
+        assert line.endswith(f"; {RETRY}.")
+        assert bundle == [REF]
+        assert state_bytes() == saved
+        assert sha_tree(gen("claude").skills_root()) == tree
+
+    def test_refresh_follows_recorded_ref_and_env_wins(
+        self, home, bundle, capsys, monkeypatch
+    ):
+        list(sg.install_for([(gen("claude"), "my-branch")]))
+        refresh(capsys)
+        assert bundle == ["my-branch", "my-branch"]
+        assert sg.get_skills_state()["skill_folders"]["claude"]["skills_ref"] == (
+            "my-branch"
+        )
+        monkeypatch.setenv(skill_bundle.REF_ENV_VAR, "env-ref")
+        refresh(capsys)
+        monkeypatch.delenv(skill_bundle.REF_ENV_VAR)
+        assert bundle[-1] == "env-ref"
+        write_state({"installed_skills": {"cursor": {"paths": []}}})
+        refresh(capsys)
+        assert bundle[-1] == REF
+
+    @pytest.mark.parametrize("kind", ["dir", "symlink", "dangling-symlink"])
+    def test_refresh_conflict_refuses_every_tool(
+        self, home, bundle, capsys, tmp_path, kind
+    ):
+        list(sg.install_for([(gen("claude"), REF)]))
+        write_state(
+            {**json.loads(state_bytes()), "installed_skills": {"cursor": {"paths": []}}}
+        )
+        saved, claude = state_bytes(), sha_tree(gen("claude").skills_root())
+        dest = gen("cursor").skills_root() / "api"
+        dest.parent.mkdir(parents=True)
+        mine = tmp_path / "mine"
+        mine.mkdir()
+        (mine / "notes.md").write_bytes(b"mine")
+        if kind == "dir":
+            shutil.copytree(mine, dest)
+        else:
+            target = mine if kind == "symlink" else tmp_path / "gone"
+            try:
+                dest.symlink_to(target, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                pytest.skip(f"cannot create a symlink here: {exc}")
+        before = sha_tree(dest)
+        out, err = refresh(capsys)
+        e1 = sg._msg("E1", paths=str(dest))
+        assert warnings(err) == [
+            f"WARN: AI assistant skills were not updated: {e1.removesuffix(AGAIN)}, "
+            "then run 'dg skills update' to try again."
+        ]
+        assert "updated" not in out
+        assert sha_tree(dest) == before
+        assert sha_tree(mine) == {"notes.md": hashlib.sha256(b"mine").hexdigest()}
+        assert state_bytes() == saved
+        assert sha_tree(gen("claude").skills_root()) == claude
+        assert bundle == [REF, REF]
+
+    def test_refresh_edited_folder_warns_e22_and_leaves_it(self, home, bundle, capsys):
+        list(sg.install_for([(gen("claude"), REF)]))
+        api = gen("claude").skills_root() / "api"
+        with open(api / "SKILL.md", "ab") as f:
+            f.write(b"mine\n")
+        before, saved = sha_tree(api), state_bytes()
+        _, err = refresh(capsys)
+        e22 = sg._msg("E22", dest=api)
+        assert warnings(err) == [
+            f"WARN: AI assistant skills were not updated: {retried(e22)}"
+        ]
+        assert sha_tree(api) == before
+        assert state_bytes() == saved
+
+    def test_refresh_multi_problem_warning_names_the_retry_in_every_sentence(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(output.stderr_console, "_width", 2000)
+        write_state({"installed_skills": {"claude": {"paths": []}}})
+        p1, p2, p3 = (home / n for n in ("a", "b", "c"))
+        fail_for(monkeypatch, "claude", sg.SkillOwnershipError([p1], [p2, p3]))
+        _, err = refresh(capsys)
+        [line] = warnings(err)
+        assert "run the command again" not in line
+        assert line.count(f", then {RETRY}.") == 3
+        assert line.endswith(f", then {RETRY}.")
+
+    def test_refresh_corrupt_skills_json_warns_and_keeps_bytes(
+        self, home, bundle, capsys
+    ):
+        sg._STATE_FILE.parent.mkdir(parents=True)
+        sg._STATE_FILE.write_bytes(b'{"installed_skills": []}')
+        out, err = refresh(capsys)
+        e7 = sg._msg("E7")
+        assert warnings(err) == [
+            f"WARN: AI assistant skills were not updated: {retried(e7)}"
+        ]
+        assert out == ""
+        assert state_bytes() == b'{"installed_skills": []}'
+        assert bundle == []
+
+    @pytest.mark.parametrize("handler", ["install", "update", "remove"])
+    @pytest.mark.parametrize("success", [True, False])
+    def test_refresh_runs_after_install_update_remove_only_on_success(
+        self, handler, success
+    ):
+        cmd = PluginCommand()
+        result = PluginOperationResult(
+            success=success, action=handler, package="p", message="m"
+        )
+        method = "remove_plugin" if handler == "remove" else "install_plugin"
+        with (
+            patch.object(cmd, method, return_value=result),
+            patch.object(cmd, "_maybe_update_skills") as refresh_mock,
+        ):
+            call = getattr(cmd, f"_handle_{handler}")
+            args = (MagicMock(), MagicMock(), MagicMock())
+            if success:
+                call(*args, package="p", yes=True)
+            else:
+                with pytest.raises(click.ClickException):
+                    call(*args, package="p", yes=True)
+        assert refresh_mock.call_count == (1 if success else 0)
+
+    def test_only_install_update_remove_refresh(self):
+        tree = ast.parse(inspect.getsource(PluginCommand).lstrip())
+        callers = {
+            fn.name
+            for fn in ast.walk(tree)
+            if isinstance(fn, ast.FunctionDef)
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Attribute) and node.attr == "_maybe_update_skills"
+        }
+        assert callers == {"_handle_install", "_handle_update", "_handle_remove"}
+
+    def test_refresh_ctrl_c_in_second_tool_keeps_first_and_no_staging(
+        self, home, bundle, monkeypatch
+    ):
+        write_state(
+            {"installed_skills": {"claude": {"paths": []}, "cursor": {"paths": []}}}
+        )
+        real = sg._swap
+
+        def swap(g, *a, **k):
+            if g.cli_name == "cursor":
+                raise KeyboardInterrupt
+            return real(g, *a, **k)
+
+        monkeypatch.setattr(sg, "_swap", swap)
+        with pytest.raises(KeyboardInterrupt):
+            PluginCommand()._maybe_update_skills()
+        state = sg.get_skills_state()
+        claude = state["skill_folders"]["claude"]["folders"]
+        assert {r["state"] for r in claude.values()} == {"installed"}
+        assert "cursor" not in state.get("skill_folders", {})
+        for cli in ("claude", "cursor"):
+            assert staging_dirs(gen(cli).skills_root()) == []
+
+    def test_refresh_leftover_staging_warns_on_stderr(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        output._output_config["agentic"] = False
+        write_state({"installed_skills": {"claude": {"paths": []}}})
+        staging = gen("claude").skills_root() / ".deepctl-staging-x"
+        real = sg.install_tool
+        monkeypatch.setattr(
+            sg, "install_tool", lambda *a, **k: (real(*a, **k)[0], staging)
+        )
+        out, err = refresh(capsys)
+        assert err.splitlines() == ["⚠ " + sg._msg("E12", staging=staging)]
+        assert out == ""
