@@ -20,88 +20,21 @@ from deepctl_core import skill_bundle
 from deepctl_core import skill_generator as sg
 from deepctl_core.skill_bundle import RepoSkill
 from deepctl_core.skill_generator import (
-    CommandMetadata,
     SkillInstallError,
     SkillOwnershipError,
-    _commands_hash,
     _fingerprint,
     _marker_ok,
     _msg,
     _ownership,
     _place,
-    collect_command_metadata,
     detect_ai_clis,
     get_all_generators,
     get_skills_state,
     install_conflicts,
     install_tool,
     remove_tool,
-    render_developer_guide,
-    render_skill_content,
-    save_skills_state,
-    skills_need_update,
     tool_status,
 )
-
-
-def _make_command(**overrides):
-    """Create a CommandMetadata with sensible defaults."""
-    defaults = {
-        "name": "test",
-        "full_command": "deepctl test",
-        "help": "A test command",
-        "agent_help": "Test agent help",
-        "requires_auth": False,
-        "ci_friendly": True,
-        "examples": ["dg test foo"],
-        "arguments": [],
-        "is_group": False,
-        "parent_group": None,
-        "source": "builtin",
-    }
-    defaults.update(overrides)
-    return CommandMetadata(**defaults)
-
-
-class TestCommandMetadata:
-    """Test CommandMetadata dataclass."""
-
-    def test_create(self):
-        cmd = _make_command()
-        assert cmd.name == "test"
-        assert cmd.full_command == "deepctl test"
-        assert cmd.examples == ["dg test foo"]
-
-    def test_create_with_parent_group(self):
-        cmd = _make_command(
-            name="audio", parent_group="debug", full_command="deepctl debug audio"
-        )
-        assert cmd.parent_group == "debug"
-        assert cmd.full_command == "deepctl debug audio"
-
-
-class TestCommandsHash:
-    """Test _commands_hash."""
-
-    def test_deterministic(self):
-        cmds = [
-            _make_command(),
-            _make_command(name="other", full_command="deepctl other"),
-        ]
-        h1 = _commands_hash(cmds)
-        h2 = _commands_hash(cmds)
-        assert h1 == h2
-        assert h1.startswith("sha256:")
-
-    def test_changes_when_commands_differ(self):
-        cmds1 = [_make_command()]
-        cmds2 = [_make_command(help="Different help")]
-        assert _commands_hash(cmds1) != _commands_hash(cmds2)
-
-    def test_order_independent(self):
-        a = _make_command(name="a", full_command="deepctl a")
-        b = _make_command(name="b", full_command="deepctl b")
-        assert _commands_hash([a, b]) == _commands_hash([b, a])
 
 
 class TestSkillsState:
@@ -111,119 +44,6 @@ class TestSkillsState:
         with patch("deepctl_core.skill_generator._STATE_FILE", tmp_path / "nope.json"):
             state = get_skills_state()
             assert state == {"installed_skills": {}, "auto_update": True}
-
-    def test_save_and_get_skills_state(self, tmp_path):
-        state_file = tmp_path / "skills.json"
-        with (
-            patch("deepctl_core.skill_generator._STATE_FILE", state_file),
-            patch("deepctl_core.skill_generator._SKILLS_DIR", tmp_path),
-        ):
-            save_skills_state(
-                {"installed_skills": {"claude": {}}, "auto_update": False}
-            )
-            result = get_skills_state()
-            assert result["installed_skills"] == {"claude": {}}
-            assert result["auto_update"] is False
-
-    def test_skills_need_update_no_installed(self):
-        with patch(
-            "deepctl_core.skill_generator.get_skills_state",
-            return_value={"installed_skills": {}},
-        ):
-            assert skills_need_update([_make_command()]) is False
-
-    def test_skills_need_update_stale_hash(self):
-        state = {"installed_skills": {"claude": {"commands_hash": "sha256:old"}}}
-        with patch("deepctl_core.skill_generator.get_skills_state", return_value=state):
-            assert skills_need_update([_make_command()]) is True
-
-
-class TestRenderDeveloperGuide:
-    """Test render_developer_guide and render_skill_content delegation."""
-
-    def test_basic_render(self):
-        content = render_developer_guide("1.0.0")
-        assert "# Deepgram Developer Guide" in content
-        assert "v1.0.0" in content
-        assert "Authentication" in content
-
-    def test_contains_stt_content(self):
-        content = render_developer_guide("1.0.0")
-        assert "Speech-to-Text" in content
-        assert "Nova-3" in content
-        assert "diarize" in content
-        assert "smart_format" in content
-
-    def test_contains_tts_content(self):
-        content = render_developer_guide("1.0.0")
-        assert "Text-to-Speech" in content
-        assert "Aura-2" in content
-        assert "Aura and Flux voices" in content
-        assert "aura-2-andromeda-en" in content
-        assert "`expressivity` is beta" in content
-        assert "defaults to `0`" in content
-
-    def test_contains_audio_intelligence(self):
-        content = render_developer_guide("1.0.0")
-        assert "Audio Intelligence" in content
-        assert "summarize" in content
-        assert "sentiment" in content
-
-    def test_contains_voice_agent(self):
-        content = render_developer_guide("1.0.0")
-        assert "Voice Agent" in content
-        assert "barge-in" in content.lower() or "Barge-in" in content
-
-    def test_contains_sdks(self):
-        content = render_developer_guide("1.0.0")
-        assert "deepgram-sdk" in content
-        assert "@deepgram/sdk" in content
-        assert "pip install" in content
-        assert "npm install" in content
-
-    def test_contains_resources(self):
-        content = render_developer_guide("1.0.0")
-        assert "developers.deepgram.com" in content
-        assert "console.deepgram.com" in content
-        assert "discord.gg/deepgram" in content
-        assert "github.com/deepgram" in content
-
-    def test_contains_mcp_server(self):
-        content = render_developer_guide("1.0.0")
-        assert "MCP" in content
-        assert '"dg"' in content or "'dg'" in content
-        assert "mcpServers" in content
-
-    def test_contains_cli_section(self):
-        content = render_developer_guide("1.0.0")
-        assert "deepctl CLI" in content
-        assert "dg listen" in content
-        assert "dg login" in content
-        # The speak quickstart leads with playback and voice discovery.
-        assert 'dg speak "Hello from Deepgram" --play' in content
-        assert "dg speak --list-voices" in content
-
-    def test_frontmatter(self):
-        content = render_developer_guide("1.0.0", include_frontmatter=True)
-        assert content.startswith("---\n")
-        assert "description:" in content
-
-    def test_no_frontmatter_by_default(self):
-        content = render_developer_guide("1.0.0")
-        assert not content.startswith("---")
-
-    def test_render_skill_content_delegates(self):
-        """render_skill_content should delegate to render_developer_guide."""
-        cmds = [_make_command()]
-        content = render_skill_content(cmds, "1.0.0")
-        assert "# Deepgram Developer Guide" in content
-        assert "Speech-to-Text" in content
-
-    def test_render_skill_content_frontmatter(self):
-        cmds = [_make_command()]
-        content = render_skill_content(cmds, "1.0.0", include_frontmatter=True)
-        assert content.startswith("---\n")
-        assert "description:" in content
 
 
 # ---------------------------------------------------------------------------
@@ -860,7 +680,7 @@ class TestB5:
 
 class TestB6:
     def test_record_before_swap_failure_moves_nothing(self, tmp_path, monkeypatch):
-        """_write_state is the write both save_skills_state() and the installer use."""
+        """_write_state is the one write the installer uses (via _update_state)."""
         install(make_bundle(tmp_path))
         v1, saved = sha_tree(root()), state_bytes()
         calls = []
@@ -899,25 +719,6 @@ class TestB6:
         assert str(exc.value) == _msg("E8", reason="Permission denied")
         assert sha_tree(root()) == v1
         assert staging_dirs(root()) == []
-
-    def test_save_skills_state_failure_after_shim_install_keeps_records(
-        self, tmp_path, monkeypatch
-    ):
-        skills = make_bundle(tmp_path)
-        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", lambda ref=None: skills)
-        state = get_skills_state()
-        paths = gen("claude").install([], "x")
-        state["installed_skills"]["claude"] = {"paths": [str(p) for p in paths]}
-        wrap(
-            monkeypatch,
-            sg,
-            "_write_state",
-            lambda s: (_ for _ in ()).throw(OSError(errno.EIO, "I/O error")),
-        )
-        with pytest.raises(SkillInstallError) as exc:
-            save_skills_state(state)
-        assert str(exc.value) == _msg("E9c", reason="I/O error")
-        assert set(records()) == {"api", "docs"}
 
     def test_final_save_failure_leaves_installing_records_that_prove_ownership(
         self, tmp_path, monkeypatch
@@ -985,7 +786,7 @@ class TestB7:
         lookalike.parent.mkdir(parents=True)
         lookalike.write_bytes(b"mine")
         install(make_bundle(tmp_path))
-        save_skills_state(get_skills_state())
+        sg._update_state(lambda state: None)  # One more skills.json write.
         remove_tool(gen("claude"))
         assert lookalike.read_bytes() == b"mine"
 
@@ -2186,7 +1987,7 @@ class TestState:
         expected = _msg("E7")
         for call in (
             get_skills_state,
-            lambda: save_skills_state({"installed_skills": {}}),
+            lambda: sg._update_state(lambda state: None),
             lambda: install(make_bundle(tmp_path)),
         ):
             with pytest.raises(SkillInstallError) as exc:
@@ -2201,7 +2002,7 @@ class TestState:
 
         monkeypatch.setattr(os, "fsync", fail)
         with pytest.raises(SkillInstallError) as exc:
-            save_skills_state({"installed_skills": {}})
+            sg._update_state(lambda state: None)
         assert str(exc.value) == _msg("E9c", reason="No space left on device")
         assert [
             n for n in os.listdir(sg._STATE_FILE.parent) if n.endswith(".tmp")
@@ -2213,7 +2014,7 @@ class TestState:
 
         monkeypatch.setattr(os, "fsync", interrupt)
         with pytest.raises(KeyboardInterrupt):
-            save_skills_state({"installed_skills": {}})
+            sg._update_state(lambda state: None)
         assert os.listdir(sg._STATE_FILE.parent) == ["skills.json.lock"]
 
     def test_symlinked_state_file_stays_a_symlink(self, tmp_path):
@@ -2222,33 +2023,18 @@ class TestState:
         real.write_text('{"installed_skills": {}}', encoding="utf-8")
         sg._STATE_FILE.parent.mkdir(parents=True)
         symlink_or_skip(sg._STATE_FILE, rel(real, sg._STATE_FILE), is_dir=False)
-        save_skills_state({"installed_skills": {"x": {}}, "auto_update": False})
+        sg._update_state(lambda state: state.update(auto_update=False))
         assert sg._STATE_FILE.is_symlink()
         assert json.loads(real.read_text(encoding="utf-8"))["auto_update"] is False
 
-    def test_public_save_cannot_write_records(self):
-        forged = {
-            "claude": {"folders": {"api": {"state": "installed", "fingerprint": FP_A}}}
-        }
-        save_skills_state({"installed_skills": {}, "skill_folders": forged})
-        assert "skill_folders" not in disk_state()
-
 
 # ---------------------------------------------------------------------------
-# Compatibility shim for login and plugin
+# Survivors and the tool table
 # ---------------------------------------------------------------------------
 
 
 class TestSurvivors:
     """Each pins one guard a mutation sweep could otherwise drop unnoticed."""
-
-    def test_save_validates_before_writing(self):
-        write_state({"installed_skills": {}, "auto_update": True})
-        saved = state_bytes()
-        with pytest.raises(SkillInstallError) as exc:
-            save_skills_state({"installed_skills": [], "auto_update": True})
-        assert str(exc.value) == _msg("E7")
-        assert state_bytes() == saved
 
     def test_recorded_ref_is_validated(self):
         state = {
@@ -2365,68 +2151,6 @@ class TestSurvivors:
             "Permission denied"
         )
 
-
-class TestShim:
-    def test_stale_save_shim_login_flow_keeps_records(self, tmp_path, monkeypatch):
-        skills = make_bundle(tmp_path)
-        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", lambda ref=None: skills)
-        state = get_skills_state()
-        paths = gen("claude").install([], "x")
-        state["installed_skills"]["claude"] = {
-            "paths": [str(p) for p in paths],
-            "version": "x",
-        }
-        save_skills_state(state)
-        assert set(records()) == {"api", "docs"}
-        assert install_conflicts([gen("claude")], skills) == ([], [])
-
-    def test_stale_save_shim_plugin_flow_keeps_records(self, tmp_path, monkeypatch):
-        skills = make_bundle(tmp_path)
-        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", lambda ref=None: skills)
-        write_state(
-            {"installed_skills": {"claude": {"paths": ["old"]}, "aider": {"paths": []}}}
-        )
-        state = get_skills_state()
-        gens = {g.cli_name: g for g in get_all_generators()}
-        for cli, info in state["installed_skills"].items():
-            info.update(paths=[str(p) for p in gens[cli].install([], "x")])
-        save_skills_state(state)
-        assert set(records()) == {"api", "docs"}
-        assert install_conflicts([gen("claude")], skills) == ([], [])
-
-    def test_shim_follows_recorded_ref(self, tmp_path, monkeypatch):
-        skills = make_bundle(tmp_path)
-        fetched = []
-        monkeypatch.setattr(
-            skill_bundle,
-            "fetch_skill_bundle",
-            lambda ref=None: fetched.append(ref) or skills,
-        )
-        install(skills, ref="my-branch")
-        gen("claude").install([], "x")
-        assert fetched == ["my-branch"]
-        assert disk_state()["skill_folders"]["claude"]["skills_ref"] == "my-branch"
-        monkeypatch.setenv(skill_bundle.REF_ENV_VAR, "env-ref")
-        gen("claude").install([], "x")
-        assert fetched[-1] == "env-ref"
-        monkeypatch.delenv(skill_bundle.REF_ENV_VAR)
-        gen("cursor").install([], "x")
-        assert fetched[-1] == REF
-
-    def test_hint_only_install_returns_empty_and_never_raises(self, monkeypatch):
-        def boom(ref=None):
-            raise AssertionError("fetched")
-
-        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", boom)
-        assert gen("amazonq").install([], "x") == []
-        assert gen("aider").install([], "x") == []
-        rule = Path.home() / ".amazonq" / "rules" / "deepctl.md"
-        write_state({"installed_skills": {"amazonq": {"paths": [str(rule)]}}})
-        assert gen("amazonq").install([], "x") == [rule]  # Keeps 0.3.x paths.
-        for bad in ({"installed_skills": {"amazonq": "x"}}, {"skill_folders": 1}):
-            write_state(bad)  # Corrupt: [] so plugin's loop goes on.
-            assert gen("amazonq").install([], "x") == []
-
     def test_remove_e21_keeps_records(self, tmp_path, monkeypatch):
         install(make_bundle(tmp_path))
         saved = state_bytes()
@@ -2441,18 +2165,24 @@ class TestShim:
         assert state_bytes() == saved
         assert (root() / "api").is_dir()
 
-    def test_shim_surface_exists(self):
+
+class TestToolTable:
+    def test_generator_has_no_install_shim(self):
+        assert not hasattr(sg.SkillGenerator, "install")
         for name in (
-            "detect_ai_clis",
-            "get_all_generators",
-            "get_skills_state",
             "save_skills_state",
             "collect_command_metadata",
             "_commands_hash",
+            "skills_need_update",
+            "render_developer_guide",
+            "render_skill_content",
+            "CommandMetadata",
         ):
+            assert not hasattr(sg, name), name
+        for name in ("detect_ai_clis", "get_all_generators", "get_skills_state"):
             assert callable(getattr(sg, name))
         for g in get_all_generators():
-            assert g.cli_name and g.display_name and callable(g.install)
+            assert g.cli_name and g.display_name
         assert [g.cli_name for g in get_all_generators()] == [
             "claude",
             "codex",
@@ -2688,17 +2418,6 @@ class TestConcurrency:
         for n in ("api", "docs"):
             assert _ownership(root() / n, "claude", n, records()[n]) == "ok"
         assert staging_dirs(root()) == []
-
-    def test_login_save_during_install_keeps_records(self, tmp_path, monkeypatch):
-        stale = get_skills_state()
-
-        def login_save(*a, **k):
-            save_skills_state(stale)
-
-        wrap(monkeypatch, sg, "_swap", login_save)
-        install(make_bundle(tmp_path))
-        assert set(records()) == {"api", "docs"}
-        assert all(r["state"] == "installed" for r in records().values())
 
     def test_root_alias_second_tool_refuses_without_writing(self, tmp_path):
         root("claude").mkdir(parents=True)
@@ -2951,7 +2670,7 @@ class TestStateLock:
             for op in (
                 lambda: install(make_bundle(tmp_path, body="v2")),
                 lambda: remove_tool(gen("claude")),
-                lambda: save_skills_state(get_skills_state()),
+                lambda: sg._update_state(lambda state: None),
             ):
                 with pytest.raises(SkillInstallError) as exc:
                     op()
@@ -3157,7 +2876,7 @@ class TestStateLock:
             return skills
 
         monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
-        gen("claude").install([], "x")
+        list(sg.install_for([(gen("claude"), "x")]))
         assert set(records()) == {"api", "docs"}
 
     def test_lock_messages_end_with_the_retry_phrase(self):
