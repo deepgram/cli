@@ -2500,6 +2500,115 @@ class TestShim:
 
 
 # ---------------------------------------------------------------------------
+# install_for: the one path for 'dg skills', login and plugin (B3)
+# ---------------------------------------------------------------------------
+
+
+class TestInstallFor:
+    def _fetch(self, monkeypatch, skills):
+        fetched = []
+        monkeypatch.setattr(
+            skill_bundle,
+            "fetch_skill_bundle",
+            lambda ref=None: fetched.append(ref) or skills,
+        )
+        return fetched
+
+    def test_install_for_fetches_each_ref_once_and_preflights_every_tool(
+        self, tmp_path, monkeypatch
+    ):
+        fetched = self._fetch(monkeypatch, make_bundle(tmp_path))
+        mine = root("cursor") / "api"
+        mine.mkdir(parents=True)
+        (mine / "notes.md").write_bytes(b"mine")
+        before = sha_tree(mine)
+        plan = [(gen("claude"), REF), (gen("cursor"), REF)]
+        with pytest.raises(SkillOwnershipError) as exc:
+            list(sg.install_for(plan))
+        assert str(exc.value) == _msg("E1", paths=str(mine))
+        assert fetched == [REF]
+        assert not root("claude").exists()
+        assert sha_tree(mine) == before
+        assert state_bytes() is None
+
+    def test_install_for_fetches_each_distinct_ref_once(self, tmp_path, monkeypatch):
+        fetched = self._fetch(monkeypatch, make_bundle(tmp_path))
+        plan = [(gen("claude"), REF), (gen("cursor"), "b"), (gen("cline"), REF)]
+        done = [g.cli_name for g, _, _ in sg.install_for(plan)]
+        assert done == ["claude", "cursor", "cline"]
+        assert fetched == [REF, "b"]
+        assert disk_state()["skill_folders"]["cursor"]["skills_ref"] == "b"
+
+    def test_install_for_skips_hint_only_tools_without_fetching(self, monkeypatch):
+        def boom(ref=None):
+            raise AssertionError("fetched")
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", boom)
+        assert list(sg.install_for([(gen("amazonq"), REF), (gen("aider"), REF)])) == []
+        assert state_bytes() is None
+
+    def test_install_for_second_tool_failure_keeps_first_recorded(
+        self, tmp_path, monkeypatch
+    ):
+        skills = make_bundle(tmp_path)
+        self._fetch(monkeypatch, skills)
+
+        def fail_cursor(g, *a, **k):
+            if g.cli_name == "cursor":
+                raise sg._err("E5", g, reason="disk full")
+
+        wrap(monkeypatch, sg, "install_tool", fail_cursor)
+        done = []
+        plan = [(gen("claude"), REF), (gen("cursor"), REF), (gen("cline"), REF)]
+        with pytest.raises(SkillInstallError) as exc:
+            for g, placed, _ in sg.install_for(plan):
+                done.append((g.cli_name, len(placed)))
+        assert str(exc.value) == _msg("E5", gen("cursor"), reason="disk full")
+        assert done == [("claude", 2)]
+        assert {n: r["state"] for n, r in records().items()} == {
+            "api": "installed",
+            "docs": "installed",
+        }
+        assert install_conflicts([gen("claude")], skills) == ([], [])
+        assert set(disk_state()["skill_folders"]) == {"claude"}
+        assert not root("cline").exists()
+
+    def test_skills_json_has_one_writer(self, tmp_path, monkeypatch):
+        self._fetch(monkeypatch, make_bundle(tmp_path))
+        writes = []
+        wrap(monkeypatch, sg, "_write_state", lambda s: writes.append(1) and None)
+        updates = []
+        wrap(monkeypatch, sg, "_update_state", lambda *a, **k: updates.append(1) and None)
+        list(sg.install_for([(gen("claude"), REF), (gen("cursor"), REF)]))
+        assert len(writes) == len(updates) == 4  # mark + settle per tool
+
+    @pytest.mark.parametrize("agentic", [False, True])
+    def test_warn_install_failure_is_one_stderr_line(self, capsys, agentic):
+        from deepctl_core import output
+
+        output._output_config["agentic"] = agentic
+        sg.warn_install_failure("Step did not finish", SkillInstallError("[b]x[/b]."))
+        sg.warn_install_failure("Step did not finish", RuntimeError())
+        out, err = capsys.readouterr()
+        assert out == ""
+        lines = err.splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith("Step did not finish: [b]x[/b].")
+        assert lines[1].endswith("Step did not finish: RuntimeError")
+
+    def test_warn_install_failure_reports_leftover_staging_first(self, capsys):
+        exc = SkillInstallError("boom.")
+        exc.leftover = Path.home() / ".deepctl-staging-1"
+        sg.warn_install_failure("Step did not finish", exc)
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert err.splitlines() == [
+            "WARN: " + _msg("E12", staging=exc.leftover),
+            "WARN: Step did not finish: boom.",
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Concurrency
 # ---------------------------------------------------------------------------
 

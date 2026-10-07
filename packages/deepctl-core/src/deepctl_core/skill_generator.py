@@ -30,7 +30,10 @@ from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from rich.markup import escape
+
 from deepctl_core import skill_bundle
+from deepctl_core.output import print_warning
 from deepctl_core.skill_bundle import portable_name
 
 if sys.platform == "win32":
@@ -1278,6 +1281,49 @@ def install_tool(
     if error is not None:
         raise error
     return [root / n for n in placed], leftover
+
+
+def _deepctl_version() -> str:
+    try:
+        return metadata.version("deepctl")
+    except metadata.PackageNotFoundError:
+        return "0.0.0"
+
+
+def install_for(
+    plan: Sequence[tuple[SkillGenerator, str]],
+) -> Iterator[tuple[SkillGenerator, list[Path], Path | None]]:
+    """The one install path for 'dg skills', login and plugin (B3).
+
+    Fetches each ref once and preflights every folder tool before anything is
+    written, then installs tool by tool, yielding (tool, placed, leftover).
+    Hint-only tools are skipped. The first failure is raised; every tool
+    yielded before it stays recorded.
+    """
+    plan = [(g, r) for g, r in plan if g.skills_root() is not None]
+    bundles = {
+        r: skill_bundle.fetch_skill_bundle(r) for r in dict.fromkeys(r for _, r in plan)
+    }
+    unproven: list[Path] = []
+    edited: list[Path] = []
+    for ref, skills in bundles.items():
+        u, e = install_conflicts([g for g, r in plan if r == ref], skills)
+        unproven += u
+        edited += e
+    if unproven or edited:  # Nothing is written for any tool.
+        raise SkillOwnershipError(unproven, edited)
+    version = _deepctl_version()
+    for gen, ref in plan:
+        placed, leftover = install_tool(gen, bundles[ref], ref=ref, version=version)
+        yield gen, placed, leftover
+
+
+def warn_install_failure(prefix: str, exc: Exception) -> None:
+    """One plain warning on stderr for a best-effort caller (login, plugin)."""
+    leftover = getattr(exc, "leftover", None)
+    if leftover:
+        print_warning(escape(_msg("E12", staging=leftover)), stderr=True)
+    print_warning(escape(f"{prefix}: {str(exc) or type(exc).__name__}"), stderr=True)
 
 
 @dataclass

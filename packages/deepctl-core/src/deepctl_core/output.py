@@ -369,13 +369,15 @@ def print_error(message: str) -> None:
         stderr_console.print(f"[red]✗[/red] {message}")
 
 
-def print_warning(message: str) -> None:
-    """Print warning message."""
+def print_warning(message: str, *, stderr: bool = False) -> None:
+    """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too."""
     if not _output_config["quiet"]:
         if _output_config["agentic"]:
             stderr_console.print(f"WARN: {message}")
         else:
-            console.print(f"[yellow]⚠[/yellow] {message}")
+            (stderr_console if stderr else console).print(
+                f"[yellow]⚠[/yellow] {message}"
+            )
 
 
 def print_info(message: str) -> None:

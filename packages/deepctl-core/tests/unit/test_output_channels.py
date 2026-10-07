@@ -287,3 +287,37 @@ class TestAuthFailurePayloadOnAClosedStream:
     def test_any_other_value_error_surfaces(self) -> None:
         with pytest.raises(ValueError, match="something else"):
             self._run(ValueError("something else"))
+
+
+class TestWarningOnStderr:
+    """``print_warning(stderr=True)`` keeps stdout clean in every mode (BG-3)."""
+
+    @pytest.mark.parametrize(("agentic", "prefix"), [(False, "⚠ "), (True, "WARN: ")])
+    def test_print_warning_stderr_keeps_stdout_clean(
+        self, capsys, agentic: bool, prefix: str
+    ) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(output._output_config, {"agentic": agentic, "quiet": False}):
+            output.print_warning("careful", stderr=True)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.strip() == f"{prefix}careful"
+
+    def test_print_warning_default_stays_on_stdout_outside_agentic(
+        self, capsys
+    ) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(output._output_config, {"agentic": False, "quiet": False}):
+            output.print_warning("careful")
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "⚠ careful"
+        assert captured.err == ""
+
+    def test_print_warning_stderr_is_silenced_by_quiet(self, capsys) -> None:
+        from unittest.mock import patch
+
+        with patch.dict(output._output_config, {"agentic": False, "quiet": True}):
+            output.print_warning("careful", stderr=True)
+        assert capsys.readouterr() == ("", "")
