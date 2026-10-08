@@ -168,6 +168,10 @@ def write_state(state):
     sg._STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
 
 
+def body(where, name="api"):
+    return (Path(where) / name / "SKILL.md").read_bytes()
+
+
 def staging_dirs(where):
     if not os.path.isdir(where):
         return []
@@ -2868,7 +2872,8 @@ class TestStateLock:
         assert (state_bytes(), sha_tree(root())) == (saved, tree)
         assert staging_dirs(root()) == []
 
-    def test_fetch_runs_without_the_lock(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("refresh", [False, True])
+    def test_fetch_runs_without_the_lock(self, tmp_path, monkeypatch, refresh):
         skills = make_bundle(tmp_path)
 
         def fetch(ref=None):
@@ -2876,7 +2881,8 @@ class TestStateLock:
             return skills
 
         monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
-        list(sg.install_for([(gen("claude"), "x")]))
+        since = get_skills_state() if refresh else None
+        list(sg.install_for([(gen("claude"), "x")], since=since))
         assert set(records()) == {"api", "docs"}
 
     def test_lock_messages_end_with_the_retry_phrase(self):
@@ -2931,4 +2937,195 @@ class TestStateLock:
         finally:
             os.close(other[0])
         assert other[0] >= 0 and str(exc.value) == _msg("E27")
+        assert getattr(sg._LOCAL, "fd", None) is None
+
+
+class TestRecheckUnderLock:
+    """S5: a refresh re-reads each tool's record under the lock before writing."""
+
+    def _refresh(self, monkeypatch, skills, during=None, plan=None, **kw):
+        """Plan from a snapshot, run ``during`` while "downloading", then install."""
+        since = get_skills_state()
+        plan = plan or [(gen(c), sg._ref_for(c, since)) for c in ("claude", "cursor")]
+
+        def fetch(ref=None):
+            if during is not None:
+                during()
+            return skills
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+        kw.setdefault("since", since)
+        return [(g.cli_name, len(p)) for g, p, _ in sg.install_for(plan, **kw)]
+
+    def _both(self, tmp_path):
+        old = make_bundle(tmp_path, body="v1")
+        install(old)
+        install(old, "cursor")
+
+    def test_refresh_never_overwrites_a_ref_changed_during_its_download(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        self._both(tmp_path)
+        newer = make_bundle(tmp_path, body="v2")
+        done = self._refresh(
+            monkeypatch,
+            make_bundle(tmp_path, body="v3"),
+            lambda: install(newer, ref="x"),
+            plan=[(gen("claude"), REF)],
+        )
+        assert done == []
+        assert disk_state()["skill_folders"]["claude"]["skills_ref"] == "x"
+        assert body(root()) == body(newer[0].path.parent)
+        _, err = capsys.readouterr()
+        assert err.count(_msg("E30", gen("claude"))) == 1
+
+    def test_refresh_never_reinstalls_a_tool_removed_during_its_download(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        self._both(tmp_path)
+        done = self._refresh(
+            monkeypatch,
+            make_bundle(tmp_path, body="v2"),
+            lambda: remove_tool(gen("claude")),
+            plan=[(gen("claude"), REF)],
+        )
+        assert done == []
+        assert not (root() / "api").exists() and not (root() / "docs").exists()
+        state = disk_state()
+        assert "claude" not in state["skill_folders"]
+        assert "claude" not in state["installed_skills"]
+        assert staging_dirs(root()) == []
+        _, err = capsys.readouterr()
+        assert err.count(_msg("E31", gen("claude"))) == 1
+
+    def test_skip_is_per_tool(self, tmp_path, monkeypatch, capsys):
+        self._both(tmp_path)
+        v2 = make_bundle(tmp_path, body="v2")
+        done = self._refresh(monkeypatch, v2, lambda: remove_tool(gen("claude")))
+        assert done == [("cursor", 2)]
+        assert body(root("cursor")) == body(v2[0].path.parent)
+        assert not (root() / "api").exists()
+        _, err = capsys.readouterr()
+        assert err.count(_msg("E31", gen("claude"))) == 1
+        assert "cursor" not in err.replace(str(root("cursor")), "")
+
+    def test_explicit_ref_update_still_wins_but_never_resurrects(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        self._both(tmp_path)
+
+        def other():
+            install(make_bundle(tmp_path, body="v2"), ref="x")
+            remove_tool(gen("cursor"))
+
+        plan = [(gen("claude"), "y"), (gen("cursor"), "y")]
+        v3 = make_bundle(tmp_path, body="v3")
+        done = self._refresh(monkeypatch, v3, other, plan=plan, explicit_ref=True)
+        assert done == [("claude", 2)]
+        state = disk_state()
+        assert state["skill_folders"]["claude"]["skills_ref"] == "y"
+        assert body(root()) == body(v3[0].path.parent)
+        assert "cursor" not in state["skill_folders"]
+        assert not (root("cursor") / "api").exists()
+        _, err = capsys.readouterr()
+        assert err.count(_msg("E31", gen("cursor"))) == 1
+        assert _msg("E30", gen("claude")) not in err
+
+    def test_fresh_install_ignores_the_records(self, tmp_path, monkeypatch, capsys):
+        self._both(tmp_path)
+        plan = [(gen("claude"), "x")]
+        done = self._refresh(
+            monkeypatch,
+            make_bundle(tmp_path, body="v2"),
+            lambda: remove_tool(gen("claude")),
+            plan=plan,
+            since=None,
+        )
+        assert done == [("claude", 2)]
+        assert disk_state()["skill_folders"]["claude"]["skills_ref"] == "x"
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize("removed", [False, True])
+    def test_03x_only_tool_still_gets_folders_on_refresh(
+        self, tmp_path, monkeypatch, capsys, removed
+    ):
+        legacy = {"paths": [str(tmp_path / "legacy" / "deepgram.md")]}
+        write_state({"installed_skills": {"claude": legacy}, "auto_update": True})
+
+        def remove():
+            write_state({"installed_skills": {}, "auto_update": True})
+
+        done = self._refresh(
+            monkeypatch,
+            make_bundle(tmp_path),
+            remove if removed else None,
+            plan=[(gen("claude"), REF)],
+        )
+        _, err = capsys.readouterr()
+        if removed:
+            assert done == [] and not root().exists()
+            assert err.count(_msg("E31", gen("claude"))) == 1
+        else:
+            assert done == [("claude", 2)] and err == ""
+            assert disk_state()["skill_folders"]["claude"]["skills_ref"] == REF
+
+    def test_refresh_never_overwrites_a_newer_copy_of_the_same_ref(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """B1 (review): a moving ref, so the older download must not land last."""
+        self._both(tmp_path)
+        since, newer = get_skills_state(), make_bundle(tmp_path, body="new")
+
+        def other():  # A second refresh of REF fetched later but lands first.
+            install_tool(gen("claude"), newer, ref=REF, version="new", since=since)
+
+        older = make_bundle(tmp_path, body="old")
+        plan = [(gen("claude"), REF)]
+        done = self._refresh(monkeypatch, older, other, plan=plan, since=since)
+        assert done == []
+        assert body(root()) == body(newer[0].path.parent) != body(older[0].path.parent)
+        assert disk_state()["skill_folders"]["claude"]["version"] == "new"
+        _, err = capsys.readouterr()
+        assert err.count(_msg("E32", gen("claude"))) == 1
+        assert _msg("E30", gen("claude")) not in err
+
+    @pytest.mark.parametrize("record", ["03x", "blank"])
+    def test_two_refreshes_of_a_blank_ref_record_keep_the_first(
+        self, tmp_path, monkeypatch, capsys, record
+    ):
+        if record == "03x":
+            legacy = {"paths": [str(tmp_path / "legacy" / "deepgram.md")]}
+            write_state({"installed_skills": {"claude": legacy}, "auto_update": True})
+        else:
+            write_state({"skill_folders": {"claude": {"folders": {}}}})
+        since, skills = get_skills_state(), make_bundle(tmp_path)
+
+        def other():  # A second refresh from the same snapshot lands first.
+            install_tool(gen("claude"), skills, ref=REF, version="9.9.9", since=since)
+
+        done = self._refresh(
+            monkeypatch, skills, other, plan=[(gen("claude"), REF)], since=since
+        )
+        _, err = capsys.readouterr()  # True: the other refresh updated it first.
+        assert done == [] and err.count(_msg("E32", gen("claude"))) == 1
+        assert _msg("E30", gen("claude")) not in err
+        assert disk_state()["skill_folders"]["claude"]["skills_ref"] == REF
+        assert disk_state()["skill_folders"]["claude"]["version"] == "9.9.9"
+
+    def test_ctrl_c_at_the_recheck_writes_nothing(self, tmp_path, monkeypatch):
+        self._both(tmp_path)
+        saved, tree = state_bytes(), sha_tree(root())
+
+        def interrupt(*a):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(sg, "_recorded", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            self._refresh(
+                monkeypatch,
+                make_bundle(tmp_path, body="v2"),
+                plan=[(gen("claude"), REF)],
+            )
+        assert (state_bytes(), sha_tree(root())) == (saved, tree)
+        assert staging_dirs(root()) == []
         assert getattr(sg._LOCAL, "fd", None) is None
