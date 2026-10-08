@@ -319,7 +319,13 @@ These commands abort if the filesystem cannot provide locking or no-replace dire
 
 If you edit a deepctl folder, or add a file or link to it, deepctl leaves it alone: `update` stops without changing anything and `remove` won't delete it. To get updates again, rename or move your edited copy, or delete it yourself. Opening a skill folder in Finder or Explorer can add `.DS_Store`, `Thumbs.db` or `desktop.ini`, which counts as an edit.
 
-Files from deepctl 0.3.x, such as `~/.claude/commands/deepgram/*.md` and the rules files like `~/.cursor/rules/deepctl.mdc`, are currently kept, and `dg skills remove` doesn't delete them.
+#### Upgrading from deepctl 0.2.16 through 0.3.x
+
+Once `dg skills install` or `update` (or `dg login`, or `dg plugin install`, `update` or `remove`) has installed a tool's skill folders, deepctl removes the files older deepctl wrote for that tool, and prints which ones on stderr: `~/.claude/commands/deepgram/*.md`, `~/.cursor/rules/deepctl.mdc`, `~/.cline/rules/deepctl.md`, and the section between the `<!-- BEGIN deepctl CLI Reference` and `<!-- END deepctl CLI Reference -->` lines in `~/.codex/instructions.md`, `~/.gemini/GEMINI.md` and `~/.opencode/agents.md`. In those three files, everything between the two marker lines is removed, including anything you changed there; the rest of the file is kept, apart from the blank line deepctl added before its section.
+
+deepctl removes a file only if its content is exactly a deepgram/skills version that older deepctl copied, even if you made that copy yourself. It keeps a file you edited, a link, a file in a folder reached through a link (such as a dotfiles `~/.claude`), and a section that is incomplete, repeated or in a read-only or locked file, and warns once about each file 0.3.x recorded. An I/O failure, such as permission denied, is retried on the next install or update, with a warning for files 0.3.x recorded. Amazon Q Developer and Aider files (`~/.amazonq/rules/deepctl.md`, `~/.deepctl/skills/deepctl-conventions.md`) are kept, because those tools have no skill folders; if you delete Aider's, also remove its entry under `read:` in `~/.aider.conf.yml`.
+
+While deepctl works on a file, it moves it to `.deepctl-v03-<name>` in the same folder. If deepctl is interrupted, the next install or update puts the file back and says so. If both the file and its `.deepctl-v03-<name>` are there, as after you saved the file while deepctl was editing it, deepctl changes neither and names both on each run until you compare them and delete the `.deepctl-v03-<name>` copy; it does the same if `.deepctl-v03-<name>` is a link or folder deepctl didn't make. A `.deepctl-v03-*.tmp` file is an unused draft; delete it.
 
 ### Starter Apps
 
