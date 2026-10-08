@@ -827,7 +827,9 @@ class TestSkillsRefresh:
     def test_refresh_keeps_03x_and_hint_only_records_byte_identical(
         self, home, bundle, capsys
     ):
-        old = Path.home() / ".claude" / "commands" / "deepgram" / "api.md"
+        old = Path.home() / ".claude" / "commands" / "deepgram" / "setup-mcp.md"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"mine")  # A folder for setup-mcp never lands: kept.
         rule = Path.home() / ".amazonq" / "rules" / "deepctl.md"
         conf = Path.home() / ".aider.conf.yml"
         legacy = {

@@ -441,6 +441,9 @@ class TestSkillsFlows:
     @pytest.mark.parametrize("old", [True, False])
     def test_remove_notes_03x_files_left_behind(self, bundle, capsys, old):
         detect("claude")
+        kept = Path.home() / ".claude" / "commands" / "deepgram" / "setup-mcp.md"
+        kept.parent.mkdir(parents=True)
+        kept.write_bytes(b"mine")  # A folder for setup-mcp never lands: kept.
         if old:
             write_state(
                 {
@@ -452,7 +455,7 @@ class TestSkillsFlows:
                                     / ".claude"
                                     / "commands"
                                     / "deepgram"
-                                    / "api.md"
+                                    / "setup-mcp.md"
                                 )
                             ]
                         }
@@ -466,7 +469,7 @@ class TestSkillsFlows:
         err = err_text(capsys)
         assert ("0.3.x" in err) == old
         assert (
-            "For Claude Code, files from deepctl 0.3.x stay until a later release."
+            f"For Claude Code, its deepctl 0.3.x files were kept: {kept}; delete any you don't need, or 'dg skills install' removes the ones deepctl can prove it wrote."
             in err
         ) == old
         assert "OK: Removed 2 skill folders from 1 tool." in err
@@ -681,8 +684,12 @@ class TestSkillsFlows:
 
     def test_remove_notes_03x_files_after_a_plugin_refresh(self, bundle, capsys):
         detect("claude")
-        old = Path.home() / ".claude" / "commands" / "deepgram" / "api.md"
+        old = Path.home() / ".claude" / "commands" / "deepgram" / "setup-mcp.md"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"mine")  # A folder for setup-mcp never lands: kept.
         rule = Path.home() / ".amazonq" / "rules" / "deepctl.md"
+        rule.parent.mkdir(parents=True)
+        rule.write_bytes(b"0.3.x rules")  # On disk, so remove names it.
         write_state(
             {
                 "installed_skills": {
@@ -702,15 +709,11 @@ class TestSkillsFlows:
         SkillsCommand()._handle_update()  # A later write keeps the flag.
         capsys.readouterr()
         SkillsCommand()._handle_remove(remove_all=True)
-        err, v03 = (
-            err_text(capsys),
-            "files from deepctl 0.3.x stay until a later release.",
-        )
+        err = err_text(capsys)
+        v03 = f"its deepctl 0.3.x files were kept: {old}; delete any you don't need, or 'dg skills install' removes the ones deepctl can prove it wrote."
         assert f"For Claude Code, {v03}" in err
-        assert (
-            f"Amazon Q Developer has no skill folders recorded, so nothing was removed; {v03}"
-            in err
-        )
+        q = "Amazon Q Developer has no skill folders, so nothing was removed and its deepctl 0.3.x file is kept; delete it yourself if you don't need it."
+        assert q in err
 
     def test_update_edited_folder_exits_one_with_rename_advice(self, bundle):
         detect("claude")
@@ -812,7 +815,11 @@ class TestSkillsFlows:
         assert unchanged()
         fingerprinted()
         assert len(disk_state()["skill_folders"]) == 6
-        assert disk_state()["installed_skills"] == legacy
+        recorded = disk_state()["installed_skills"]
+        assert set(recorded) == set(tools)  # Login and startup key on these.
+        assert {t: recorded[t] for t in ("amazonq", "aider")} == {
+            t: legacy[t] for t in ("amazonq", "aider")
+        }  # Hint-only tools: never cleaned up.
         cmd._handle_update()
         assert unchanged()
         fingerprinted()

@@ -380,13 +380,13 @@ def print_warning(message: str, *, stderr: bool = False) -> None:
             )
 
 
-def print_info(message: str) -> None:
+def print_info(message: str, *, stderr: bool = False) -> None:
     """Print info message."""
     if not _output_config["quiet"]:
         if _output_config["agentic"]:
             stderr_console.print(f"INFO: {message}")
         else:
-            console.print(f"[blue]ℹ[/blue] {message}")
+            (stderr_console if stderr else console).print(f"[blue]ℹ[/blue] {message}")
 
 
 def print_debug(message: str) -> None:

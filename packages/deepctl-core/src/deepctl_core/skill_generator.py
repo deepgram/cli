@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 from rich.markup import escape
 
 from deepctl_core import skill_bundle
-from deepctl_core.output import print_warning
+from deepctl_core.output import _output_config, print_info, print_warning
 from deepctl_core.skill_bundle import portable_name
 
 if sys.platform == "win32":
@@ -99,6 +99,16 @@ _MSG = {
     "E16": "{path} looks like staging from an interrupted deepctl run; deepctl never deletes it, so check it and delete it by hand.",
     "E18": "{root} exists but is not a folder, so deepctl changed nothing for {display}; move it away or point it at a folder, then run the command again.",
     "E21": "Could not remove the skills from {root}: {reason}.",
+    "E33": "deepctl can't prove it wrote {path} ({why}), so it left it in place and no longer tracks it; if it's an old deepctl 0.3.x copy you don't need, delete it.",
+    "E35": "Could not remove deepctl 0.3.x content from {path}: {reason}; {path} is unchanged and still recorded, so the next install or update tries again.",
+    "E35b": "Could not remove deepctl 0.3.x content from {path}: {reason}; it is still recorded, so the next install or update tries again.",
+    "E36": "The skills for {display} are installed, but deepctl could not finish removing its 0.3.x files: {reason}; the next install or update tries again.",
+    "E37": "{dest} was saved while deepctl was removing its 0.3.x content, so deepctl kept your save; the earlier version is in {aside}. Compare them before you delete {aside}.",
+    "E38": "{aside}, left by an earlier deepctl run, holds an earlier version of {dest}, so deepctl changed neither; compare them, keep what you want in {dest}, then delete {aside}.",
+    "E39": "{dest} was missing, so deepctl put it back from {aside}, where an interrupted deepctl run had moved it.",
+    "E40": "{why.strerror}, so deepctl left {path} as it is and won't warn about it again; if it holds deepctl 0.3.x content you don't need, remove that content yourself.",
+    "E41": "{aside} is no longer the file deepctl moved there (a link or folder is there now), so deepctl did not put it back and {dest} is missing; restore {dest} from a backup if you need it, then delete {aside}.",
+    "E42": "{aside} is not a file deepctl moved there, so deepctl changed neither it nor {dest}; delete {aside} if you don't need it.",
     "E22": "{dest} was edited since deepctl installed it, so deepctl left it alone and did not install over it; rename or move your edited folder, then run the command again.",
     "E23": "{dest} was edited since deepctl installed it, so deepctl left it in place and no longer tracks it; delete it yourself if you don't need it.",
     "E24": "{dest} was edited since deepctl installed it, so 'dg skills remove' leaves it alone and 'dg skills update' stops until you rename or move it to keep your edits, or delete it to get deepctl's copy back.",
@@ -293,13 +303,13 @@ def _marker_text(cli: str, name: str) -> str:
     return f"deepctl installed this folder ({cli}/{name}); 'dg skills update' replaces it and 'dg skills remove' deletes it.\n"
 
 
-def _read_regular(path: str | Path, limit: int) -> bytes | None:
+def _read_regular(path: str | Path, limit: int, at: int | None = None) -> bytes | None:
     """Read one regular file of at most ``limit`` bytes, never via a link, else None."""
-    lst = os.lstat(path)  # The link check on Windows, which has no O_NOFOLLOW.
+    lst = os.stat(path, dir_fd=at, follow_symlinks=False)  # Windows: no O_NOFOLLOW.
     if _is_link(lst) or not stat.S_ISREG(lst.st_mode) or lst.st_size > limit:
         return None
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
+    fd = os.open(path, flags | getattr(os, "O_NONBLOCK", 0), dir_fd=at)
     try:
         st, data = os.fstat(fd), bytearray()
         if (st.st_dev, st.st_ino) != (lst.st_dev, lst.st_ino) or st.st_size > limit:
@@ -367,20 +377,23 @@ def _ownership(path: Path, cli: str, name: str, rec: dict[str, Any] | None) -> s
     return "ok" if fp in want else "edited"
 
 
-def _rename_excl(src: Path, dest: Path) -> None:
+def _rename_excl(src: str | Path, dest: str | Path, at: int | None = None) -> None:
     """Rename ``src`` to ``dest`` in one step that fails if anything is at ``dest``."""
     if _WINDOWS:
         os.rename(src, dest)  # Windows rename refuses any existing dest.
         return
     mac, libc = sys.platform == "darwin", ctypes.CDLL(None, use_errno=True)
     fn = getattr(libc, "renamex_np" if mac else "renameat2", None)
+    if mac and at is not None:  # Names relative to folder fd ``at`` (macOS 10.12+).
+        fn = getattr(libc, "renameatx_np", None)
     nr = _NR_RENAMEAT2[sys.maxsize < 2**32].get(platform.machine())
     if nr and sys.platform == "linux" and hasattr(libc, "syscall"):  # Every glibc.
         fn = functools.partial(libc.syscall, ctypes.c_long(nr))  # The kernel's errno.
     if fn is None:  # No call to make on this OS, machine or Python.
         raise OSError(errno.ENOSYS, _NO_EXCL_SYS, str(dest))
     a, b = os.fsencode(src), os.fsencode(dest)
-    if (fn(a, b, 4) if mac else fn(-100, a, -100, b, 1)) != 0:  # RENAME_EXCL/NOREPLACE
+    d = -100 if at is None else at  # AT_FDCWD (Linux); RENAME_EXCL 4, NOREPLACE 1.
+    if (fn(a, b, 4) if mac and at is None else fn(d, a, d, b, 4 if mac else 1)) != 0:
         e = ctypes.get_errno() or errno.EIO  # Never "Success" for a failed call.
         bad = e in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP)  # The filesystem.
         why = _NO_EXCL_SYS if e == errno.ENOSYS else _NO_EXCL if bad else None
@@ -390,6 +403,258 @@ def _rename_excl(src: Path, dest: Path) -> None:
 def _place(src: Path, dest: Path) -> None:
     """Move ``src`` to ``dest``; if anything is at ``dest``, the OS refuses atomically (B2)."""
     _rename_excl(src, dest)
+
+
+# "bytes:sha256" of each SKILL.md 0.2.16-0.3.2 copied (legacy_v03/allowlist.tsv).
+_V03_BLOBS = {
+    "api": (
+        "2271:0e84ca7cdbfecde6ccbad869ac1368ffc70e500d7fd63cba317ef5c5a010bc39",
+        "6892:1e3c33188e3b6548adac918916e489cecc9dd408cc63eccc7645846a9bf8b5ef",
+        "7229:37b0c83a184100354b58dbd6f63fe086e11018aec0e29730a58a71cb72ba8569",
+        "7810:87682eb16a5fe904bad30ee1f68c43dc1a6db31217c252e1d2b94e89c8c810ac",
+        "7558:ab6dcec901dbe89994ee8b5f43649d488fca95d3ad591d910f6109b5946fea97",
+        "7769:644f06c0a29a2251a556c5669d26f636074ebfb1ab57f61d7c298d34f5810553",
+        "11915:db3f40de8edb8b810ec9636cf2d5ac8916a4c760555373d5b4f4a75607b9ec59",
+        "12087:523e206af4c33a07175d7fd6d190b70ed7b1c7ec89cb3b6b4575669abf02e5a2",
+        "19480:b2855ce6bcc9d8e6744c9b669c8ad0de624100f779a80d9139b73333bfd5e408",
+        "19496:b193fe2baed574077026cf2b60f5d07985ad27899e2e8ffdab6a2657d70601a6",
+        "21751:8cda50a65b00eb45b3789fd3e29bc998f7737aa0ad03bb563e782cc3924b556b",
+        "25667:545d78a1b2735479237fe7703128ca033279126772eca2a6dbf1a5a878ea12f2",
+        "26114:f24514384d9662214b973923117802bf5b7329be17b787be0ed5495cb668eab1",
+        "29407:959031e436ae0eb50bb5139a30acca1607c3f4828061e655b6b7e3d10be1ea92",
+    ),
+    "docs": (
+        "1683:a3d3c853b73b6e0f56cba86a6be91bcba936135d4a58fa0ecc62958de1349e12",
+        "3511:e987e38d0e832c11949a21395c38cec2a0e7c275acfce26e65a0c7c36cffaa0b",
+        "4875:cef47147b79e903c72b3d27a9bd8dcca3ddeb5e0f9f6bbc36da4dd6f13ad8336",
+        "4925:1c0457b580de0620b8953bb6029873d614eb96e586b7e6be72c83fd63c2e51a8",
+        "5249:64e23bb3edd797bc149a3fd26034170e1c8e2850d608ad15e59915bfa84f289e",
+    ),
+    "setup-mcp": (
+        "4647:8ce952a6d4322ea883028c9a548be58fc7178bbba4148baae257aa57d3a7d68a",
+        "10674:251db18b9a887660093e82a09b4c3ff02d464e02df1450484a87261d2ce836b3",
+        "12301:f5000298802362356907889bfcd90cba430c528d466c3f27bddd3923274d9a54",
+    ),
+    "starters": (
+        "8790:9ba321bc8cf444c8b493d290d61e5dda00fb21bb7a56b55bef7b92952a841b2c",
+        "10027:6a5622355f3c185b2eafd3dad5b54aca01bda47d11d03dff79f6ab4228194c70",
+        "11464:0074b2b8f7677624ee0a7f94d373085ea70c87e5057b601adf549094e9f61258",
+        "11489:b92ba4683fc740b77858a3f7b2f9845b6ce07fee91d17ba7ec67d1417b4c70cb",
+        "16472:40c3ec366c632145a619276fee54f426a124a496ebcfcee4b1fa0f34d7a25b9b",
+        "16572:950c42c6c7c01f5692a5a2cdc00c6e1bbded51dab0e261e290f890f8eda035a0",
+        "17376:aba86630c4872031d3c66dc100e58b3878a3c9b4cbbfad4af87a12102ba8e228",
+    ),
+}
+_V03_SEP = b"\n\n---\n\n"  # 0.3.x joined the skills with this, in _V03_BLOBS order.
+_V03_ASIDE = ".deepctl-v03-"  # Not _STAGING_PREFIX: README names 0.3.x leftovers.
+_V03_MAX = 16 << 20
+_V03_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+_V03_NOFOLLOW = _V03_DIR | getattr(os, "O_NOFOLLOW", 0)
+_V03_CLAUDE = ".claude/commands/deepgram"
+_V03_PATHS = {  # Under the home folder, from the v0.3.2 generator.
+    "claude": [f"{_V03_CLAUDE}/{n}.md" for n in _V03_BLOBS],
+    "cursor": [".cursor/rules/deepctl.mdc"],
+    "cline": [".cline/rules/deepctl.md"],
+}
+
+
+def _v03_join(data: bytes, names: list[str]) -> bool:
+    """True if ``data`` is allowlisted blobs, one per name at most, in order, joined."""
+    for i, n in enumerate(names):
+        for blob in _V03_BLOBS[n]:
+            size, sha = blob.split(":")
+            head, rest = data[: int(size)], data[int(size) :]
+            tail = rest[len(_V03_SEP) :] if rest.startswith(_V03_SEP) else None
+            if hashlib.sha256(head).hexdigest() == sha and (
+                not rest or (tail is not None and _v03_join(tail, names[i + 1 :]))
+            ):
+                return True
+    return False
+
+
+def _v03_gone(path: str | Path) -> bool:
+    """True only when ``path`` provably does not exist; an unreadable one is there."""
+    try:
+        return not os.lstat(path)  # A stat result is never empty: it is there.
+    except OSError as exc:
+        return isinstance(exc, (FileNotFoundError, NotADirectoryError))
+
+
+class _V03Link(OSError): ...  # A folder between home and a legacy file is a link.
+
+
+class _V03Dir(contextlib.AbstractContextManager["_V03Dir"]):
+    """Folder of ``rel``, reached through no link: by fd (POSIX), rechecked (Windows)."""
+
+    def __init__(self, rel: str) -> None:
+        *self.parts, self.name = rel.split("/")
+        self.where = Path.home().joinpath(*self.parts)
+        self.walk()
+
+    def walk(self, err: type[OSError] = _V03Link) -> None:
+        home = Path.home()  # Followed: HOME itself may be a link (/home -> /data/home).
+        self.fd: int | None = None if _WINDOWS else os.open(home, _V03_DIR)
+        try:
+            for i, part in enumerate(self.parts):
+                if _is_link(os.lstat(sub := home.joinpath(*self.parts[: i + 1]))):
+                    why = f"{sub} is a link, which deepctl doesn't follow"
+                    raise err(errno.ELOOP, why, str(sub))
+                if self.fd is not None:  # A link swapped in since the lstat fails here.
+                    up, self.fd = self.fd, os.open(part, _V03_NOFOLLOW, dir_fd=self.fd)
+                    os.close(up)
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def __call__(self, name: str) -> str:
+        if self.fd is not None:
+            return name  # Used with dir_fd=self.fd.
+        self.walk(OSError)  # Not E40: a file may have moved already (E35, tracked).
+        return str(self.where / name)
+
+    def lstat(self, name: str) -> os.stat_result | None:
+        try:
+            return os.stat(self(name), dir_fd=self.fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+
+    def back(self, aside: str) -> bool:
+        """Put ``aside`` back (never over a newer file); False after E4, E37 or E41."""
+        try:
+            if (s := self.lstat(aside)) and not stat.S_ISREG(s.st_mode):
+                return self.warn("E41", aside)  # A link or folder is there now.
+            if s:  # Nothing if nothing moved.
+                _rename_excl(self(aside), self(self.name), self.fd)
+            return True
+        except OSError as exc:  # A save at the name since (E37), else E4.
+            return self.warn("E37" if exc.errno in _NO_REPLACE else "E4", aside)
+
+    def warn(self, key: str, aside: str) -> bool:
+        text = _msg(key, dest=self.where / self.name, aside=self.where / aside)
+        print_warning(escape(text), stderr=True)
+        return False  # For back(): the file is not back.
+
+    def __exit__(self, *exc: object) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+
+
+def _v03_mv(d: _V03Dir, data: bytes, why: str) -> bool | str:
+    """Move aside, re-prove ``data``, then delete it (True); else put it back: ``why``,
+    or "" after E4, E37 or E41."""
+    aside = _V03_ASIDE + d.name
+    try:  # Ctrl-C right after the move still puts it back.
+        _rename_excl(d(d.name), d(aside), d.fd)  # A save from now on lands at name.
+        if _read_regular(d(aside), _V03_MAX, d.fd) != data:
+            return why if d.back(aside) else ""  # E4, E37 or E41 said where it is.
+        os.unlink(d(aside), dir_fd=d.fd)  # If it fails, put back: E35 is true.
+        return True
+    except BaseException as exc:
+        vars(exc)["v03_moved"] = not d.back(aside)  # E35b, not E35, if it isn't back.
+        raise
+
+
+def _v03_file(rel: str, names: list[str]) -> bool | str | _V03Link:
+    """Remove deepctl's 0.3.x file at ``rel``: True if it deleted it, "" if none,
+    else why kept (a _V03Link for a linked folder); raises OSError if I/O fails."""
+    try:
+        with _V03Dir(rel) as d:
+            return _v03_cut(d, names)
+    except _V03Link as exc:
+        return exc
+    except (FileNotFoundError, NotADirectoryError):
+        return ""
+
+
+def _v03_cut(d: _V03Dir, names: list[str]) -> bool | str:
+    aside = _V03_ASIDE + d.name  # The same name each run, so a leftover is found.
+    st, old = d.lstat(d.name), d.lstat(aside)
+    if old and st:  # E38 for a file an earlier run moved; else not deepctl's (E42).
+        d.warn("E38" if stat.S_ISREG(old.st_mode) else "E42", aside)
+        return ""
+    if old and stat.S_ISREG(old.st_mode) and not _is_link(old):  # An interrupted run's.
+        try:
+            _rename_excl(d(aside), d(d.name), d.fd)  # Refused if a file appeared since.
+        except OSError as exc:
+            vars(exc)["v03_moved"] = True  # E35b: it is still in the aside.
+            raise
+        d.warn("E39", aside)
+        st = old
+    if st is None:
+        return ""
+    data = _read_regular(d(d.name), _V03_MAX, d.fd)
+    if data is None:
+        if _is_link(st) or not stat.S_ISREG(st.st_mode):
+            return "it is a link" if _is_link(st) else "it is not a file"
+        big = st.st_size > _V03_MAX  # Else it changed between the lstat and the read.
+        return "it is larger than 16 MiB" if big else "it changed while deepctl read it"
+    eol = b"\r\n" if b"\r\n" in data else b"\n"
+    mixed = b"\n" in data.replace(eol, b"")  # CRLF and LF: 0.3.x never did.
+    if mixed or not _v03_join(data.replace(b"\r\n", b"\n"), names):
+        return "it differs from every deepgram/skills version deepctl 0.3.x copied"
+    return _v03_mv(d, data, "it changed while deepctl was removing it")
+
+
+def _clean_v03(gen: SkillGenerator, root: Path) -> None:
+    """Remove the 0.3.x content of ``gen`` deepctl can prove; only Ctrl-C raises."""
+    cli, notes, removed, untrack = gen.cli_name, list[str](), list[Path](), set[Path]()
+    retry = set[Path]()
+    try:
+        state = get_skills_state()
+        tool = state.get(_RECORDS_KEY, {}).get(cli, {})
+        folders = tool.get("folders", {})
+        landed = {n for n, r in folders.items() if r.get("state") == "installed"}
+        rec = state["installed_skills"].get(cli)
+        recorded = {Path(p) for p in rec["paths"]} if rec else set()
+        for rel in _V03_PATHS.get(cli, []):
+            path = Path.home().joinpath(*rel.split("/"))
+            names = [path.stem] if cli == "claude" else list(_V03_BLOBS)
+            if not set(names) <= landed:
+                continue  # The folders that replace it did not all land: keep it.
+            try:
+                why = _v03_file(rel, names)
+            except OSError as exc:  # Warned only if 0.3.x recorded it (E35 says so).
+                if path in recorded:  # E35b after E4, E37, E41 or a failed E39.
+                    key = "E35b" if getattr(exc, "v03_moved", False) else "E35"
+                    notes.append(_msg(key, path=path, reason=_reason(exc)))
+                retry.add(path)  # Tracked, even if a link now hides it from the prune.
+                continue
+            if why is True:
+                removed.append(path)
+            elif why and path in recorded:  # Once, then untracked (as E23/E26).
+                if _output_config["quiet"]:
+                    continue  # Unseen: stay tracked so a later run warns.
+                key = "E40" if isinstance(why, _V03Link) else "E33"
+                notes.append(_msg(key, path=path, why=why))
+            untrack.add(path)
+        if removed and cli == "claude":  # Only when empty: the user's files stay.
+            with contextlib.suppress(OSError), _V03Dir(_V03_CLAUDE) as d:
+                if (s := d.lstat(d.name)) and not _is_link(s):  # Windows junction.
+                    os.rmdir(d(d.name), dir_fd=d.fd)
+        if rec:
+            paths = [
+                p
+                for p in rec["paths"]
+                if Path(p) not in untrack
+                and (Path(p).parent == root or Path(p) in retry or not _v03_gone(p))
+            ] or [str(root / n) for n in sorted(landed)]
+            v03 = any(Path(p).parent != root for p in paths)
+
+            def clear(state: dict[str, Any]) -> None:
+                state["installed_skills"][cli]["paths"] = paths
+                if not v03:
+                    state[_RECORDS_KEY][cli].pop("v03", None)
+
+            if paths != rec["paths"] or (not v03 and "v03" in tool):
+                _update_state(clear, "E9c", gen)
+    except Exception as exc:  # Never fail an install that landed.
+        why = str(exc) if isinstance(exc, SkillInstallError) else _reason(exc)
+        notes.append(_msg("E36", gen, reason=why.rstrip(".")))
+    if removed:
+        done = f"Removed deepctl 0.3.x files for {gen.display_name}: {', '.join(map(str, removed))}."
+        print_info(escape(done), stderr=True)
+    for note in notes:
+        print_warning(escape(note), stderr=True)
 
 
 @dataclass(frozen=True)
@@ -683,6 +948,7 @@ def install_tool(
         error.leftover = leftover
     if error is not None:
         raise error
+    _clean_v03(gen, root)
     return [root / n for n in placed], leftover
 
 
