@@ -428,6 +428,8 @@ class SkillsCommand(BaseGroupCommand):
                 left = [p for p in paths if Path(p).parent != gen.skills_root()]
                 old = [p for p in left if not sg._v03_gone(p)]  # On disk, else no note.
                 v03 = f"its deepctl 0.3.x files were kept: {', '.join(old)}; delete any you don't need, or 'dg skills install' removes the ones deepctl can prove it wrote."
+                if cli_key in sg._V03_SHARED:  # A section in the user's own file.
+                    v03 = f"the deepctl 0.3.x section in {', '.join(old)}, if any, was kept; 'dg skills install' removes it when it can do so safely; if it is still there afterwards, remove the lines between its marker lines yourself."
                 c10 = f"For {gen.display_name}, {v03}"
                 if cli_key not in recs:
                     c10 = f"{gen.display_name} has no skill folders recorded, so nothing was removed{'; ' + v03 if old else '.'}"

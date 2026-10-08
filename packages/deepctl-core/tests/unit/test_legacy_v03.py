@@ -22,6 +22,12 @@ FIX = Path(__file__).parent / "fixtures" / "legacy_v03"
 NAMES = ("api", "docs", "setup-mcp", "starters")
 BLOB = {n: (FIX / f"{n}.md").read_bytes() for n in NAMES}
 JOINED = (FIX / "deepctl.mdc").read_bytes()
+BLOCK = (FIX / "GEMINI.md").read_bytes()
+SHARED = {
+    "codex": ".codex/instructions.md",
+    "gemini": ".gemini/GEMINI.md",
+    "opencode": ".opencode/agents.md",
+}
 STANDALONE = {"cursor": ".cursor/rules/deepctl.mdc", "cline": ".cline/rules/deepctl.md"}
 DIFFERS = "it differs from every deepgram/skills version deepctl 0.3.x copied"
 
@@ -343,6 +349,257 @@ class TestStandalone:
         sg._STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
         install(tmp_path)
         assert str(gone) not in legacy_paths("claude")
+
+
+class TestShared:
+    @pytest.mark.parametrize("cli", sorted(SHARED))
+    def test_block_removal_keeps_user_text(self, tmp_path, capsys, cli):
+        seed_text = b"# My notes\n\nKeep this.\n"
+        data = V032.shared({n: BLOB[n].decode() for n in NAMES}, seed_text.decode())
+        path = at(SHARED[cli])
+        seed({path: data.encode()})
+        install(tmp_path, cli)
+        assert path.read_bytes() == seed_text  # cmp-equal to the pre-0.3.x file.
+        text = err(capsys)
+        assert f"INFO: Removed the deepctl 0.3.x section from {path}; the rest" in text
+        assert "Removed deepctl 0.3.x files" not in text
+        assert legacy_paths(cli) == folder_paths(cli, sorted(NAMES))
+        assert "v03" not in disk()["skill_folders"][cli]
+
+    def test_shared_cleanup_then_second_install_is_silent(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"user\n\n" + BLOCK})
+        install(tmp_path, "gemini")
+        assert path.read_bytes() == b"user\n"
+        capsys.readouterr()
+        calls = []
+        real = sg._update_state
+        monkeypatch.setattr(
+            sg, "_update_state", lambda *a, **k: (calls.append(a[1]), real(*a, **k))
+        )
+        install(tmp_path, "gemini")
+        assert err(capsys) == ""
+        assert calls == ["E9", "E9b"]  # The cleanup wrote nothing.
+        assert "v03" not in disk()["skill_folders"]["gemini"]
+
+    def test_shared_file_without_markers_is_untouched_and_silent(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"user text only\n"}, record=False)
+        before = ident(path)
+        calls = []
+        real = sg._update_state
+        monkeypatch.setattr(
+            sg, "_update_state", lambda *a, **k: (calls.append(a[1]), real(*a, **k))
+        )
+        install(tmp_path, "gemini")
+        assert ident(path) == before
+        assert err(capsys) == ""
+        assert calls == ["E9", "E9b"]
+
+    def test_recorded_file_without_markers_is_done_and_silent(self, tmp_path, capsys):
+        path = at(SHARED["gemini"])
+        seed({path: b"I removed the section myself.\n"})
+        before = ident(path)
+        install(tmp_path, "gemini")
+        assert ident(path) == before
+        assert err(capsys) == ""
+        assert legacy_paths("gemini") == folder_paths("gemini", sorted(NAMES))
+        assert "v03" not in disk()["skill_folders"]["gemini"]
+
+    @pytest.mark.parametrize(
+        ("data", "want"),
+        [
+            (BLOCK, None),  # Block only: 0.3.x created the file, so it is deleted.
+            (b"user\n\n" + BLOCK + b"after\n", b"user\nafter\n"),
+            (crlf(b"user\n\n" + BLOCK + b"after\n"), b"user\r\nafter\r\n"),
+            (b"\xef\xbb\xbfuser\n\n" + BLOCK, b"\xef\xbb\xbfuser\n"),  # BOM kept.
+            (b"\n\n" + BLOCK, b"\n"),  # An empty user file: one newline left.
+            (b"user\n\n\n" + BLOCK, b"user\n\n\n"),  # Not 0.3.x's shape: kept as is.
+            (b"user" + b"\n" + BLOCK, b"user\n"),  # No blank line before it.
+        ],
+        ids=["only", "after", "crlf", "bom", "empty", "three-eol", "no-blank"],
+    )
+    def test_block_shapes(self, tmp_path, data, want):
+        path = at(SHARED["codex"])
+        seed({path: data})
+        install(tmp_path, "codex")
+        assert (path.read_bytes() if path.exists() else None) == want
+        assert legacy_paths("codex") == folder_paths("codex", sorted(NAMES))
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            BLOCK + BLOCK,  # Duplicate.
+            BLOCK[: BLOCK.index(b"\n") + 1] + BLOCK,  # Nested BEGIN.
+            BLOCK[: -len(sg._V03_END) - 1],  # Unterminated.
+            b"a\n" + sg._V03_END + b"\nx\n" + sg._V03_BEGIN + b"\n",  # END first.
+            b"text " + BLOCK,  # BEGIN not on its own line.
+            BLOCK[:-1] + b" trailing\n",  # END not on its own line.
+            b"user\r\n\r\n" + BLOCK,  # Mixed line endings.
+            b"```\n" + BLOCK + b"```\n" + BLOCK,  # A second copy in a code fence.
+        ],
+        ids=["dup", "nested", "open", "end-first", "begin-inline", "end-inline"]
+        + ["mixed-eol", "fenced"],
+    )
+    def test_incomplete_repeated_or_mixed_sections_kept(self, tmp_path, capsys, data):
+        path = at(SHARED["opencode"])
+        seed({path: data})
+        before = ident(path)
+        install(tmp_path, "opencode")
+        assert ident(path) == before
+        text = err(capsys)
+        assert "WARN: deepctl can't safely remove its 0.3.x section from" in text
+        assert "delete it" not in text  # Never for a file with the user's text.
+        assert legacy_paths("opencode") == folder_paths("opencode", sorted(NAMES))
+        install(tmp_path, "opencode")
+        assert err(capsys) == ""
+
+    @POSIX
+    def test_hard_link_and_foreign_owner_kept(self, tmp_path, capsys, monkeypatch):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        os.link(path, tmp_path / "other-name")
+        install(tmp_path, "gemini")
+        assert path.read_bytes() == b"u\n\n" + BLOCK
+        assert "it has other hard links or another user owns it" in err(capsys)
+        os.unlink(tmp_path / "other-name")
+        seed({path: b"u\n\n" + BLOCK})
+        monkeypatch.setattr(os, "getuid", lambda: os.stat(path).st_uid + 1)
+        install(tmp_path, "gemini")
+        assert path.read_bytes() == b"u\n\n" + BLOCK
+        assert "it has other hard links or another user owns it" in err(capsys)
+
+    @POSIX
+    def test_mode_times_and_line_endings_kept(self, tmp_path):
+        path = at(SHARED["gemini"])
+        seed({path: crlf(b"u\n\n" + BLOCK)})
+        path.chmod(0o640)
+        os.utime(path, ns=(1_600_000_000_000_000_000, 1_600_000_000_123_456_789))
+        install(tmp_path, "gemini")
+        assert path.read_bytes() == b"u\r\n"
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
+        assert os.stat(path).st_mtime_ns == 1_600_000_000_123_456_789
+
+    @pytest.mark.parametrize("lock", ["read-only", "root", "uchg"])
+    def test_read_only_or_locked_file_kept_once(
+        self, tmp_path, capsys, monkeypatch, lock
+    ):
+        if lock == "root":  # os.access lets root write anything: the mode decides.
+            monkeypatch.setattr(os, "access", lambda *a, **k: True)
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        try:
+            if lock == "uchg":
+                try:
+                    os.chflags(path, stat.UF_IMMUTABLE)
+                except (AttributeError, OSError) as exc:
+                    pytest.skip(f"no chflags uchg here: {exc}")
+            else:
+                path.chmod(0o444)
+            install(tmp_path, "gemini")
+            why = "it is read-only or locked"
+            assert note("E34", path=path, why=why, what=sg._V03_LINES) in err(capsys)
+            install(tmp_path, "gemini")
+            assert err(capsys) == ""
+        finally:
+            with contextlib.suppress(AttributeError, OSError):
+                os.chflags(path, 0)
+            path.chmod(0o644)
+        assert path.read_bytes() == b"u\n\n" + BLOCK
+        assert [n for n in os.listdir(path.parent) if n.startswith(sg._V03_ASIDE)] == []
+
+    def test_windows_branch(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "_WINDOWS", True)
+        monkeypatch.delattr(os, "getuid", raising=False)
+        shared, cursor = at(SHARED["gemini"]), at(STANDALONE["cursor"])
+        seed({shared: b"u\n\n" + BLOCK, cursor: JOINED})
+        install(tmp_path, "gemini")
+        install(tmp_path, "cursor")
+        assert shared.read_bytes() == b"u\n"
+        assert not cursor.exists()
+
+    def test_concurrent_change_keeps_file_and_drops_temp(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        real = sg._read_regular
+
+        def read(p, limit, fd=None):  # The re-proof reads the moved file.
+            data = real(p, limit, fd)
+            return b"changed" if Path(p).name.startswith(sg._V03_ASIDE) else data
+
+        monkeypatch.setattr(sg, "_read_regular", read)
+        install(tmp_path, "gemini")
+        assert path.read_bytes() == b"u\n\n" + BLOCK
+        assert "it changed while deepctl was editing it" in err(capsys)
+        assert [n for n in os.listdir(path.parent) if n.startswith(sg._V03_ASIDE)] == []
+
+    def test_section_line_even_if_the_file_goes_after_the_cut(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path, real = at(SHARED["gemini"]), sg._v03_mv
+        seed({path: b"u\n\n" + BLOCK})
+        monkeypatch.setattr(
+            sg, "_v03_mv", lambda *a: real(*a) and not path.unlink()
+        )  # Another process deletes the file right after deepctl's cut.
+        install(tmp_path, "gemini")
+        text = err(capsys)
+        assert f"Removed the deepctl 0.3.x section from {path}" in text
+        assert "Removed deepctl 0.3.x files" not in text
+
+    def test_e35_on_replace_failure(self, tmp_path, capsys, monkeypatch):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        real = sg._rename_excl
+
+        def rename(src, dest, fd=None):  # The publish: the temp onto the name.
+            if Path(dest).name == path.name and Path(src).name.endswith(".tmp"):
+                raise PermissionError(13, "Permission denied")
+            return real(src, dest, fd)
+
+        monkeypatch.setattr(sg, "_rename_excl", rename)
+        install(tmp_path, "gemini")
+        assert path.read_bytes() == b"u\n\n" + BLOCK
+        assert note("E35", path=path, reason="Permission denied") in err(capsys)
+        assert [n for n in os.listdir(path.parent) if n.startswith(sg._V03_ASIDE)] == []
+        assert legacy_paths("gemini") == [str(path)]
+
+    def test_block_fixture_regenerates_from_v032_writer(self, tmp_path):
+        block = V032.shared({n: BLOB[n].decode() for n in NAMES}, None).encode()
+        assert block == BLOCK
+        assert hashlib.sha256(block).hexdigest().startswith("b6158ef6")
+        seed({at(SHARED["gemini"]): block})
+        install(tmp_path, "gemini")
+        assert not at(SHARED["gemini"]).exists()
+
+    def test_gate_keeps_section_when_a_folder_did_not_land(self, tmp_path, capsys):
+        seed({at(SHARED["gemini"]): b"u\n\n" + BLOCK})
+        install(tmp_path, "gemini", ("docs", "setup-mcp", "starters"))
+        assert at(SHARED["gemini"]).read_bytes() == b"u\n\n" + BLOCK
+        assert err(capsys) == ""
+        assert legacy_paths("gemini") == [str(at(SHARED["gemini"]))]
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_link_kept(self, tmp_path, capsys, dangling):
+        link_kept(tmp_path, capsys, "gemini", at(SHARED["gemini"]), BLOCK, dangling)
+
+    def test_temp_prefix_is_not_staging(self, tmp_path, monkeypatch):
+        seed({at(SHARED["codex"]): b"u\n\n" + BLOCK})
+        names, real = [], os.open
+
+        def open_(p, *a, **k):
+            names.append(Path(p).name)
+            return real(p, *a, **k)
+
+        monkeypatch.setattr(os, "open", open_)
+        install(tmp_path, "codex")
+        assert [n for n in names if n.startswith(sg._V03_ASIDE) and n.endswith(".tmp")]
+        assert at(SHARED["codex"]).read_bytes() == b"u\n"
 
 
 class TestLinksAndKinds:
@@ -702,19 +959,29 @@ CASES = {  # cli: (its 0.3.x file, what it holds, the folders a link can replace
     "claude": (".claude/commands/deepgram/api.md", BLOB["api"], 3),
     "cursor": (STANDALONE["cursor"], JOINED, 2),
     "cline": (STANDALONE["cline"], JOINED, 2),
+    **{cli: (rel, b"u\n\n" + BLOCK, 1) for cli, rel in SHARED.items()},
 }
 STEPS = dict.fromkeys(CASES, ["aside", "proof", "unlink"])
-DONE = dict.fromkeys(CASES, None)  # What is at the path once deepctl is done.
+STEPS.update(dict.fromkeys(SHARED, ["temp", "aside", "proof", "publish", "unlink"]))
+DONE = {cli: b"u\n" if cli in SHARED else None for cli in CASES}  # Once it's done.
 # What the file and its aside hold right after a step is interrupted:
 # "legacy" (0.3.x's bytes), "done" (DONE), or None (nothing there).
 CTRL_C = {
     "before": ("legacy", None),
+    "temp": ("legacy", None),
     "aside": ("legacy", None),
     "proof": ("legacy", None),
+    "publish": ("done", "legacy"),
     "unlink": ("done", None),
 }
-KILL = {"aside": (None, "legacy"), "proof": (None, "legacy"), "unlink": ("done", None)}
-AFTER_KILL = {"aside": "E39", "proof": "E39"}  # What the next run says.
+KILL = {
+    "temp": ("legacy", None),
+    "aside": (None, "legacy"),
+    "proof": (None, "legacy"),
+    "publish": ("done", "legacy"),
+    "unlink": ("done", None),
+}
+AFTER_KILL = {"aside": "E39", "proof": "E39", "publish": "E38"}  # The next run.
 
 
 def holds(path):
@@ -784,14 +1051,18 @@ class TestLinkedFolders:
         assert link.is_symlink() and legacy.read_bytes() == data
         assert not list(real.rglob(sg._V03_ASIDE + "*"))
         why = f"{link} is a link, which deepctl doesn't follow"
-        assert note("E40", path=path, why=sg._V03Link(0, why)) in err(capsys)
+        text, what = err(capsys), "that content yourself"
+        if cli in SHARED:  # Only the marker lines, as E34 says.
+            what = "only the lines from '<!-- BEGIN deepctl CLI Reference' to '<!-- END"
+            what += " deepctl CLI Reference -->' yourself and keep the rest of the file"
+        assert note("E40", path=path, why=sg._V03Link(0, why), what=what) in text
         assert str(path) not in legacy_paths(cli)
         install(tmp_path, cli)
         assert err(capsys) == ""
         assert legacy.read_bytes() == data
 
     @POSIX
-    @pytest.mark.parametrize("cli", ["cursor"])
+    @pytest.mark.parametrize("cli", ["cursor", "gemini"])
     def test_home_itself_a_link_still_cleans(self, tmp_path, monkeypatch, cli):
         real = Path.home()
         alias = tmp_path / "home-link"
@@ -803,7 +1074,7 @@ class TestLinkedFolders:
         assert holds(at(CASES[cli][0])) == expect(cli, ("done", None))
 
     @POSIX
-    @pytest.mark.parametrize("cli", ["cursor"])
+    @pytest.mark.parametrize("cli", ["cursor", "gemini"])
     def test_a_folder_swapped_for_a_link_after_the_walk_is_not_followed(
         self, tmp_path, monkeypatch, cli
     ):
@@ -832,7 +1103,7 @@ class TestLinkedFolders:
         )  # In the folder it checked.
 
     @POSIX
-    @pytest.mark.parametrize("cli", ["cursor"])
+    @pytest.mark.parametrize("cli", ["cursor", "gemini"])
     def test_a_folder_swapped_for_a_link_between_its_check_and_open_fails_closed(
         self, tmp_path, capsys, monkeypatch, cli
     ):
@@ -950,6 +1221,67 @@ class TestLinkedFolders:
         assert "left it in place" not in text and "won't warn" not in text
         assert str(path) in legacy_paths("cursor")
 
+    @pytest.mark.parametrize("dotfiles", [False, True])
+    def test_windows_link_before_the_publish_keeps_it_tracked(
+        self, tmp_path, capsys, monkeypatch, dotfiles
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        victim = tmp_path / ("moved" if dotfiles else "victim")  # Dotfiles: a link to
+        if not dotfiles:  # where the folder went, as a dotfiles manager would do.
+            victim.mkdir()
+        moved = self._link_mid_run(monkeypatch, ".gemini", victim, ".tmp")
+        install(tmp_path, "gemini")
+        text = err(capsys)
+        assert holds(moved / "GEMINI.md") == (None, b"u\n\n" + BLOCK)
+        assert dotfiles or asides(victim) == []
+        assert "move it back by hand" in text and "is still recorded" in text  # E4, E35b
+        assert "is unchanged" not in text
+        assert "left the file as it is" not in text and "won't warn" not in text
+        assert str(path) in legacy_paths("gemini")
+
+    def test_a_failed_publish_puts_it_back_even_if_the_temp_is_gone(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path, real = at(SHARED["gemini"]), sg._rename_excl
+        seed({path: b"u\n\n" + BLOCK})
+
+        def ren(src, dest, fd=None):  # The temp vanishes, then the publish fails.
+            if str(src).endswith(".tmp"):
+                os.remove(path.parent / Path(src).name)
+                raise OSError(5, "Input/output error")
+            return real(src, dest, fd)
+
+        monkeypatch.setattr(sg, "_rename_excl", ren)
+        install(tmp_path, "gemini")
+        assert holds(path) == (b"u\n\n" + BLOCK, None)
+        text = err(capsys)
+        assert f"{path} is unchanged and still recorded" in text
+        assert legacy_paths("gemini") == [str(path)]
+
+    def test_windows_ctrl_c_after_the_publish_with_a_link_still_raises(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr(sg, "_WINDOWS", True)
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        victim, moved, real = tmp_path / "victim", tmp_path / "moved", sg._rename_excl
+        victim.mkdir()
+
+        def ren(src, dest, fd=None):  # Published, then a link and Ctrl-C at once.
+            real(src, dest, fd)
+            if str(src).endswith(".tmp"):
+                at(".gemini").rename(moved)
+                at(".gemini").symlink_to(victim, target_is_directory=True)
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(sg, "_rename_excl", ren)
+        with pytest.raises(KeyboardInterrupt):  # Not an OSError from the temp check.
+            install(tmp_path, "gemini")
+        assert holds(moved / "GEMINI.md") == (b"u\n", b"u\n\n" + BLOCK)
+        assert os.listdir(victim) == []
+        assert "move it back by hand" in err(capsys)
+
     @pytest.mark.skipif(os.name == "nt", reason="the Windows branch uses os.rename")
     def test_rename_excl_names_relative_to_the_cwd_or_a_folder_fd(
         self, tmp_path, monkeypatch
@@ -993,7 +1325,8 @@ class TestInterrupted:
         assert holds(path) == expect(cli, CTRL_C[step])
         assert not [n for n in asides(path.parent) if n.endswith(".tmp")]
         aside = path.with_name(sg._V03_ASIDE + path.name)
-        assert (note("E4", dest=path, aside=aside) in text) is (step == "publish")
+        assert note("E4", dest=path, aside=aside) not in text  # Published: E38 next.
+        assert note("E37", dest=path, aside=aside) not in text  # Nor a put-back try.
         install(tmp_path, cli)  # The next run finishes, or names what it kept.
         assert holds(path) == expect(cli, ("done", CTRL_C[step][1]))
         assert (note("E38", dest=path, aside=aside) in err(capsys)) is (
@@ -1113,3 +1446,139 @@ class TestInterrupted:
         assert not path.exists() and target.read_bytes() == JOINED
         assert aside.is_dir() if kind == "folder" else aside.is_symlink()
         assert err(capsys) == ""
+
+
+class TestSharedRaces:
+    @POSIX
+    @pytest.mark.parametrize("step", ["temp", "proof"])
+    def test_a_temp_swapped_for_a_link_is_never_followed_or_published(
+        self, tmp_path, capsys, monkeypatch, step
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        victim = tmp_path / "victim"
+        victim.write_bytes(b"secret")
+        victim.chmod(0o600)
+        os.utime(victim, ns=(1_500_000_000_000_000_000, 1_500_000_000_000_000_000))
+        before = os.stat(victim)
+
+        def swap():  # Right before the chmod ("temp") or the publish ("proof").
+            (tmp,) = [n for n in asides(path.parent) if n.endswith(".tmp")]
+            os.remove(path.parent / tmp)
+            (path.parent / tmp).symlink_to(victim)
+
+        hooks(monkeypatch, "gemini", step, swap)
+        install(tmp_path, "gemini")
+        after = os.stat(victim)
+        assert (after.st_mode, after.st_mtime_ns) == (before.st_mode, before.st_mtime_ns)
+        assert victim.read_bytes() == b"secret"
+        assert not path.is_symlink() and holds(path) == (b"u\n\n" + BLOCK, None)
+        assert asides(path.parent) == []  # The swapped-in link is gone too.
+        text = err(capsys)  # GEMINI.md itself never changed.
+        assert "(deepctl's temporary copy of it was replaced)" in text
+        assert "it changed while deepctl was editing it" not in text
+
+    def test_a_save_between_the_proof_and_the_publish_is_kept(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        aside = path.with_name(sg._V03_ASIDE + path.name)
+        seed({path: b"u\n\n" + BLOCK})
+
+        def save():  # An editor saves atomically: a temp file renamed over the name.
+            (path.parent / "editor.swp").write_bytes(b"EDITOR\n")
+            os.replace(path.parent / "editor.swp", path)
+
+        hooks(monkeypatch, "gemini", "proof", save)
+        install(tmp_path, "gemini")
+        text = err(capsys)
+        assert holds(path) == (b"EDITOR\n", b"u\n\n" + BLOCK)
+        assert asides(path.parent) == [aside.name]  # No temp left.
+        assert note("E37", dest=path, aside=aside) in text
+        assert "move it back by hand" not in text  # E4 would undo the save.
+        assert "can't safely remove its 0.3.x section" not in text  # E34 contradicts.
+        install(tmp_path, "gemini")
+        assert note("E38", dest=path, aside=aside) in err(capsys)
+        assert holds(path) == (b"EDITOR\n", b"u\n\n" + BLOCK)
+
+    @POSIX
+    def test_a_refused_publish_puts_it_back_and_leaves_no_fd(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+        before, real = open_fds(), sg._rename_excl
+
+        def ren(src, dest, fd=None):
+            if Path(src).name.endswith(".tmp"):
+                raise PermissionError(13, "Permission denied")
+            return real(src, dest, fd)
+
+        monkeypatch.setattr(sg, "_rename_excl", ren)
+        install(tmp_path, "gemini")
+        assert open_fds() == before
+        assert holds(path) == (b"u\n\n" + BLOCK, None) and asides(path.parent) == []
+        assert note("E35", path=path, reason="Permission denied") in err(capsys)
+        assert legacy_paths("gemini") == [str(path)]
+        monkeypatch.setattr(sg, "_rename_excl", real)
+        install(tmp_path, "gemini")
+        assert open_fds() == before
+        assert holds(path) == (b"u\n", None)
+
+    def test_a_full_disk_while_writing_the_temp_leaves_the_file(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        seed({path: b"u\n\n" + BLOCK})
+
+        def full():
+            raise OSError(28, "No space left on device")
+
+        hooks(monkeypatch, "gemini", "temp", full)
+        install(tmp_path, "gemini")
+        assert holds(path) == (b"u\n\n" + BLOCK, None) and asides(path.parent) == []
+        reason = "No space left on device"
+        text = err(capsys)
+        assert note("E35", path=path, reason=reason) in text
+        assert f"{path} is unchanged and still recorded" in text
+        assert legacy_paths("gemini") == [str(path)]
+
+    def test_a_failed_aside_delete_after_the_publish_keeps_the_cut(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["gemini"])
+        aside = path.with_name(sg._V03_ASIDE + path.name)
+        seed({path: b"u\n\n" + BLOCK})
+        real = os.unlink
+
+        def unlink(p, *a, **k):
+            if Path(p).name == aside.name:
+                raise PermissionError(13, "Permission denied", str(p))
+            return real(p, *a, **k)
+
+        monkeypatch.setattr(os, "unlink", unlink)
+        install(tmp_path, "gemini")
+        text = err(capsys)
+        assert holds(path) == (b"u\n", b"u\n\n" + BLOCK)
+        assert f"Removed the deepctl 0.3.x section from {path}" in text
+        assert "Could not remove" not in text
+        install(tmp_path, "gemini")
+        assert note("E38", dest=path, aside=aside) in err(capsys)
+
+    def test_a_section_only_file_is_put_back_if_its_aside_cannot_be_deleted(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        path = at(SHARED["codex"])
+        seed({path: BLOCK})
+        real = os.unlink
+
+        def unlink(p, *a, **k):
+            if Path(p).name.startswith(sg._V03_ASIDE):
+                raise PermissionError(13, "Permission denied", str(p))
+            return real(p, *a, **k)
+
+        monkeypatch.setattr(os, "unlink", unlink)
+        install(tmp_path, "codex")
+        assert holds(path) == (BLOCK, None)  # Put back.
+        assert note("E35", path=path, reason="Permission denied") in err(capsys)
+        assert legacy_paths("codex") == [str(path)]

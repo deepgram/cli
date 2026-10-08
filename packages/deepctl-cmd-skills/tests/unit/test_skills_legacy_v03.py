@@ -106,6 +106,25 @@ def test_kept_file_status_and_remove_name_install_and_update(
     assert ("0.3.x" in err) != gone
 
 
+def test_kept_shared_section_is_not_called_a_deepctl_file(
+    tmp_path, monkeypatch, capsys
+):
+    use_bundle(tmp_path, monkeypatch, ("api", "docs", "starters"))
+    gem = Path.home() / ".gemini" / "GEMINI.md"
+    gem.parent.mkdir(parents=True)
+    gem.write_bytes(b"my notes\n\n" + (FIX / "GEMINI.md").read_bytes())
+    before = gem.read_bytes()
+    seed(names=(), extra={"gemini": {"paths": [str(gem)]}})
+    SkillsCommand()._handle_install(install_all=True)  # No setup-mcp: kept.
+    capsys.readouterr()
+    SkillsCommand()._handle_remove(remove_all=True)
+    err = err_text(capsys)
+    note = f"For Gemini CLI, the deepctl 0.3.x section in {gem}, if any, was kept; 'dg skills install' removes it when it can do so safely; if it is still there afterwards, remove the lines between its marker lines yourself."
+    assert note in err
+    assert "files were kept" not in err and "delete any" not in err
+    assert gem.read_bytes() == before
+
+
 def test_hint_only_remove_says_the_file_is_kept(tmp_path, monkeypatch, capsys):
     use_bundle(tmp_path, monkeypatch)
     rule = Path.home() / ".amazonq" / "rules" / "deepctl.md"
