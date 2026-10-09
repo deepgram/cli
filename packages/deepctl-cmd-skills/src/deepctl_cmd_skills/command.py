@@ -281,13 +281,14 @@ class SkillsCommand(BaseGroupCommand):
             notes += [sg._msg("E16", path=p) for p in st.leftovers]
             if found and st.root is None:
                 notes.append(sg._msg("E15", gen))
-            if st.root and gen.cli_name in legacy and gen.cli_name not in recs:
+            v03 = recs.get(gen.cli_name, {"v03": 1}).get("v03")
+            if st.root and gen.cli_name in legacy and v03:
                 old.append(gen.display_name)
         console.print(table)
         for note in dict.fromkeys(notes):
             print_warning(escape(note))
         if old:
-            note = f"Files from deepctl 0.3.x are recorded for {', '.join(old)}; run 'dg skills update' to install the skill folders, and the old files stay until a later release."
+            note = f"Files from deepctl 0.3.x are recorded for {', '.join(old)}; 'dg skills install' or 'dg skills update' removes the ones deepctl can prove it wrote once the skill folders are installed."
             print_info(escape(note))
         if detected and not recs and not legacy:
             print_info("Run 'dg skills install' to set up AI assistant integrations.")
@@ -424,13 +425,17 @@ class SkillsCommand(BaseGroupCommand):
                 for note in notes:
                     print_warning(escape(note))
                 paths = legacy.get(cli_key, {}).get("paths", [])
-                old = recs.get(cli_key, {}).get("v03") or any(
-                    Path(p).parent != gen.skills_root() for p in paths
-                )  # Not 0.3.x if every path is one of our folders.
-                v03 = "files from deepctl 0.3.x stay until a later release."
+                left = [p for p in paths if Path(p).parent != gen.skills_root()]
+                old = [p for p in left if not sg._v03_gone(p)]  # On disk, else no note.
+                v03 = f"its deepctl 0.3.x files were kept: {', '.join(old)}; delete any you don't need, or 'dg skills install' removes the ones deepctl can prove it wrote."
+                if cli_key in sg._V03_SHARED:  # A section in the user's own file.
+                    v03 = f"the deepctl 0.3.x section in {', '.join(old)}, if any, was kept; 'dg skills install' removes it when it can do so safely; if it is still there afterwards, remove the lines between its marker lines yourself."
                 c10 = f"For {gen.display_name}, {v03}"
                 if cli_key not in recs:
                     c10 = f"{gen.display_name} has no skill folders recorded, so nothing was removed{'; ' + v03 if old else '.'}"
+                if gen.skills_root() is None and old:
+                    a = " and its entry under 'read:' in ~/.aider.conf.yml"
+                    c10 = f"{gen.display_name} has no skill folders, so nothing was removed and its deepctl 0.3.x file is kept; delete it{a * (cli_key == 'aider')} yourself if you don't need it."
                 if old or cli_key not in recs:
                     print_info(escape(c10))
                 failed = failed or bool(

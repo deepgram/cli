@@ -1,2 +1,3 @@
 # output.py is CRLF on main and ruff format keeps it that way; let git diff --check accept it.
 packages/deepctl-core/src/deepctl_core/output.py whitespace=cr-at-eol
+packages/deepctl-core/tests/unit/fixtures/legacy_v03/** -text
