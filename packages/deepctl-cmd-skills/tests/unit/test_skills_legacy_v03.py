@@ -77,7 +77,11 @@ def test_install_removes_proven_files_and_remove_has_no_03x_note(
     SkillsCommand()._handle_install(install_all=True)
     err = err_text(capsys)
     assert "INFO: Removed deepctl 0.3.x files for Claude Code:" in err
-    backups = [n for n in claude("api").parent.iterdir() if n.name.startswith(".deepctl-kept-v03-")]
+    backups = [
+        n
+        for n in claude("api").parent.iterdir()
+        if n.name.startswith(".deepctl-kept-v03-")
+    ]
     assert len(backups) == len(NAMES)
     SkillsCommand()._handle_status()
     assert "0.3.x" not in err_text(capsys)

@@ -233,7 +233,11 @@ class TestStandalone:
     def test_command_dir_keeps_retained_legacy_copies(self, tmp_path):
         seed({claude(n): BLOB[n] for n in NAMES})
         install(tmp_path)
-        kept = [n for n in os.listdir(claude("api").parent) if n.startswith(".deepctl-kept-v03-")]
+        kept = [
+            n
+            for n in os.listdir(claude("api").parent)
+            if n.startswith(".deepctl-kept-v03-")
+        ]
         assert len(kept) == len(NAMES)
 
     @pytest.mark.parametrize("cli", ["cursor", "cline"])
@@ -520,7 +524,11 @@ class TestShared:
         monkeypatch.delattr(os, "getuid", raising=False)
         shared, cursor = at(SHARED["gemini"]), at(STANDALONE["cursor"])
         seed({shared: b"u\n\n" + BLOCK, cursor: JOINED})
-        monkeypatch.setattr(sg, "_v03_file", lambda *a: pytest.fail("Windows must not mutate legacy paths"))
+        monkeypatch.setattr(
+            sg,
+            "_v03_file",
+            lambda *a: pytest.fail("Windows must not mutate legacy paths"),
+        )
         install(tmp_path, "gemini")
         install(tmp_path, "cursor")
         assert shared.read_bytes() == b"u\n\n" + BLOCK
@@ -1331,7 +1339,10 @@ class TestSharedRaces:
         hooks(monkeypatch, "gemini", step, swap)
         install(tmp_path, "gemini")
         after = os.stat(victim)
-        assert (after.st_mode, after.st_mtime_ns) == (before.st_mode, before.st_mtime_ns)
+        assert (after.st_mode, after.st_mtime_ns) == (
+            before.st_mode,
+            before.st_mtime_ns,
+        )
         assert victim.read_bytes() == b"secret"
         assert not path.is_symlink() and holds(path) == (b"u\n\n" + BLOCK, None)
         assert asides(path.parent) == []  # The swapped-in link is gone too.
@@ -1441,7 +1452,9 @@ class TestSharedRaces:
         assert f"Removed the deepctl 0.3.x section from {path}" in text
         assert "kept the original file" in text
 
-    def test_a_removed_section_only_file_keeps_the_original_copy(self, tmp_path, capsys):
+    def test_a_removed_section_only_file_keeps_the_original_copy(
+        self, tmp_path, capsys
+    ):
         path = at(SHARED["codex"])
         seed({path: BLOCK})
         install(tmp_path, "codex")
