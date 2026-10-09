@@ -2,11 +2,11 @@
 name = "deepctl-cmd-plugin"
 description = "Plugin management command for deepctl"
 readme = "README.md"
-version = "0.1.13" # x-release-please-version
+version = "0.1.14" # x-release-please-version
 requires-python = ">=3.10"
 authors = [{ name = "Deepgram DevRel", email = "devrel@deepgram.com" }]
 dependencies = [
-    "deepctl-core>=0.1.10",
+    "deepctl-core>=0.2.19",
     "packaging>=21.0",
     "toml>=0.10.2",
 ]
