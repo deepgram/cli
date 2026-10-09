@@ -139,6 +139,9 @@ dmypy.json
 *.swo
 *~
 
+# Claude Code local state (worktrees, session files)
+.claude/
+
 # OS
 .DS_Store
 .DS_Store?
