@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import subprocess
 import sys
@@ -29,6 +28,7 @@ from deepctl_core.plugin_env import (
     save_plugin_state,
 )
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .models import (
@@ -1171,37 +1171,31 @@ except:
         return "varies"
 
     def _maybe_update_skills(self) -> None:
-        """Regenerate AI CLI skills if installed (best-effort)."""
+        """Refresh the recorded skills the way 'dg skills update' does (B3).
+
+        Never changes the plugin command's exit code; a failure prints a
+        warning on stderr.
+        """
+        from deepctl_core import skill_generator as sg
+
         try:
-            from deepctl_core.skill_generator import (
-                _commands_hash,
-                collect_command_metadata,
-                get_all_generators,
-                get_skills_state,
-                save_skills_state,
-            )
-
-            state = get_skills_state()
-            if not state.get("installed_skills") or not state.get("auto_update", True):
+            state = sg.get_skills_state()
+            names = {*state.get("skill_folders", {}), *state["installed_skills"]}
+            if not state.get("auto_update", True):
                 return
-
-            commands = collect_command_metadata()
-            version = importlib.metadata.version("deepctl")
-            generators = {g.cli_name: g for g in get_all_generators()}
-
-            for cli_name, info in state["installed_skills"].items():
-                gen = generators.get(cli_name)
-                if gen:
-                    paths = gen.install(commands, version)
-                    info.update(
-                        {
-                            "paths": [str(p) for p in paths],
-                            "version": version,
-                            "commands_hash": _commands_hash(commands),
-                        }
-                    )
-
-            save_skills_state(state)
-            console.print("[dim]AI assistant skills updated[/dim]")
-        except Exception:
-            pass  # Non-fatal
+            plan = [
+                (g, sg._ref_for(g.cli_name, state))
+                for g in sg.get_all_generators()
+                if g.cli_name in names and g.skills_root() is not None
+            ]
+            if not plan:  # None recorded, or hint-only only: records untouched.
+                return
+            for _gen, _paths, leftover in sg.install_for(plan):
+                if leftover:
+                    print_warning(escape(sg._msg("E12", staging=leftover)), stderr=True)
+        except Exception as exc:  # Non-fatal: the plugin operation succeeded.
+            sg.warn_install_failure(
+                "AI assistant skills were not updated",
+                exc,
+                "run 'dg skills update' to try again",
+            )

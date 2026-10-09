@@ -691,10 +691,14 @@ class TestSkillsFlows:
                 }
             }
         )
-        state = sg.get_skills_state()  # The plugin flow: shim, then a stale save.
-        for cli, info in state["installed_skills"].items():
-            info.update(paths=[str(p) for p in gen(cli).install([], "x")])
-        sg.save_skills_state(state)
+        from deepctl_cmd_plugin.command import PluginCommand
+
+        capsys.readouterr()
+        PluginCommand()._maybe_update_skills()  # The real plugin refresh.
+        assert err_text(capsys) == ""
+        assert "claude" in disk_state()["skill_folders"]
+        assert disk_state()["installed_skills"]["amazonq"] == {"paths": [str(rule)]}
+        assert disk_state()["installed_skills"]["claude"]["paths"] == [str(old)]
         SkillsCommand()._handle_update()  # A later write keeps the flag.
         capsys.readouterr()
         SkillsCommand()._handle_remove(remove_all=True)

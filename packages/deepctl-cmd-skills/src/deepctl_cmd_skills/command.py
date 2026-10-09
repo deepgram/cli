@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import importlib.metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -224,37 +223,24 @@ class SkillsCommand(BaseGroupCommand):
     # ------------------------------------------------------------------
 
     def _install(self, plan: list[tuple[SkillGenerator, str]]) -> None:
-        """Fetch, preflight every tool, then install tool by tool."""
-        from deepctl_core import skill_bundle
+        """Install through core's shared path, reporting each tool as it lands."""
         from deepctl_core import skill_generator as sg
 
         for gen, _ in plan:
             if gen.skills_root() is None:
                 print_warning(escape(sg._msg("E15", gen)))
-        plan = [(g, r) for g, r in plan if g.skills_root() is not None]
-        bundles = {
-            r: skill_bundle.fetch_skill_bundle(r)
-            for r in dict.fromkeys(r for _, r in plan)
-        }
-        unproven, edited = list[Path](), list[Path]()
-        for ref, skills in bundles.items():
-            u, e = sg.install_conflicts([g for g, r in plan if r == ref], skills)
-            unproven, edited = unproven + u, edited + e
-        if unproven or edited:  # Nothing is written for any tool.
-            raise sg.SkillOwnershipError(unproven, edited)
-        count, tools, v = 0, 0, _version()
-        for gen, ref in plan:
-            try:
-                paths, leftover = sg.install_tool(gen, bundles[ref], ref=ref, version=v)
-            except sg.SkillInstallError as exc:
-                if exc.leftover:
-                    print_warning(escape(sg._msg("E12", staging=exc.leftover)))
-                raise
-            done = f"{gen.display_name}: installed {_n(len(paths), 'skill')} in {gen.skills_root()}."
-            print_success(escape(done))
-            if leftover:  # Only this run's staging (SF3).
-                print_warning(escape(sg._msg("E12", staging=leftover)))
-            count, tools = count + len(paths), tools + 1
+        count, tools = 0, 0
+        try:
+            for gen, paths, leftover in sg.install_for(plan):
+                done = f"{gen.display_name}: installed {_n(len(paths), 'skill')} in {gen.skills_root()}."
+                print_success(escape(done))
+                if leftover:  # Only this run's staging (SF3).
+                    print_warning(escape(sg._msg("E12", staging=leftover)))
+                count, tools = count + len(paths), tools + 1
+        except sg.SkillInstallError as exc:
+            if exc.leftover:
+                print_warning(escape(sg._msg("E12", staging=exc.leftover)))
+            raise
         if count:
             labels = ", ".join(dict.fromkeys(_label(r) for _, r in plan))
             done = f"Installed {_n(count, 'skill folder')} for {_n(tools, 'tool')} from deepgram/skills {labels}."
@@ -559,13 +545,6 @@ class SkillsCommand(BaseGroupCommand):
         with _clean_errors():
             ref = resolve_skills_ref(ref)
             self._install([(g, ref) for g in selected])
-
-
-def _version() -> str:
-    try:
-        return importlib.metadata.version("deepctl")
-    except importlib.metadata.PackageNotFoundError:
-        return "0.0.0"
 
 
 def _n(count: int, word: str) -> str:
