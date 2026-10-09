@@ -3045,29 +3045,59 @@ class TestRecheckUnderLock:
         assert disk_state()["skill_folders"]["claude"]["skills_ref"] == "x"
         assert capsys.readouterr().err == ""
 
-    @pytest.mark.parametrize("removed", [False, True])
+    @pytest.mark.parametrize(
+        ("removed", "windows"),
+        [
+            pytest.param(False, False, id="native"),
+            pytest.param(
+                False,
+                True,
+                id="forced-windows",
+                marks=pytest.mark.skipif(
+                    os.name == "nt", reason="the native case already covers Windows"
+                ),
+            ),
+            pytest.param(True, False, id="removed"),
+        ],
+    )
     def test_03x_only_tool_still_gets_folders_on_refresh(
-        self, tmp_path, monkeypatch, capsys, removed
+        self, tmp_path, monkeypatch, capsys, removed, windows
     ):
+        # Run the Windows branch on POSIX too; never force the POSIX branch on Windows.
+        if windows:
+            monkeypatch.setattr(sg, "_WINDOWS", True)
         legacy = {"paths": [str(tmp_path / "legacy" / "deepgram.md")]}
         write_state({"installed_skills": {"claude": legacy}, "auto_update": True})
 
         def remove():
             write_state({"installed_skills": {}, "auto_update": True})
 
+        plan = [(gen("claude"), REF)]
         done = self._refresh(
-            monkeypatch,
-            make_bundle(tmp_path),
-            remove if removed else None,
-            plan=[(gen("claude"), REF)],
+            monkeypatch, make_bundle(tmp_path), remove if removed else None, plan=plan
         )
         _, err = capsys.readouterr()
         if removed:
             assert done == [] and not root().exists()
             assert err.count(_msg("E31", gen("claude"))) == 1
         else:
-            assert done == [("claude", 2)] and err == ""
-            assert disk_state()["skill_folders"]["claude"]["skills_ref"] == REF
+            assert done == [("claude", 2)]
+            if sg._WINDOWS:
+                # On Windows, deepctl leaves 0.3.x files alone and prints E44 once.
+                # Both sides normalize whitespace so a wrap cannot split the match.
+                e44 = " ".join(_msg("E44", paths=legacy["paths"][0]).split())
+                assert " ".join(err.split()).count(e44) == 1
+            else:
+                assert err == ""
+            state = disk_state()
+            assert state["skill_folders"]["claude"]["skills_ref"] == REF
+            # The 0.3.x path leaves the record; on Windows a stale one reprints E44.
+            assert state["installed_skills"]["claude"]["paths"] == [
+                str(root() / n) for n in ("api", "docs")
+            ]
+            assert "v03" not in state["skill_folders"]["claude"]
+            again = self._refresh(monkeypatch, make_bundle(tmp_path), plan=plan)
+            assert again == [("claude", 2)] and capsys.readouterr().err == ""
 
     def test_refresh_never_overwrites_a_newer_copy_of_the_same_ref(
         self, tmp_path, monkeypatch, capsys
