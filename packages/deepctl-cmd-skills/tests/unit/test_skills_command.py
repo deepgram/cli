@@ -115,6 +115,18 @@ def sha_tree(path):
     }
 
 
+def during_fetch(monkeypatch, action):
+    """Run ``action`` (another command) once, while the next fetch "downloads"."""
+    real, pending = skill_bundle.fetch_skill_bundle, [action]
+
+    def fetch(ref=None):
+        if pending:
+            pending.pop()()
+        return real(ref)
+
+    monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+
+
 def write_state(state):
     sg._STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     sg._STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
@@ -271,6 +283,86 @@ class TestSkillsFlows:
             bundle[-1]
             == {"recorded": "my-branch", "--ref": "other", "env": "env-ref"}[how]
         )
+
+    def test_update_keeps_a_ref_installed_during_its_download(
+        self, bundle, monkeypatch, capsys
+    ):
+        detect("claude")
+        SkillsCommand()._handle_install(install_all=True)
+        during_fetch(
+            monkeypatch,
+            lambda: SkillsCommand()._handle_install(cli_name="claude", ref="newer"),
+        )
+        SkillsCommand()._handle_update()  # Returns: exit 0.
+        assert disk_state()["skill_folders"]["claude"]["skills_ref"] == "newer"
+        assert (
+            b"newer" in (gen("claude").skills_root() / "api" / "SKILL.md").read_bytes()
+        )
+        assert err_text(capsys).count(_msg("E30", gen("claude"))) == 1
+
+    def test_update_keeps_a_newer_copy_of_the_same_moving_ref(
+        self, bundle, tmp_path, monkeypatch, capsys
+    ):
+        """B1 (review): one ref, two bodies; the newer lands first and stays."""
+        detect("claude")
+        SkillsCommand()._handle_install(install_all=True)
+        folder = tmp_path / "newer" / "api"
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_bytes(b"---\nname: api\n---\nnewer body\n")
+        ref = disk_state()["skill_folders"]["claude"]["skills_ref"]
+
+        def other():  # Same ref spelling, but it moved: a different body.
+            sg.install_tool(
+                gen("claude"), [RepoSkill("api", folder)], ref=ref, version="9"
+            )
+
+        during_fetch(monkeypatch, other)
+        capsys.readouterr()
+        SkillsCommand()._handle_update()  # Returns: exit 0.
+        api = gen("claude").skills_root() / "api" / "SKILL.md"
+        assert api.read_bytes() == b"---\nname: api\n---\nnewer body\n"
+        assert disk_state()["skill_folders"]["claude"]["version"] == "9"
+        err = err_text(capsys)
+        assert err.count(_msg("E32", gen("claude"))) == 1
+        assert _msg("E30", gen("claude")) not in err
+        assert "Installed" not in err
+
+    def test_update_with_ref_overrides_but_skips_a_removed_tool(
+        self, bundle, monkeypatch, capsys
+    ):
+        detect("claude", "cursor")
+        SkillsCommand()._handle_install(install_all=True)
+
+        def other():
+            SkillsCommand()._handle_install(cli_name="claude", ref="newer")
+            SkillsCommand()._handle_remove(cli_name="cursor")
+
+        during_fetch(monkeypatch, other)
+        SkillsCommand()._handle_update(ref="mine")
+        state = disk_state()
+        assert state["skill_folders"]["claude"]["skills_ref"] == "mine"
+        assert "cursor" not in state["skill_folders"]
+        assert not (gen("cursor").skills_root() / "api").exists()
+        err = err_text(capsys)
+        assert err.count(_msg("E31", gen("cursor"))) == 1
+        assert _msg("E30", gen("claude")) not in err
+
+    def test_update_summary_counts_only_tools_it_installed(
+        self, bundle, monkeypatch, capsys
+    ):
+        detect("claude", "cursor")
+        SkillsCommand()._handle_install(cli_name="claude", ref="claude-ref")
+        SkillsCommand()._handle_install(cli_name="cursor", ref="cursor-ref")
+        during_fetch(
+            monkeypatch, lambda: SkillsCommand()._handle_remove(cli_name="claude")
+        )
+        capsys.readouterr()
+        SkillsCommand()._handle_update()
+        err = err_text(capsys)
+        assert err.count(_msg("E31", gen("claude"))) == 1
+        assert "for 1 tool from deepgram/skills cursor-ref." in err
+        assert "claude-ref" not in err
+        assert "/setup-mcp" not in err
 
     def test_only_this_runs_staging_gets_e12(self, bundle, monkeypatch, capsys):
         detect("claude")

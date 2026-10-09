@@ -222,30 +222,32 @@ class SkillsCommand(BaseGroupCommand):
     # Handlers
     # ------------------------------------------------------------------
 
-    def _install(self, plan: list[tuple[SkillGenerator, str]]) -> None:
+    def _install(self, plan: list[tuple[SkillGenerator, str]], **recheck: Any) -> None:
         """Install through core's shared path, reporting each tool as it lands."""
         from deepctl_core import skill_generator as sg
 
         for gen, _ in plan:
             if gen.skills_root() is None:
                 print_warning(escape(sg._msg("E15", gen)))
-        count, tools = 0, 0
+        refs = {g.cli_name: r for g, r in plan}
+        count, done_refs = 0, dict[str, str]()  # Only tools actually installed.
         try:
-            for gen, paths, leftover in sg.install_for(plan):
+            for gen, paths, leftover in sg.install_for(plan, **recheck):
                 done = f"{gen.display_name}: installed {_n(len(paths), 'skill')} in {gen.skills_root()}."
                 print_success(escape(done))
                 if leftover:  # Only this run's staging (SF3).
                     print_warning(escape(sg._msg("E12", staging=leftover)))
-                count, tools = count + len(paths), tools + 1
+                count += len(paths)
+                done_refs[gen.cli_name] = refs[gen.cli_name]
         except sg.SkillInstallError as exc:
             if exc.leftover:
                 print_warning(escape(sg._msg("E12", staging=exc.leftover)))
             raise
         if count:
-            labels = ", ".join(dict.fromkeys(_label(r) for _, r in plan))
-            done = f"Installed {_n(count, 'skill folder')} for {_n(tools, 'tool')} from deepgram/skills {labels}."
+            labels = ", ".join(dict.fromkeys(_label(r) for r in done_refs.values()))
+            done = f"Installed {_n(count, 'skill folder')} for {_n(len(done_refs), 'tool')} from deepgram/skills {labels}."
             print_success(escape(done))
-            if any(g.cli_name == "claude" for g, _ in plan):  # Every tool installed.
+            if "claude" in done_refs:  # A skipped tool (E30-E32) isn't counted.
                 print_info(
                     "In Claude Code, run /setup-mcp to configure the Deepgram MCP server."
                 )
@@ -369,7 +371,8 @@ class SkillsCommand(BaseGroupCommand):
                 hint = "No skills are installed, so there is nothing to update; run 'dg skills install' first."
                 print_info(hint)
                 return
-            self._install([(g, sg._ref_for(g.cli_name, state, ref)) for g in targets])
+            plan = [(g, sg._ref_for(g.cli_name, state, ref)) for g in targets]
+            self._install(plan, since=state, explicit_ref=bool(ref))
 
     def _handle_remove(
         self,

@@ -120,6 +120,9 @@ _MSG = {
     "E26": "deepctl cannot prove it installed {dest}, so it left it in place and no longer tracks it.",
     "E27": "Another deepctl command is installing or removing skills, so this one waited 30 seconds and changed nothing; wait for it to finish, then run the command again.",
     "E29": "An interrupted deepctl run left the previous copy of {dest} in {aside}; delete it, or move it out of the skills folder if you want to keep it, then run the command again.",
+    "E30": "Another deepctl command installed {display}'s skills from a different ref while this one was running, so deepctl kept that ref and did not update {display}.",
+    "E31": "Another deepctl command removed {display}'s skills while this one was running, so deepctl did not install them again.",
+    "E32": "Another deepctl command changed {display}'s skills while this one was running, so deepctl left them as that command left them and did not update {display}; run 'dg skills update' to refresh them.",
     "E28": "Could not lock {lock}: {reason}, so deepctl changed nothing; check that you own that file and its folder and that they are on a local disk, then run the command again.",
 }
 
@@ -157,6 +160,10 @@ class SkillOwnershipError(SkillInstallError):
         parts = [_msg("E1", paths=", ".join(map(str, paths)))] if paths else []
         parts += [_msg("E22", dest=p) for p in edited]
         super().__init__(message or " ".join(parts))
+
+
+class SkillSkipped(SkillInstallError):
+    """Another command changed or removed the tool's record after a refresh planned; nothing was written."""
 
 
 def _validated(raw: Any) -> dict[str, Any]:
@@ -295,6 +302,15 @@ def _folders(state: dict[str, Any], cli: str) -> dict[str, Any]:
         state.get(_RECORDS_KEY, {}).get(cli, {}).get("folders", {})
     )
     return folders
+
+
+def _recorded(state: dict[str, Any], cli: str) -> tuple[Any, Any] | None:
+    """The tool's whole records (folders, 0.3.x), or None when it is not listed."""
+    rec = (
+        state.get(_RECORDS_KEY, {}).get(cli),
+        state.get("installed_skills", {}).get(cli),
+    )
+    return None if rec == (None, None) else rec
 
 
 def _is_link(st: os.stat_result) -> bool:
@@ -965,16 +981,35 @@ def _scan(path: Path) -> list[Path]:
 
 @_state_lock()
 def install_tool(
-    gen: SkillGenerator, skills: Sequence[RepoSkill], *, ref: str, version: str
+    gen: SkillGenerator,
+    skills: Sequence[RepoSkill],
+    *,
+    ref: str,
+    version: str,
+    since: dict[str, Any] | None = None,
+    explicit_ref: bool = False,
 ) -> tuple[list[Path], Path | None]:
-    """Install ``skills`` for ``gen``; return (placed folders, leftover staging)."""
+    """Install ``skills`` for ``gen``; return (placed folders, leftover staging).
+
+    A refresh passes ``since``, the skills.json it planned from: if the tool's
+    record changed at all since then, SkillSkipped is raised before anything
+    is written: E31 if removed; else, unless ``explicit_ref``, E30 if it now
+    names another ref, E32 if not (a moving ref's copy may be newer).
+    """
     root, cli = gen.skills_root(), gen.cli_name
     if root is None:
         return [], None
     for s in skills:
         if not portable_name(s.name):
             raise _err("E11", name=s.name)
-    before = {n: dict(r) for n, r in _folders(get_skills_state(), cli).items()}
+    state = get_skills_state()
+    if since is not None and (now := _recorded(state, cli)) != _recorded(since, cli):
+        if now is None:
+            raise SkillSkipped(_msg("E31", gen))
+        if not explicit_ref:
+            other = (now[0] or {}).get("skills_ref") not in (None, "", ref)
+            raise SkillSkipped(_msg("E30" if other else "E32", gen))
+    before = {n: dict(r) for n, r in _folders(state, cli).items()}
     unproven, edited = _conflicts(gen, skills, before)
     if unproven or edited:
         raise SkillOwnershipError(unproven, edited)
@@ -1066,13 +1101,17 @@ def _deepctl_version() -> str:
 
 def install_for(
     plan: Sequence[tuple[SkillGenerator, str]],
+    *,
+    since: dict[str, Any] | None = None,
+    explicit_ref: bool = False,
 ) -> Iterator[tuple[SkillGenerator, list[Path], Path | None]]:
     """The one install path for 'dg skills', login and plugin (B3).
 
     Fetches each ref once and preflights every folder tool before anything is
     written, then installs tool by tool, yielding (tool, placed, leftover).
-    Hint-only tools are skipped. The first failure is raised; every tool
-    yielded before it stays recorded.
+    Hint-only tools are skipped. A refresh passes ``since`` (see install_tool):
+    a tool whose record changed is skipped with a warning on stderr. The first
+    failure is raised; every tool yielded before it stays recorded.
     """
     plan = [(g, r) for g, r in plan if g.skills_root() is not None]
     bundles = {
@@ -1088,7 +1127,18 @@ def install_for(
         raise SkillOwnershipError(unproven, edited)
     version = _deepctl_version()
     for gen, ref in plan:
-        placed, leftover = install_tool(gen, bundles[ref], ref=ref, version=version)
+        try:
+            placed, leftover = install_tool(
+                gen,
+                bundles[ref],
+                ref=ref,
+                version=version,
+                since=since,
+                explicit_ref=explicit_ref,
+            )
+        except SkillSkipped as exc:
+            print_warning(escape(str(exc)), stderr=True)
+            continue
         yield gen, placed, leftover
 
 

@@ -1190,7 +1190,7 @@ except:
             ]
             if not plan:  # None recorded, or hint-only only: records untouched.
                 return
-            for _gen, _paths, leftover in sg.install_for(plan):
+            for _gen, _paths, leftover in sg.install_for(plan, since=state):
                 if leftover:
                     print_warning(escape(sg._msg("E12", staging=leftover)), stderr=True)
         except Exception as exc:  # Non-fatal: the plugin operation succeeded.

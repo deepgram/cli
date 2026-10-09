@@ -150,6 +150,17 @@ def staging_dirs(where):
     return [n for n in os.listdir(where) if n.startswith(sg._STAGING_PREFIX)]
 
 
+def bundle_for(where, ref):
+    """A separate bundle whose SKILL.md files name ``ref``."""
+    skills = []
+    for name in ("api", "docs"):
+        folder = where.parent / f"bundle-{ref}" / "skills" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_bytes(f"---\nname: {name}\n---\n{ref}\n".encode())
+        skills.append(RepoSkill(name, folder))
+    return skills
+
+
 def fail_for(monkeypatch, cli, exc):
     real = sg.install_tool
 
@@ -854,6 +865,62 @@ class TestSkillsRefresh:
         )
         assert (gen("claude").skills_root() / "api" / "SKILL.md").is_file()
         assert bundle == [REF]
+
+    def _install_then_overlap(self, monkeypatch, action):
+        list(sg.install_for([(gen("claude"), REF), (gen("cursor"), REF)]))
+        real, pending = skill_bundle.fetch_skill_bundle, [action]
+
+        def fetch(ref=None):
+            if pending:
+                pending.pop()()
+            return real(ref)
+
+        monkeypatch.setattr(skill_bundle, "fetch_skill_bundle", fetch)
+
+    def test_refresh_skips_a_tool_removed_during_its_download(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        self._install_then_overlap(monkeypatch, lambda: sg.remove_tool(gen("claude")))
+        out, err = refresh(capsys)
+        assert out == ""
+        assert warnings(err) == ["WARN: " + sg._msg("E31", gen("claude"))]
+        state = sg.get_skills_state()
+        assert "claude" not in state["skill_folders"]
+        assert "claude" not in state["installed_skills"]
+        assert not (gen("claude").skills_root() / "api").exists()
+        assert set(state["skill_folders"]["cursor"]["folders"]) == {"api", "docs"}
+
+    def test_refresh_keeps_an_explicit_ref_set_during_its_download(
+        self, home, bundle, monkeypatch
+    ):
+        skills = bundle_for(home, "newer")
+        self._install_then_overlap(
+            monkeypatch,
+            lambda: sg.install_tool(gen("claude"), skills, ref="newer", version="9"),
+        )
+        result = invoke_install()
+        assert result.exit_code == 0, result.output
+        assert warnings(result.stderr) == ["WARN: " + sg._msg("E30", gen("claude"))]
+        assert sg.get_skills_state()["skill_folders"]["claude"]["skills_ref"] == "newer"
+        assert sg.get_skills_state()["skill_folders"]["cursor"]["skills_ref"] == REF
+
+    def test_refresh_keeps_a_newer_copy_of_the_same_moving_ref(
+        self, home, bundle, monkeypatch, capsys
+    ):
+        """B1 (review): REF moved; the newer download landed first and stays."""
+        newer = bundle_for(home, "newer")
+        self._install_then_overlap(
+            monkeypatch,
+            lambda: sg.install_tool(gen("claude"), newer, ref=REF, version="9"),
+        )
+        out, err = refresh(capsys)
+        assert out == ""
+        assert warnings(err) == ["WARN: " + sg._msg("E32", gen("claude"))]
+        api = gen("claude").skills_root() / "api" / "SKILL.md"
+        assert api.read_bytes() == (newer[0].path / "SKILL.md").read_bytes()
+        state = sg.get_skills_state()["skill_folders"]
+        assert (state["claude"]["skills_ref"], state["claude"]["version"]) == (REF, "9")
+        assert state["cursor"]["version"] != "9"
 
     @pytest.mark.parametrize(
         "state",
