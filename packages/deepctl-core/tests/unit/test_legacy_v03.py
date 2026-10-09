@@ -1383,6 +1383,7 @@ class TestSharedRaces:
             ("cursor", STANDALONE["cursor"], JOINED, None),
             ("gemini", SHARED["gemini"], b"u\n\n" + BLOCK, b"u\n"),
         ],
+        ids=["standalone", "shared"],
     )
     def test_a_write_through_an_open_descriptor_stays_recoverable(
         self, tmp_path, capsys, cli, path, data, active
