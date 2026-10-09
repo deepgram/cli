@@ -111,6 +111,8 @@ _MSG = {
     "E40": "{why.strerror}, so deepctl left {path} as it is and won't warn about it again; if it holds deepctl 0.3.x content you don't need, remove {what}.",
     "E41": "{aside} is no longer the file deepctl moved there (a link or folder is there now), so deepctl did not put it back and {dest} is missing; restore {dest} from a backup if you need it, then delete {aside}.",
     "E42": "{aside} is not a file deepctl moved there, so deepctl changed neither it nor {dest}; delete {aside} if you don't need it.",
+    "E43": "deepctl removed its 0.3.x content from {dest}, but kept the original file in {aside} because a program that already had it open can still write it; compare it, then delete {aside} if you don't need it.",
+    "E44": "deepctl does not clean 0.3.x content on Windows because a parent folder can become a junction during cleanup; it left these recorded paths untouched and will not try again: {paths}. Delete the content you don't need yourself.",
     "E22": "{dest} was edited since deepctl installed it, so deepctl left it alone and did not install over it; rename or move your edited folder, then run the command again.",
     "E23": "{dest} was edited since deepctl installed it, so deepctl left it in place and no longer tracks it; delete it yourself if you don't need it.",
     "E24": "{dest} was edited since deepctl installed it, so 'dg skills remove' leaves it alone and 'dg skills update' stops until you rename or move it to keep your edits, or delete it to get deepctl's copy back.",
@@ -492,6 +494,14 @@ def _v03_gone(path: str | Path) -> bool:
 class _V03Link(OSError): ...  # A folder between home and a legacy file is a link.
 
 
+@dataclass(frozen=True)
+class _V03Done:
+    """A finished cleanup and the original inode retained for late writers."""
+
+    removed: bool
+    aside: Path
+
+
 class _V03Dir(contextlib.AbstractContextManager["_V03Dir"]):
     """Folder of ``rel``, reached through no link: by fd (POSIX), rechecked (Windows)."""
 
@@ -550,9 +560,10 @@ class _V03Dir(contextlib.AbstractContextManager["_V03Dir"]):
 
 def _v03_mv(
     d: _V03Dir, data: bytes, st: os.stat_result, new: bytes | None, why: str
-) -> bool | str:
-    """After a re-proof, delete (True) or publish ``new`` (False); else why kept, or ""."""
+) -> _V03Done | str:
+    """After a re-proof, delete or publish ``new`` while retaining the original inode."""
     aside, tmp, pub = _V03_ASIDE + d.name, f"{_V03_ASIDE}{uuid.uuid4().hex}.tmp", False
+    kept = f".deepctl-kept-v03-{uuid.uuid4().hex}-{d.name}"
     made: tuple[int, ...] | None = None
     try:
         if new is not None:
@@ -575,8 +586,8 @@ def _v03_mv(
                 why = why if bad else "deepctl's temporary copy of it was replaced"
                 return why if d.back(aside) else ""  # E4, E37 or E41 said where it is.
             if new is None:
-                os.unlink(d(aside), dir_fd=d.fd)  # If it fails, put back: E35 is true.
-                return True
+                _rename_excl(d(aside), d(kept), d.fd)
+                return _V03Done(True, d.where / kept)
             pub = True
             _rename_excl(d(tmp), d(d.name), d.fd)  # Refused if a new file is there.
         except BaseException as exc:
@@ -588,17 +599,15 @@ def _v03_mv(
                 left = not pub or isinstance(exc, OSError) or bool(d.lstat(tmp))
             vars(exc)["v03_moved"] = left and not d.back(aside)  # E35b, not E35.
             raise
-        with contextlib.suppress(OSError):  # Else the next run names it (E38).
-            os.unlink(d(aside), dir_fd=d.fd)
-        return False
+        _rename_excl(d(aside), d(kept), d.fd)
+        return _V03Done(False, d.where / kept)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(d(tmp), dir_fd=d.fd)  # Gone already once it was published.
 
 
-def _v03_file(rel: str, names: list[str], shared: bool) -> bool | str | _V03Link:
-    """True if it deleted the 0.3.x file at ``rel``, False if it cut the section, "" if
-    none, else why kept (a _V03Link for a linked folder); raises OSError if I/O fails."""
+def _v03_file(rel: str, names: list[str], shared: bool) -> _V03Done | str | _V03Link:
+    """A completed cleanup, no-op, or reason kept; raises OSError if I/O fails."""
     try:
         with _V03Dir(rel) as d:
             return _v03_cut(d, names, shared)
@@ -608,7 +617,7 @@ def _v03_file(rel: str, names: list[str], shared: bool) -> bool | str | _V03Link
         return ""
 
 
-def _v03_cut(d: _V03Dir, names: list[str], shared: bool) -> bool | str:
+def _v03_cut(d: _V03Dir, names: list[str], shared: bool) -> _V03Done | str:
     aside = _V03_ASIDE + d.name  # The same name each run, so a leftover is found.
     st, old = d.lstat(d.name), d.lstat(aside)
     if old and st:  # E38 for a file an earlier run moved; else not deepctl's (E42).
@@ -665,7 +674,12 @@ def _v03_cut(d: _V03Dir, names: list[str], shared: bool) -> bool | str:
 def _clean_v03(gen: SkillGenerator, root: Path) -> None:
     """Remove the 0.3.x content of ``gen`` deepctl can prove; only Ctrl-C raises."""
     cli, notes, untrack = gen.cli_name, list[str](), set[Path]()
-    removed, cut, retry = list[Path](), list[Path](), set[Path]()
+    removed, cut, kept, retry = (
+        list[Path](),
+        list[Path](),
+        list[tuple[Path, Path]](),
+        set[Path](),
+    )
     try:
         state = get_skills_state()
         tool = state.get(_RECORDS_KEY, {}).get(cli, {})
@@ -673,6 +687,22 @@ def _clean_v03(gen: SkillGenerator, root: Path) -> None:
         landed = {n for n, r in folders.items() if r.get("state") == "installed"}
         rec = state["installed_skills"].get(cli)
         recorded = {Path(p) for p in rec["paths"]} if rec else set()
+        if _WINDOWS:
+            legacy = [p for p in recorded if p.parent != root]
+            if rec and legacy:
+                paths = [p for p in rec["paths"] if Path(p).parent == root] or [
+                    str(root / n) for n in sorted(landed)
+                ]
+
+                def clear_windows(state: dict[str, Any]) -> None:
+                    state["installed_skills"][cli]["paths"] = paths
+                    state.get(_RECORDS_KEY, {}).get(cli, {}).pop("v03", None)
+
+                _update_state(clear_windows, "E9c", gen)
+                print_warning(
+                    escape(_msg("E44", paths=", ".join(map(str, legacy)))), stderr=True
+                )
+            return
         for rel in _V03_PATHS.get(cli, []):
             path = Path.home().joinpath(*rel.split("/"))
             names = [path.stem] if cli == "claude" else list(_V03_BLOBS)
@@ -686,8 +716,9 @@ def _clean_v03(gen: SkillGenerator, root: Path) -> None:
                     notes.append(_msg(key, path=path, reason=_reason(exc)))
                 retry.add(path)  # Tracked, even if a link now hides it from the prune.
                 continue
-            if isinstance(why, bool):  # A cut section (False) gets its own line.
-                (removed if why else cut).append(path)
+            if isinstance(why, _V03Done):
+                (removed if why.removed else cut).append(path)
+                kept.append((path, why.aside))
             elif why and path in recorded:  # Once, then untracked (as E23/E26).
                 if _output_config["quiet"]:
                     continue  # Unseen: stay tracked so a later run warns.
@@ -725,6 +756,8 @@ def _clean_v03(gen: SkillGenerator, root: Path) -> None:
     for p in cut:
         text = f"Removed the deepctl 0.3.x section from {p}; the rest of the file is unchanged."
         print_info(escape(text), stderr=True)
+    for path, aside in kept:
+        print_info(escape(_msg("E43", dest=path, aside=aside)), stderr=True)
     for note in notes:
         print_warning(escape(note), stderr=True)
 
