@@ -839,11 +839,19 @@ class TestSkillsRefresh:
         }
         write_state({"installed_skills": legacy})
         _, err = refresh(capsys)
-        assert warnings(err) == []
         state = sg.get_skills_state()
-        assert state["installed_skills"] == legacy
+        if os.name == "nt":
+            assert len(warnings(err)) == 1
+            assert "does not clean 0.3.x content on Windows" in warnings(err)[0]
+            assert str(old) not in state["installed_skills"]["claude"]["paths"]
+            assert "v03" not in state["skill_folders"]["claude"]
+        else:
+            assert warnings(err) == []
+            assert state["installed_skills"] == legacy
         assert set(state["skill_folders"]) == {"claude"}
-        assert state["skill_folders"]["claude"]["v03"] is True
+        assert (state["skill_folders"]["claude"].get("v03") is True) != (
+            os.name == "nt"
+        )
         assert (gen("claude").skills_root() / "api" / "SKILL.md").is_file()
         assert bundle == [REF]
 

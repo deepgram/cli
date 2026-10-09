@@ -467,6 +467,7 @@ class TestSkillsFlows:
         capsys.readouterr()
         SkillsCommand()._handle_remove(remove_all=True)
         err = err_text(capsys)
+        old = old and os.name != "nt"
         assert ("0.3.x" in err) == old
         assert (
             f"For Claude Code, its deepctl 0.3.x files were kept: {kept}; delete any you don't need, or 'dg skills install' removes the ones deepctl can prove it wrote."
@@ -702,16 +703,22 @@ class TestSkillsFlows:
 
         capsys.readouterr()
         PluginCommand()._maybe_update_skills()  # The real plugin refresh.
-        assert err_text(capsys) == ""
+        refresh = err_text(capsys)
+        if os.name == "nt":
+            assert "does not clean 0.3.x content on Windows" in refresh
+            assert str(old) not in disk_state()["installed_skills"]["claude"]["paths"]
+        else:
+            assert refresh == ""
         assert "claude" in disk_state()["skill_folders"]
         assert disk_state()["installed_skills"]["amazonq"] == {"paths": [str(rule)]}
-        assert disk_state()["installed_skills"]["claude"]["paths"] == [str(old)]
+        if os.name != "nt":
+            assert disk_state()["installed_skills"]["claude"]["paths"] == [str(old)]
         SkillsCommand()._handle_update()  # A later write keeps the flag.
         capsys.readouterr()
         SkillsCommand()._handle_remove(remove_all=True)
         err = err_text(capsys)
         v03 = f"its deepctl 0.3.x files were kept: {old}; delete any you don't need, or 'dg skills install' removes the ones deepctl can prove it wrote."
-        assert f"For Claude Code, {v03}" in err
+        assert (f"For Claude Code, {v03}" in err) != (os.name == "nt")
         q = "Amazon Q Developer has no skill folders, so nothing was removed and its deepctl 0.3.x file is kept; delete it yourself if you don't need it."
         assert q in err
 
