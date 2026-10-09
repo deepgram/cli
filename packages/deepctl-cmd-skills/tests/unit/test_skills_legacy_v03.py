@@ -1,6 +1,7 @@
 """dg skills and the deepctl 0.3.x cleanup: what the commands print around it."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,9 @@ FIX = Path(__file__).parents[3] / "deepctl-core" / "tests" / "unit" / "fixtures"
 FIX = FIX / "legacy_v03"
 NAMES = ("api", "docs", "setup-mcp", "starters")
 BLOB = {n: (FIX / f"{n}.md").read_bytes() for n in NAMES}
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="legacy cleanup is intentionally disabled on Windows"
+)
 
 
 @pytest.fixture(autouse=True)

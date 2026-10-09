@@ -17,6 +17,9 @@ from deepctl_core import skill_generator as sg
 from deepctl_core.skill_bundle import RepoSkill
 
 POSIX = pytest.mark.skipif(os.name == "nt", reason="POSIX-only filesystem behavior")
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="legacy cleanup is intentionally disabled on Windows"
+)
 REF = skill_bundle.DEFAULT_SKILLS_COMMIT
 FIX = Path(__file__).parent / "fixtures" / "legacy_v03"
 NAMES = ("api", "docs", "setup-mcp", "starters")

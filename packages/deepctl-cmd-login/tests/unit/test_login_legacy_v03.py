@@ -1,5 +1,6 @@
 """dg login's skills step runs the deepctl 0.3.x cleanup and prints it on stderr."""
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -16,6 +17,9 @@ from deepctl_core.skill_bundle import RepoSkill
 FIX = Path(__file__).parents[3] / "deepctl-core" / "tests" / "unit" / "fixtures"
 FIX = FIX / "legacy_v03"
 NAMES = ("api", "docs", "setup-mcp", "starters")
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="legacy cleanup is intentionally disabled on Windows"
+)
 
 
 @pytest.fixture(autouse=True)
