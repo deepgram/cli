@@ -50,10 +50,12 @@ class TokenResponse(BaseModel):
 
     access_token: str
     project_id: str
-    refresh_token: str | None = None  # Present in new JWT-based device flow
+    refresh_token: str | None = None  # Legacy dx-id response field
     token_type: str | None = None
     expires_in: int | None = None
     scope: str | None = None
+    dg_token: str | None = None
+    dg_expires_in: int | None = None
 
     @property
     def api_key(self) -> str:
@@ -552,7 +554,7 @@ class AuthManager:
         payload = {
             "client_id": CLIENT_ID,
             "hostname": hostname,
-            "scopes": "admin",
+            "scopes": "openid profile email",
         }
 
         try:
@@ -628,61 +630,31 @@ class AuthManager:
     def _store_token(self, token_response: TokenResponse) -> None:
         """Store authentication token.
 
-        Handles two server response shapes:
-        - New JWT flow: access_token is a short-lived JWT (expires_in=900),
-          refresh_token present. Stores JWT + refresh_token in keyring.
-        - Legacy flow: access_token is a Deepgram API key directly.
-          Stored under api-key.{profile} as before.
+        Stores a direct finite Deepgram credential from dx-id. The credential
+        expires independently of the OIDC access token and requires a new
+        device authorization when it expires.
         """
         profile_name = self.config.profile or "default"
 
-        if token_response.refresh_token:
-            # New JWT-based device flow.
-            jwt = token_response.access_token
-            refresh_token = token_response.refresh_token
-            expires_in = token_response.expires_in or 900
+        if token_response.dg_token:
+            api_key = token_response.dg_token
+            expires_in = token_response.dg_expires_in or 0
+            if expires_in <= 0:
+                raise AuthenticationError(
+                    "dx-id did not provide a finite Deepgram credential expiry"
+                )
             expires_at = (
                 datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             ).isoformat()
 
-            try:
-                # Clear any stale direct API key so get_api_key() doesn't
-                # return a cached dg_token from a previous session.
-                keyring.delete_password(KEYRING_SERVICE, f"api-key.{profile_name}")
-            except Exception:
-                pass
-
-            try:
-                keyring.set_password(KEYRING_SERVICE, f"jwt.{profile_name}", jwt)
-                keyring.set_password(
-                    KEYRING_SERVICE, f"refresh-token.{profile_name}", refresh_token
-                )
-                console.print(
-                    "[green]✓[/green] Session stored securely in system keyring"
-                )
-            except Exception as e:
-                console.print(
-                    f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
-                )
-
-            # Store expiry timestamps and project ID in config (non-sensitive).
-            profile = self.config.get_profile(profile_name)
-            profile.jwt_expires_at = expires_at
-            profile.project_id = token_response.project_id
-            self.config.save()
-
-        else:
-            # Legacy flow: access_token is the Deepgram API key directly.
-            api_key = token_response.access_token
-            project_id = token_response.project_id
             keyring_available = False
-
             try:
                 keyring.set_password(
                     KEYRING_SERVICE, f"api-key.{profile_name}", api_key
                 )
-                console.print(
-                    "[green]✓[/green] API key stored securely in system keyring"
+                keyring.delete_password(KEYRING_SERVICE, f"jwt.{profile_name}")
+                keyring.delete_password(
+                    KEYRING_SERVICE, f"refresh-token.{profile_name}"
                 )
                 keyring_available = True
             except Exception as e:
@@ -694,8 +666,39 @@ class AuthManager:
             self.config.create_profile(
                 profile_name,
                 api_key=api_key if not keyring_available else None,
-                project_id=project_id,
+                project_id=token_response.project_id,
             )
+            profile = self.config.get_profile(profile_name)
+            profile.dg_token_expires_at = expires_at
+            profile.jwt_expires_at = None
+            self.config.save()
+            console.print("[green]✓[/green] Finite API key stored securely in system keyring")
+            return
+
+        # Legacy flow: access_token is the Deepgram API key directly.
+        api_key = token_response.access_token
+        project_id = token_response.project_id
+        keyring_available = False
+
+        try:
+            keyring.set_password(
+                KEYRING_SERVICE, f"api-key.{profile_name}", api_key
+            )
+            console.print(
+                "[green]✓[/green] API key stored securely in system keyring"
+            )
+            keyring_available = True
+        except Exception as e:
+            console.print(
+                f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
+            )
+            console.print("API key will be stored in config file instead")
+
+        self.config.create_profile(
+            profile_name,
+            api_key=api_key if not keyring_available else None,
+            project_id=project_id,
+        )
 
     def logout(self, keep_config: bool = False) -> None:
         """Logout user and clear credentials.

@@ -597,8 +597,8 @@ class TestCredentialDetection:
                 )
 
 
-class TestJWTFlow:
-    """Tests for the new JWT-based device flow."""
+class TestFiniteCredentialFlow:
+    """Tests for finite direct credentials returned by dx-id."""
 
     def _make_auth(self, mock_config):
         with patch("deepctl_core.auth.httpx.Client"):
@@ -606,17 +606,17 @@ class TestJWTFlow:
                 return AuthManager(mock_config)
 
     # ------------------------------------------------------------------
-    # _store_token — JWT path
+    # _store_token — finite direct credential path
     # ------------------------------------------------------------------
 
-    def test_store_token_jwt_path_saves_to_keyring(self, mock_config):
+    def test_store_token_direct_credential_saves_to_keyring(self, mock_config):
         from deepctl_core.auth import TokenResponse
 
         token = TokenResponse(
             access_token="jwt-abc",
-            refresh_token="rt-xyz",
+            dg_token="dg-finite-key",
+            dg_expires_in=2592000,
             project_id="proj-1",
-            expires_in=900,
         )
         auth = self._make_auth(mock_config)
 
@@ -624,17 +624,18 @@ class TestJWTFlow:
             auth._store_token(token)
 
         calls = {call[0][1]: call[0][2] for call in mock_kr.set_password.call_args_list}
-        assert calls["jwt.default"] == "jwt-abc"
-        assert calls["refresh-token.default"] == "rt-xyz"
+        assert calls["api-key.default"] == "dg-finite-key"
+        assert "jwt.default" not in calls
+        assert "refresh-token.default" not in calls
 
-    def test_store_token_jwt_path_clears_stale_dg_token(self, mock_config):
+    def test_store_token_direct_credential_clears_legacy_session(self, mock_config):
         from deepctl_core.auth import TokenResponse
 
         token = TokenResponse(
             access_token="jwt-abc",
-            refresh_token="rt-xyz",
+            dg_token="dg-finite-key",
+            dg_expires_in=2592000,
             project_id="proj-1",
-            expires_in=900,
         )
         auth = self._make_auth(mock_config)
 
@@ -642,7 +643,8 @@ class TestJWTFlow:
             auth._store_token(token)
 
         deleted = [c[0][1] for c in mock_kr.delete_password.call_args_list]
-        assert "api-key.default" in deleted
+        assert "jwt.default" in deleted
+        assert "refresh-token.default" in deleted
 
     def test_store_token_legacy_path_saves_api_key(self, mock_config):
         from deepctl_core.auth import TokenResponse
