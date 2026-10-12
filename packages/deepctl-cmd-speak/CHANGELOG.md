@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.0.5](https://github.com/deepgram/cli/compare/deepctl-cmd-speak-v0.0.4...deepctl-cmd-speak-v0.0.5) (2026-10-09)
+
+
+### Features
+
+* **speak:** add --play and --list-voices to the speak command ([59683a7](https://github.com/deepgram/cli/commit/59683a73db4ffe893fcf6f7f76c387b0136d7bbd))
+* **speak:** add --play and --list-voices to the speak command ([#110](https://github.com/deepgram/cli/issues/110)) ([fde4ed3](https://github.com/deepgram/cli/commit/fde4ed38920c9bf3a22acdef361f0fc9d204e8a3))
+
+
+### Bug Fixes
+
+* **speak:** carry voice languages as data and flag the unlisted default ([d8dffc4](https://github.com/deepgram/cli/commit/d8dffc44d8100aab682e3aed5e85980ef988d7a8))
+* **speak:** gate --play per player instead of treating paplay like aplay ([2dfdae2](https://github.com/deepgram/cli/commit/2dfdae25664ec7202c78d3b6b5e42492b5291a6c))
+* **speak:** honor Aura's WAV default for playback ([3cf2d20](https://github.com/deepgram/cli/commit/3cf2d208e5d39ab8bf0dc28b596e9caababacf50))
+* **speak:** keep --play honest about the file it saved and the empty pipe ([dafb3a9](https://github.com/deepgram/cli/commit/dafb3a9aebee710535f019c2065c10a073ef4479))
+* **speak:** list voices by their canonical -m value and languages ([a8cd658](https://github.com/deepgram/cli/commit/a8cd658a1e09ee0b0f84c3d40ff3148e75598205))
+* **speak:** print the errors the framework never shows, and re-order the pipe note ([9d9a3d0](https://github.com/deepgram/cli/commit/9d9a3d0a9a0120c9bbf8bbb01686ddcefdc6119e))
+* **speak:** retain Aura's production MP3 default ([07d1e2b](https://github.com/deepgram/cli/commit/07d1e2bf8109092c403bcab06ac8887c6fcf77c7))
+* **speak:** stop rich from eating bracketed paths out of error messages ([9bed27f](https://github.com/deepgram/cli/commit/9bed27fee88f5a2fc04015b80449ef68880c3deb))
+
 ## [0.0.4](https://github.com/deepgram/cli/compare/deepctl-cmd-speak-v0.0.3...deepctl-cmd-speak-v0.0.4) (2026-08-17)
 
 

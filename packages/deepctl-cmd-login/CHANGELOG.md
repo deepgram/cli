@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.20](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.19...deepctl-cmd-login-v0.1.20) (2026-10-09)
+
+
+### Features
+
+* **skills:** prove and remove deepctl 0.3.x skill files after the new folders land ([f65e0e2](https://github.com/deepgram/cli/commit/f65e0e22868b3d8f7ac4e81d9163045aca3383ec))
+* **skills:** remove the deepctl 0.3.x skill files deepctl can prove it wrote ([#130](https://github.com/deepgram/cli/issues/130)) ([8be5172](https://github.com/deepgram/cli/commit/8be5172fc8d101dbcb60f5b1fb7b36e5f4cfbcff))
+
+
+### Bug Fixes
+
+* **skills:** install skills from login and plugin through the shared installer ([1d34a22](https://github.com/deepgram/cli/commit/1d34a22c6b6c6ee2d87b3ee83657e7c28998a8fd))
+* **skills:** login and plugin install skills through the shared installer ([#125](https://github.com/deepgram/cli/issues/125)) ([3675f7a](https://github.com/deepgram/cli/commit/3675f7a21a34f59a6d1ab5c1c463149fec66d0e3))
+
 ## [0.1.19](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.18...deepctl-cmd-login-v0.1.19) (2026-09-29)
 
 

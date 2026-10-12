@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.3](https://github.com/deepgram/cli/compare/v0.3.2...v0.3.3) (2026-10-09)
+
+
+### Features
+
+* **core:** fetch the skills bundle from an immutable pin ([ab567de](https://github.com/deepgram/cli/commit/ab567dee5053e468494858ac3bccf14f2b3ef037))
+* **core:** fetch the skills bundle from an immutable pin ([#123](https://github.com/deepgram/cli/issues/123)) ([ca5ca98](https://github.com/deepgram/cli/commit/ca5ca984c4c956e2aa5589a4e8ba347246075dba))
+* **skills:** install and remove only skill folders deepctl owns ([b3d629e](https://github.com/deepgram/cli/commit/b3d629e1d53a729e7ce20fbf6ecf1101648cd3a3))
+* **skills:** install and remove only skill folders deepctl owns ([#124](https://github.com/deepgram/cli/issues/124)) ([5e227eb](https://github.com/deepgram/cli/commit/5e227ebf421518290626f3d3c332c860c1438532))
+* **skills:** prove and remove deepctl 0.3.x skill files after the new folders land ([f65e0e2](https://github.com/deepgram/cli/commit/f65e0e22868b3d8f7ac4e81d9163045aca3383ec))
+* **skills:** remove the deepctl 0.3.x skill files deepctl can prove it wrote ([#130](https://github.com/deepgram/cli/issues/130)) ([8be5172](https://github.com/deepgram/cli/commit/8be5172fc8d101dbcb60f5b1fb7b36e5f4cfbcff))
+* **skills:** remove the deepctl section from GEMINI.md, instructions.md and agents.md ([b7311a3](https://github.com/deepgram/cli/commit/b7311a30e10d04d753cdb43747a5c9f0f6cde71e))
+* **speak:** add --play and --list-voices to the speak command ([#110](https://github.com/deepgram/cli/issues/110)) ([fde4ed3](https://github.com/deepgram/cli/commit/fde4ed38920c9bf3a22acdef361f0fc9d204e8a3))
+
+
+### Bug Fixes
+
+* **core:** harden bundle publish races and Windows names ([70db676](https://github.com/deepgram/cli/commit/70db67620d7fb7e2c5df92f4f56387cbf69e5202))
+* **core:** re-prove cache ownership around the swap ([60f9630](https://github.com/deepgram/cli/commit/60f96304f96f9b71a6f9324f57f80c2e90da67f0))
+* **skills:** hold a skills.json lock across each tool's whole install and remove ([aa07edf](https://github.com/deepgram/cli/commit/aa07edfa8ff20e19b74389441724d4fd900e1c25))
+* **skills:** install skills from login and plugin through the shared installer ([1d34a22](https://github.com/deepgram/cli/commit/1d34a22c6b6c6ee2d87b3ee83657e7c28998a8fd))
+* **skills:** keep a newer skills ref and a removed tool when a refresh overlaps ([#126](https://github.com/deepgram/cli/issues/126)) ([3c9d1cf](https://github.com/deepgram/cli/commit/3c9d1cf3121a649a67b74ca9992cafdb0f2159ac))
+* **skills:** login and plugin install skills through the shared installer ([#125](https://github.com/deepgram/cli/issues/125)) ([3675f7a](https://github.com/deepgram/cli/commit/3675f7a21a34f59a6d1ab5c1c463149fec66d0e3))
+* **skills:** place folders with an atomic no-replace rename ([e678b4f](https://github.com/deepgram/cli/commit/e678b4f7b9a89e0bfb05de32f3a29af816d29b7e))
+* **skills:** re-check records in dg skills update and the plugin refresh ([b0b1595](https://github.com/deepgram/cli/commit/b0b15959214085e818a551f1c37cfb1645001c6a))
+* **skills:** retain legacy copies and skip Windows cleanup ([0f103af](https://github.com/deepgram/cli/commit/0f103afc97432924e269dfcf7febc11e9abe9922))
+* **skills:** skip a refreshed tool whose record changed while it downloaded ([1f86cd0](https://github.com/deepgram/cli/commit/1f86cd0a6bd08f67806797a57a8d631ef91ce9af))
+* **speak:** honor Aura's WAV default for playback ([3cf2d20](https://github.com/deepgram/cli/commit/3cf2d208e5d39ab8bf0dc28b596e9caababacf50))
+* **speak:** retain Aura's production MP3 default ([07d1e2b](https://github.com/deepgram/cli/commit/07d1e2bf8109092c403bcab06ac8887c6fcf77c7))
+
+
+### Documentation
+
+* **readme:** explain where skills go, the ownership rule and the requirements ([d1cf0f0](https://github.com/deepgram/cli/commit/d1cf0f0a36b8d9798491794321b9d1d579f88089))
+* **skills:** explain the 0.3.x upgrade cleanup ([21383d6](https://github.com/deepgram/cli/commit/21383d6f3fdf777e8c9b7b9da792f55c6f97b7f7))
+
 ## [0.3.2](https://github.com/deepgram/cli/compare/v0.3.1...v0.3.2) (2026-09-29)
 
 

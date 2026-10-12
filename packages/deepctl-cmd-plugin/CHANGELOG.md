@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.14](https://github.com/deepgram/cli/compare/deepctl-cmd-plugin-v0.1.13...deepctl-cmd-plugin-v0.1.14) (2026-10-09)
+
+
+### Features
+
+* **skills:** prove and remove deepctl 0.3.x skill files after the new folders land ([f65e0e2](https://github.com/deepgram/cli/commit/f65e0e22868b3d8f7ac4e81d9163045aca3383ec))
+* **skills:** remove the deepctl 0.3.x skill files deepctl can prove it wrote ([#130](https://github.com/deepgram/cli/issues/130)) ([8be5172](https://github.com/deepgram/cli/commit/8be5172fc8d101dbcb60f5b1fb7b36e5f4cfbcff))
+
+
+### Bug Fixes
+
+* **skills:** install skills from login and plugin through the shared installer ([1d34a22](https://github.com/deepgram/cli/commit/1d34a22c6b6c6ee2d87b3ee83657e7c28998a8fd))
+* **skills:** keep a newer skills ref and a removed tool when a refresh overlaps ([#126](https://github.com/deepgram/cli/issues/126)) ([3c9d1cf](https://github.com/deepgram/cli/commit/3c9d1cf3121a649a67b74ca9992cafdb0f2159ac))
+* **skills:** login and plugin install skills through the shared installer ([#125](https://github.com/deepgram/cli/issues/125)) ([3675f7a](https://github.com/deepgram/cli/commit/3675f7a21a34f59a6d1ab5c1c463149fec66d0e3))
+* **skills:** re-check records in dg skills update and the plugin refresh ([b0b1595](https://github.com/deepgram/cli/commit/b0b15959214085e818a551f1c37cfb1645001c6a))
+
 ## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-cmd-plugin-v0.1.12...deepctl-cmd-plugin-v0.1.13) (2026-09-23)
 
 
