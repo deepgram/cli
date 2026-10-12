@@ -302,7 +302,7 @@ jobs:
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Open bump PR against homebrew-tap
+      - name: Open and merge bump PR against homebrew-tap
         working-directory: homebrew-tap
         env:
           GH_TOKEN: ${{ secrets.CLI_TAP_SYNC_PAT }}
@@ -345,3 +345,20 @@ jobs:
             --head "${BRANCH}" \
             --title "Bump deepctl to ${VERSION}" \
             --body-file "${BODY_FILE}"
+
+          # Merge it immediately. The formula is generated from PyPI metadata,
+          # and the tap has no checks or reviewers, so an open PR only delays
+          # Homebrew users: the 0.3.1, 0.3.2 and 0.3.3 bumps all sat unmerged
+          # while the tap served 0.2.26. The merged PR remains the audit trail.
+          # GitHub computes mergeability after the PR is created and gh does
+          # not wait for it, so retry a few times before giving up loudly.
+          for attempt in 1 2 3 4 5; do
+            if gh pr merge "${BRANCH}" --merge --delete-branch; then
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "::error::Could not merge ${BRANCH} on deepgram/homebrew-tap after 5 attempts; merge it by hand"
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
