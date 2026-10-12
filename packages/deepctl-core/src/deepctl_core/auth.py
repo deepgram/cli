@@ -672,7 +672,9 @@ class AuthManager:
             profile.dg_token_expires_at = expires_at
             profile.jwt_expires_at = None
             self.config.save()
-            console.print("[green]✓[/green] Finite API key stored securely in system keyring")
+            console.print(
+                "[green]✓[/green] Finite API key stored securely in system keyring"
+            )
             return
 
         # Legacy flow: access_token is the Deepgram API key directly.
@@ -681,17 +683,11 @@ class AuthManager:
         keyring_available = False
 
         try:
-            keyring.set_password(
-                KEYRING_SERVICE, f"api-key.{profile_name}", api_key
-            )
-            console.print(
-                "[green]✓[/green] API key stored securely in system keyring"
-            )
+            keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
+            console.print("[green]✓[/green] API key stored securely in system keyring")
             keyring_available = True
         except Exception as e:
-            console.print(
-                f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
-            )
+            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
             console.print("API key will be stored in config file instead")
 
         self.config.create_profile(
