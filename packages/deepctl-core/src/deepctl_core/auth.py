@@ -691,11 +691,11 @@ class AuthManager:
             self.config.save()
             if keyring_available:
                 console.print(
-                    "[green]✓[/green] Finite API key stored securely in system keyring"
+                    "[green]✓[/green] API key stored securely in system keyring"
                 )
             else:
                 console.print(
-                    "[yellow]Warning:[/yellow] Finite API key stored in the config file fallback"
+                    "[yellow]Warning:[/yellow] API key stored in the config file fallback"
                 )
             return
 
