@@ -31,3 +31,4 @@ class WhoamiResult(BaseResult):
     key_source: str
     project_id: str | None = None
     base_url: str | None = None
+    credential_expires_at: str | None = None

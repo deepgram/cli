@@ -54,6 +54,7 @@ class TestBaseCommand:
         """Create a mock Click context."""
         ctx = Mock(spec=click.Context)
         ctx.obj = {"config": Config()}
+        ctx.command = Mock(params=[])
         return ctx
 
     @pytest.mark.unit
@@ -167,6 +168,7 @@ class TestBaseCommand:
         # Create context without config
         ctx = Mock(spec=click.Context)
         ctx.obj = {}
+        ctx.command = Mock(params=[])
 
         # Create and execute command
         command = mock_command_class()
@@ -442,6 +444,7 @@ class TestBaseCommand:
         config.get.return_value = True  # output.verbose returns True
         ctx = Mock(spec=click.Context)
         ctx.obj = {"config": config}
+        ctx.command = Mock(params=[])
 
         mock_auth_instance = Mock()
         mock_client_instance = Mock()
@@ -1499,6 +1502,7 @@ class TestExecuteStreamSafety:
     def mock_context(self):
         ctx = Mock(spec=click.Context)
         ctx.obj = {"config": Config()}
+        ctx.command = Mock(params=[])
         return ctx
 
     @pytest.mark.unit

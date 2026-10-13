@@ -154,6 +154,7 @@ def mock_config():
     mock_profile.api_key = None
     mock_profile.project_id = None
     mock_profile.base_url = "https://api.deepgram.com"
+    mock_profile.dg_token_expires_at = None
 
     config.get_profile.return_value = mock_profile
     return config
@@ -545,7 +546,10 @@ class TestWhoamiKeySource:
     def _run(self, whoami_command, mock_config, mock_client, env, profile_key):
         auth_manager = Mock(spec=AuthManager)
         auth_manager.get_project_id.return_value = "proj-1"
+        auth_manager.has_profile_credentials.return_value = (bool(profile_key), False)
+        auth_manager.is_authenticated.return_value = bool(profile_key or env)
         mock_config.get_profile.return_value.api_key = profile_key
+        mock_config.get_profile.return_value.dg_token_expires_at = None
         with (
             patch.dict("os.environ", env, clear=False),
             patch("keyring.get_password", return_value=None),

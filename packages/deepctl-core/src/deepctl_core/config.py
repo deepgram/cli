@@ -15,9 +15,6 @@ class ProfileConfig(BaseModel):
     api_key: str | None = None
     project_id: str | None = None
     base_url: str = "https://api.deepgram.com"
-    # JWT-based auth (device flow with new server): expiry timestamps stored
-    # here (non-sensitive); the tokens themselves live in the keyring.
-    jwt_expires_at: str | None = None
     dg_token_expires_at: str | None = None
 
 

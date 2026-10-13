@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from deepctl_core import (
+    AuthenticationError,
     AuthManager,
     BaseCommand,
     Config,
@@ -207,8 +208,10 @@ class InitCommand(BaseCommand):
             api_key = auth_manager.get_api_key()
             if api_key:
                 lifecycle.inject_env(dest, api_key)
-        except Exception:
-            pass  # Auth is optional
+        except AuthenticationError as exc:
+            console.print(
+                f"[yellow]Could not inject Deepgram credentials:[/yellow] {exc}"
+            )
 
         # ── Setup (make check-prereqs && make init) ────────────────────────────
         installed = False
