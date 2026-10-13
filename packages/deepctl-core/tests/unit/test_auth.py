@@ -1,6 +1,6 @@
 """Tests for the authentication module."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import httpx
@@ -646,7 +646,7 @@ class TestFiniteCredentialFlow:
         assert "jwt.default" in deleted
         assert "refresh-token.default" in deleted
 
-    def test_store_token_legacy_path_saves_api_key(self, mock_config):
+    def test_store_token_legacy_response_requires_reauthentication(self, mock_config):
         from deepctl_core.auth import TokenResponse
 
         token = TokenResponse(
@@ -655,12 +655,47 @@ class TestFiniteCredentialFlow:
         )
         auth = self._make_auth(mock_config)
 
-        with patch("deepctl_core.auth.keyring") as mock_kr:
+        with pytest.raises(AuthenticationError, match="Run `dg update` and `dg login` again"):
             auth._store_token(token)
 
-        calls = {call[0][1]: call[0][2] for call in mock_kr.set_password.call_args_list}
-        assert calls.get("api-key.default") == "sk-legacy-key"
-        assert "jwt.default" not in calls
+    def test_get_api_key_rejects_expired_finite_credential(self, mock_config):
+        mock_profile = Mock()
+        mock_profile.dg_token_expires_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        mock_config.get_profile.return_value = mock_profile
+        auth = self._make_auth(mock_config)
+
+        with pytest.raises(AuthenticationError, match="Run `dg login` again"):
+            auth.get_api_key()
+
+    def test_device_login_prints_code_and_opens_plain_verification_uri(self, mock_config):
+        from deepctl_core.auth import DeviceCodeResponse, TokenResponse
+
+        auth = self._make_auth(mock_config)
+        device = DeviceCodeResponse(
+            device_code="device-code",
+            user_code="ABCD-EFGH",
+            verification_uri="https://id.dx.deepgram.com/auth/cli",
+            expires_in=600,
+            interval=1,
+        )
+        token = TokenResponse(
+            access_token="jwt",
+            dg_token="dg-finite-key",
+            dg_expires_in=3600,
+            project_id="project",
+        )
+
+        with patch.object(auth, "_request_device_code", return_value=device), patch.object(
+            auth, "_poll_for_token", return_value=token
+        ), patch.object(auth, "_store_token"), patch("deepctl_core.auth.webbrowser.open") as open_browser, patch(
+            "deepctl_core.auth.console.print"
+        ) as print_console:
+            auth.login_with_device_flow()
+
+        open_browser.assert_called_once_with(device.verification_uri)
+        assert any("ABCD-EFGH" in str(call) for call in print_console.call_args_list)
 
     # ------------------------------------------------------------------
     # get_api_key — JWT fast-path

@@ -4,7 +4,6 @@ import os
 import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
 
 import httpx
 import keyring
@@ -39,7 +38,7 @@ class DeviceCodeResponse(BaseModel):
     """Response from device code request."""
 
     device_code: str
-    user_code: str | None = None  # Not used in current implementation
+    user_code: str | None = None
     verification_uri: str
     expires_in: int
     interval: int
@@ -147,6 +146,8 @@ class AuthManager:
 
         # Check profile credentials
         profile_name = self.config.profile or "default"
+        current_profile = self.config.get_profile(profile_name)
+
         has_profile_key, _ = self.has_profile_credentials(profile_name)
         if has_profile_key:
             return True
@@ -179,6 +180,19 @@ class AuthManager:
             return self.explicit_api_key
 
         profile_name = self.config.profile or "default"
+        current_profile = self.config.get_profile(profile_name)
+
+        if isinstance(current_profile.dg_token_expires_at, str):
+            try:
+                expires_at = datetime.fromisoformat(current_profile.dg_token_expires_at)
+                if expires_at <= datetime.now(timezone.utc):
+                    raise AuthenticationError(
+                        "Your Deepgram credential has expired. Run `dg login` again."
+                    )
+            except ValueError:
+                raise AuthenticationError(
+                    "Your Deepgram credential expiry is invalid. Run `dg login` again."
+                )
 
         # JWT-based flow: present when logged in via device flow with new server.
         try:
@@ -197,7 +211,6 @@ class AuthManager:
             pass
 
         # Config file fallback (keyring unavailable on this machine).
-        current_profile = self.config.get_profile(profile_name)
         if current_profile.api_key:
             return current_profile.api_key
 
@@ -503,21 +516,14 @@ class AuthManager:
             # Request device code from dx-id auth provider
             device_response = self._request_device_code()
 
-            # Build verification URI with query parameters
-            query_params = {
-                "device_code": device_response.device_code,
-                "client_id": CLIENT_ID,
-                "hostname": hostname,
-            }
-            verification_uri = (
-                f"{device_response.verification_uri}?{urlencode(query_params)}"
-            )
+            verification_uri = device_response.verification_uri
 
             # Open browser immediately and start polling
             console.print(
                 "\n[bold]Hello from Deepgram![/bold] Opening browser to "
                 "complete login..."
             )
+            console.print(f"[bold]Enter code:[/bold] {device_response.user_code}")
 
             try:
                 webbrowser.open(verification_uri)
@@ -652,16 +658,18 @@ class AuthManager:
                 keyring.set_password(
                     KEYRING_SERVICE, f"api-key.{profile_name}", api_key
                 )
-                keyring.delete_password(KEYRING_SERVICE, f"jwt.{profile_name}")
-                keyring.delete_password(
-                    KEYRING_SERVICE, f"refresh-token.{profile_name}"
-                )
                 keyring_available = True
             except Exception as e:
                 console.print(
                     f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
                 )
                 console.print("API key will be stored in config file instead")
+
+            for keyring_key in (f"jwt.{profile_name}", f"refresh-token.{profile_name}"):
+                try:
+                    keyring.delete_password(KEYRING_SERVICE, keyring_key)
+                except Exception:
+                    pass
 
             self.config.create_profile(
                 profile_name,
@@ -672,28 +680,18 @@ class AuthManager:
             profile.dg_token_expires_at = expires_at
             profile.jwt_expires_at = None
             self.config.save()
-            console.print(
-                "[green]✓[/green] Finite API key stored securely in system keyring"
-            )
+            if keyring_available:
+                console.print(
+                    "[green]✓[/green] Finite API key stored securely in system keyring"
+                )
+            else:
+                console.print(
+                    "[yellow]Warning:[/yellow] Finite API key stored in the config file fallback"
+                )
             return
 
-        # Legacy flow: access_token is the Deepgram API key directly.
-        api_key = token_response.access_token
-        project_id = token_response.project_id
-        keyring_available = False
-
-        try:
-            keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
-            console.print("[green]✓[/green] API key stored securely in system keyring")
-            keyring_available = True
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
-            console.print("API key will be stored in config file instead")
-
-        self.config.create_profile(
-            profile_name,
-            api_key=api_key if not keyring_available else None,
-            project_id=project_id,
+        raise AuthenticationError(
+            "Deepgram sign-in did not return a finite credential. Run `dg update` and `dg login` again."
         )
 
     def logout(self, keep_config: bool = False) -> None:
