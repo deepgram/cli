@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/deepgram/cli/compare/v0.3.3...v0.4.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** store finite Deepgram credentials ([#133](https://github.com/deepgram/cli/issues/133))
+* **cli:** Existing browser-login sessions must run dg login once after upgrading.
+
+### Bug Fixes
+
+* **cli:** clarify credential storage copy ([35905c5](https://github.com/deepgram/cli/commit/35905c55d68cf2763d2e0d56adbdf7592042cc32))
+* **cli:** require finite browser credentials ([5972207](https://github.com/deepgram/cli/commit/59722077c0e2d43a95682619618f437d680cabfb))
+* **cli:** store finite Deepgram credentials ([#133](https://github.com/deepgram/cli/issues/133)) ([c654944](https://github.com/deepgram/cli/commit/c6549445720bf9269a5b6034a329b0dfb5629346))
+* **cli:** store finite dx-id credentials ([e7268ae](https://github.com/deepgram/cli/commit/e7268aea132fcc4d90269fa522974b0937119feb))
+* **login:** require finite device credentials ([b67c723](https://github.com/deepgram/cli/commit/b67c72334acb3281768de80487adabccd6f82d03))
+
 ## [0.3.3](https://github.com/deepgram/cli/compare/v0.3.2...v0.3.3) (2026-10-09)
 
 

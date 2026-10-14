@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.20...deepctl-cmd-login-v0.2.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** store finite Deepgram credentials ([#133](https://github.com/deepgram/cli/issues/133))
+* **cli:** Existing browser-login sessions must run dg login once after upgrading.
+
+### Bug Fixes
+
+* **cli:** require finite browser credentials ([5972207](https://github.com/deepgram/cli/commit/59722077c0e2d43a95682619618f437d680cabfb))
+* **cli:** store finite Deepgram credentials ([#133](https://github.com/deepgram/cli/issues/133)) ([c654944](https://github.com/deepgram/cli/commit/c6549445720bf9269a5b6034a329b0dfb5629346))
+
 ## [0.1.20](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.19...deepctl-cmd-login-v0.1.20) (2026-10-09)
 
 
