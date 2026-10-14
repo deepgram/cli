@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 import click
-from deepctl_core import AuthManager, BaseGroupCommand, Config
+from deepctl_core import AuthenticationError, AuthManager, BaseGroupCommand, Config
 from rich.console import Console
 
 from .fetcher import get_cached_manifest, get_or_fetch_script, refresh_manifest
@@ -131,8 +131,10 @@ def _make_script_command(name: str, entry: ToolkitScript) -> click.Command:
                 api_key = AuthManager(Config()).get_api_key()
                 if api_key:
                     env["DEEPGRAM_API_KEY"] = api_key
-            except Exception:
-                pass  # Script will surface its own missing-key error
+            except AuthenticationError as exc:
+                console.print(
+                    f"[yellow]Could not provide Deepgram credentials:[/yellow] {exc}"
+                )
 
         result = subprocess.run(
             [sys.executable, str(script_path)] + list(script_args),

@@ -16,7 +16,7 @@ from deepctl_cmd_init.models import (
     TomlConfig,
 )
 from deepctl_cmd_init.templates_api import filter_templates
-from deepctl_core import AuthManager, Config, DeepgramClient
+from deepctl_core import AuthenticationError, AuthManager, Config, DeepgramClient
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -338,6 +338,49 @@ class TestInitCommand:
         mock_api.get_template.assert_called_once_with("node-transcription")
         mock_lifecycle.clone_template.assert_called_once()
         mock_lifecycle.run_lifecycle_step.assert_called_once()
+
+    @patch("deepctl_cmd_init.command.templates_api")
+    @patch("deepctl_cmd_init.command.lifecycle")
+    def test_expired_credential_warning_is_visible(
+        self,
+        mock_lifecycle,
+        mock_api,
+        init_command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        sample_detail,
+        tmp_path,
+    ):
+        mock_api.get_template.return_value = sample_detail
+        mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.clone_template.return_value = None
+        mock_auth_manager.get_api_key.side_effect = AuthenticationError(
+            "Your Deepgram credential has expired. Run `dg login` again."
+        )
+
+        with patch.object(init_command, "confirm", return_value=True), patch(
+            "deepctl_cmd_init.command.console.print"
+        ) as print_console:
+            result = init_command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                template="node-transcription",
+                dir=str(tmp_path / "my-app"),
+                search=None,
+                list=False,
+                install=False,
+                start=False,
+                no_install=True,
+                no_start=True,
+            )
+
+        assert result.status == "success"
+        assert any(
+            "Run `dg login` again" in str(call)
+            for call in print_console.call_args_list
+        )
 
     @patch("deepctl_cmd_init.command.templates_api")
     def test_template_not_found(

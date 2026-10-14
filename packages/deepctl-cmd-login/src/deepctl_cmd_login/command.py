@@ -743,19 +743,24 @@ class WhoamiCommand(BaseCommand):
         profile_name = config.profile or "default"
         profile_cfg = config.get_profile(profile_name)
 
-        # Determine key and its exact storage source
+        # Determine key and its exact storage source. Expired finite profile
+        # credentials must not mask a valid environment variable.
         api_key: str | None = None
         key_source = "not set"
         env_key = os.environ.get("DEEPGRAM_API_KEY")
+        has_profile_key, _ = auth_manager.has_profile_credentials(profile_name)
 
-        try:
-            api_key = _keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
-            if api_key:
-                key_source = "system keyring"
-        except Exception:
-            pass
+        if has_profile_key:
+            try:
+                api_key = _keyring.get_password(
+                    KEYRING_SERVICE, f"api-key.{profile_name}"
+                )
+                if api_key:
+                    key_source = "system keyring"
+            except Exception:
+                pass
 
-        if not api_key and profile_cfg.api_key:
+        if has_profile_key and not api_key and profile_cfg.api_key:
             # Config merges DEEPGRAM_API_KEY into the profile at load time
             # (environment overrides the file), so a profile key equal to the
             # environment value came from the environment, not the config
@@ -770,7 +775,7 @@ class WhoamiCommand(BaseCommand):
             api_key = env_key
             key_source = "DEEPGRAM_API_KEY (env)"
 
-        authenticated = api_key is not None
+        authenticated = auth_manager.is_authenticated()
         masked: str | None = None
         if api_key:
             masked = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else "****"
@@ -797,6 +802,8 @@ class WhoamiCommand(BaseCommand):
                 )
                 if base_url != "https://api.deepgram.com":
                     console.print(f"  Base URL:   {base_url}")
+                if profile_cfg.dg_token_expires_at and has_profile_key:
+                    console.print(f"  Expires:    {profile_cfg.dg_token_expires_at}")
 
         return WhoamiResult(
             authenticated=authenticated,
@@ -805,4 +812,7 @@ class WhoamiCommand(BaseCommand):
             key_source=key_source,
             project_id=project_id,
             base_url=base_url,
+            credential_expires_at=(
+                profile_cfg.dg_token_expires_at if has_profile_key else None
+            ),
         )
