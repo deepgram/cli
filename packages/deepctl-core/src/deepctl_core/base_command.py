@@ -89,7 +89,7 @@ class BaseCommand(ABC):
                 client = DeepgramClient(config, auth_manager)
 
             # Check authentication if required
-            if self.requires_auth:
+            if self.requires_auth and not self.uses_external_auth(**kwargs):
                 with TimingContext("authentication_check"):
                     try:
                         auth_manager.guard()
@@ -218,6 +218,10 @@ class BaseCommand(ABC):
         """
         status = str(getattr(result, "status", "") or "")
         return self.EXIT_CODES.get(status, 0)
+
+    def uses_external_auth(self, **kwargs: Any) -> bool:
+        """Whether this invocation uses a transport with its own credentials."""
+        return False
 
     def is_guided(self, ctx: click.Context) -> bool:
         """True only when the user invoked this command with no input at all.

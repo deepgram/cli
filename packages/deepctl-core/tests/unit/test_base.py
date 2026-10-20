@@ -225,6 +225,42 @@ class TestBaseCommand:
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")
     @patch("deepctl_core.base_command.DeepgramClient")
+    def test_execute_external_auth_bypasses_deepgram_guard(
+        self, mock_client_class, mock_auth_class, mock_context
+    ):
+        """AWS-backed commands must not require an unrelated Deepgram API key."""
+
+        class ExternalAuthCommand(BaseCommand):
+            name = "external_auth_test"
+            help = "Test external auth"
+            requires_auth = True
+
+            def uses_external_auth(self, **kwargs: Any) -> bool:
+                return bool(kwargs.get("external"))
+
+            def handle(
+                self,
+                config: Config,
+                auth_manager: AuthManager,
+                client: DeepgramClient,
+                **kwargs: Any,
+            ) -> Any:
+                return {"external": True}
+
+        auth_manager = Mock()
+        mock_auth_class.return_value = auth_manager
+        command = ExternalAuthCommand()
+        with patch.object(command, "output_result") as mock_output:
+            command.execute(mock_context, external=True)
+
+        auth_manager.guard.assert_not_called()
+        mock_output.assert_called_once_with(
+            {"external": True}, mock_context.obj["config"]
+        )
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
     @patch("deepctl_core.base_command.console")
     def test_execute_with_auth_required_failure(
         self, mock_console, mock_client_class, mock_auth_class, mock_context
