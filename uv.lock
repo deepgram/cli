@@ -855,7 +855,7 @@ wheels = [
 
 [[package]]
 name = "deepctl"
-version = "0.3.3"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1218,7 +1218,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-debug-toolkit"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/deepctl-cmd-debug-toolkit" }
 dependencies = [
     { name = "click" },
@@ -1275,7 +1275,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-init"
-version = "0.0.4"
+version = "0.1.0"
 source = { editable = "packages/deepctl-cmd-init" }
 dependencies = [
     { name = "click" },
@@ -1347,7 +1347,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-login"
-version = "0.1.20"
+version = "0.2.0"
 source = { editable = "packages/deepctl-cmd-login" }
 dependencies = [
     { name = "click" },
@@ -1632,7 +1632,7 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-core"
-version = "0.2.19"
+version = "0.3.0"
 source = { editable = "packages/deepctl-core" }
 dependencies = [
     { name = "click" },
