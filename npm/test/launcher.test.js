@@ -797,10 +797,12 @@ describe('bin/dg.js end to end', posixOnly, () => {
       'print("nonblock=%s read=%r" % (flags, data))',
       '',
     ].join('\n');
-    // A fake python3 so the venv strategy runs (and writes its setup line
+    // A fake python so the venv strategy runs (and writes its setup line
     // to stderr) without touching PyPI: `-m venv` lays down the checker as
-    // deepctl, everything else succeeds.
-    fakeExe(bin, 'python3', [
+    // deepctl, everything else succeeds. It's installed under every name
+    // the launcher probes, or a real python3.12 later on PATH (as on
+    // GitHub's ubuntu runners) wins and builds a real venv.
+    const fakePython = [
       '#!/bin/sh',
       'case "$1 $2" in',
       '  "-c "*) echo "(3, 12)"; exit 0;;',
@@ -808,7 +810,10 @@ describe('bin/dg.js end to end', posixOnly, () => {
       'esac',
       'exit 0',
       '',
-    ].join('\n'));
+    ].join('\n');
+    for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) {
+      fakeExe(bin, name, fakePython);
+    }
     fs.writeFileSync(path.join(home, 'checker'), checker);
     const { spawn } = require('node:child_process');
     const child = spawn(process.execPath, [BIN], {
