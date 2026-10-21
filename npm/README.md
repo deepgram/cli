@@ -52,8 +52,10 @@ Node.js 18 or newer runs the launcher.
 ## Already installed the CLI another way?
 
 If you installed the CLI with Homebrew, pip, pipx, uv or the install script,
-you don't need this package. Homebrew and npm both want to own `dg`; if you
-do want the npm version to take it over, run `npm install -g --force @deepgram/cli`.
+you don't need this package. Use one install method: they all provide a
+`dg` command, and two of them on the same machine fight over it. To switch to
+npm, uninstall the other first (for example `brew uninstall deepgram` or
+`pip uninstall deepctl`), then `npm install -g @deepgram/cli`.
 
 Update the npm version with `npm install -g @deepgram/cli@latest`, or run
 `npx @deepgram/cli@latest`.
