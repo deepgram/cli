@@ -21,7 +21,8 @@ const LOCK_MAX_MS = 60 * 60 * 1000;
 const LOCK_POLL_MS = 250;
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const SIGNAL_GRACE_MS = 1000;
-const DOUBLE_INTERRUPT_MS = 3000;
+const STDERR_EAGAIN_RETRIES = 100;
+const STDERR_EAGAIN_SLEEP_MS = 10;
 const PROBE_TIMEOUT_MS = 10 * 1000;
 const RUNNERS = ['uvx', 'venv', 'path'];
 
@@ -34,7 +35,27 @@ const PROBE_CODE = 'import sys;print(tuple(sys.version_info[:2]));import venv,en
 // O_NONBLOCK on it. deepctl inherits the same open file, and a non-blocking
 // stdin breaks `ffmpeg ... | dg listen` and MCP hosts that send their first
 // message a moment after starting `dg mcp`.
-const fdStderr = { write: (text) => fs.writeSync(2, text) };
+//
+// Writing is best effort: fd 2 may be a full non-blocking pipe (EAGAIN) or
+// one whose reader has gone (EPIPE), and a progress line must never abort
+// a first-run setup or keep deepctl from running.
+function writeStderr(text, opts = {}) {
+  const writeSync = opts.writeSync || fs.writeSync;
+  const sleep = opts.sleep || sleepSync;
+  const buf = Buffer.from(String(text));
+  let offset = 0;
+  let retries = 0;
+  while (offset < buf.length) {
+    try {
+      offset += writeSync(2, buf, offset, buf.length - offset);
+    } catch (err) {
+      if (err.code !== 'EAGAIN' || retries++ >= STDERR_EAGAIN_RETRIES) return;
+      sleep(STDERR_EAGAIN_SLEEP_MS);
+    }
+  }
+}
+
+const fdStderr = { write: (text) => writeStderr(text) };
 
 class LauncherError extends Error {
   constructor(message, hint = '') {
@@ -305,9 +326,12 @@ function rootTrusted(spec, opts = {}) {
   return ancestorsSafe(above, uid, gid, lstat, true) && ancestorsSafe(real, uid, gid, lstat, false);
 }
 
-// Group-writable is fine for a directory we own whose group is our own
-// primary group: the user-private-group convention (Ubuntu, Fedora; umask
-// 002) makes ~/.cache 0775 with a group that only we are in.
+// Group-writable is trusted only for a directory we own whose group id
+// equals our uid: the user-private-group convention (Ubuntu, Fedora; umask
+// 002), where ~/.cache is 0775 with a group named after us. A shared
+// primary group (SUSE and Debian USERGROUPS=no use `users`, macOS uses
+// `staff`) has other members who could swap the cache during the first
+// build, so anything else group-writable fails closed.
 function ancestorsSafe(start, uid, gid, lstat, allowLinks) {
   for (let dir = start; ; dir = path.posix.dirname(dir)) {
     let st;
@@ -319,7 +343,7 @@ function ancestorsSafe(start, uid, gid, lstat, allowLinks) {
     const link = st.isSymbolicLink ? st.isSymbolicLink() : false;
     if (link ? !allowLinks : !st.isDirectory()) return false;
     if (st.uid !== 0 && st.uid !== uid) return false;
-    const privateGroup = st.uid === uid && st.gid === gid;
+    const privateGroup = st.uid === uid && st.gid === gid && gid === uid;
     const writableByOthers = (st.mode & 0o002) !== 0 || ((st.mode & 0o020) !== 0 && !privateGroup);
     if (!link && writableByOthers && (st.mode & STICKY) === 0) return false;
     if (dir === '/' || dir === '.') return true;
@@ -739,20 +763,7 @@ function run(argv = process.argv.slice(2), opts = {}) {
   // child outright rather than interrupt it.
   // isatty(), not process.stdin.isTTY: see fdStderr for why.
   const terminal = [0, 1, 2].some((fd) => tty.isatty(fd));
-  // A second Ctrl-C within a few seconds means "stop now": pass that one on
-  // even under a terminal, in case the child is ignoring or slow to act on
-  // the first.
-  let lastInterrupt = 0;
-  const onTerminalInterrupt = (sig) => () => {
-    const now = Date.now();
-    if (now - lastInterrupt <= DOUBLE_INTERRUPT_MS && childRunning()) child.kill(sig);
-    lastInterrupt = now;
-  };
-  const interrupt = (sig) => {
-    if (isWindows(process.platform)) return () => {};
-    if (terminal) return sig === 'SIGINT' ? onTerminalInterrupt(sig) : () => {};
-    return forwardIfMissed(sig);
-  };
+  const interrupt = (sig) => (isWindows(process.platform) || terminal ? () => {} : forwardIfMissed(sig));
   const handlers = { SIGINT: interrupt('SIGINT'), SIGTERM: forward('SIGTERM') };
   if (!isWindows(process.platform)) {
     handlers.SIGQUIT = interrupt('SIGQUIT');
@@ -804,6 +815,7 @@ module.exports = {
   parseProbeOutput,
   probePython,
   pathDirs,
+  writeStderr,
   prepareRoot,
   pypiSpec,
   pruneSiblings,

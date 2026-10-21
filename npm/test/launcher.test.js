@@ -312,9 +312,9 @@ describe('cache root ownership (POSIX)', () => {
     '/home/u': dirStat(1000, 0o755),
     '/home/u/.cache': dirStat(1000, 0o700),
   };
-  const check = (spec, stats, realpath = (d) => d) => {
+  const check = (spec, stats, realpath = (d) => d, gid = 1000) => {
     const all = { ...ancestors, ...stats };
-    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, gid: 1000, realpath, lstat: (d) => {
+    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, gid, realpath, lstat: (d) => {
       if (!(d in all)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       return all[d];
     } });
@@ -400,6 +400,16 @@ describe('cache root ownership (POSIX)', () => {
     assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o777) }), false);
     // Group-writable, our gid, but owned by someone else: rejected.
     assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(2000, 0o775, true, 1000) }), false);
+  });
+
+  test('a group-writable ~/.cache in a shared primary group is rejected even though it is ours', () => {
+    // SUSE / Debian USERGROUPS=no: primary group `users` (100), shared with
+    // every other user, so gid matches ours but is not a private group.
+    const base = '/home/u/.cache/deepgram-cli';
+    const ok = { [base]: dirStat(1000, 0o700, true, 100), [`${base}/venvs`]: dirStat(1000, 0o700, true, 100) };
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775, true, 100) }, (d) => d, 100), false);
+    // The same directory without group write is fine.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o755, true, 100) }, (d) => d, 100), true);
   });
 
   test('prepareRoot creates missing parents 0700 even under umask 002', posixOnly, () => {
@@ -571,6 +581,49 @@ describe('lock', () => {
       (err) => err instanceof launcher.LauncherError && /Could not create the setup lock.*ENOSPC/.test(err.message),
     );
     assert.equal(fs.existsSync(lock), false);
+  });
+});
+
+describe('launcher messages on stderr', () => {
+  const err = (code) => Object.assign(new Error(code), { code });
+
+  test('partial writes are completed', () => {
+    const chunks = [];
+    const writeSync = (fd, buf, offset, length) => {
+      const n = Math.min(3, length);
+      chunks.push(buf.subarray(offset, offset + n).toString());
+      return n;
+    };
+    launcher.writeStderr('hello world\n', { writeSync });
+    assert.equal(chunks.join(''), 'hello world\n');
+  });
+
+  test('EAGAIN is retried after a short sleep', () => {
+    let calls = 0;
+    let sleeps = 0;
+    const writeSync = (fd, buf, offset, length) => {
+      if (calls++ < 3) throw err('EAGAIN');
+      return length;
+    };
+    launcher.writeStderr('x', { writeSync, sleep: () => sleeps++ });
+    assert.equal(calls, 4);
+    assert.equal(sleeps, 3);
+  });
+
+  test('a stderr that stays full is given up on, not thrown', () => {
+    let calls = 0;
+    const writeSync = () => {
+      calls++;
+      throw err('EAGAIN');
+    };
+    assert.doesNotThrow(() => launcher.writeStderr('x', { writeSync, sleep: () => {} }));
+    assert.equal(calls, 101);
+  });
+
+  test('EPIPE and other errors are swallowed', () => {
+    for (const code of ['EPIPE', 'EBADF', 'EIO']) {
+      assert.doesNotThrow(() => launcher.writeStderr('x', { writeSync: () => { throw err(code); } }));
+    }
   });
 });
 
