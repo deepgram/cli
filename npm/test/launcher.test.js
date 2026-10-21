@@ -42,6 +42,13 @@ describe('package.json', () => {
     }
   });
 
+  test('ships the same LICENSE as the repository', () => {
+    const repoLicense = path.join(PKG_DIR, '..', 'LICENSE');
+    const own = fs.readFileSync(path.join(PKG_DIR, 'LICENSE'), 'utf8');
+    assert.match(own, /MIT License/);
+    if (fs.existsSync(repoLicense)) assert.equal(own, fs.readFileSync(repoLicense, 'utf8'));
+  });
+
   test('version is a plain release version', () => {
     assert.match(launcher.packageVersion(PKG_DIR), /^\d+\.\d+\.\d+$/);
   });
@@ -153,7 +160,7 @@ describe('Python discovery', () => {
     assert.deepEqual(linux, ['/usr/local/bin/python3.11', '/usr/local/bin/python3', '/usr/bin/python3']);
   });
 
-  test('Windows tries py -3.13..-3.10, then python, skipping the Store stub', () => {
+  test('Windows tries py -3.13..-3.10 and -3, then python, with WindowsApps last', () => {
     const present = new Set([
       'C:\\Windows\\py.exe',
       'C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe',
@@ -172,8 +179,35 @@ describe('Python discovery', () => {
       'C:\\Windows\\py.exe -3.12',
       'C:\\Windows\\py.exe -3.11',
       'C:\\Windows\\py.exe -3.10',
+      'C:\\Windows\\py.exe -3',
       'C:\\Python312\\python.exe',
+      // A real Store Python lives here too; the probe rejects the stub.
+      'C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe',
     ]);
+  });
+
+  test('Windows tries a py found only in WindowsApps, after everything else', () => {
+    const apps = 'C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps';
+    const present = new Set([`${apps}\\py.exe`, `${apps}\\python.exe`]);
+    const opts = {
+      env: { Path: apps },
+      platform: 'win32',
+      pkgDir: 'C:\\npm\\node_modules\\@deepgram\\cli',
+      realpath: (f) => f,
+      isExecutable: (f) => present.has(f),
+    };
+    const got = launcher.pythonCandidates(opts).map((c) => [c.command, ...c.args].join(' '));
+    assert.equal(got.length, 6);
+    assert.equal(got[0], `${apps}\\py.exe -3.13`);
+    assert.equal(got[4], `${apps}\\py.exe -3`);
+    assert.equal(got[5], `${apps}\\python.exe`);
+  });
+
+  test('the version probe rejects a Store stub that prints no version', () => {
+    const stub = () => ({ status: 9009, stdout: '', stderr: 'Python was not found; run without arguments to install from the Microsoft Store' });
+    const info = launcher.probePython({ command: 'python.exe', args: [] }, stub);
+    assert.equal(info.ok, false);
+    assert.equal(info.version, null);
   });
 
   test('findPython returns the first usable one and records the rest', () => {
@@ -226,12 +260,122 @@ describe('cache directory', () => {
   });
 
   test('a cached venv is used only when complete, from either root', () => {
-    const opts = { env: {}, platform: 'linux', home: '/home/u', tmpdir: '/tmp', uid: 1 };
+    const opts = { env: {}, platform: 'linux', home: '/home/u', tmpdir: '/tmp', uid: 1, trustRoot: () => true };
     const files = new Set(['/tmp/deepgram-cli-1/venvs/1.0.0/.complete', '/tmp/deepgram-cli-1/venvs/1.0.0/bin/deepctl']);
     const hit = launcher.findCachedVenv('1.0.0', { ...opts, exists: (f) => files.has(f) });
     assert.equal(hit.deepctl, '/tmp/deepgram-cli-1/venvs/1.0.0/bin/deepctl');
     files.delete('/tmp/deepgram-cli-1/venvs/1.0.0/.complete');
     assert.equal(launcher.findCachedVenv('1.0.0', { ...opts, exists: (f) => files.has(f) }), null);
+  });
+
+  test('an untrusted root is never used, however complete its venv looks', () => {
+    const opts = { env: {}, platform: 'linux', home: '/home/u', tmpdir: '/tmp', uid: 1, trustRoot: (spec) => !spec.shared };
+    const files = new Set(['/tmp/deepgram-cli-1/venvs/1.0.0/.complete', '/tmp/deepgram-cli-1/venvs/1.0.0/bin/deepctl']);
+    assert.equal(launcher.findCachedVenv('1.0.0', { ...opts, exists: (f) => files.has(f) }), null);
+  });
+});
+
+describe('cache root ownership (POSIX)', () => {
+  const dirStat = (uid, mode, isDir = true) => ({ uid, mode: (isDir ? 0o040000 : 0o120000) | mode, isDirectory: () => isDir });
+  const shared = { dir: '/tmp/deepgram-cli-1000/venvs', shared: true };
+  const home = { dir: '/home/u/.cache/deepgram-cli/venvs', shared: false };
+  const check = (spec, stats) => launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, lstat: (d) => {
+    if (!(d in stats)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    return stats[d];
+  } });
+
+  test('a private directory we own is trusted', () => {
+    assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(1000, 0o700), '/tmp/deepgram-cli-1000/venvs': dirStat(1000, 0o700) }), true);
+  });
+
+  test('a shared root owned by another user is rejected', () => {
+    assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(2000, 0o700), '/tmp/deepgram-cli-1000/venvs': dirStat(1000, 0o700) }), false);
+    assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(1000, 0o700), '/tmp/deepgram-cli-1000/venvs': dirStat(2000, 0o700) }), false);
+  });
+
+  test('a shared root others can read or write is rejected, even if ours', () => {
+    assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(1000, 0o777), '/tmp/deepgram-cli-1000/venvs': dirStat(1000, 0o700) }), false);
+    assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(1000, 0o750), '/tmp/deepgram-cli-1000/venvs': dirStat(1000, 0o700) }), false);
+  });
+
+  test('a symlinked root is rejected', () => {
+    assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(1000, 0o777, false), '/tmp/deepgram-cli-1000/venvs': dirStat(1000, 0o700) }), false);
+  });
+
+  test('the home root may be readable by others but not writable', () => {
+    const base = '/home/u/.cache/deepgram-cli';
+    assert.equal(check(home, { [base]: dirStat(1000, 0o755), [`${base}/venvs`]: dirStat(1000, 0o755) }), true);
+    assert.equal(check(home, { [base]: dirStat(1000, 0o775), [`${base}/venvs`]: dirStat(1000, 0o755) }), false);
+    assert.equal(check(home, { [base]: dirStat(2000, 0o755), [`${base}/venvs`]: dirStat(1000, 0o755) }), false);
+  });
+
+  test('a missing root is not trusted', () => {
+    assert.equal(check(shared, {}), false);
+  });
+
+  test('on a real filesystem, a 0777 directory we own is rejected and 0700 accepted', posixOnly, () => {
+    const base = tmpdir();
+    const spec = { dir: path.join(base, 'deepgram-cli-x', 'venvs'), shared: true };
+    fs.mkdirSync(spec.dir, { recursive: true });
+    fs.chmodSync(path.dirname(spec.dir), 0o777);
+    fs.chmodSync(spec.dir, 0o700);
+    assert.equal(launcher.rootTrusted(spec), false);
+    fs.chmodSync(path.dirname(spec.dir), 0o700);
+    assert.equal(launcher.rootTrusted(spec), true);
+    const link = { dir: path.join(base, 'linked', 'venvs'), shared: true };
+    fs.symlinkSync(path.dirname(spec.dir), path.join(base, 'linked'));
+    assert.equal(launcher.rootTrusted(link), false);
+  });
+
+  test('Windows skips the ownership check', () => {
+    assert.equal(launcher.rootTrusted({ dir: 'C:\\x\\venvs', shared: true }, { platform: 'win32' }), true);
+  });
+});
+
+describe('pruning other versions', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  function venv(root, name, { markerAgeDays, dirAgeMs } = {}) {
+    const dir = path.join(root, name);
+    fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+    if (markerAgeDays !== undefined) {
+      const marker = path.join(dir, '.complete');
+      fs.writeFileSync(marker, '');
+      const t = new Date(Date.now() - markerAgeDays * DAY);
+      fs.utimesSync(marker, t, t);
+    }
+    if (dirAgeMs !== undefined) {
+      const t = new Date(Date.now() - dirAgeMs);
+      fs.utimesSync(dir, t, t);
+    }
+    return dir;
+  }
+
+  test('keeps recently used versions and removes long-idle ones', () => {
+    const root = tmpdir();
+    venv(root, '1.0.0', { markerAgeDays: 0 });
+    const recent = venv(root, '0.9.0', { markerAgeDays: 2 });
+    const idle = venv(root, '0.8.0', { markerAgeDays: 45 });
+    launcher.pruneSiblings(root, '1.0.0');
+    assert.equal(fs.existsSync(recent), true);
+    assert.equal(fs.existsSync(idle), false);
+  });
+
+  test('a half-built venv is removed only once no build could still own it', () => {
+    const root = tmpdir();
+    const fresh = venv(root, '0.9.0', { dirAgeMs: 60 * 1000 });
+    const dead = venv(root, '0.8.0', { dirAgeMs: 60 * 60 * 1000 });
+    launcher.pruneSiblings(root, '1.0.0');
+    assert.equal(fs.existsSync(fresh), true);
+    assert.equal(fs.existsSync(dead), false);
+  });
+
+  test('never removes a version with a live lock', () => {
+    const root = tmpdir();
+    const locked = venv(root, '0.8.0', { markerAgeDays: 90 });
+    const release = launcher.acquireLock(`${locked}.lock`);
+    launcher.pruneSiblings(root, '1.0.0');
+    assert.equal(fs.existsSync(locked), true);
+    release();
   });
 });
 
@@ -267,28 +411,52 @@ describe('lock', () => {
     release();
   });
 
-  test('an old lock is stale even if its pid looks alive', () => {
+  test('an old lock on this host is not stale while its pid is alive', () => {
     const lock = path.join(tmpdir(), 'v.lock');
     fs.mkdirSync(lock);
     fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), time: 0 }));
-    assert.equal(launcher.lockIsStale(lock), true);
+    assert.equal(launcher.lockIsStale(lock), false);
   });
 
-  test('a lock from another host is not judged by local pids', () => {
+  test('a lock from another host is judged by age, not local pids', () => {
     const lock = path.join(tmpdir(), 'v.lock');
     fs.mkdirSync(lock);
     fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: 999999, host: 'elsewhere', time: Date.now() }));
     assert.equal(launcher.lockIsStale(lock, Date.now(), () => false), false);
+    assert.equal(launcher.lockIsStale(lock, Date.now() + 11 * 60 * 1000, () => false), true);
+  });
+
+  test('release leaves a lock that another process has taken over', () => {
+    const lock = path.join(tmpdir(), 'v.lock');
+    const release = launcher.acquireLock(lock);
+    fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: 4242, host: os.hostname(), time: 1 }));
+    release();
+    assert.equal(fs.existsSync(lock), true);
+  });
+
+  test('a failure writing the lock is a clean LauncherError and leaves no lock', () => {
+    const lock = path.join(tmpdir(), 'v.lock');
+    const writeFile = () => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    };
+    assert.throws(
+      () => launcher.acquireLock(lock, { writeFile }),
+      (err) => err instanceof launcher.LauncherError && /Could not create the setup lock.*ENOSPC/.test(err.message),
+    );
+    assert.equal(fs.existsSync(lock), false);
   });
 });
 
 describe('child environment', () => {
-  test('marks the launcher and increments the depth', () => {
+  test('marks the launcher and adds nothing else', () => {
     const env = launcher.childEnv({ HOME: '/h' }, 'uvx');
-    assert.equal(env.DEEPCTL_LAUNCHER, 'npm');
-    assert.equal(env.DEEPCTL_NPM_LAUNCHER_DEPTH, '1');
-    assert.equal(env.HOME, '/h');
+    assert.deepEqual(env, { HOME: '/h', DEEPCTL_LAUNCHER: 'npm' });
     assert.equal(launcher.childEnv({}, 'venv').DEEPCTL_LAUNCHER, 'npm');
+  });
+
+  test('npx and npm exec are reported as npx', () => {
+    assert.equal(launcher.childEnv({ npm_command: 'exec' }, 'uvx').DEEPCTL_LAUNCHER, 'npx');
+    assert.equal(launcher.childEnv({ npm_command: 'run-script' }, 'venv').DEEPCTL_LAUNCHER, 'npm');
   });
 
   test('the path strategy removes DEEPCTL_LAUNCHER', () => {
@@ -343,6 +511,7 @@ describe('resolveRunner', () => {
       realpath: (f) => f,
       isExecutable: (f) => f === '/bin/uv',
       exists: (f) => f.startsWith('/h/.cache/deepgram-cli/venvs/1.2.3/'),
+      trustRoot: () => true,
     });
     assert.equal(r.strategy, 'venv');
     assert.equal(r.command, '/h/.cache/deepgram-cli/venvs/1.2.3/bin/deepctl');
@@ -382,10 +551,13 @@ describe('bin/dg.js end to end', posixOnly, () => {
     return spawnSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
   }
 
-  test('aborts when started recursively', () => {
-    const r = runBin({ PATH: '/nonexistent', DEEPCTL_NPM_LAUNCHER_DEPTH: '1' });
-    assert.equal(r.status, 1);
-    assert.match(r.stderr, /recursively/);
+  test('a dg run from inside deepctl (nested launcher) still works', () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    fakeExe(bin, 'uv', '#!/bin/sh\necho nested-ok\n');
+    const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_LAUNCHER_DEPTH: '1' });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, 'nested-ok\n');
   });
 
   test('no uv and no Python: clear error on stderr, nothing on stdout, exit 1', () => {
@@ -399,11 +571,32 @@ describe('bin/dg.js end to end', posixOnly, () => {
   test('passes arguments, env and exit code through a fake uv', () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
-    fakeExe(bin, 'uv', '#!/bin/sh\necho "$DEEPCTL_LAUNCHER $DEEPCTL_NPM_LAUNCHER_DEPTH $*"\nexit 7\n');
+    fakeExe(bin, 'uv', '#!/bin/sh\necho "$DEEPCTL_LAUNCHER $*"\nexit 7\n');
     const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') }, ['listen', 'a b.wav']);
     assert.equal(r.status, 7);
     const version = launcher.packageVersion(PKG_DIR);
-    assert.equal(r.stdout, `npm 1 tool run --from deepctl==${version} deepctl listen a b.wav\n`);
+    assert.equal(r.stdout, `npm tool run --from deepctl==${version} deepctl listen a b.wav\n`);
+  });
+
+  test('a SIGINT sent only to the launcher reaches the child after the grace period', async () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    fakeExe(bin, 'deepctl', '#!/bin/sh\ntrap "echo got-INT; exit 130" INT\nwhile :; do sleep 0.1; done\n');
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, [BIN], {
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, DEEPCTL_NPM_RUNNER: 'path' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    await new Promise((r) => setTimeout(r, 500));
+    const sentAt = Date.now();
+    process.kill(child.pid, 'SIGINT');
+    const code = await new Promise((r) => child.on('exit', (c) => r(c)));
+    assert.equal(code, 130);
+    assert.match(out, /got-INT/);
+    assert.ok(Date.now() - sentAt >= 900, 'forwarded only after the grace period');
   });
 
   test('re-raises the signal the child died from', () => {

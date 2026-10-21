@@ -15,6 +15,8 @@ const MIN_PYTHON = [3, 10];
 const LOCK_WAIT_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_POLL_MS = 250;
+const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+const SIGNAL_GRACE_MS = 1000;
 const PROBE_TIMEOUT_MS = 10 * 1000;
 const RUNNERS = ['uvx', 'venv', 'path'];
 
@@ -146,12 +148,25 @@ function pythonCandidates(opts = {}) {
   const platform = opts.platform || process.platform;
   const candidates = [];
   if (isWindows(platform)) {
-    const py = whichAll('py', opts).filter((f) => !isWindowsAppsStub(f))[0];
-    if (py) {
-      for (const minor of [13, 12, 11, 10]) candidates.push({ command: py, args: [`-3.${minor}`] });
-    }
-    for (const exe of whichAll('python', opts)) {
-      if (!isWindowsAppsStub(exe)) candidates.push({ command: exe, args: [] });
+    // WindowsApps holds both the Store's "python" stub, which only prints
+    // an install hint, and real Store-installed Pythons. Try it last and let
+    // the version probe tell them apart.
+    const pys = whichAll('py', opts);
+    const pythons = whichAll('python', opts);
+    const ordered = [
+      ...pys.filter((f) => !isWindowsAppsStub(f)).map((f) => ({ f, py: true })),
+      ...pythons.filter((f) => !isWindowsAppsStub(f)).map((f) => ({ f, py: false })),
+      ...pys.filter(isWindowsAppsStub).map((f) => ({ f, py: true })),
+      ...pythons.filter(isWindowsAppsStub).map((f) => ({ f, py: false })),
+    ];
+    for (const { f, py } of ordered) {
+      if (!py) {
+        candidates.push({ command: f, args: [] });
+        continue;
+      }
+      for (const minor of [13, 12, 11, 10]) candidates.push({ command: f, args: [`-3.${minor}`] });
+      // Newer than 3.13, or a launcher configured with only a default.
+      candidates.push({ command: f, args: ['-3'] });
     }
     return candidates;
   }
@@ -203,7 +218,7 @@ function findPython(opts = {}) {
 
 // --- Cache directory ------------------------------------------------------
 
-function cacheRoots(opts = {}) {
+function cacheRootSpecs(opts = {}) {
   const env = opts.env || process.env;
   const platform = opts.platform || process.platform;
   const home = opts.home || os.homedir();
@@ -215,14 +230,65 @@ function cacheRoots(opts = {}) {
   else if (platform === 'darwin') base = p.join(home, 'Library', 'Caches');
   else base = env.XDG_CACHE_HOME && p.isAbsolute(env.XDG_CACHE_HOME) ? env.XDG_CACHE_HOME : p.join(home, '.cache');
   // The fallback covers containers run as an arbitrary UID with a HOME that
-  // does not exist or is read-only.
-  return [p.join(base, 'deepgram-cli', 'venvs'), p.join(tmpdir, `deepgram-cli-${uid}`, 'venvs')];
+  // does not exist or is read-only. It sits in a directory every user can
+  // write to, so it is held to a stricter ownership check (see rootTrusted).
+  return [
+    { dir: p.join(base, 'deepgram-cli', 'venvs'), shared: false },
+    { dir: p.join(tmpdir, `deepgram-cli-${uid}`, 'venvs'), shared: true },
+  ];
 }
 
-function ensureWritableDir(dir) {
+function cacheRoots(opts = {}) {
+  return cacheRootSpecs(opts).map((spec) => spec.dir);
+}
+
+function currentUid(opts) {
+  if (opts.uid !== undefined && typeof opts.uid === 'number') return opts.uid;
+  return process.getuid ? process.getuid() : null;
+}
+
+// Whatever is in a cache root gets executed, so the root and its parent
+// must be ours: real directories (not symlinks) owned by this uid that no
+// one else can write to. In a shared root such as /tmp, another user could
+// otherwise pre-create the directory and plant a "cached" deepctl, so it
+// must also be private (0700). Windows has no uid and per-user LOCALAPPDATA.
+function rootTrusted(spec, opts = {}) {
+  const platform = opts.platform || process.platform;
+  if (isWindows(platform)) return true;
+  const uid = currentUid(opts);
+  const lstat = opts.lstat || fs.lstatSync;
+  const forbidden = spec.shared ? 0o077 : 0o022;
+  for (const dir of [path.posix.dirname(spec.dir), spec.dir]) {
+    let st;
+    try {
+      st = lstat(dir);
+    } catch {
+      return false;
+    }
+    if (!st.isDirectory() || st.uid !== uid || (st.mode & forbidden) !== 0) return false;
+  }
+  return true;
+}
+
+function mkdirPrivate(dir) {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.accessSync(dir, fs.constants.W_OK);
+    fs.mkdirSync(dir, { mode: 0o700 });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
+}
+
+// Creates the root if needed and returns whether it is safe and writable.
+function prepareRoot(spec, opts = {}) {
+  const platform = opts.platform || process.platform;
+  const p = isWindows(platform) ? path.win32 : path.posix;
+  const top = p.dirname(spec.dir);
+  try {
+    fs.mkdirSync(p.dirname(top), { recursive: true });
+    mkdirPrivate(top);
+    mkdirPrivate(spec.dir);
+    if (!rootTrusted(spec, opts)) return false;
+    fs.accessSync(spec.dir, fs.constants.W_OK);
     return true;
   } catch {
     return false;
@@ -243,12 +309,24 @@ function venvLayout(dir, platform = process.platform) {
 
 function findCachedVenv(key, opts = {}) {
   const exists = opts.exists || fs.existsSync;
+  const trusted = opts.trustRoot || ((spec) => rootTrusted(spec, opts));
   const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;
-  for (const root of cacheRoots(opts)) {
-    const layout = venvLayout(p.join(root, key), opts.platform);
+  for (const spec of cacheRootSpecs(opts)) {
+    if (!trusted(spec)) continue;
+    const layout = venvLayout(p.join(spec.dir, key), opts.platform);
     if (exists(layout.marker) && exists(layout.deepctl)) return layout;
   }
   return null;
+}
+
+// Marks a venv as recently used, which keeps pruneSiblings away from it.
+function touchMarker(marker) {
+  try {
+    const now = new Date();
+    fs.utimesSync(marker, now, now);
+  } catch {
+    // Best effort: a read-only cache only loses the recency hint.
+  }
 }
 
 // --- Lock -----------------------------------------------------------------
@@ -275,8 +353,11 @@ function lockIsStale(lockDir, now = Date.now(), alive = pidAlive) {
     // the directory's age.
   }
   if (owner && typeof owner.pid === 'number') {
-    if (now - owner.time > LOCK_STALE_MS) return true;
-    return owner.host === os.hostname() && !alive(owner.pid);
+    // On this host the pid is authoritative: a slow first install (a big
+    // wheel on a bad network) can outlive any age limit. Across hosts
+    // (a shared home directory) the pid means nothing, so fall back to age.
+    if (owner.host === os.hostname()) return !alive(owner.pid);
+    return now - owner.time > LOCK_STALE_MS;
   }
   try {
     return now - fs.statSync(lockDir).mtimeMs > LOCK_STALE_MS;
@@ -293,16 +374,20 @@ function acquireLock(lockDir, opts = {}) {
   const onWait = opts.onWait || (() => {});
   const deadline = Date.now() + waitMs;
   let announced = false;
+  const writeFile = opts.writeFile || fs.writeFileSync;
   for (;;) {
+    let created = false;
     try {
       fs.mkdirSync(lockDir);
-      fs.writeFileSync(
-        path.join(lockDir, 'owner.json'),
-        JSON.stringify({ pid: process.pid, host: os.hostname(), time: Date.now() }),
-      );
-      return () => fs.rmSync(lockDir, { recursive: true, force: true });
+      created = true;
+      const owner = { pid: process.pid, host: os.hostname(), time: Date.now() };
+      writeFile(path.join(lockDir, 'owner.json'), JSON.stringify(owner));
+      return () => releaseLock(lockDir, owner);
     } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
+      if (created) fs.rmSync(lockDir, { recursive: true, force: true });
+      if (err.code !== 'EEXIST' || created) {
+        throw new LauncherError(`Could not create the setup lock ${lockDir}: ${err.message}`);
+      }
     }
     if (lockIsStale(lockDir)) {
       fs.rmSync(lockDir, { recursive: true, force: true });
@@ -319,6 +404,19 @@ function acquireLock(lockDir, opts = {}) {
   }
 }
 
+// Only removes the lock if it is still ours: if it was judged stale and
+// taken over while we ran, the new owner's lock must survive.
+function releaseLock(lockDir, owner) {
+  try {
+    const current = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+    if (current.pid === owner.pid && current.time === owner.time && current.host === owner.host) {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
+  } catch {
+    // Gone already, or not readable: either way it is not ours to remove.
+  }
+}
+
 // --- Venv bootstrap -------------------------------------------------------
 
 function runStep(command, args, what, hint, spawnSync) {
@@ -331,22 +429,43 @@ function runStep(command, args, what, hint, spawnSync) {
 const VENV_HINT = 'On Debian or Ubuntu, install python3-venv (sudo apt install python3-venv), or install uv instead.';
 const NETWORK_HINT = 'Check your network connection and that PyPI is reachable, then run dg again.';
 
-function pruneSiblings(root, keep) {
+// Removes other versions' venvs, but only ones nobody has used for a long
+// time: a dg pinned to an older npm version (npx @deepgram/cli@0.4.0, a
+// project-local install) may be running from one right now. Every run from
+// a cached venv refreshes its .complete mtime.
+function pruneSiblings(root, keep, now = Date.now()) {
+  let entries;
   try {
-    for (const entry of fs.readdirSync(root)) {
-      if (entry === keep || entry.endsWith('.lock')) continue;
-      if (fs.existsSync(path.join(root, `${entry}.lock`))) continue;
-      fs.rmSync(path.join(root, entry), { recursive: true, force: true });
-    }
+    entries = fs.readdirSync(root);
   } catch {
-    // Best effort: an old version left behind only costs disk space.
+    return;
+  }
+  for (const entry of entries) {
+    if (entry === keep || entry.endsWith('.lock')) continue;
+    try {
+      const lock = path.join(root, `${entry}.lock`);
+      if (fs.existsSync(lock) && !lockIsStale(lock, now)) continue;
+      const dir = path.join(root, entry);
+      let idle;
+      try {
+        idle = now - fs.statSync(path.join(dir, '.complete')).mtimeMs > PRUNE_AFTER_MS;
+      } catch {
+        // No marker: a build that died. Leave it until no live build could own it.
+        idle = now - fs.statSync(dir).mtimeMs > LOCK_STALE_MS;
+      }
+      if (idle) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best effort: an old version left behind only costs disk space.
+    }
   }
 }
 
 function buildVenv({ python, key, spec, version, opts = {} }) {
   const stderr = opts.stderr || process.stderr;
   const spawnSync = opts.spawnSync || childProcess.spawnSync;
-  const root = cacheRoots(opts).find(ensureWritableDir);
+  const prepare = opts.prepareRoot || ((spec) => prepareRoot(spec, opts));
+  const rootSpec = cacheRootSpecs(opts).find(prepare);
+  const root = rootSpec && rootSpec.dir;
   if (!root) throw new LauncherError('No writable cache directory for the Deepgram CLI.', 'Set XDG_CACHE_HOME to a writable directory, or install uv.');
   // Built in place: venv console scripts carry absolute shebangs, so a venv
   // built elsewhere and renamed into place would not run.
@@ -383,11 +502,11 @@ function buildVenv({ python, key, spec, version, opts = {} }) {
 
 function childEnv(env, strategy) {
   const out = { ...env };
-  out.DEEPCTL_NPM_LAUNCHER_DEPTH = String((parseInt(env.DEEPCTL_NPM_LAUNCHER_DEPTH, 10) || 0) + 1);
   // A deepctl the user installed themselves knows its own install method;
   // telling it "npm" would make `dg update` give the wrong advice.
   if (strategy === 'path') delete out.DEEPCTL_LAUNCHER;
-  else out.DEEPCTL_LAUNCHER = 'npm';
+  // npx and `npm exec` set npm_command=exec; a global `dg` does not.
+  else out.DEEPCTL_LAUNCHER = env.npm_command === 'exec' ? 'npx' : 'npm';
   return out;
 }
 
@@ -442,7 +561,10 @@ function resolveRunner(argv, opts = {}) {
 
   if (!forced || forced === 'venv') {
     const cached = findCachedVenv(key, opts);
-    if (cached) return { command: cached.deepctl, args: argv, strategy: 'venv' };
+    if (cached) {
+      touchMarker(cached.marker);
+      return { command: cached.deepctl, args: argv, strategy: 'venv' };
+    }
   }
 
   if (!forced || forced === 'uvx') {
@@ -460,10 +582,6 @@ function resolveRunner(argv, opts = {}) {
 function run(argv = process.argv.slice(2), opts = {}) {
   const env = opts.env || process.env;
   const stderr = opts.stderr || process.stderr;
-  if ((parseInt(env.DEEPCTL_NPM_LAUNCHER_DEPTH, 10) || 0) >= 1) {
-    stderr.write('dg: the npm launcher started itself recursively; aborting. Check DEEPCTL_NPM_RUNNER and PATH.\n');
-    process.exit(1);
-  }
 
   let runner;
   try {
@@ -480,14 +598,26 @@ function run(argv = process.argv.slice(2), opts = {}) {
     env: childEnv(env, runner.strategy),
   });
 
-  // Ctrl-C and Ctrl-\ reach the child straight from the terminal (same
-  // process group); the parent only has to survive them. TERM and HUP come
-  // from whoever is managing *this* process, so pass them on.
-  const ignore = () => {};
+  // TERM and HUP come from whoever manages *this* process: pass them on.
+  // Ctrl-C and Ctrl-\ from a terminal reach the child directly (same
+  // process group), so forwarding them at once would deliver them twice.
+  // But an IDE, supervisor or `timeout -s INT` signals only our pid; if the
+  // child is still running after a grace period, it never got the signal.
+  const timers = new Set();
+  const childRunning = () => child.exitCode === null && child.signalCode === null;
   const forward = (sig) => () => child.kill(sig);
-  const handlers = { SIGINT: ignore, SIGTERM: forward('SIGTERM') };
+  const forwardIfMissed = (sig) => () => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      if (childRunning()) child.kill(sig);
+    }, SIGNAL_GRACE_MS);
+    timers.add(timer);
+  };
+  // On Windows a console Ctrl-C reaches every attached process, and
+  // child.kill() would terminate the child outright rather than interrupt it.
+  const handlers = { SIGINT: isWindows(process.platform) ? () => {} : forwardIfMissed('SIGINT'), SIGTERM: forward('SIGTERM') };
   if (!isWindows(process.platform)) {
-    handlers.SIGQUIT = ignore;
+    handlers.SIGQUIT = forwardIfMissed('SIGQUIT');
     handlers.SIGHUP = forward('SIGHUP');
   }
   for (const [sig, fn] of Object.entries(handlers)) process.on(sig, fn);
@@ -498,6 +628,7 @@ function run(argv = process.argv.slice(2), opts = {}) {
   });
 
   child.on('exit', (code, signal) => {
+    for (const timer of timers) clearTimeout(timer);
     for (const [sig, fn] of Object.entries(handlers)) process.removeListener(sig, fn);
     const action = exitAction(code, signal);
     if (action.signal) {
@@ -519,6 +650,7 @@ function run(argv = process.argv.slice(2), opts = {}) {
 module.exports = {
   LauncherError,
   acquireLock,
+  cacheRootSpecs,
   cacheRoots,
   childEnv,
   exitAction,
@@ -530,10 +662,14 @@ module.exports = {
   lockIsStale,
   packageVersion,
   parseProbeOutput,
+  probePython,
   pathDirs,
   pypiSpec,
+  pruneSiblings,
   pythonCandidates,
+  releaseLock,
   resolveRunner,
+  rootTrusted,
   run,
   venvKey,
   venvLayout,
