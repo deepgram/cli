@@ -975,6 +975,9 @@ class TestSkillsStartupCheck:
         }
         with patch.dict(os.environ, env, clear=False):
             assert startup_check._is_oneshot() is False
+        from deepctl_core.launcher import reset_launcher_for_tests
+
+        reset_launcher_for_tests()
         with patch.dict(os.environ, env, clear=False):
             del os.environ["DEEPCTL_LAUNCHER"]
             assert startup_check._is_oneshot() is True

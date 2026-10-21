@@ -7,18 +7,8 @@ import sys
 from enum import Enum
 from pathlib import Path
 
+from deepctl_core.launcher import get_launcher, launched_via_npm
 from pydantic import BaseModel
-
-# The @deepgram/cli npm launcher sets this in deepctl's environment. Its
-# venv or uv cache is private to the launcher, so pip/uv commands run from
-# inside it would update the wrong thing; npm is the only way to update.
-LAUNCHER_ENV_VAR = "DEEPCTL_LAUNCHER"
-NPM_UPDATE_COMMAND = "npm install -g @deepgram/cli@latest"
-
-
-def launched_via_npm() -> bool:
-    """Return True if deepctl was started by the @deepgram/cli npm launcher."""
-    return os.environ.get(LAUNCHER_ENV_VAR) == "npm"
 
 
 class InstallMethod(str, Enum):
@@ -136,9 +126,17 @@ class InstallationDetector:
         if info.method == InstallMethod.HOMEBREW:
             return "Please update using Homebrew: brew upgrade deepctl"
 
+        # The launcher's venv or uv cache is private to it, so pip/uv run
+        # from inside would update the wrong thing; only npm can update it.
         if info.method == InstallMethod.NPM:
+            if get_launcher() == "npx":
+                return (
+                    "Running via npx. Use the latest version with: "
+                    "npx @deepgram/cli@latest"
+                )
             return (
-                f"Installed via npm. Update with: {NPM_UPDATE_COMMAND} "
+                "Installed via npm. Update with: "
+                "npm install -g @deepgram/cli@latest "
                 "(or run npx @deepgram/cli@latest)"
             )
 

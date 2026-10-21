@@ -282,6 +282,22 @@ class TestGetUpdateInstructions:
         assert "npx @deepgram/cli@latest" in instructions
 
 
+    @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npx"}, clear=False)
+    def test_npx_instructions(self, detector):
+        from deepctl_cmd_update.installation import InstallationInfo
+
+        info = InstallationInfo(
+            method=InstallMethod.NPM,
+            path="/home/u/.cache/deepgram-cli/venvs/0.4.0",
+            virtual_env=True,
+            editable=False,
+            python_executable="/home/u/.cache/deepgram-cli/venvs/0.4.0/bin/python",
+        )
+        instructions = detector.get_update_instructions(info)
+        assert "npx @deepgram/cli@latest" in instructions
+        assert "npm install -g" not in instructions
+
+
 class TestNpmLauncherDetection:
     """The npm launcher marks deepctl's environment with DEEPCTL_LAUNCHER=npm."""
 
@@ -314,6 +330,14 @@ class TestNpmLauncherDetection:
         assert (
             detector._detect_method(None, in_venv=False, is_editable=False)
             == InstallMethod.UVX
+        )
+
+    @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npx"}, clear=False)
+    def test_npx_is_the_npm_method(self):
+        detector = InstallationDetector()
+        assert (
+            detector._detect_method(None, in_venv=True, is_editable=False)
+            == InstallMethod.NPM
         )
 
     @patch.dict("os.environ", {}, clear=False)

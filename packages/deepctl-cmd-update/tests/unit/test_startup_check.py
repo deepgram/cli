@@ -78,6 +78,18 @@ class TestOneshotDetection:
         """npm runs deepctl via uv, but the npm install persists."""
         assert _is_oneshot() is False
 
+    @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npx"}, clear=True)
+    def test_upgrade_hint_under_npx(self):
+        from deepctl_cmd_update.startup_check import upgrade_hint
+
+        assert upgrade_hint() == "npx @deepgram/cli@latest"
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_upgrade_hint_default(self):
+        from deepctl_cmd_update.startup_check import upgrade_hint
+
+        assert upgrade_hint() == "dg update"
+
 
 class TestCacheTimestamp:
     """Test file-based timestamp caching."""
