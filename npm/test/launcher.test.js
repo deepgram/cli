@@ -301,7 +301,7 @@ describe('cache directory', () => {
 });
 
 describe('cache root ownership (POSIX)', () => {
-  const dirStat = (uid, mode, isDir = true) => ({ uid, mode: (isDir ? 0o040000 : 0o120000) | mode, isDirectory: () => isDir, isSymbolicLink: () => !isDir });
+  const dirStat = (uid, mode, isDir = true, gid = uid) => ({ uid, gid, mode: (isDir ? 0o040000 : 0o120000) | mode, isDirectory: () => isDir, isSymbolicLink: () => !isDir });
   const shared = { dir: '/tmp/deepgram-cli-1000/venvs', shared: true };
   const home = { dir: '/home/u/.cache/deepgram-cli/venvs', shared: false };
   // Sane ancestors; individual tests override entries.
@@ -314,7 +314,7 @@ describe('cache root ownership (POSIX)', () => {
   };
   const check = (spec, stats, realpath = (d) => d) => {
     const all = { ...ancestors, ...stats };
-    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, realpath, lstat: (d) => {
+    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, gid: 1000, realpath, lstat: (d) => {
       if (!(d in all)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       return all[d];
     } });
@@ -351,8 +351,8 @@ describe('cache root ownership (POSIX)', () => {
     assert.equal(check(home, ok), true);
     // HOME=/tmp style: ~/.cache made world-writable by someone else.
     assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(2000, 0o777) }), false);
-    // Ours but group-writable and not sticky: still swappable by the group.
-    assert.equal(check(home, { ...ok, '/home/u': dirStat(1000, 0o775) }), false);
+    // Ours but group-writable by a shared group, not sticky: swappable by the group.
+    assert.equal(check(home, { ...ok, '/home/u': dirStat(1000, 0o775, true, 50) }), false);
     // World-writable but sticky and root-owned, like /tmp: fine.
     assert.equal(check(home, { ...ok, '/home': dirStat(0, 0o1777) }), true);
     // Owned by a third user, even read-only: rejected.
@@ -387,6 +387,32 @@ describe('cache root ownership (POSIX)', () => {
     const link = { dir: path.join(base, 'linked', 'venvs'), shared: true };
     fs.symlinkSync(path.dirname(spec.dir), path.join(base, 'linked'));
     assert.equal(launcher.rootTrusted(link), false);
+  });
+
+  test('our own group-writable ~/.cache in our private group is accepted (umask 002)', () => {
+    const base = '/home/u/.cache/deepgram-cli';
+    const ok = { [base]: dirStat(1000, 0o700), [`${base}/venvs`]: dirStat(1000, 0o700) };
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775) }), true);
+    assert.equal(check(home, { ...ok, '/home/u': dirStat(1000, 0o775) }), true);
+    // Group-writable with a shared group (staff, users): rejected.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775, true, 50) }), false);
+    // Writable by everyone: rejected even when ours.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o777) }), false);
+    // Group-writable, our gid, but owned by someone else: rejected.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(2000, 0o775, true, 1000) }), false);
+  });
+
+  test('prepareRoot creates missing parents 0700 even under umask 002', posixOnly, () => {
+    const home = tmpdir();
+    const spec = { dir: path.join(home, '.cache', 'deepgram-cli', 'venvs'), shared: false };
+    const old = process.umask(0o002);
+    try {
+      assert.equal(launcher.prepareRoot(spec), true);
+    } finally {
+      process.umask(old);
+    }
+    assert.equal(fs.statSync(path.join(home, '.cache')).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(spec.dir).mode & 0o777, 0o700);
   });
 
   test('Windows skips the ownership check', () => {
@@ -701,6 +727,50 @@ describe('bin/dg.js end to end', posixOnly, () => {
     assert.equal(code, 130);
     assert.match(out, /got-INT/);
     assert.ok(Date.now() - sentAt >= 900, 'forwarded only after the grace period');
+  });
+
+  // Regression: reading process.stdin.isTTY made Node set O_NONBLOCK on a
+  // piped fd 0, which deepctl inherited; a reader that had to wait for
+  // input (an MCP host, `ffmpeg | dg listen`) then failed.
+  const python3 = ['/usr/bin/python3', '/usr/local/bin/python3', '/opt/homebrew/bin/python3'].find((f) => fs.existsSync(f));
+  test('fds 0-2 stay blocking for deepctl, and a delayed stdin writer works', { skip: !python3 && 'needs python3' }, async () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    const checker = [
+      `#!${python3}`,
+      'import fcntl, os, sys',
+      'flags = [bool(fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_NONBLOCK) for fd in (0, 1, 2)]',
+      'data = sys.stdin.read()',
+      'print("nonblock=%s read=%r" % (flags, data))',
+      '',
+    ].join('\n');
+    // A fake python3 so the venv strategy runs (and writes its setup line
+    // to stderr) without touching PyPI: `-m venv` lays down the checker as
+    // deepctl, everything else succeeds.
+    fakeExe(bin, 'python3', [
+      '#!/bin/sh',
+      'case "$1 $2" in',
+      '  "-c "*) echo "(3, 12)"; exit 0;;',
+      `  "-m venv") mkdir -p "$3/bin" && cp "${path.join(home, 'checker')}" "$3/bin/deepctl" && printf '#!/bin/sh\\nexit 0\\n' > "$3/bin/python" && chmod +x "$3/bin/deepctl" "$3/bin/python"; exit 0;;`,
+      'esac',
+      'exit 0',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(home, 'checker'), checker);
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, [BIN], {
+      env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_RUNNER: 'venv' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    setTimeout(() => child.stdin.end('hello\n'), 1000);
+    const code = await new Promise((r) => child.on('exit', (c) => r(c)));
+    assert.equal(code, 0, err);
+    assert.match(err, /Setting up Deepgram CLI/);
+    assert.equal(out.trim(), "nonblock=[False, False, False] read='hello\\n'");
   });
 
   test('re-raises the signal the child died from', () => {

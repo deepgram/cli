@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const tty = require('node:tty');
 
 const PKG_DIR = path.resolve(__dirname, '..');
 const MIN_PYTHON = [3, 10];
@@ -20,12 +21,20 @@ const LOCK_MAX_MS = 60 * 60 * 1000;
 const LOCK_POLL_MS = 250;
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const SIGNAL_GRACE_MS = 1000;
+const DOUBLE_INTERRUPT_MS = 3000;
 const PROBE_TIMEOUT_MS = 10 * 1000;
 const RUNNERS = ['uvx', 'venv', 'path'];
 
 // Prints the version first so a Python without venv/ensurepip (Debian's
 // python3 without python3-venv) still reports what it is.
 const PROBE_CODE = 'import sys;print(tuple(sys.version_info[:2]));import venv,ensurepip';
+
+// Launcher messages go straight to fd 2. Touching process.stdin, stdout or
+// stderr makes Node wrap the fd in a stream, and for a pipe libuv then sets
+// O_NONBLOCK on it. deepctl inherits the same open file, and a non-blocking
+// stdin breaks `ffmpeg ... | dg listen` and MCP hosts that send their first
+// message a moment after starting `dg mcp`.
+const fdStderr = { write: (text) => fs.writeSync(2, text) };
 
 class LauncherError extends Error {
   constructor(message, hint = '') {
@@ -292,10 +301,14 @@ function rootTrusted(spec, opts = {}) {
   } catch {
     return false;
   }
-  return ancestorsSafe(above, uid, lstat, true) && ancestorsSafe(real, uid, lstat, false);
+  const gid = opts.gid !== undefined ? opts.gid : process.getgid ? process.getgid() : null;
+  return ancestorsSafe(above, uid, gid, lstat, true) && ancestorsSafe(real, uid, gid, lstat, false);
 }
 
-function ancestorsSafe(start, uid, lstat, allowLinks) {
+// Group-writable is fine for a directory we own whose group is our own
+// primary group: the user-private-group convention (Ubuntu, Fedora; umask
+// 002) makes ~/.cache 0775 with a group that only we are in.
+function ancestorsSafe(start, uid, gid, lstat, allowLinks) {
   for (let dir = start; ; dir = path.posix.dirname(dir)) {
     let st;
     try {
@@ -306,7 +319,9 @@ function ancestorsSafe(start, uid, lstat, allowLinks) {
     const link = st.isSymbolicLink ? st.isSymbolicLink() : false;
     if (link ? !allowLinks : !st.isDirectory()) return false;
     if (st.uid !== 0 && st.uid !== uid) return false;
-    if (!link && (st.mode & 0o022) !== 0 && (st.mode & STICKY) === 0) return false;
+    const privateGroup = st.uid === uid && st.gid === gid;
+    const writableByOthers = (st.mode & 0o002) !== 0 || ((st.mode & 0o020) !== 0 && !privateGroup);
+    if (!link && writableByOthers && (st.mode & STICKY) === 0) return false;
     if (dir === '/' || dir === '.') return true;
   }
 }
@@ -325,7 +340,9 @@ function prepareRoot(spec, opts = {}) {
   const p = isWindows(platform) ? path.win32 : path.posix;
   const top = p.dirname(spec.dir);
   try {
-    fs.mkdirSync(p.dirname(top), { recursive: true });
+    // 0700 so that, under umask 002, we do not create a group-writable
+    // ~/.cache ourselves.
+    fs.mkdirSync(p.dirname(top), { recursive: true, mode: 0o700 });
     mkdirPrivate(top);
     mkdirPrivate(spec.dir);
     if (!rootTrusted(spec, opts)) return false;
@@ -473,6 +490,11 @@ function readOwnerRaw(lockDir) {
 // only one waiter gets the stale lock) and delete it only if what moved is
 // still the owner that was judged stale. If a fresh lock was moved by
 // mistake, try to put it back; the caller then simply retries.
+//
+// A residual interleaving remains with three or more waiters (one restores
+// a lock another has already replaced). Directory locks cannot close it
+// completely, and it needs a stale lock plus three concurrent first runs;
+// the worst case is two builds of the same venv racing, which is accepted.
 function breakStaleLock(lockDir) {
   const judged = readOwnerRaw(lockDir);
   const grave = `${lockDir}.stale.${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
@@ -549,7 +571,7 @@ function pruneSiblings(root, keep, now = Date.now()) {
 }
 
 function buildVenv({ python, key, spec, version, opts = {} }) {
-  const stderr = opts.stderr || process.stderr;
+  const stderr = opts.stderr || fdStderr;
   const spawnSync = opts.spawnSync || childProcess.spawnSync;
   const prepare = opts.prepareRoot || ((spec) => prepareRoot(spec, opts));
   const rootSpec = cacheRootSpecs(opts).find(prepare);
@@ -676,7 +698,7 @@ function resolveRunner(argv, opts = {}) {
 
 function run(argv = process.argv.slice(2), opts = {}) {
   const env = opts.env || process.env;
-  const stderr = opts.stderr || process.stderr;
+  const stderr = opts.stderr || fdStderr;
 
   let runner;
   try {
@@ -715,8 +737,22 @@ function run(argv = process.argv.slice(2), opts = {}) {
   // is still cleaning up after the first. On Windows a console Ctrl-C
   // reaches every attached process, and child.kill() would terminate the
   // child outright rather than interrupt it.
-  const terminal = Boolean(process.stdin.isTTY || process.stdout.isTTY || process.stderr.isTTY);
-  const interrupt = (sig) => (isWindows(process.platform) || terminal ? () => {} : forwardIfMissed(sig));
+  // isatty(), not process.stdin.isTTY: see fdStderr for why.
+  const terminal = [0, 1, 2].some((fd) => tty.isatty(fd));
+  // A second Ctrl-C within a few seconds means "stop now": pass that one on
+  // even under a terminal, in case the child is ignoring or slow to act on
+  // the first.
+  let lastInterrupt = 0;
+  const onTerminalInterrupt = (sig) => () => {
+    const now = Date.now();
+    if (now - lastInterrupt <= DOUBLE_INTERRUPT_MS && childRunning()) child.kill(sig);
+    lastInterrupt = now;
+  };
+  const interrupt = (sig) => {
+    if (isWindows(process.platform)) return () => {};
+    if (terminal) return sig === 'SIGINT' ? onTerminalInterrupt(sig) : () => {};
+    return forwardIfMissed(sig);
+  };
   const handlers = { SIGINT: interrupt('SIGINT'), SIGTERM: forward('SIGTERM') };
   if (!isWindows(process.platform)) {
     handlers.SIGQUIT = interrupt('SIGQUIT');
@@ -768,6 +804,7 @@ module.exports = {
   parseProbeOutput,
   probePython,
   pathDirs,
+  prepareRoot,
   pypiSpec,
   pruneSiblings,
   pythonCandidates,
