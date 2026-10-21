@@ -14,6 +14,9 @@ const PKG_DIR = path.resolve(__dirname, '..');
 const MIN_PYTHON = [3, 10];
 const LOCK_WAIT_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 10 * 60 * 1000;
+// No first-run install takes this long; past it a same-host lock is
+// abandoned even if its pid has been reused by an unrelated process.
+const LOCK_MAX_MS = 60 * 60 * 1000;
 const LOCK_POLL_MS = 250;
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const SIGNAL_GRACE_MS = 1000;
@@ -247,27 +250,65 @@ function currentUid(opts) {
   return process.getuid ? process.getuid() : null;
 }
 
+const STICKY = 0o1000;
+
 // Whatever is in a cache root gets executed, so the root and its parent
 // must be ours: real directories (not symlinks) owned by this uid that no
 // one else can write to. In a shared root such as /tmp, another user could
 // otherwise pre-create the directory and plant a "cached" deepctl, so it
-// must also be private (0700). Windows has no uid and per-user LOCALAPPDATA.
+// must also be private (0700).
+//
+// Every ancestor above them matters too: whoever can rename entries in an
+// ancestor can swap our cache for theirs between our check and our exec.
+// So each ancestor must belong to root or to us, and if others can write to
+// it, it must be sticky (like /tmp), which stops them renaming our entries.
+// Windows has no uid and a per-user LOCALAPPDATA.
 function rootTrusted(spec, opts = {}) {
   const platform = opts.platform || process.platform;
   if (isWindows(platform)) return true;
   const uid = currentUid(opts);
   const lstat = opts.lstat || fs.lstatSync;
   const forbidden = spec.shared ? 0o077 : 0o022;
-  for (const dir of [path.posix.dirname(spec.dir), spec.dir]) {
+  const statDir = (dir) => {
+    try {
+      const st = lstat(dir);
+      return st.isDirectory() ? st : null;
+    } catch {
+      return null;
+    }
+  };
+  const top = path.posix.dirname(spec.dir);
+  for (const dir of [top, spec.dir]) {
+    const st = statDir(dir);
+    if (!st || st.uid !== uid || (st.mode & forbidden) !== 0) return false;
+  }
+  // Both the path as written (whose symlinks, like macOS's /var, must not
+  // be replaceable) and the real path it resolves to.
+  const realpath = opts.realpath || fs.realpathSync;
+  const above = path.posix.dirname(top);
+  let real;
+  try {
+    real = realpath(above);
+  } catch {
+    return false;
+  }
+  return ancestorsSafe(above, uid, lstat, true) && ancestorsSafe(real, uid, lstat, false);
+}
+
+function ancestorsSafe(start, uid, lstat, allowLinks) {
+  for (let dir = start; ; dir = path.posix.dirname(dir)) {
     let st;
     try {
       st = lstat(dir);
     } catch {
       return false;
     }
-    if (!st.isDirectory() || st.uid !== uid || (st.mode & forbidden) !== 0) return false;
+    const link = st.isSymbolicLink ? st.isSymbolicLink() : false;
+    if (link ? !allowLinks : !st.isDirectory()) return false;
+    if (st.uid !== 0 && st.uid !== uid) return false;
+    if (!link && (st.mode & 0o022) !== 0 && (st.mode & STICKY) === 0) return false;
+    if (dir === '/' || dir === '.') return true;
   }
-  return true;
 }
 
 function mkdirPrivate(dir) {
@@ -314,9 +355,17 @@ function findCachedVenv(key, opts = {}) {
   for (const spec of cacheRootSpecs(opts)) {
     if (!trusted(spec)) continue;
     const layout = venvLayout(p.join(spec.dir, key), opts.platform);
-    if (exists(layout.marker) && exists(layout.deepctl)) return layout;
+    if (venvUsable(layout, exists)) return layout;
   }
   return null;
+}
+
+// A venv's python is a link to the interpreter that built it. When that
+// interpreter is uninstalled (brew, pyenv, a distro upgrade), every console
+// script fails with a confusing ENOENT, so a venv without a working python
+// is treated as missing and rebuilt. existsSync follows the link.
+function venvUsable(layout, exists = fs.existsSync) {
+  return exists(layout.marker) && exists(layout.deepctl) && exists(layout.python);
 }
 
 // Marks a venv as recently used, which keeps pruneSiblings away from it.
@@ -353,10 +402,16 @@ function lockIsStale(lockDir, now = Date.now(), alive = pidAlive) {
     // the directory's age.
   }
   if (owner && typeof owner.pid === 'number') {
-    // On this host the pid is authoritative: a slow first install (a big
-    // wheel on a bad network) can outlive any age limit. Across hosts
-    // (a shared home directory) the pid means nothing, so fall back to age.
-    if (owner.host === os.hostname()) return !alive(owner.pid);
+    if (owner.host === os.hostname()) {
+      // Our own pid in someone else's lock means the pid was reused: a
+      // container that crashed mid-setup restarts as pid 1 with the same
+      // hostname and cache volume. A live pid is otherwise trusted for a
+      // slow install, up to an hour, after which it must be a reused pid.
+      if (owner.pid === process.pid) return true;
+      if (!alive(owner.pid)) return true;
+      return now - owner.time > LOCK_MAX_MS;
+    }
+    // Across hosts (a shared home directory) the pid means nothing.
     return now - owner.time > LOCK_STALE_MS;
   }
   try {
@@ -390,7 +445,7 @@ function acquireLock(lockDir, opts = {}) {
       }
     }
     if (lockIsStale(lockDir)) {
-      fs.rmSync(lockDir, { recursive: true, force: true });
+      breakStaleLock(lockDir);
       continue;
     }
     if (Date.now() >= deadline) {
@@ -401,6 +456,39 @@ function acquireLock(lockDir, opts = {}) {
       announced = true;
     }
     sleepSync(pollMs);
+  }
+}
+
+function readOwnerRaw(lockDir) {
+  try {
+    return fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+// Two waiters can both judge the same lock stale. If each simply deleted
+// it, the slower one could delete the lock the faster one has just taken.
+// Instead, move the lock aside under a unique name (rename is atomic, so
+// only one waiter gets the stale lock) and delete it only if what moved is
+// still the owner that was judged stale. If a fresh lock was moved by
+// mistake, try to put it back; the caller then simply retries.
+function breakStaleLock(lockDir) {
+  const judged = readOwnerRaw(lockDir);
+  const grave = `${lockDir}.stale.${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    fs.renameSync(lockDir, grave);
+  } catch {
+    return; // Someone else moved or removed it first.
+  }
+  if (readOwnerRaw(grave) === judged) {
+    fs.rmSync(grave, { recursive: true, force: true });
+    return;
+  }
+  try {
+    fs.renameSync(grave, lockDir);
+  } catch {
+    // A new lock exists already; leave the moved one for pruning.
   }
 }
 
@@ -477,7 +565,8 @@ function buildVenv({ python, key, spec, version, opts = {} }) {
   const onExit = () => release();
   process.once('exit', onExit);
   try {
-    if (fs.existsSync(layout.marker)) return layout;
+    if (venvUsable(layout)) return layout;
+    // Half-built, or broken by a removed base interpreter: start over.
     fs.rmSync(layout.dir, { recursive: true, force: true });
     stderr.write(`Setting up Deepgram CLI ${version} (one-time, ~1 min)...\n`);
     const pip = [layout.python, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '-q'];
@@ -500,13 +589,19 @@ function buildVenv({ python, key, spec, version, opts = {} }) {
 
 // --- Child environment and exit mapping ------------------------------------
 
-function childEnv(env, strategy) {
+// npx and `npm exec` unpack packages under npm's cache in a `_npx`
+// directory. Where this package lives is what counts, not how the parent
+// was started: a global dg run from inside an npx process is still global.
+function launcherKind(pkgDir = PKG_DIR) {
+  return pkgDir.split(/[\\/]/).includes('_npx') ? 'npx' : 'npm';
+}
+
+function childEnv(env, strategy, pkgDir = PKG_DIR) {
   const out = { ...env };
   // A deepctl the user installed themselves knows its own install method;
   // telling it "npm" would make `dg update` give the wrong advice.
   if (strategy === 'path') delete out.DEEPCTL_LAUNCHER;
-  // npx and `npm exec` set npm_command=exec; a global `dg` does not.
-  else out.DEEPCTL_LAUNCHER = env.npm_command === 'exec' ? 'npx' : 'npm';
+  else out.DEEPCTL_LAUNCHER = launcherKind(pkgDir);
   return out;
 }
 
@@ -587,9 +682,10 @@ function run(argv = process.argv.slice(2), opts = {}) {
   try {
     runner = resolveRunner(argv, opts);
   } catch (err) {
-    if (!(err instanceof LauncherError)) throw err;
-    const hint = err.hint ? `\n${err.hint}` : '';
-    stderr.write(`dg: ${err.message.trimStart()}${hint}\n`);
+    // Filesystem surprises (a cache directory changing underneath us) get
+    // the same one-line treatment as expected failures, not a stack trace.
+    const hint = err instanceof LauncherError && err.hint ? `\n${err.hint}` : '';
+    stderr.write(`dg: ${String(err.message || err).trimStart()}${hint}\n`);
     process.exit(1);
   }
 
@@ -613,11 +709,17 @@ function run(argv = process.argv.slice(2), opts = {}) {
     }, SIGNAL_GRACE_MS);
     timers.add(timer);
   };
-  // On Windows a console Ctrl-C reaches every attached process, and
-  // child.kill() would terminate the child outright rather than interrupt it.
-  const handlers = { SIGINT: isWindows(process.platform) ? () => {} : forwardIfMissed('SIGINT'), SIGTERM: forward('SIGTERM') };
+  //
+  // With a terminal attached, assume the signal came from it and reached the
+  // child too: a second, forwarded interrupt would cut short a child that
+  // is still cleaning up after the first. On Windows a console Ctrl-C
+  // reaches every attached process, and child.kill() would terminate the
+  // child outright rather than interrupt it.
+  const terminal = Boolean(process.stdin.isTTY || process.stdout.isTTY || process.stderr.isTTY);
+  const interrupt = (sig) => (isWindows(process.platform) || terminal ? () => {} : forwardIfMissed(sig));
+  const handlers = { SIGINT: interrupt('SIGINT'), SIGTERM: forward('SIGTERM') };
   if (!isWindows(process.platform)) {
-    handlers.SIGQUIT = forwardIfMissed('SIGQUIT');
+    handlers.SIGQUIT = interrupt('SIGQUIT');
     handlers.SIGHUP = forward('SIGHUP');
   }
   for (const [sig, fn] of Object.entries(handlers)) process.on(sig, fn);
@@ -652,7 +754,9 @@ module.exports = {
   acquireLock,
   cacheRootSpecs,
   cacheRoots,
+  breakStaleLock,
   childEnv,
+  launcherKind,
   exitAction,
   exeNames,
   findCachedVenv,
@@ -673,6 +777,7 @@ module.exports = {
   run,
   venvKey,
   venvLayout,
+  venvUsable,
   versionAtLeast,
   which,
   whichAll,

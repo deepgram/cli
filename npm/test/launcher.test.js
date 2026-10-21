@@ -24,6 +24,12 @@ function fakeExe(dir, name, body = '#!/bin/sh\nexit 0\n') {
   return file;
 }
 
+// A lock owned by another live process on this host (the test runner).
+function liveForeignLock(lock, time = Date.now()) {
+  fs.mkdirSync(lock);
+  fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.ppid, host: os.hostname(), time }));
+}
+
 const posixOnly = { skip: process.platform === 'win32' && 'POSIX shell scripts' };
 
 describe('package.json', () => {
@@ -261,11 +267,30 @@ describe('cache directory', () => {
 
   test('a cached venv is used only when complete, from either root', () => {
     const opts = { env: {}, platform: 'linux', home: '/home/u', tmpdir: '/tmp', uid: 1, trustRoot: () => true };
-    const files = new Set(['/tmp/deepgram-cli-1/venvs/1.0.0/.complete', '/tmp/deepgram-cli-1/venvs/1.0.0/bin/deepctl']);
+    const files = new Set(['/tmp/deepgram-cli-1/venvs/1.0.0/.complete', '/tmp/deepgram-cli-1/venvs/1.0.0/bin/deepctl', '/tmp/deepgram-cli-1/venvs/1.0.0/bin/python']);
     const hit = launcher.findCachedVenv('1.0.0', { ...opts, exists: (f) => files.has(f) });
     assert.equal(hit.deepctl, '/tmp/deepgram-cli-1/venvs/1.0.0/bin/deepctl');
     files.delete('/tmp/deepgram-cli-1/venvs/1.0.0/.complete');
     assert.equal(launcher.findCachedVenv('1.0.0', { ...opts, exists: (f) => files.has(f) }), null);
+  });
+
+  test('a venv whose python no longer resolves is not used', () => {
+    const opts = { env: {}, platform: 'linux', home: '/home/u', tmpdir: '/tmp', uid: 1, trustRoot: () => true };
+    const files = new Set(['/home/u/.cache/deepgram-cli/venvs/1.0.0/.complete', '/home/u/.cache/deepgram-cli/venvs/1.0.0/bin/deepctl']);
+    assert.equal(launcher.findCachedVenv('1.0.0', { ...opts, exists: (f) => files.has(f) }), null);
+  });
+
+  test('a dangling bin/python symlink makes a venv unusable (real filesystem)', posixOnly, () => {
+    const dir = tmpdir();
+    const layout = launcher.venvLayout(dir, 'linux');
+    fs.mkdirSync(path.dirname(layout.python), { recursive: true });
+    fs.writeFileSync(layout.marker, '');
+    fakeExe(path.dirname(layout.deepctl), 'deepctl');
+    fs.symlinkSync('/nonexistent/python3', layout.python);
+    assert.equal(launcher.venvUsable(layout), false);
+    fs.unlinkSync(layout.python);
+    fs.symlinkSync(process.execPath, layout.python);
+    assert.equal(launcher.venvUsable(layout), true);
   });
 
   test('an untrusted root is never used, however complete its venv looks', () => {
@@ -276,15 +301,26 @@ describe('cache directory', () => {
 });
 
 describe('cache root ownership (POSIX)', () => {
-  const dirStat = (uid, mode, isDir = true) => ({ uid, mode: (isDir ? 0o040000 : 0o120000) | mode, isDirectory: () => isDir });
+  const dirStat = (uid, mode, isDir = true) => ({ uid, mode: (isDir ? 0o040000 : 0o120000) | mode, isDirectory: () => isDir, isSymbolicLink: () => !isDir });
   const shared = { dir: '/tmp/deepgram-cli-1000/venvs', shared: true };
   const home = { dir: '/home/u/.cache/deepgram-cli/venvs', shared: false };
-  const check = (spec, stats) => launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, lstat: (d) => {
-    if (!(d in stats)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    return stats[d];
-  } });
+  // Sane ancestors; individual tests override entries.
+  const ancestors = {
+    '/': dirStat(0, 0o755),
+    '/tmp': dirStat(0, 0o1777),
+    '/home': dirStat(0, 0o755),
+    '/home/u': dirStat(1000, 0o755),
+    '/home/u/.cache': dirStat(1000, 0o700),
+  };
+  const check = (spec, stats, realpath = (d) => d) => {
+    const all = { ...ancestors, ...stats };
+    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, realpath, lstat: (d) => {
+      if (!(d in all)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      return all[d];
+    } });
+  };
 
-  test('a private directory we own is trusted', () => {
+  test('a private directory we own under sticky /tmp is trusted', () => {
     assert.equal(check(shared, { '/tmp/deepgram-cli-1000': dirStat(1000, 0o700), '/tmp/deepgram-cli-1000/venvs': dirStat(1000, 0o700) }), true);
   });
 
@@ -307,6 +343,32 @@ describe('cache root ownership (POSIX)', () => {
     assert.equal(check(home, { [base]: dirStat(1000, 0o755), [`${base}/venvs`]: dirStat(1000, 0o755) }), true);
     assert.equal(check(home, { [base]: dirStat(1000, 0o775), [`${base}/venvs`]: dirStat(1000, 0o755) }), false);
     assert.equal(check(home, { [base]: dirStat(2000, 0o755), [`${base}/venvs`]: dirStat(1000, 0o755) }), false);
+  });
+
+  test('an ancestor another user can write to is rejected', () => {
+    const base = '/home/u/.cache/deepgram-cli';
+    const ok = { [base]: dirStat(1000, 0o700), [`${base}/venvs`]: dirStat(1000, 0o700) };
+    assert.equal(check(home, ok), true);
+    // HOME=/tmp style: ~/.cache made world-writable by someone else.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(2000, 0o777) }), false);
+    // Ours but group-writable and not sticky: still swappable by the group.
+    assert.equal(check(home, { ...ok, '/home/u': dirStat(1000, 0o775) }), false);
+    // World-writable but sticky and root-owned, like /tmp: fine.
+    assert.equal(check(home, { ...ok, '/home': dirStat(0, 0o1777) }), true);
+    // Owned by a third user, even read-only: rejected.
+    assert.equal(check(home, { ...ok, '/home': dirStat(2000, 0o755) }), false);
+  });
+
+  test('a root-owned symlink ancestor is allowed, an attacker-owned one is not', () => {
+    const base = '/home/u/.cache/deepgram-cli';
+    const ok = { [base]: dirStat(1000, 0o700), [`${base}/venvs`]: dirStat(1000, 0o700) };
+    // /home -> /data/home, as /var -> /private/var on macOS.
+    const real = (d) => d.replace(/^\/home/, '/data/home');
+    const target = { '/data': dirStat(0, 0o755), '/data/home': dirStat(0, 0o755), '/data/home/u': dirStat(1000, 0o755), '/data/home/u/.cache': dirStat(1000, 0o700) };
+    assert.equal(check(home, { ...ok, ...target, '/home': dirStat(0, 0o777, false) }, real), true);
+    assert.equal(check(home, { ...ok, ...target, '/home': dirStat(2000, 0o777, false) }, real), false);
+    // The resolved path is checked too.
+    assert.equal(check(home, { ...ok, ...target, '/data/home': dirStat(2000, 0o777), '/home': dirStat(0, 0o777, false) }, real), false);
   });
 
   test('a missing root is not trusted', () => {
@@ -372,10 +434,9 @@ describe('pruning other versions', () => {
   test('never removes a version with a live lock', () => {
     const root = tmpdir();
     const locked = venv(root, '0.8.0', { markerAgeDays: 90 });
-    const release = launcher.acquireLock(`${locked}.lock`);
+    liveForeignLock(`${locked}.lock`);
     launcher.pruneSiblings(root, '1.0.0');
     assert.equal(fs.existsSync(locked), true);
-    release();
   });
 });
 
@@ -391,14 +452,13 @@ describe('lock', () => {
 
   test('a lock held by a live process times out and announces the wait once', () => {
     const lock = path.join(tmpdir(), 'v.lock');
-    const release = launcher.acquireLock(lock);
+    liveForeignLock(lock);
     let waits = 0;
     assert.throws(
       () => launcher.acquireLock(lock, { waitMs: 300, pollMs: 50, onWait: () => waits++ }),
       /Timed out waiting/,
     );
     assert.equal(waits, 1);
-    release();
   });
 
   test('a lock whose pid is dead is stale and is taken over', () => {
@@ -411,11 +471,52 @@ describe('lock', () => {
     release();
   });
 
-  test('an old lock on this host is not stale while its pid is alive', () => {
+  test('a same-host lock with a live pid is kept for up to an hour', () => {
+    const lock = path.join(tmpdir(), 'v.lock');
+    liveForeignLock(lock, Date.now() - 30 * 60 * 1000);
+    assert.equal(launcher.lockIsStale(lock), false);
+    assert.equal(launcher.lockIsStale(lock, Date.now() + 31 * 60 * 1000), true);
+  });
+
+  test('a lock naming our own pid is a reused pid and stale (crashed container restart)', () => {
     const lock = path.join(tmpdir(), 'v.lock');
     fs.mkdirSync(lock);
-    fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), time: 0 }));
-    assert.equal(launcher.lockIsStale(lock), false);
+    fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, host: os.hostname(), time: Date.now() }));
+    assert.equal(launcher.lockIsStale(lock), true);
+    const release = launcher.acquireLock(lock, { waitMs: 0 });
+    release();
+    assert.equal(fs.existsSync(lock), false);
+  });
+
+  test('breaking a stale lock removes it only if it is still the judged owner', () => {
+    const lock = path.join(tmpdir(), 'v.lock');
+    fs.mkdirSync(lock);
+    fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: 999999, host: os.hostname(), time: 1 }));
+    launcher.breakStaleLock(lock);
+    assert.equal(fs.existsSync(lock), false);
+    assert.deepEqual(fs.readdirSync(path.dirname(lock)), []);
+  });
+
+  test('a fresh lock moved aside by a racing waiter is put back', () => {
+    const lock = path.join(tmpdir(), 'v.lock');
+    fs.mkdirSync(lock);
+    fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: 1, host: 'h', time: 1 }));
+    // Simulate the race: the owner changes between judging and renaming.
+    const realRename = fs.renameSync;
+    let swapped = false;
+    fs.renameSync = (from, to) => {
+      if (!swapped) {
+        swapped = true;
+        fs.writeFileSync(path.join(from, 'owner.json'), JSON.stringify({ pid: 2, host: 'h', time: 2 }));
+      }
+      return realRename(from, to);
+    };
+    try {
+      launcher.breakStaleLock(lock);
+    } finally {
+      fs.renameSync = realRename;
+    }
+    assert.equal(JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8')).pid, 2);
   });
 
   test('a lock from another host is judged by age, not local pids', () => {
@@ -454,9 +555,12 @@ describe('child environment', () => {
     assert.equal(launcher.childEnv({}, 'venv').DEEPCTL_LAUNCHER, 'npm');
   });
 
-  test('npx and npm exec are reported as npx', () => {
-    assert.equal(launcher.childEnv({ npm_command: 'exec' }, 'uvx').DEEPCTL_LAUNCHER, 'npx');
-    assert.equal(launcher.childEnv({ npm_command: 'run-script' }, 'venv').DEEPCTL_LAUNCHER, 'npm');
+  test('a package unpacked under npm\'s _npx cache is reported as npx', () => {
+    const npx = '/home/u/.npm/_npx/0123abcd/node_modules/@deepgram/cli';
+    assert.equal(launcher.childEnv({}, 'uvx', npx).DEEPCTL_LAUNCHER, 'npx');
+    assert.equal(launcher.launcherKind('C:\\Users\\u\\AppData\\Local\\npm-cache\\_npx\\ab\\node_modules\\@deepgram\\cli'), 'npx');
+    // How the parent was started does not matter: a global dg is npm.
+    assert.equal(launcher.childEnv({ npm_command: 'exec' }, 'venv', '/usr/local/lib/node_modules/@deepgram/cli').DEEPCTL_LAUNCHER, 'npm');
   });
 
   test('the path strategy removes DEEPCTL_LAUNCHER', () => {
