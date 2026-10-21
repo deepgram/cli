@@ -5,6 +5,13 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: >-
+          Re-publish only the npm package for an existing root release tag
+          (for example v0.4.1). Leave empty for a normal release run.
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -13,6 +20,9 @@ permissions:
 jobs:
   release-please:
     name: Release Please
+    # A manual npm re-publish must not cut releases or touch the release PR;
+    # skipping this job skips everything that needs it.
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.npm_tag }}
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -368,93 +378,82 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
-      # No registry-url: it writes an .npmrc expecting NODE_AUTH_TOKEN, and an
-      # empty token there makes npm skip the OIDC exchange.
-      - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
-        with:
-          node-version: "22"
-
-      # Trusted publishing needs npm 11.5.1+; Node 22 bundles npm 10.
-      - name: Install an npm that supports trusted publishing
-        run: npm install -g npm@^11.5.1
-
-      # release-please bumps npm/package.json through extra-files. If that
-      # ever drifts, publishing would ship a launcher pinned to a deepctl
-      # version that verify-published never checked.
-      - name: Check the package version matches the tag
+      - name: Read the version from the tag
         id: version
-        run: |
-          set -euo pipefail
-          TAG_VERSION="${TAG_NAME#v}"
-          PKG_VERSION="$(node -p 'require("./npm/package.json").version')"
-          if [ "${PKG_VERSION}" != "${TAG_VERSION}" ]; then
-            echo "::error::npm/package.json is ${PKG_VERSION} but the tag is ${TAG_NAME}"
-            exit 1
-          fi
-          if ! printf '%s' "${PKG_VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::${PKG_VERSION} is not a plain X.Y.Z version; refusing to publish it as latest"
-            exit 1
-          fi
-          echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
-      # npm refuses to republish a version, so a re-run after a later step
-      # failed would otherwise fail here forever.
-      - name: Check whether this version is already on npm
-        id: existing
+      - name: Publish
+        uses: ./.github/actions/publish-npm
+        with:
+          version: ${{ steps.version.outputs.version }}
+          package-dir: npm
+
+  # Manual path for when the automatic publish could not run: the trusted
+  # publisher was not configured yet, npm was down past the job timeout, or
+  # a release predates this job. Same workflow file and environment as
+  # publish-npm, because that is what the trusted publisher accepts.
+  publish-npm-manual:
+    name: Re-publish @deepgram/cli to npm (manual)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.npm_tag }}
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      id-token: write
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - name: Validate the tag name
+        id: version
         run: |
           set -euo pipefail
-          if [ "$(npm view "@deepgram/cli@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; then
-            echo "@deepgram/cli@${VERSION} is already published; skipping publish"
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
+          if ! printf '%s' "${NPM_TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::npm_tag must look like v1.2.3 (got '${NPM_TAG}')"
+            exit 1
+          fi
+          echo "version=${NPM_TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          NPM_TAG: ${{ inputs.npm_tag }}
+
+      # The publish steps come from the branch this was dispatched on; the
+      # package itself comes from the tag, so what ships is what was released.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+      - name: Check the tag exists
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${NPM_TAG}" >/dev/null; then
+            echo "::error::tag ${NPM_TAG} does not exist"
+            exit 1
           fi
         env:
+          NPM_TAG: ${{ inputs.npm_tag }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          ref: refs/tags/${{ inputs.npm_tag }}
+          path: release
+
+      # The same gate verify-published applies on a normal release: the
+      # launcher must never point at a deepctl version pip cannot install.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Check deepctl resolves from PyPI
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet --upgrade pip
+          /tmp/verify/bin/pip install --dry-run --no-cache-dir "deepctl==${VERSION}"
+        env:
           VERSION: ${{ steps.version.outputs.version }}
 
+      # The action also checks release/npm/package.json equals the tag.
       - name: Publish
-        if: steps.existing.outputs.published != 'true'
-        working-directory: npm
-        run: npm publish --access public --provenance
-
-      - name: Wait until the registry serves the version
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 40); do
-            if [ "$(npm view "@deepgram/cli@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; then
-              echo "@deepgram/cli@${VERSION} is visible"
-              exit 0
-            fi
-            echo "Waiting for @deepgram/cli@${VERSION} (${i}/40)..."
-            sleep 15
-          done
-          echo "::error::@deepgram/cli@${VERSION} was not visible on the registry after 10 minutes"
-          exit 1
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-
-      # The end-to-end check a user would do: npx resolves the published
-      # tarball, the launcher hands off to uv, uv installs deepctl from PyPI.
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
-
-      - name: Run the published package
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 10); do
-            if OUT="$(npx -y "@deepgram/cli@${VERSION}" --version 2>/dev/null)" && printf '%s' "${OUT}" | grep -qF "${VERSION}"; then
-              echo "${OUT}"
-              exit 0
-            fi
-            echo "npx @deepgram/cli@${VERSION} not runnable yet (${i}/10)..."
-            sleep 30
-          done
-          echo "Final attempt, with output:"
-          npx -y "@deepgram/cli@${VERSION}" --version || true
-          echo "::error::npx @deepgram/cli@${VERSION} --version did not report ${VERSION}"
-          exit 1
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
+        uses: ./.github/actions/publish-npm
+        with:
+          version: ${{ steps.version.outputs.version }}
+          package-dir: release/npm
