@@ -965,6 +965,35 @@ class TestSkillsStartupCheck:
         startup_check.check_and_notify(quiet=True)
         assert startup_check._thread is None
 
+    def test_npm_launcher_is_not_oneshot(self):
+        """npm runs deepctl via uv, but the npm install persists."""
+        from deepctl_cmd_skills import startup_check
+
+        env = {
+            "UV_INTERNAL__PARENT_INTERPRETER": "/usr/bin/python3",
+            "DEEPCTL_LAUNCHER": "npm",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            assert startup_check._is_oneshot() is False
+        with patch.dict(os.environ, env, clear=False):
+            del os.environ["DEEPCTL_LAUNCHER"]
+            assert startup_check._is_oneshot() is True
+
+    def test_prompt_names_dg(self):
+        """npm installs only `dg` and `deepgram`, so the prompt must not say deepctl."""
+        import io
+        import threading
+
+        from deepctl_cmd_skills import startup_check
+
+        startup_check._result = {"should_prompt": True}
+        startup_check._thread = threading.Thread(target=lambda: None)
+        startup_check._thread.start()
+        err = io.StringIO()
+        with patch.object(sys, "stderr", err):
+            startup_check.print_pending_notification()
+        assert "Run 'dg skills install'" in err.getvalue()
+
     @pytest.mark.parametrize(
         "error",
         [
