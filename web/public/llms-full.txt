@@ -28,7 +28,7 @@ npm install -g @deepgram/cli        # npm (needs uv or Python 3.10+; installs dg
 npx @deepgram/cli --help            # npx (run without install)
 ```
 
-Aliases: `dg`, `deepctl`, `deepgram`
+Aliases: `dg`, `deepctl`, `deepgram` (the npm package installs only `dg` and `deepgram`)
 
 ---
 
