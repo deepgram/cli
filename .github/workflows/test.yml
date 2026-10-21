@@ -135,6 +135,11 @@ jobs:
       - name: Unit tests
         run: node --test "npm/test/*.test.js"
 
+      # npm/LICENSE is what npmjs.com and the tarball show; it must not drift
+      # from the repository's.
+      - name: npm/LICENSE matches LICENSE
+        run: cmp LICENSE npm/LICENSE
+
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
 
@@ -146,9 +151,27 @@ jobs:
           set -euo pipefail
           LATEST="$(node -e 'fetch("https://pypi.org/pypi/deepctl/json").then(r => r.json()).then(d => console.log(d.info.version))')"
           echo "deepctl on PyPI: ${LATEST}"
+          echo "latest=${LATEST}" >> "$GITHUB_ENV"
           OUT="$(DEEPCTL_NPM_PYPI_SPEC="deepctl==${LATEST}" node npm/bin/dg.js --version)"
           echo "${OUT}"
           printf '%s' "${OUT}" | grep -qF "${LATEST}"
+
+      # The fallback for machines without uv: find Python, build a private
+      # venv, run from it. Windows exercises Scripts\deepctl.exe and the py
+      # launcher here.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test the venv strategy
+        run: |
+          set -euo pipefail
+          # tr: Python on Windows ends lines with CRLF.
+          OUT="$(DEEPCTL_NPM_RUNNER=venv DEEPCTL_NPM_PYPI_SPEC="deepctl==${latest}" node npm/bin/dg.js --version | tr -d '\r')"
+          printf 'stdout: %s\n' "${OUT}"
+          # Exactly the version line: setup chatter must stay on stderr.
+          [ "${OUT}" = "deepctl, version ${latest}" ]
 
   # Single rollup so branch protection needs exactly one required check.
   # Requiring the matrix contexts directly means editing repo settings every
