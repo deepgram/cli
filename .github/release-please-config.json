@@ -11,7 +11,12 @@
       "include-component-in-tag": false,
       "make-latest": true,
       "extra-files": [
-        "src/deepctl/__init__.py"
+        "src/deepctl/__init__.py",
+        {
+          "type": "json",
+          "path": "npm/package.json",
+          "jsonpath": "$.version"
+        }
       ]
     },
     "packages/deepctl-core": {
