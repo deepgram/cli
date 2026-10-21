@@ -22,7 +22,7 @@ class TestInstallMethod:
         """Verify all expected methods exist."""
         expected = {
             "pip", "pipx", "uv", "homebrew", "uv_tool",
-            "uvx", "pipx_run", "system", "development", "unknown",
+            "uvx", "pipx_run", "npm", "system", "development", "unknown",
         }
         actual = {m.value for m in InstallMethod}
         assert actual == expected
@@ -67,6 +67,9 @@ class TestGetUpdateCommand:
     def test_returns_none_for_pipx_run(self, detector):
         cmd = detector.get_update_command(InstallMethod.PIPX_RUN)
         assert cmd is None
+
+    def test_returns_none_for_npm(self, detector):
+        assert detector.get_update_command(InstallMethod.NPM) is None
 
     def test_returns_none_for_development(self, detector):
         cmd = detector.get_update_command(InstallMethod.DEVELOPMENT)
@@ -263,3 +266,59 @@ class TestGetUpdateInstructions:
         instructions = detector.get_update_instructions(info)
         assert "pipx run" in instructions
         assert "automatically" in instructions
+
+    def test_npm_instructions(self, detector):
+        from deepctl_cmd_update.installation import InstallationInfo
+
+        info = InstallationInfo(
+            method=InstallMethod.NPM,
+            path="/home/u/.cache/deepgram-cli/venvs/0.4.0",
+            virtual_env=True,
+            editable=False,
+            python_executable="/home/u/.cache/deepgram-cli/venvs/0.4.0/bin/python",
+        )
+        instructions = detector.get_update_instructions(info)
+        assert "npm install -g @deepgram/cli@latest" in instructions
+        assert "npx @deepgram/cli@latest" in instructions
+
+
+class TestNpmLauncherDetection:
+    """The npm launcher marks deepctl's environment with DEEPCTL_LAUNCHER=npm."""
+
+    @patch.dict(
+        "os.environ",
+        {
+            "DEEPCTL_LAUNCHER": "npm",
+            # The launcher's uv strategy also looks like uvx; npm must win.
+            "UV_INTERNAL__PARENT_INTERPRETER": "/usr/bin/python3",
+        },
+        clear=False,
+    )
+    def test_npm_wins_over_uvx_and_development(self):
+        detector = InstallationDetector()
+        assert (
+            detector._detect_method(None, in_venv=True, is_editable=True)
+            == InstallMethod.NPM
+        )
+
+    @patch.dict(
+        "os.environ",
+        {"UV_INTERNAL__PARENT_INTERPRETER": "/usr/bin/python3"},
+        clear=False,
+    )
+    def test_other_launcher_values_are_ignored(self):
+        import os
+
+        os.environ["DEEPCTL_LAUNCHER"] = "something-else"
+        detector = InstallationDetector()
+        assert (
+            detector._detect_method(None, in_venv=False, is_editable=False)
+            == InstallMethod.UVX
+        )
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_detect_reports_npm(self):
+        import os
+
+        os.environ["DEEPCTL_LAUNCHER"] = "npm"
+        assert InstallationDetector().detect().method == InstallMethod.NPM

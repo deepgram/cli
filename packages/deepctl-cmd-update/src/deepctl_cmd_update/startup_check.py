@@ -42,8 +42,29 @@ def _is_ci() -> bool:
     return any(os.environ.get(v) for v in _CI_ENV_VARS)
 
 
+def _launched_via_npm() -> bool:
+    """Return True if the @deepgram/cli npm launcher started deepctl.
+
+    Mirrors ``installation.launched_via_npm`` without importing pydantic on
+    every CLI start.
+    """
+    return os.environ.get("DEEPCTL_LAUNCHER") == "npm"
+
+
+def upgrade_hint() -> str:
+    """Return the command a user should run to upgrade deepctl."""
+    if _launched_via_npm():
+        return "npm install -g @deepgram/cli@latest"
+    return "dg update"
+
+
 def _is_oneshot() -> bool:
     """Return True if running in an ephemeral one-shot environment."""
+    # The npm launcher often runs deepctl through `uv tool run`, which looks
+    # one-shot, but the npm install itself persists and is pinned to one
+    # version, so its users do need to hear about updates.
+    if _launched_via_npm():
+        return False
     # uvx
     if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
         return True
@@ -200,7 +221,7 @@ def print_pending_notification() -> None:
         try:
             sys.stderr.write(
                 f"\n\033[33m  Update available:  {current} → {latest}"
-                f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
+                f"  —  run \033[1m{upgrade_hint()}\033[0m\033[33m to upgrade\033[0m\n\n"
             )
         except (BrokenPipeError, OSError, ValueError):
             # The output stream closed (e.g. an MCP host disconnected stdio

@@ -9,6 +9,17 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+# The @deepgram/cli npm launcher sets this in deepctl's environment. Its
+# venv or uv cache is private to the launcher, so pip/uv commands run from
+# inside it would update the wrong thing; npm is the only way to update.
+LAUNCHER_ENV_VAR = "DEEPCTL_LAUNCHER"
+NPM_UPDATE_COMMAND = "npm install -g @deepgram/cli@latest"
+
+
+def launched_via_npm() -> bool:
+    """Return True if deepctl was started by the @deepgram/cli npm launcher."""
+    return os.environ.get(LAUNCHER_ENV_VAR) == "npm"
+
 
 class InstallMethod(str, Enum):
     """Supported installation methods."""
@@ -20,6 +31,7 @@ class InstallMethod(str, Enum):
     UV_TOOL = "uv_tool"
     UVX = "uvx"
     PIPX_RUN = "pipx_run"
+    NPM = "npm"
     SYSTEM = "system"
     DEVELOPMENT = "development"
     UNKNOWN = "unknown"
@@ -105,6 +117,7 @@ class InstallationDetector:
             ],
             InstallMethod.UVX: None,  # Ephemeral, no update needed
             InstallMethod.PIPX_RUN: None,  # Ephemeral, no update needed
+            InstallMethod.NPM: None,  # Updated through npm, see instructions
             InstallMethod.SYSTEM: None,  # Handled separately
             InstallMethod.DEVELOPMENT: None,  # Can't auto-update
             InstallMethod.UNKNOWN: None,
@@ -122,6 +135,12 @@ class InstallationDetector:
         """
         if info.method == InstallMethod.HOMEBREW:
             return "Please update using Homebrew: brew upgrade deepctl"
+
+        if info.method == InstallMethod.NPM:
+            return (
+                f"Installed via npm. Update with: {NPM_UPDATE_COMMAND} "
+                "(or run npx @deepgram/cli@latest)"
+            )
 
         if info.method == InstallMethod.UVX:
             return (
@@ -261,8 +280,8 @@ class InstallationDetector:
     ) -> InstallMethod:
         """Detect the installation method.
 
-        Priority: development > oneshot > homebrew > uv_tool > pipx >
-                  uv > system > pip > unknown
+        Priority: npm > development > oneshot > homebrew > uv_tool >
+                  pipx > uv > system > pip > unknown
 
         Args:
             package_location: Path to package
@@ -272,6 +291,11 @@ class InstallationDetector:
         Returns:
             Detected installation method
         """
+        # The npm launcher runs deepctl through uv or its own venv, which
+        # would otherwise be detected as uvx or pip.
+        if launched_via_npm():
+            return InstallMethod.NPM
+
         # Development installation
         if is_editable:
             return InstallMethod.DEVELOPMENT
