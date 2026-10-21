@@ -838,5 +838,25 @@ describe('bin/dg.js end to end', posixOnly, () => {
     const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
     assert.equal(r.status, null);
     assert.equal(r.signal, 'SIGTERM');
+    assert.doesNotMatch(r.stderr, /crashed/);
+  });
+
+  test('names the signal when the child crashes', { skip: process.platform === 'win32' && 'POSIX signals' }, () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    fakeExe(bin, 'uv', '#!/bin/sh\nkill -SEGV $$\n');
+    const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
+    assert.equal(r.signal, 'SIGSEGV');
+    assert.match(r.stderr, /dg: .*uv crashed \(SIGSEGV\)\./);
+  });
+
+  test('a venv build step killed by a signal says so', { skip: process.platform === 'win32' && 'POSIX signals' }, () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    const fakePython = '#!/bin/sh\ncase "$1 $2" in\n  "-c "*) echo "(3, 12)"; exit 0;;\nesac\nkill -KILL $$\n';
+    for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) fakeExe(bin, name, fakePython);
+    const r = runBin({ PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_RUNNER: 'venv' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /failed \(killed by SIGKILL\)/);
   });
 });

@@ -553,11 +553,16 @@ function releaseLock(lockDir, owner) {
 
 // --- Venv bootstrap -------------------------------------------------------
 
+const CRASH_SIGNALS = new Set(['SIGSEGV', 'SIGBUS', 'SIGILL', 'SIGFPE', 'SIGABRT']);
+
 function runStep(command, args, what, hint, spawnSync) {
   // stdout goes to stderr: `dg -o json` and `dg mcp` own stdout.
   const result = spawnSync(command, args, { stdio: ['ignore', 2, 2], windowsHide: true });
   if (result.error) throw new LauncherError(`${what} failed: ${result.error.message}.`, hint);
-  if (result.status !== 0) throw new LauncherError(`${what} failed (exit ${result.status}).`, hint);
+  if (result.status !== 0) {
+    const how = result.signal ? `killed by ${result.signal}` : `exit ${result.status}`;
+    throw new LauncherError(`${what} failed (${how}).`, hint);
+  }
 }
 
 const VENV_HINT = 'On Debian or Ubuntu, install python3-venv (sudo apt install python3-venv), or install uv instead.';
@@ -780,6 +785,8 @@ function run(argv = process.argv.slice(2), opts = {}) {
     for (const timer of timers) clearTimeout(timer);
     for (const [sig, fn] of Object.entries(handlers)) process.removeListener(sig, fn);
     const action = exitAction(code, signal);
+    // A crash otherwise surfaces only as a bare exit status (139 and so on).
+    if (CRASH_SIGNALS.has(signal)) stderr.write(`dg: ${runner.command} crashed (${signal}).\n`);
     if (action.signal) {
       // Die the same way the child did, so shells and supervisors see the
       // signal rather than a plain exit code.
