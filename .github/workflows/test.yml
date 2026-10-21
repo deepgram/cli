@@ -140,6 +140,26 @@ jobs:
       - name: npm/LICENSE matches LICENSE
         run: cmp LICENSE npm/LICENSE
 
+      # Regression: the launcher once made the stdin it hands to deepctl
+      # non-blocking, so a reader that had to wait (an MCP host, `ffmpeg |
+      # dg listen`) failed. A stand-in deepctl checks fds 0-2 and reads input
+      # that arrives a second late.
+      - name: stdin stays blocking for deepctl
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          FAKE="$(mktemp -d)"
+          cat > "${FAKE}/deepctl" <<'PY'
+          #!/usr/bin/env python3
+          import fcntl, os, sys
+          flags = [bool(fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_NONBLOCK) for fd in (0, 1, 2)]
+          print("nonblock=%s read=%r" % (flags, sys.stdin.read()))
+          PY
+          chmod +x "${FAKE}/deepctl"
+          OUT="$( (sleep 1; echo hello) | PATH="${FAKE}:${PATH}" DEEPCTL_NPM_RUNNER=path node npm/bin/dg.js)"
+          echo "${OUT}"
+          [ "${OUT}" = "nonblock=[False, False, False] read='hello\n'" ]
+
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
 
