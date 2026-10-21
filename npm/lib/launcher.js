@@ -1,0 +1,543 @@
+'use strict';
+
+// Runs the Python Deepgram CLI (deepctl, from PyPI) at the same version as
+// this npm package. Nothing here is downloaded at install time: the first
+// `dg` either hands off to uv, reuses a cached venv, or builds one.
+
+const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const PKG_DIR = path.resolve(__dirname, '..');
+const MIN_PYTHON = [3, 10];
+const LOCK_WAIT_MS = 5 * 60 * 1000;
+const LOCK_STALE_MS = 10 * 60 * 1000;
+const LOCK_POLL_MS = 250;
+const PROBE_TIMEOUT_MS = 10 * 1000;
+const RUNNERS = ['uvx', 'venv', 'path'];
+
+// Prints the version first so a Python without venv/ensurepip (Debian's
+// python3 without python3-venv) still reports what it is.
+const PROBE_CODE = 'import sys;print(tuple(sys.version_info[:2]));import venv,ensurepip';
+
+class LauncherError extends Error {
+  constructor(message, hint = '') {
+    super(message);
+    this.hint = hint;
+  }
+}
+
+function packageVersion(pkgDir = PKG_DIR) {
+  return JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).version;
+}
+
+function pypiSpec(env, version) {
+  return env.DEEPCTL_NPM_PYPI_SPEC || `deepctl==${version}`;
+}
+
+// Venvs are keyed by version. An overridden spec gets its own directory so
+// a CI run against a different deepctl never poisons the real cache entry.
+function venvKey(env, version) {
+  if (!env.DEEPCTL_NPM_PYPI_SPEC) return version;
+  const hash = crypto.createHash('sha256').update(env.DEEPCTL_NPM_PYPI_SPEC).digest('hex');
+  return `${version}+${hash.slice(0, 12)}`;
+}
+
+// --- PATH resolution ------------------------------------------------------
+
+function isWindows(platform) {
+  return platform === 'win32';
+}
+
+function exeNames(name, platform) {
+  // No PATHEXT and no .cmd/.bat: those need a shell to run, and a shell
+  // re-parses the arguments we pass through.
+  return isWindows(platform) ? [`${name}.exe`, `${name}.com`] : [name];
+}
+
+function pathDirs(env, platform) {
+  const raw = (isWindows(platform) ? env.Path || env.PATH : env.PATH) || '';
+  const p = isWindows(platform) ? path.win32 : path.posix;
+  // Empty and relative entries resolve against the current directory, and
+  // Windows searches it implicitly. A launcher run from inside an arbitrary
+  // project must not pick up an executable that happens to sit there.
+  return raw.split(p.delimiter).filter((dir) => dir && p.isAbsolute(dir));
+}
+
+function isExecutableFile(file, platform = process.platform) {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return false;
+    if (isWindows(platform)) return true;
+    fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function realpathOrSelf(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return file;
+  }
+}
+
+function isInside(child, parent, platform) {
+  const p = isWindows(platform) ? path.win32 : path.posix;
+  const rel = p.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
+}
+
+// Every match for `name` on PATH, in order, minus anything that resolves
+// into this package (npm's own `dg` shim must never be mistaken for deepctl).
+function whichAll(name, opts = {}) {
+  const env = opts.env || process.env;
+  const platform = opts.platform || process.platform;
+  const isExec = opts.isExecutable || ((f) => isExecutableFile(f, platform));
+  const realpath = opts.realpath || realpathOrSelf;
+  const pkgDir = realpath(opts.pkgDir || PKG_DIR);
+  const join = isWindows(platform) ? path.win32.join : path.posix.join;
+  const found = [];
+  for (const dir of pathDirs(env, platform)) {
+    for (const exe of exeNames(name, platform)) {
+      const candidate = join(dir, exe);
+      if (!isExec(candidate)) continue;
+      if (isInside(realpath(candidate), pkgDir, platform)) continue;
+      if (!found.includes(candidate)) found.push(candidate);
+    }
+  }
+  return found;
+}
+
+function which(name, opts) {
+  return whichAll(name, opts)[0] || null;
+}
+
+function isWindowsAppsStub(file) {
+  return /[\\/]WindowsApps[\\/]/i.test(file);
+}
+
+// --- uv -------------------------------------------------------------------
+
+function findUv(opts = {}) {
+  const platform = opts.platform || process.platform;
+  const home = opts.home || os.homedir();
+  const isExec = opts.isExecutable || ((f) => isExecutableFile(f, platform));
+  const onPath = which('uv', opts);
+  if (onPath) return onPath;
+  // The uv installer drops it here but only edits shell profiles, so a
+  // fresh install is often not on PATH in the shell npm was started from.
+  const join = isWindows(platform) ? path.win32.join : path.posix.join;
+  const exe = isWindows(platform) ? 'uv.exe' : 'uv';
+  for (const dir of [join(home, '.local', 'bin'), join(home, '.cargo', 'bin')]) {
+    const candidate = join(dir, exe);
+    if (isExec(candidate)) return candidate;
+  }
+  return null;
+}
+
+// --- Python ---------------------------------------------------------------
+
+function pythonCandidates(opts = {}) {
+  const platform = opts.platform || process.platform;
+  const candidates = [];
+  if (isWindows(platform)) {
+    const py = whichAll('py', opts).filter((f) => !isWindowsAppsStub(f))[0];
+    if (py) {
+      for (const minor of [13, 12, 11, 10]) candidates.push({ command: py, args: [`-3.${minor}`] });
+    }
+    for (const exe of whichAll('python', opts)) {
+      if (!isWindowsAppsStub(exe)) candidates.push({ command: exe, args: [] });
+    }
+    return candidates;
+  }
+  for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) {
+    for (const exe of whichAll(name, opts)) {
+      // Running Apple's stub pops the "install command line developer
+      // tools" dialog instead of failing quietly.
+      if (platform === 'darwin' && exe === '/usr/bin/python3') continue;
+      if (!candidates.some((c) => c.command === exe)) candidates.push({ command: exe, args: [] });
+    }
+  }
+  return candidates;
+}
+
+function parseProbeOutput(stdout) {
+  const match = /\((\d+),\s*(\d+)\)/.exec(String(stdout || ''));
+  return match ? [Number(match[1]), Number(match[2])] : null;
+}
+
+function versionAtLeast(version, minimum) {
+  return version[0] > minimum[0] || (version[0] === minimum[0] && version[1] >= minimum[1]);
+}
+
+function probePython(candidate, spawnSync = childProcess.spawnSync) {
+  const result = spawnSync(candidate.command, [...candidate.args, '-c', PROBE_CODE], {
+    encoding: 'utf8',
+    timeout: PROBE_TIMEOUT_MS,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const version = parseProbeOutput(result.stdout);
+  if (!version) return { version: null, ok: false };
+  return { version, ok: result.status === 0 && versionAtLeast(version, MIN_PYTHON), hasVenv: result.status === 0 };
+}
+
+// Returns the first usable Python plus what was seen on the way, so the
+// failure message can say "found 3.9" or "found 3.12 without venv".
+function findPython(opts = {}) {
+  const probe = opts.probe || probePython;
+  const seen = [];
+  for (const candidate of pythonCandidates(opts)) {
+    const info = probe(candidate);
+    if (!info.version) continue;
+    seen.push({ ...candidate, ...info });
+    if (info.ok) return { python: candidate, seen };
+  }
+  return { python: null, seen };
+}
+
+// --- Cache directory ------------------------------------------------------
+
+function cacheRoots(opts = {}) {
+  const env = opts.env || process.env;
+  const platform = opts.platform || process.platform;
+  const home = opts.home || os.homedir();
+  const tmpdir = opts.tmpdir || os.tmpdir();
+  const uid = opts.uid !== undefined ? opts.uid : process.getuid ? process.getuid() : 'user';
+  const p = isWindows(platform) ? path.win32 : path.posix;
+  let base;
+  if (isWindows(platform)) base = env.LOCALAPPDATA || p.join(home, 'AppData', 'Local');
+  else if (platform === 'darwin') base = p.join(home, 'Library', 'Caches');
+  else base = env.XDG_CACHE_HOME && p.isAbsolute(env.XDG_CACHE_HOME) ? env.XDG_CACHE_HOME : p.join(home, '.cache');
+  // The fallback covers containers run as an arbitrary UID with a HOME that
+  // does not exist or is read-only.
+  return [p.join(base, 'deepgram-cli', 'venvs'), p.join(tmpdir, `deepgram-cli-${uid}`, 'venvs')];
+}
+
+function ensureWritableDir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function venvLayout(dir, platform = process.platform) {
+  const p = isWindows(platform) ? path.win32 : path.posix;
+  const bin = isWindows(platform) ? p.join(dir, 'Scripts') : p.join(dir, 'bin');
+  const ext = isWindows(platform) ? '.exe' : '';
+  return {
+    dir,
+    marker: p.join(dir, '.complete'),
+    python: p.join(bin, `python${ext}`),
+    deepctl: p.join(bin, `deepctl${ext}`),
+  };
+}
+
+function findCachedVenv(key, opts = {}) {
+  const exists = opts.exists || fs.existsSync;
+  const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;
+  for (const root of cacheRoots(opts)) {
+    const layout = venvLayout(p.join(root, key), opts.platform);
+    if (exists(layout.marker) && exists(layout.deepctl)) return layout;
+  }
+  return null;
+}
+
+// --- Lock -----------------------------------------------------------------
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+function lockIsStale(lockDir, now = Date.now(), alive = pidAlive) {
+  let owner = null;
+  try {
+    owner = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+  } catch {
+    // The owner may be between mkdir and writing owner.json; fall back to
+    // the directory's age.
+  }
+  if (owner && typeof owner.pid === 'number') {
+    if (now - owner.time > LOCK_STALE_MS) return true;
+    return owner.host === os.hostname() && !alive(owner.pid);
+  }
+  try {
+    return now - fs.statSync(lockDir).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+// mkdir is atomic on every platform and filesystem npm runs on, unlike
+// O_EXCL files on some network mounts.
+function acquireLock(lockDir, opts = {}) {
+  const waitMs = opts.waitMs !== undefined ? opts.waitMs : LOCK_WAIT_MS;
+  const pollMs = opts.pollMs || LOCK_POLL_MS;
+  const onWait = opts.onWait || (() => {});
+  const deadline = Date.now() + waitMs;
+  let announced = false;
+  for (;;) {
+    try {
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(
+        path.join(lockDir, 'owner.json'),
+        JSON.stringify({ pid: process.pid, host: os.hostname(), time: Date.now() }),
+      );
+      return () => fs.rmSync(lockDir, { recursive: true, force: true });
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+    if (lockIsStale(lockDir)) {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+      continue;
+    }
+    if (Date.now() >= deadline) {
+      throw new LauncherError(`Timed out waiting for another dg setup to finish (lock: ${lockDir}).`);
+    }
+    if (!announced) {
+      onWait();
+      announced = true;
+    }
+    sleepSync(pollMs);
+  }
+}
+
+// --- Venv bootstrap -------------------------------------------------------
+
+function runStep(command, args, what, hint, spawnSync) {
+  // stdout goes to stderr: `dg -o json` and `dg mcp` own stdout.
+  const result = spawnSync(command, args, { stdio: ['ignore', 2, 2], windowsHide: true });
+  if (result.error) throw new LauncherError(`${what} failed: ${result.error.message}.`, hint);
+  if (result.status !== 0) throw new LauncherError(`${what} failed (exit ${result.status}).`, hint);
+}
+
+const VENV_HINT = 'On Debian or Ubuntu, install python3-venv (sudo apt install python3-venv), or install uv instead.';
+const NETWORK_HINT = 'Check your network connection and that PyPI is reachable, then run dg again.';
+
+function pruneSiblings(root, keep) {
+  try {
+    for (const entry of fs.readdirSync(root)) {
+      if (entry === keep || entry.endsWith('.lock')) continue;
+      if (fs.existsSync(path.join(root, `${entry}.lock`))) continue;
+      fs.rmSync(path.join(root, entry), { recursive: true, force: true });
+    }
+  } catch {
+    // Best effort: an old version left behind only costs disk space.
+  }
+}
+
+function buildVenv({ python, key, spec, version, opts = {} }) {
+  const stderr = opts.stderr || process.stderr;
+  const spawnSync = opts.spawnSync || childProcess.spawnSync;
+  const root = cacheRoots(opts).find(ensureWritableDir);
+  if (!root) throw new LauncherError('No writable cache directory for the Deepgram CLI.', 'Set XDG_CACHE_HOME to a writable directory, or install uv.');
+  // Built in place: venv console scripts carry absolute shebangs, so a venv
+  // built elsewhere and renamed into place would not run.
+  const layout = venvLayout(path.join(root, key), opts.platform);
+  const release = acquireLock(`${layout.dir}.lock`, {
+    ...opts.lock,
+    onWait: () => stderr.write('Waiting for another dg setup to finish...\n'),
+  });
+  const onExit = () => release();
+  process.once('exit', onExit);
+  try {
+    if (fs.existsSync(layout.marker)) return layout;
+    fs.rmSync(layout.dir, { recursive: true, force: true });
+    stderr.write(`Setting up Deepgram CLI ${version} (one-time, ~1 min)...\n`);
+    const pip = [layout.python, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '-q'];
+    try {
+      runStep(python.command, [...python.args, '-m', 'venv', layout.dir], 'Creating the Python venv', VENV_HINT, spawnSync);
+      runStep(pip[0], [...pip.slice(1), '-U', 'pip'], 'Upgrading pip', NETWORK_HINT, spawnSync);
+      runStep(pip[0], [...pip.slice(1), spec], `Installing ${spec}`, NETWORK_HINT, spawnSync);
+      fs.writeFileSync(layout.marker, `${spec}\n`);
+    } catch (err) {
+      fs.rmSync(layout.dir, { recursive: true, force: true });
+      throw err;
+    }
+    pruneSiblings(root, key);
+    return layout;
+  } finally {
+    process.removeListener('exit', onExit);
+    release();
+  }
+}
+
+// --- Child environment and exit mapping ------------------------------------
+
+function childEnv(env, strategy) {
+  const out = { ...env };
+  out.DEEPCTL_NPM_LAUNCHER_DEPTH = String((parseInt(env.DEEPCTL_NPM_LAUNCHER_DEPTH, 10) || 0) + 1);
+  // A deepctl the user installed themselves knows its own install method;
+  // telling it "npm" would make `dg update` give the wrong advice.
+  if (strategy === 'path') delete out.DEEPCTL_LAUNCHER;
+  else out.DEEPCTL_LAUNCHER = 'npm';
+  return out;
+}
+
+function exitAction(code, signal, platform = process.platform) {
+  if (code !== null && code !== undefined) return { exit: code };
+  if (signal && !isWindows(platform)) {
+    const num = os.constants.signals[signal];
+    return { signal, exit: num ? 128 + num : 1 };
+  }
+  return { exit: 1 };
+}
+
+// --- Plan -----------------------------------------------------------------
+
+function installHelp(seen) {
+  const lines = ['', 'The Deepgram CLI needs uv or Python 3.10+ (with venv) to run. Fix one of:', ''];
+  lines.push('  1. Install uv (recommended), then run dg again:');
+  lines.push('       curl -LsSf https://astral.sh/uv/install.sh | sh');
+  lines.push('       powershell -c "irm https://astral.sh/uv/install.ps1 | iex"   (Windows)');
+  const noVenv = seen.find((s) => s.version && versionAtLeast(s.version, MIN_PYTHON) && !s.hasVenv);
+  if (noVenv) {
+    lines.push(`  2. Python ${noVenv.version.join('.')} was found without venv/ensurepip. Install it:`);
+    lines.push('       sudo apt install python3-venv   (Debian/Ubuntu)');
+  } else {
+    const old = seen.find((s) => s.version && !versionAtLeast(s.version, MIN_PYTHON));
+    const found = old ? ` (found ${old.version.join('.')})` : '';
+    lines.push(`  2. Install Python 3.10 or newer${found}.`);
+  }
+  lines.push('  3. Or install the CLI directly:');
+  lines.push('       curl -fsSL https://deepgram.com/install.sh | sh');
+  lines.push('       brew install deepgram/tap/deepgram');
+  return `${lines.join('\n')}\n`;
+}
+
+// Decides how to run deepctl. Returns {command, args, strategy}; may build a
+// venv as a side effect.
+function resolveRunner(argv, opts = {}) {
+  const env = opts.env || process.env;
+  const version = opts.version || packageVersion();
+  const spec = pypiSpec(env, version);
+  const key = venvKey(env, version);
+  const forced = env.DEEPCTL_NPM_RUNNER || '';
+  if (forced && !RUNNERS.includes(forced)) {
+    throw new LauncherError(`DEEPCTL_NPM_RUNNER must be one of ${RUNNERS.join(', ')} (got "${forced}").`);
+  }
+
+  if (forced === 'path') {
+    const deepctl = which('deepctl', opts);
+    if (!deepctl) throw new LauncherError('DEEPCTL_NPM_RUNNER=path, but no deepctl was found on PATH.');
+    return { command: deepctl, args: argv, strategy: 'path' };
+  }
+
+  if (!forced || forced === 'venv') {
+    const cached = findCachedVenv(key, opts);
+    if (cached) return { command: cached.deepctl, args: argv, strategy: 'venv' };
+  }
+
+  if (!forced || forced === 'uvx') {
+    const uv = findUv(opts);
+    if (uv) return { command: uv, args: ['tool', 'run', '--from', spec, 'deepctl', ...argv], strategy: 'uvx' };
+    if (forced) throw new LauncherError('DEEPCTL_NPM_RUNNER=uvx, but uv was not found.');
+  }
+
+  const { python, seen } = findPython(opts);
+  if (!python) throw new LauncherError(installHelp(seen));
+  const layout = buildVenv({ python, key, spec, version, opts });
+  return { command: layout.deepctl, args: argv, strategy: 'venv' };
+}
+
+function run(argv = process.argv.slice(2), opts = {}) {
+  const env = opts.env || process.env;
+  const stderr = opts.stderr || process.stderr;
+  if ((parseInt(env.DEEPCTL_NPM_LAUNCHER_DEPTH, 10) || 0) >= 1) {
+    stderr.write('dg: the npm launcher started itself recursively; aborting. Check DEEPCTL_NPM_RUNNER and PATH.\n');
+    process.exit(1);
+  }
+
+  let runner;
+  try {
+    runner = resolveRunner(argv, opts);
+  } catch (err) {
+    if (!(err instanceof LauncherError)) throw err;
+    const hint = err.hint ? `\n${err.hint}` : '';
+    stderr.write(`dg: ${err.message.trimStart()}${hint}\n`);
+    process.exit(1);
+  }
+
+  const child = childProcess.spawn(runner.command, runner.args, {
+    stdio: 'inherit',
+    env: childEnv(env, runner.strategy),
+  });
+
+  // Ctrl-C and Ctrl-\ reach the child straight from the terminal (same
+  // process group); the parent only has to survive them. TERM and HUP come
+  // from whoever is managing *this* process, so pass them on.
+  const ignore = () => {};
+  const forward = (sig) => () => child.kill(sig);
+  const handlers = { SIGINT: ignore, SIGTERM: forward('SIGTERM') };
+  if (!isWindows(process.platform)) {
+    handlers.SIGQUIT = ignore;
+    handlers.SIGHUP = forward('SIGHUP');
+  }
+  for (const [sig, fn] of Object.entries(handlers)) process.on(sig, fn);
+
+  child.on('error', (err) => {
+    stderr.write(`dg: could not start ${runner.command}: ${err.message}\n`);
+    process.exit(1);
+  });
+
+  child.on('exit', (code, signal) => {
+    for (const [sig, fn] of Object.entries(handlers)) process.removeListener(sig, fn);
+    const action = exitAction(code, signal);
+    if (action.signal) {
+      // Die the same way the child did, so shells and supervisors see the
+      // signal rather than a plain exit code.
+      process.removeAllListeners(action.signal);
+      try {
+        process.kill(process.pid, action.signal);
+      } catch {
+        // Fall through to the numeric exit below.
+      }
+      setTimeout(() => process.exit(action.exit), 100);
+      return;
+    }
+    process.exit(action.exit);
+  });
+}
+
+module.exports = {
+  LauncherError,
+  acquireLock,
+  cacheRoots,
+  childEnv,
+  exitAction,
+  exeNames,
+  findCachedVenv,
+  findPython,
+  findUv,
+  installHelp,
+  lockIsStale,
+  packageVersion,
+  parseProbeOutput,
+  pathDirs,
+  pypiSpec,
+  pythonCandidates,
+  resolveRunner,
+  run,
+  venvKey,
+  venvLayout,
+  versionAtLeast,
+  which,
+  whichAll,
+};
