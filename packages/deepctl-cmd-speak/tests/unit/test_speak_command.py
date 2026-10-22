@@ -417,6 +417,58 @@ class TestSpeakCommand:
         assert output_file.read_bytes()[:4] == b"RIFF"
 
     @patch("deepctl_cmd_speak.command.sys")
+    def test_sagemaker_aura_uses_v1_streaming_transport(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client, tmp_path
+    ):
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+        output = tmp_path / "aura.wav"
+        expected = SpeakResult(status="success", output_path=str(output))
+        with patch.object(command, "_speak_sagemaker", return_value=expected) as stream:
+            result = command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello from SageMaker",
+                output=str(output),
+                model="aura-2-asteria-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+                sagemaker_endpoint="aura-endpoint",
+            )
+
+        assert result is expected
+        assert stream.call_args.kwargs["endpoint"] == "aura-endpoint"
+        assert stream.call_args.kwargs["encoding"] == "linear16"
+        mock_client.speak_text.assert_not_called()
+
+    @patch("deepctl_cmd_speak.command.sys")
+    def test_sagemaker_flux_is_rejected(
+        self, mock_sys, command, mock_config, mock_auth_manager, mock_client, tmp_path
+    ):
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+        with pytest.raises(click.ClickException, match="Aura Speak v1"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello",
+                output=str(tmp_path / "out.wav"),
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+                sagemaker_endpoint="tts-endpoint",
+            )
+
+    def test_sagemaker_uses_aws_auth(self, command):
+        assert command.uses_external_auth(sagemaker_endpoint="tts-endpoint")
+
+    @patch("deepctl_cmd_speak.command.sys")
     def test_handle_flux_streams_and_wraps_wav(
         self,
         mock_sys,
