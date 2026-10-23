@@ -23,10 +23,12 @@ iwr deepgram.com/install.ps1 | iex
 pip install deepctl       # pip
 pipx install deepctl      # pipx (isolated)
 uvx deepctl --help        # uvx (run without install)
-brew install deepgram/tap/deepctl  # Homebrew
+brew install deepgram/tap/deepgram  # Homebrew
+npm install -g @deepgram/cli        # npm (needs uv or Python 3.10+; installs dg, deepgram)
+npx @deepgram/cli --help            # npx (run without install)
 ```
 
-Aliases: `dg`, `deepctl`, `deepgram`
+Aliases: `dg`, `deepctl`, `deepgram` (the npm package installs only `dg` and `deepgram`)
 
 ---
 

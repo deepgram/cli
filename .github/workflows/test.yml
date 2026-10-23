@@ -112,6 +112,87 @@ jobs:
       - name: Verify packages
         run: make verify-packages
 
+  launcher:
+    name: npm launcher / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "22"
+
+      # A glob, not the directory: Node 22+ treats --test arguments as file
+      # patterns, and Node expands it itself where the shell does not.
+      - name: Unit tests
+        run: node --test "npm/test/*.test.js"
+
+      # npm/LICENSE is what npmjs.com and the tarball show; it must not drift
+      # from the repository's.
+      - name: npm/LICENSE matches LICENSE
+        run: cmp LICENSE npm/LICENSE
+
+      # Regression: the launcher once made the stdin it hands to deepctl
+      # non-blocking, so a reader that had to wait (an MCP host, `ffmpeg |
+      # dg listen`) failed. A stand-in deepctl checks fds 0-2 and reads input
+      # that arrives a second late.
+      - name: stdin stays blocking for deepctl
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          FAKE="$(mktemp -d)"
+          cat > "${FAKE}/deepctl" <<'PY'
+          #!/usr/bin/env python3
+          import fcntl, os, sys
+          flags = [bool(fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_NONBLOCK) for fd in (0, 1, 2)]
+          print("nonblock=%s read=%r" % (flags, sys.stdin.read()))
+          PY
+          chmod +x "${FAKE}/deepctl"
+          OUT="$( (sleep 1; echo hello) | PATH="${FAKE}:${PATH}" DEEPCTL_NPM_RUNNER=path node npm/bin/dg.js)"
+          echo "${OUT}"
+          [ "${OUT}" = "nonblock=[False, False, False] read='hello\n'" ]
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+
+      # npm/package.json is already bumped on a release PR, before PyPI has
+      # that version, so run the launcher against the newest deepctl that
+      # PyPI actually serves. This checks the launcher, not the release.
+      - name: Smoke test against the latest deepctl on PyPI
+        run: |
+          set -euo pipefail
+          LATEST="$(node -e 'fetch("https://pypi.org/pypi/deepctl/json").then(r => r.json()).then(d => console.log(d.info.version))')"
+          echo "deepctl on PyPI: ${LATEST}"
+          echo "latest=${LATEST}" >> "$GITHUB_ENV"
+          OUT="$(DEEPCTL_NPM_PYPI_SPEC="deepctl==${LATEST}" node npm/bin/dg.js --version)"
+          echo "${OUT}"
+          printf '%s' "${OUT}" | grep -qF "${LATEST}"
+
+      # The fallback for machines without uv: find Python, build a private
+      # venv, run from it. Windows exercises Scripts\deepctl.exe and the py
+      # launcher here.
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test the venv strategy
+        run: |
+          set -euo pipefail
+          # tr: Python on Windows ends lines with CRLF.
+          OUT="$(DEEPCTL_NPM_RUNNER=venv DEEPCTL_NPM_PYPI_SPEC="deepctl==${latest}" node npm/bin/dg.js --version | tr -d '\r')"
+          printf 'stdout: %s\n' "${OUT}"
+          # Exactly the version line: setup chatter must stay on stderr.
+          [ "${OUT}" = "deepctl, version ${latest}" ]
+
   # Single rollup so branch protection needs exactly one required check.
   # Requiring the matrix contexts directly means editing repo settings every
   # time a Python version or OS is added or dropped, and a required context
@@ -123,7 +204,7 @@ jobs:
   # cancelled and skipped prerequisites are failures here too.
   all-checks:
     name: All checks
-    needs: [test, lint, floors, build-test]
+    needs: [test, lint, floors, build-test, launcher]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -133,6 +214,7 @@ jobs:
           echo "lint:       ${{ needs.lint.result }}"
           echo "floors:     ${{ needs.floors.result }}"
           echo "build-test: ${{ needs.build-test.result }}"
+          echo "launcher:   ${{ needs.launcher.result }}"
 
       - name: Fail unless every prerequisite succeeded
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}

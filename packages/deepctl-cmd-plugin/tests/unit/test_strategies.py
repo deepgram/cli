@@ -314,6 +314,16 @@ class TestGetStrategy:
         assert isinstance(strategy, IsolatedVenvStrategy)
 
     @pytest.mark.unit
+    def test_npm_returns_isolated_venv(self) -> None:
+        strategy = get_strategy(InstallMethod.NPM, venv_python="/path/to/python")
+        assert isinstance(strategy, IsolatedVenvStrategy)
+
+    @pytest.mark.unit
+    def test_npm_without_venv_python_raises(self) -> None:
+        with pytest.raises(ValueError, match="venv_python is required"):
+            get_strategy(InstallMethod.NPM)
+
+    @pytest.mark.unit
     def test_unknown_returns_isolated_venv(self) -> None:
         strategy = get_strategy(
             InstallMethod.UNKNOWN, venv_python="/path/to/python"
