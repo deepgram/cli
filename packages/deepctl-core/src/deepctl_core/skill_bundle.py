@@ -30,12 +30,12 @@ REF_ENV_VAR = "DEEPCTL_SKILLS_REF"
 
 # The default bundle is pinned by full commit SHA plus the sha256 of its
 # codeload tarball, because the release tag is a lightweight, movable tag.
-DEFAULT_SKILLS_COMMIT = "0fc13fad726fb78e17fb1f05ba5942f0d022990f"
+DEFAULT_SKILLS_COMMIT = "02bc27cb88b97c36ad552ff0e98e7c522fd06f90"
 DEFAULT_SKILLS_SHA256 = (
-    "5b7f975378110372c8ae3a3c712b72ba2fa43b06f2d1d93497abf87262a23980"
+    "33a60b2a296f70f6a0cd61b77d8fe4d7565f229136edf877b399a83278731929"
 )
 #: The release that DEFAULT_SKILLS_COMMIT is. A label for people; never fetched.
-DEFAULT_SKILLS_RELEASE = "deepgram-skills-v1.7.0"
+DEFAULT_SKILLS_RELEASE = "deepgram-skills-v1.8.0"
 
 _MANIFEST_PATH = ".claude-plugin/marketplace.json"
 _PLUGIN_NAME = "deepgram"
