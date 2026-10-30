@@ -207,7 +207,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOC_FILES = [
     "README.md",
     "web/public/llms.txt",
-    "web/public/llms-full.txt",
+    "web/src/data/llms-full.txt",
 ]
 
 # Templates, not runnable commands: `dg ... -o json | jq`, `dg <command>
