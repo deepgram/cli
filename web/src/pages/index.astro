@@ -208,12 +208,20 @@ const commandCards: CommandCard[] = [
     desc: 'Sits in front of a stream so you can see exactly what reaches Deepgram.',
     lines: ['dg debug probe'] },
 ];
+import ketchJs from '../consent/ketch.js?raw';
+import consentTrackersJs from '../consent/trackers.js?raw';
 ---
 
-<html lang="en" prefix="og: https://ogp.me/ns#">
+<html lang="en" class="dark" prefix="og: https://ogp.me/ns#">
 <head>
   <!-- ── Essentials ──────────────────────────────────────── -->
   <meta charset="utf-8" />
+  <!--
+    Ketch consent manager plus the dgOnConsent / dgOnRevoke helpers, vendored
+    from developers.deepgram.com (src/consent/SOURCE.json). Must stay the
+    FIRST script in <head>: Heap and GA4 below wait for its consent.
+  -->
+  <script is:inline set:html={ketchJs}></script>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="generator" content={Astro.generator} />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -438,20 +446,8 @@ const commandCards: CommandCard[] = [
     ]
   })} />
 
-  <!-- Heap Analytics — product analytics for cli.deepgram.com -->
-  <script is:inline>
-    window.heap=window.heap||[],heap.load=function(e,t){window.heap.appid=e,window.heap.config=t=t||{};var r=document.createElement("script");r.type="text/javascript",r.async=!0,r.src="https://cdn.us.heap-api.com/js/heap-"+e+".js";var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(r,a);for(var n=function(e){return function(){heap.push([e].concat(Array.prototype.slice.call(arguments,0)))}},p=["addEventProperties","addUserProperties","clearEventProperties","identify","resetIdentity","removeEventProperty","setEventProperties","track","unsetEventProperty"],o=0;o<p.length;o++)heap[o]=n(p[o])};
-    heap.load("765739241");
-  </script>
-
-  <!-- Google Analytics 4 — *.deepgram.com property (266000242 / 372400484) -->
-  <script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-TYPC1TBCKT"></script>
-  <script is:inline>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-TYPC1TBCKT');
-  </script>
+  <!-- Heap and Google Analytics 4 (G-TYPC1TBCKT), started only after Ketch grants targeted_advertising -->
+  <script is:inline set:html={consentTrackersJs}></script>
 </head>
 <body class="bg-dg-black text-dg-text font-sans overflow-x-hidden" style="font-feature-settings: 'cv02','cv03','cv04','cv11';">
 
@@ -913,10 +909,14 @@ const commandCards: CommandCard[] = [
       </div>
       <div class="pt-6 text-[11px] text-dg-pebble flex flex-col sm:flex-row justify-between gap-2" style="border-top: 1px solid #2c2c3330;">
         <span>© {new Date().getFullYear()} Deepgram, Inc. All rights reserved.</span>
+        <!-- dg-consent.js mounts the "Your Privacy Choices" control here (Privacy Policy if Ketch is unavailable). -->
+        <div id="fern-footer"></div>
       </div>
     </div>
   </footer>
 
+  <!-- Cookie consent banner and footer control, vendored from developers.deepgram.com. Loads no tracker. -->
+  <script is:inline src="/consent/dg-consent.js" defer></script>
 </body>
 </html>
 
