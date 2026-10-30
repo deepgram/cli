@@ -16,3 +16,13 @@ def _clean_deepgram_env(monkeypatch):
     for key in list(os.environ):
         if key.startswith("DEEPGRAM_"):
             monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_launcher_capture():
+    """Re-read DEEPCTL_LAUNCHER in each test, so env patches take effect."""
+    from deepctl_core.launcher import reset_launcher_for_tests
+
+    reset_launcher_for_tests()
+    yield
+    reset_launcher_for_tests()
