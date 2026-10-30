@@ -66,6 +66,30 @@ class TestOneshotDetection:
     def test_uvx_oneshot(self):
         assert _is_oneshot() is True
 
+    @patch.dict(
+        "os.environ",
+        {
+            "UV_INTERNAL__PARENT_INTERPRETER": "/usr/bin/python3",
+            "DEEPCTL_LAUNCHER": "npm",
+        },
+        clear=True,
+    )
+    def test_npm_launcher_is_not_oneshot(self):
+        """npm runs deepctl via uv, but the npm install persists."""
+        assert _is_oneshot() is False
+
+    @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npx"}, clear=True)
+    def test_upgrade_hint_under_npx(self):
+        from deepctl_cmd_update.startup_check import upgrade_hint
+
+        assert upgrade_hint() == "npx @deepgram/cli@latest"
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_upgrade_hint_default(self):
+        from deepctl_cmd_update.startup_check import upgrade_hint
+
+        assert upgrade_hint() == "dg update"
+
 
 class TestCacheTimestamp:
     """Test file-based timestamp caching."""
@@ -207,6 +231,26 @@ class TestPrintPendingNotification:
         assert "2.0.0" in output
         assert "1.0.0" in output
         assert "dg update" in output
+
+    @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npm"}, clear=False)
+    def test_notification_names_npm_under_the_launcher(self):
+        """`dg update` cannot update an npm install; say what can."""
+        import io
+
+        import deepctl_cmd_update.startup_check as mod
+
+        mod._result = {"latest": "2.0.0", "current": "1.0.0"}
+        mod._thread = threading.Thread(target=lambda: None)
+        mod._thread.start()
+        mod._thread.join()
+
+        stderr_capture = io.StringIO()
+        with patch.object(sys, "stderr", stderr_capture):
+            print_pending_notification()
+
+        output = stderr_capture.getvalue()
+        assert "npm install -g @deepgram/cli@latest" in output
+        assert "dg update" not in output
 
     def test_no_notification_when_up_to_date(self, capsys):
         """No output when no update is available."""
