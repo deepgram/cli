@@ -1,5 +1,9 @@
 ---
 import '../styles/global.css';
+// Self-hosted fonts: no request to Google before (or without) consent.
+import '@fontsource-variable/inter/opsz.css';
+import '@fontsource/fira-code/400.css';
+import '@fontsource/fira-code/500.css';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -261,11 +265,6 @@ import consentTrackersJs from '../consent/trackers.js?raw';
   <link rel="manifest" href="/site.webmanifest" />
   <meta name="theme-color" content="#13ef95" />
   <meta name="msapplication-TileColor" content="#050506" />
-
-  <!-- ── Fonts ──────────────────────────────────────────── -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
 
   <!-- ── DNS prefetch ───────────────────────────────────── -->
   <link rel="dns-prefetch" href="https://deepgram.com" />
