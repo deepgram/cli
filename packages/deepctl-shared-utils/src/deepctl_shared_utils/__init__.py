@@ -28,4 +28,4 @@ __all__ = [
     "validate_url",
 ]
 
-__version__ = "0.1.13"  # x-release-please-version
+__version__ = "0.4.1"  # x-release-please-version

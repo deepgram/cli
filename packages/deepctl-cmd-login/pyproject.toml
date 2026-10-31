@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-login"
-version = "0.2.0" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "Login command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,8 @@ classifiers = [
 keywords = ["deepgram", "cli", "login", "authentication"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.2.19",
+    "deepctl==0.4.1", # x-release-please-version
+    "deepctl-core==0.4.1", # x-release-please-version
     "click>=8.0.0",
     "rich>=13.0.0",
     "deepgram-sdk>=7.7.0,<8",
@@ -43,3 +44,7 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["deepctl_cmd_login*"]
+
+[tool.uv.sources]
+deepctl = { workspace = true }
+deepctl-core = { workspace = true }

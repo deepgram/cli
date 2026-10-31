@@ -7,7 +7,7 @@ The console scripts call ``deepctl.main:main``; this package deliberately
 exports no ``main`` (``deepctl.main`` is the submodule).
 """
 
-__version__ = "0.4.0"  # x-release-please-version
+__version__ = "0.4.1"  # x-release-please-version
 __author__ = "Deepgram"
 __email__ = "devrel@deepgram.com"
 __license__ = "MIT"
