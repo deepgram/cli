@@ -1,0 +1,177 @@
+name: Competitive bench
+
+# Benchmark harness in bench/ (README there). Every measured process runs in a
+# container with --network none; no job uses a secret or a Deepgram key.
+#  - pull requests touching hot paths: base and head timed interleaved in one job
+#  - weekly: dg plus every pinned competitor
+#  - workflow_call with a ref, for a release job to call later; nothing calls it
+#    yet (bench/README.md, "Release gating")
+#  - weekly A/A (base vs base) feeds the rule that ends report-only timing gates
+# Deterministic gates block as soon as their `since` version is reached; timing
+# gates stay report-only until bench/gates.json marks them blocking.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "packages/**"
+      - "launcher/**"
+      - "uv.lock"
+      - "**/pyproject.toml"
+      - "bench/**"
+      - ".github/workflows/competitive-bench.yml"
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+  # For a release job to call before publishing (not wired yet). A tag pushed by
+  # release-please with GITHUB_TOKEN starts no workflow, so a `push: tags`
+  # trigger would never fire.
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to benchmark (the release commit)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: competitive-bench-${{ github.event_name }}-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DEEPCTL_TELEMETRY_DISABLED: "1"
+  BENCH_RUNNER_LABEL: ubuntu-24.04-arm
+
+jobs:
+  selftest:
+    name: Harness self-test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Unit tests
+        run: |
+          py=$(python3 -c 'import json; print(json.load(open("bench/competitors.json"))["images"]["python"])')
+          docker run --rm -v "$PWD/bench:/bench:ro" -e PYTHONDONTWRITEBYTECODE=1 "$py" \
+            sh -c 'pip -q install pytest==8.3.3 && cd /tmp && python -m pytest -q -p no:cacheprovider /bench/tests'
+
+      - name: Fake-CLI self-test
+        run: bench/selftest.sh
+
+  pr:
+    name: Base vs head (paired)
+    if: github.event_name == 'pull_request'
+    needs: selftest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The harness and gates come from the base commit, so a PR can't loosen the
+      # gates it is judged by. HEAD is the merge commit; its first parent is the
+      # base the PR actually merges onto.
+      - name: Harness from the base commit
+        run: |
+          base=$(git rev-parse HEAD^1)
+          echo "BASE_SHA=$base" >> "$GITHUB_ENV"
+          echo "HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          if git cat-file -e "$base:bench/bench.py" 2>/dev/null; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$base"
+            echo "BENCH_DIR=$RUNNER_TEMP/base/bench" >> "$GITHUB_ENV"
+          else
+            # Bootstrap only: the PR that adds bench/, or a base branch cut before it.
+            echo "BENCH_DIR=$PWD/bench" >> "$GITHUB_ENV"
+          fi
+
+      - name: Paired run, one automatic re-run on failure
+        run: |
+          set +e
+          for attempt in 1 2; do
+            out="$PWD/bench/out/pair-$attempt"
+            python3 "$BENCH_DIR/bench.py" pair --base "$BASE_SHA" --head "$HEAD_SHA" --out "$out"
+            python3 "$BENCH_DIR/check.py" pair "$out/pair.json" --json "$out/check.json" --summary "$GITHUB_STEP_SUMMARY"
+            rc=$?
+            [ "$rc" -eq 0 ] && break
+            echo "attempt $attempt failed; re-running once" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$rc"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: bench-pr-${{ github.event.pull_request.number }}
+          path: |
+            bench/out/pair-*/pair.json
+            bench/out/pair-*/check.json
+          retention-days: 30
+
+  full:
+    name: dg and competitors
+    if: github.event_name != 'pull_request'
+    needs: selftest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Run
+        run: python3 bench/bench.py run --ref HEAD --out bench/out/full
+
+      - name: Check
+        run: |
+          base="bench/baselines/$BENCH_RUNNER_LABEL.json"
+          args=""
+          [ -f "$base" ] && args="--baseline $base"
+          # shellcheck disable=SC2086
+          python3 bench/check.py bench/out/full/results.json $args --json bench/out/full/check.json --summary "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: bench-full-${{ github.run_id }}
+          path: |
+            bench/out/full/results.json
+            bench/out/full/check.json
+          retention-days: 90
+
+  aa:
+    name: A/A (base vs base)
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && inputs.ref == ''
+    needs: selftest
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          persist-credentials: false
+
+      - name: Paired run of HEAD against itself
+        run: |
+          set +e
+          for attempt in 1 2; do
+            out="bench/out/aa-$attempt"
+            python3 bench/bench.py pair --base HEAD --head HEAD --skip-deterministic --out "$out"
+            python3 bench/check.py pair "$out/pair.json" --json "$out/check.json" --summary "$GITHUB_STEP_SUMMARY"
+            python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["pair"]; sys.exit(1 if any(x["status"]=="RED" for x in r) else 0)' "$out/check.json" && break
+          done
+          # A red A/A after the re-run counts as a false positive toward ending report-only (bench/README.md); recorded, never failing.
+          exit 0
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: bench-aa-${{ github.run_id }}
+          path: bench/out/aa-*/check.json
+          retention-days: 400

@@ -1,0 +1,22 @@
+# A competitor installed with `uv tool install` (bytecode compiled), pinned.
+ARG PY_IMAGE
+ARG UV_IMAGE
+FROM ${UV_IMAGE} AS uv
+FROM ${PY_IMAGE}
+ARG HYPERFINE_VERSION
+ARG HYPERFINE_SHA_ARM64
+ARG HYPERFINE_SHA_AMD64
+ARG SPEC
+ARG VERSION
+COPY tools.sh /tmp/tools.sh
+RUN sh /tmp/tools.sh "$HYPERFINE_VERSION" "$HYPERFINE_SHA_ARM64" "$HYPERFINE_SHA_AMD64" && rm /tmp/tools.sh \
+ && apt-get update -qq && apt-get install -y -qq --no-install-recommends git >/dev/null && rm -rf /var/lib/apt/lists/*
+COPY --from=uv /uv /usr/local/bin/uv
+USER u
+WORKDIR /home/u
+ENV PATH=/home/u/.local/bin:$PATH UV_PYTHON_DOWNLOADS=never UV_NO_CACHE=1
+RUN uv tool install -q --compile-bytecode --python /usr/local/bin/python3 "$SPEC" \
+ && printf '{"install_mb": %s, "version": "%s"}\n' "$(du -sm /home/u/.local/share/uv/tools | cut -f1)" "$VERSION" > /home/u/.bench-meta.json
+USER root
+RUN mv /home/u/.bench-meta.json /opt/bench/meta.json && rm /usr/local/bin/uv
+USER u
