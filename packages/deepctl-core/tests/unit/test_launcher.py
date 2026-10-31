@@ -1,9 +1,9 @@
-"""Unit tests for deepctl_core.launcher."""
+"""Unit tests for deepctl_core._launcher."""
 
 import os
 from unittest.mock import patch
 
-from deepctl_core import launcher
+from deepctl_core import _launcher as launcher
 
 
 @patch.dict(os.environ, {"DEEPCTL_LAUNCHER": "npm"}, clear=False)
@@ -43,3 +43,29 @@ def test_npx_upgrade_command():
 @patch.dict(os.environ, {"DEEPCTL_LAUNCHER": "something-else"}, clear=False)
 def test_unknown_launcher_is_not_npm():
     assert launcher.launched_via_npm() is False
+
+
+@patch.dict(os.environ, {"DEEPCTL_LAUNCHER": "npx"}, clear=False)
+def test_uses_the_value_deepctl_main_captured_at_startup():
+    """An entry point that captured it first wins; the environment is left alone."""
+    import sys
+    import types
+
+    entry = types.ModuleType("deepctl.main")
+    entry.LAUNCHER = "npm"
+    entry.LAUNCHER_CAPTURED = True
+    with patch.dict(sys.modules, {"deepctl.main": entry}):
+        assert launcher.get_launcher() == "npm"
+    assert os.environ["DEEPCTL_LAUNCHER"] == "npx"
+
+
+def test_the_module_is_internal():
+    """No public ``deepctl_core.launcher`` to build plugins against."""
+    import importlib
+
+    import deepctl_core
+    import pytest
+
+    assert not hasattr(deepctl_core, "launcher")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("deepctl_core.launcher")

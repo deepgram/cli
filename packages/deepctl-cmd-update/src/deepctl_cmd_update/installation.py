@@ -7,7 +7,7 @@ import sys
 from enum import Enum
 from pathlib import Path
 
-from deepctl_core.launcher import get_launcher, launched_via_npm
+from deepctl_core._launcher import get_launcher, launched_via_npm
 from pydantic import BaseModel
 
 

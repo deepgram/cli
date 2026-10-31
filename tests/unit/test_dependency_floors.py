@@ -241,7 +241,7 @@ def test_final_release_floor_above_a_pre_release_is_unsatisfiable(
 
 # ---------------------------------------------------------------------------
 # Rule 4: coupled sibling floors (SIBLING_FLOORS) track the sibling's
-# workspace version. deepctl-cmd-update imports deepctl_core.launcher, which
+# workspace version. deepctl-cmd-update imports deepctl_core._launcher, which
 # no published deepctl-core had; with a stale floor pip can pair the new
 # update package with an old core and `dg` fails at import.
 # ---------------------------------------------------------------------------

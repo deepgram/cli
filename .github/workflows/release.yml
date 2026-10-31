@@ -157,7 +157,7 @@ jobs:
       # `chore:` commit under a package moves its code without a bump, and
       # PyPI keeps serving the old code under the same version: a clean
       # install then pairs new siblings with an old deepctl-core that has no
-      # deepctl_core.launcher. Refuse to publish in that state.
+      # deepctl_core._launcher. Refuse to publish in that state.
       - name: Check every changed package is being released
         run: python scripts/check_release_bumps.py
 
@@ -288,7 +288,7 @@ jobs:
           /tmp/real/bin/deepctl --version
           # What the npm launcher and `dg update` rely on: a sibling released
           # with stale code fails here with ModuleNotFoundError.
-          /tmp/real/bin/python -c "import deepctl_core.launcher, deepctl_cmd_update.installation"
+          /tmp/real/bin/python -c "import deepctl_core._launcher, deepctl_cmd_update.installation"
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
