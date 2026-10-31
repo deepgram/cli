@@ -6,14 +6,20 @@ import socket
 import time
 from typing import Any
 
-from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseCommand,
+    Config,
+    DeepgramClient,
+    get_status_console,
+)
 from deepctl_shared_utils import require_ffprobe
-from rich.console import Console
 from rich.panel import Panel
 
 from .models import ProbeDebugResult
 
-console = Console()
+# Status chrome is diagnostics: stderr, so stdout carries only the result.
+console = get_status_console()
 
 
 def _find_available_port(start: int = 3100, end: int = 3199) -> int | None:
@@ -165,24 +171,33 @@ class ProbeCommand(BaseCommand):
                     port=port,
                 )
 
-        upstream_host = "api.deepgram.com"
+        from deepctl_core import transport
+        from rich.markup import escape
+
+        # The upstream is the Transport's checked WebSocket base, and the key
+        # goes only where that check allows (refused hosts raise, reported).
+        upstream = transport.Transport(config, check_host=auth_manager.check_base_url)
+        upstream_base = upstream.ws_base()
+        upstream_headers = upstream.auth_headers(api_key)
 
         # Create proxy
         proxy = ProbeProxy(
             api_key=api_key,
             config=config,
-            upstream_host=upstream_host,
+            upstream_base=upstream_base,
             probe_interval_bytes=probe_interval_bytes,
             probe_interval_seconds=probe_interval_seconds,
             verbose=verbose,
+            upstream_headers=upstream_headers,
         )
+        upstream_host = proxy.upstream_host
 
         # Print instructions
         console.print(
             Panel(
                 f"[bold cyan]WebSocket Probe Proxy[/bold cyan]\n\n"
                 f"Listening on: [green]ws://localhost:{port}[/green]\n"
-                f"Upstream:     [yellow]wss://{upstream_host}[/yellow]\n"
+                f"Forwards to:  [yellow]{escape(proxy.upstream_base)}[/yellow]\n"
                 f"API key:      [dim]****{api_key[-4:]}[/dim]\n\n"
                 f"Probe every:  {probe_interval_bytes:,} bytes "
                 f"or {probe_interval_seconds}s\n\n"
@@ -205,7 +220,10 @@ class ProbeCommand(BaseCommand):
             if proxy._stop.is_set():
                 proxy.abort()
             else:
-                console.print("\n[yellow]Shutting down probe proxy...[/yellow]")
+                console.print(
+                    "\n[yellow]Stopping: open connections can finish. Press "
+                    "Ctrl+C again to end them now.[/yellow]"
+                )
                 proxy._stop.set()
 
         installed, previous = _handle_sigint(loop, interrupt)
@@ -230,6 +248,10 @@ class ProbeCommand(BaseCommand):
                     loop.remove_signal_handler(signal.SIGINT)
                     signal.signal(signal.SIGINT, previous)
                 loop.close()
+
+        if proxy.fatal is not None:
+            # The key was rejected at the upgrade: exit 1 with its code.
+            raise proxy.fatal
 
         duration = time.time() - start_time
 

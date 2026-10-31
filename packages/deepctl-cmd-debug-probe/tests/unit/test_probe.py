@@ -1,5 +1,6 @@
 """Tests for debug probe command and proxy."""
 
+import asyncio
 import json
 from unittest.mock import Mock, patch
 
@@ -236,8 +237,13 @@ def _probe_through_redirect(location: str):
             stubs.append(srv)
             ports[name] = srv.sockets[0].getsockname()[1]
 
-        proxy = ProbeProxy(api_key="fa1ce0000000000000000000000000000000000d")
-        proxy._upstream_base = f"ws://127.0.0.1:{ports['origin']}"
+        proxy = ProbeProxy(
+            api_key="fa1ce0000000000000000000000000000000000d",
+            upstream_base=f"ws://127.0.0.1:{ports['origin']}",
+            upstream_headers={
+                "Authorization": "Token fa1ce0000000000000000000000000000000000d"
+            },
+        )
         server = await proxy.start(0)
         port = next(iter(server.sockets)).getsockname()[1]
         try:
@@ -256,7 +262,7 @@ def _probe_through_redirect(location: str):
     out = io.StringIO()
     with patch(
         "deepctl_cmd_debug_probe.proxy.console",
-        Console(file=out, force_terminal=False, width=300),
+        Console(file=out, force_terminal=False, width=300, stderr=True),
     ):
         asyncio.run(run())
     return origin_reqs, target_reqs, out.getvalue()
@@ -273,7 +279,8 @@ class TestProbeUpstreamRedirect:
         assert target == []
         assert len(origin) == 1
         assert b"Token fa1ce0" in origin[0]
-        assert "Upstream connection refused" in text
+        assert "Deepgram connection failed" in text
+        assert "(network_unavailable)" in text
         assert "dg debug probe doesn't follow redirects, so no audio was sent." in (
             " ".join(text.split())
         )
@@ -320,6 +327,8 @@ def _run_probe(**proxy_hooks):
 
     auth = Mock()
     auth.get_api_key.return_value = "fa1ce0000000000000000000000000000000000d"
+    # The Transport's host check: the default host passes.
+    auth.check_base_url.return_value = "https://api.deepgram.com"
     with (
         patch("deepctl_cmd_debug_probe.command.require_ffprobe", return_value=True),
         patch.object(proxymod.ProbeProxy, "run", run),
@@ -353,7 +362,7 @@ class TestInterrupt:
             signal.signal(signal.SIGINT, old)
         assert result.status == "success"
         assert seen == []
-        assert "Shutting down probe proxy" in capsys.readouterr().out
+        assert "Stopping: open connections can finish" in capsys.readouterr().err
 
     def test_ignored_sigint_stays_ignored(self):
         """A background job in a script starts with SIGINT ignored: kill -INT
@@ -387,7 +396,7 @@ print(json.dumps({{
         assert out["ignored"] is True
         if out["sigign"] is not None:  # Linux: the SIGINT bit is still set
             assert int(out["sigign"], 16) & (1 << (2 - 1))
-        assert "Shutting down probe proxy" not in proc.stdout
+        assert "Stopping: open connections can finish" not in proc.stderr
 
     def test_keyboard_interrupt_path_first_and_second_press(self, capsys):
         """Where the loop can't take SIGINT (Windows), Ctrl+C raises
@@ -423,7 +432,7 @@ print(json.dumps({{
         assert time.monotonic() - t0 < 10
         assert result.status == "success"
         assert calls == ["abort"]
-        assert "Shutting down probe proxy" in capsys.readouterr().out
+        assert "Stopping: open connections can finish" in capsys.readouterr().err
 
 
 async def _hold_connection(proxy, port):
@@ -438,7 +447,7 @@ async def _hold_connection(proxy, port):
         writer.close()
 
     hang = await asyncio.start_server(never, "127.0.0.1", 0)
-    proxy._upstream_base = f"ws://127.0.0.1:{hang.sockets[0].getsockname()[1]}"
+    proxy.upstream_base = f"ws://127.0.0.1:{hang.sockets[0].getsockname()[1]}"
     for _ in range(100):
         try:
             ws = await connect(f"ws://127.0.0.1:{port}/v1/listen")
@@ -520,3 +529,213 @@ class TestProbeConnectionChecks:
     )
     def test_foreign_host_refused(self, host):
         assert self._status([("Host", host)]) == 403
+
+
+# ── The upstream comes from the Transport ──
+
+KEY = "fa1ce0000000000000000000000000000000000d"
+_QUIET = __import__("logging").getLogger("test.probe.fake-upstream")
+_QUIET.propagate = False
+_QUIET.setLevel(__import__("logging").CRITICAL + 1)
+
+
+async def _upstream(process_request, handler=None):
+    """A websockets server on a free loopback port. A refusal must come from
+    ``connection.respond()`` in ``process_request`` (websockets 13 runs the
+    handler for a hand-built Response)."""
+    from websockets.asyncio.server import serve
+
+    async def echo(ws):
+        async for msg in ws:
+            await ws.send(msg)
+
+    server = await serve(
+        handler or echo,
+        "127.0.0.1",
+        0,
+        process_request=process_request,
+        logger=_QUIET,
+    )
+    return server, next(iter(server.sockets)).getsockname()[1]
+
+
+def _proxy_to(port):
+    proxy = ProbeProxy(
+        api_key=KEY,
+        upstream_base=f"http://127.0.0.1:{port}",
+        upstream_headers={"Authorization": f"Token {KEY}"},
+    )
+    assert proxy.upstream_base == f"ws://127.0.0.1:{port}"
+    return proxy
+
+
+async def _client_until_closed(port, target="/v1/listen?encoding=linear16"):
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed, InvalidHandshake
+
+    try:
+        async with connect(f"ws://127.0.0.1:{port}{target}", open_timeout=5) as ws:
+            await asyncio.wait_for(ws.recv(), 10)
+    except (ConnectionClosed, InvalidHandshake, OSError, asyncio.TimeoutError):
+        pass
+
+
+def _run_proxy_against(process_request, *, connections=1):
+    """Serve the fake upstream and the proxy on loopback, connect
+    ``connections`` clients one after another, and run until the proxy stops
+    itself or the clients are done. Returns (proxy, seen upstream auth)."""
+    seen = []
+
+    def record(connection, request):
+        seen.append(request.headers.get("Authorization"))
+        return process_request(connection, request)
+
+    async def main():
+        upstream, up_port = await _upstream(record)
+        proxy = _proxy_to(up_port)
+        port = _free_port()
+        run = asyncio.ensure_future(proxy.run(port))
+        await asyncio.sleep(0.1)
+        for _ in range(connections):
+            await _client_until_closed(port)
+        await asyncio.sleep(0.3)
+        proxy._stop.set()
+        await asyncio.wait_for(run, 20)
+        upstream.close()
+        await upstream.wait_closed()
+        return proxy
+
+    return asyncio.run(main()), seen
+
+
+def _refusing(status):
+    def process_request(connection, request):
+        return connection.respond(status, "{}")
+
+    return process_request
+
+
+@pytest.mark.parametrize(("status", "code"), [(401, "auth_invalid")])
+def test_refused_key_stops_the_proxy_with_its_code(status, code):
+    proxy, seen = _run_proxy_against(_refusing(status), connections=1)
+    assert proxy.fatal is not None
+    assert proxy.fatal.code == code
+    assert seen == [f"Token {KEY}"]
+    assert KEY not in proxy.fatal.error
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 429, 500, 503])
+def test_other_refusals_fail_only_that_connection(status, capsys):
+    proxy, seen = _run_proxy_against(_refusing(status), connections=2)
+    assert proxy.fatal is None  # the proxy kept serving
+    assert seen == [f"Token {KEY}"] * 2
+    assert len(proxy.connections) == 2
+    err = capsys.readouterr().err
+    assert err.count("Deepgram connection failed") == 2
+    assert KEY not in err
+    if status == 404:
+        assert "/v1/listen" in err
+
+
+def test_a_later_401_doesnt_stop_the_loop_again():
+    """A second client refused after the first fatal 401 (here: while the
+    server shuts down) must not stop the proxy a second time."""
+    proxy, seen = _run_proxy_against(_refusing(401), connections=2)
+    assert proxy.fatal is not None and proxy.fatal.code == "auth_invalid"
+    assert 1 <= len(seen) <= 2
+
+
+def test_fatal_stop_with_an_open_stream_is_fast(capsys):
+    """A 401 while another stream is open stops within seconds, with
+    no leftover tasks or loop exception-handler errors."""
+    import time
+
+    def process_request(connection, request):
+        if "mode=401" in request.path:
+            return connection.respond(401, "{}")
+        return None
+
+    errors: list[dict] = []
+    marks: dict[str, float] = {}
+
+    async def main():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda _loop, ctx: errors.append(ctx)
+        )
+        upstream, up_port = await _upstream(process_request)
+        proxy = _proxy_to(up_port)
+        port = _free_port()
+        run = asyncio.ensure_future(proxy.run(port))
+        await asyncio.sleep(0.1)
+
+        async def held():
+            from websockets.asyncio.client import connect
+            from websockets.exceptions import ConnectionClosed
+
+            async with connect(f"ws://127.0.0.1:{port}/v1/listen") as ws:
+                await ws.send("ping")
+                await asyncio.wait_for(ws.recv(), 5)
+                try:
+                    await asyncio.wait_for(ws.recv(), 30)  # until the proxy closes it
+                except ConnectionClosed:
+                    pass
+
+        holder = asyncio.ensure_future(held())
+        await asyncio.sleep(0.5)
+        marks["refused"] = time.monotonic()
+        await _client_until_closed(port, "/v1/listen?mode=401")
+        await asyncio.wait_for(run, 30)
+        marks["stopped"] = time.monotonic()
+        await asyncio.wait_for(holder, 5)
+        upstream.close()
+        await upstream.wait_closed()
+        return proxy
+
+    proxy = asyncio.run(main())
+    assert proxy.fatal is not None and proxy.fatal.code == "auth_invalid"
+    assert marks["stopped"] - marks["refused"] < 10
+    assert errors == []
+
+
+def test_open_timeout_fails_only_that_connection(monkeypatch, capsys):
+    from deepctl_core import transport
+
+    monkeypatch.setattr(transport, "WS_OPEN_TIMEOUT_S", 0.3)
+
+    async def hang(connection, request):
+        await asyncio.sleep(2)
+
+    proxy, seen = _run_proxy_against(hang, connections=1)
+    assert proxy.fatal is None
+    assert "(timeout)" in capsys.readouterr().err
+
+
+def test_default_upstream_is_the_hosts_default():
+    from deepctl_core.hosts import DEFAULT_BASE_URL
+
+    proxy = ProbeProxy(api_key=KEY)
+    assert proxy.upstream_base == DEFAULT_BASE_URL.replace("https://", "wss://")
+    assert proxy.upstream_headers == {}  # no key without the command's check
+
+
+def test_refused_host_gets_no_key(monkeypatch, tmp_path):
+    from deepctl_core import hosts, output
+    from deepctl_core.auth import AuthManager
+    from deepctl_core.config import Config
+
+    monkeypatch.setattr(output, "is_ai_agent", lambda: True)
+    monkeypatch.setattr(hosts, "_reported", set())
+    monkeypatch.setenv("DEEPGRAM_BASE_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("DEEPGRAM_API_KEY", KEY)
+    config = Config(config_path=str(tmp_path / "none.yaml"))
+    built = []
+    # handle() imports ProbeProxy from .proxy at call time, so the
+    # seam is the proxy module's name.
+    monkeypatch.setattr(
+        "deepctl_cmd_debug_probe.proxy.ProbeProxy",
+        lambda **kw: built.append(kw),
+    )
+    with patch("deepctl_cmd_debug_probe.command.require_ffprobe", return_value=True):
+        with pytest.raises(hosts.CredentialHostError):
+            ProbeCommand().handle(config, AuthManager(config), Mock(), port=None)
+    assert built == []

@@ -14,12 +14,12 @@ import uuid
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from deepctl_core.output import get_status_console
 from deepctl_core.websocket import RedirectRefused
 from deepctl_shared_utils.ffprobe import (
     _parse_probe_data,  # lockstep sibling; same parsing as probe_buffer
     get_ffprobe_path,
 )
-from rich.console import Console
 from rich.text import Text
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed, WebSocketException
@@ -29,11 +29,18 @@ from .models import ProbeConnectionStats, ProbeSnapshot
 
 if TYPE_CHECKING:
     from deepctl_core import Config
+    from deepctl_core.transport import TransportError
     from deepctl_shared_utils.ffprobe_models import AudioProbeResult
     from websockets.asyncio.client import ClientConnection
     from websockets.http11 import Request, Response
 
-console = Console()
+# Status and transcripts are diagnostics: stderr, so stdout carries only the
+# command's result (one JSON document under -o json).
+console = get_status_console()
+
+# Refusals that end the proxy: the key is wrong for every connection. A 403
+# is about this request's scope (another path may be allowed), so it isn't.
+_FATAL_CODES = frozenset({"auth_invalid"})
 
 # Frames up to 4 MiB each way, the limit earlier releases allowed.
 MAX_FRAME_BYTES = 4 * 2**20
@@ -71,21 +78,33 @@ class ProbeProxy:
         self,
         api_key: str,
         config: Config | None = None,
-        upstream_host: str = "api.deepgram.com",
+        upstream_base: str | None = None,
         probe_interval_bytes: int = 131072,
         probe_interval_seconds: float = 10.0,
         verbose: bool = False,
+        upstream_headers: dict[str, str] | None = None,
     ) -> None:
+        """``upstream_base`` and ``upstream_headers`` come from the command's
+        Transport: the checked WebSocket base and the ``Authorization`` it
+        attaches only after the host check passed. Without headers, the
+        upstream gets no key."""
+        from deepctl_core import transport
+        from deepctl_core.hosts import DEFAULT_BASE_URL
+
         self.api_key = api_key
         self.config = config
-        self.upstream_host = upstream_host
+        # Where connections go: the base, then the client's path and query.
+        self.upstream_base = transport.ws_url(upstream_base or DEFAULT_BASE_URL)
+        self.upstream_base = self.upstream_base.rstrip("/")
+        self.upstream_host = urlsplit(self.upstream_base).hostname or ""
+        self.upstream_headers = dict(upstream_headers or {})
         self.probe_interval_bytes = probe_interval_bytes
         self.probe_interval_seconds = probe_interval_seconds
         self.verbose = verbose
         self.connections: list[ProbeConnectionStats] = []
-        # Where connections go: wss:// plus the fixed host, then the client's
-        # path and query. Tests point it at a loopback ws:// server.
-        self._upstream_base = f"wss://{upstream_host}"
+        # A coded error from an upstream that refused the key at the upgrade:
+        # the proxy stops and the command reports it (auth_invalid).
+        self.fatal: TransportError | None = None
         self._stop = asyncio.Event()
         # Open client and upstream connections, and pending upstream
         # connects, so a second Ctrl+C can end them at once.
@@ -139,9 +158,10 @@ class ProbeProxy:
     async def _connect_upstream(
         self, url: str, headers: dict[str, str]
     ) -> ClientConnection:
-        """Open the upstream WebSocket. The API key goes only here, and a
-        redirect on the upgrade is refused (``RedirectRefused``), never
-        followed."""
+        """Open the upstream WebSocket, within the Transport's open timeout.
+        The API key goes only here, and a redirect on the upgrade is refused
+        (``RedirectRefused``, a coded network_unavailable), never followed."""
+        from deepctl_core import transport
         from deepctl_core.websocket import open_async
 
         conn: ClientConnection = await open_async(
@@ -149,7 +169,7 @@ class ProbeProxy:
             headers,
             command="dg debug probe",
             payload="audio",
-            open_timeout=10,
+            open_timeout=transport.WS_OPEN_TIMEOUT_S,
             close_timeout=30,
             max_size=MAX_FRAME_BYTES,
             compression=None,
@@ -188,15 +208,34 @@ class ProbeProxy:
         for proc in list(self._ffprobes):
             self._reaping.add(asyncio.ensure_future(self._stop_ffprobe(proc)))
 
+    async def close_all(self) -> None:
+        """Close every open connection on both sides (each within 2 s)."""
+        for conn in list(self._live):
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(conn.close(), 2)
+
+    async def _stop_all(self) -> None:
+        """A fatal stop: close every open stream, then stop serving."""
+        await self.close_all()
+        self._stop.set()
+
     async def run(self, port: int) -> None:
         """Serve until `_stop` is set or this task is cancelled; then close
-        the listener and wait for every connection's summary."""
+        the listener and wait for every connection's summary. After a fatal
+        refusal that wait is capped at 2 s; what's left is aborted."""
         server = await self.start(port)
         try:
             await self._stop.wait()
         finally:
             server.close()
-            await server.wait_closed()
+            if self.fatal is not None:
+                closed = asyncio.ensure_future(server.wait_closed())
+                done, _ = await asyncio.wait({closed}, timeout=2)
+                if not done:
+                    self.abort()
+                await closed
+            else:
+                await server.wait_closed()
             await asyncio.gather(*self._reaping)
 
     async def handle_connection(self, ws_client: ServerConnection) -> None:
@@ -213,11 +252,11 @@ class ProbeProxy:
         )
         self.connections.append(stats)
 
-        upstream_url = self._upstream_base + target
+        upstream_url = self.upstream_base + target
 
-        upstream_headers = {
-            "Authorization": f"Token {self.api_key}",
-        }
+        # The Transport's Authorization, attached after its host check; the
+        # proxy never builds it.
+        upstream_headers = dict(self.upstream_headers)
 
         console.print(
             Text.from_markup(
@@ -241,21 +280,32 @@ class ProbeProxy:
             self._connecting.add(connecting)
             try:
                 ws_upstream = await connecting
-            except RedirectRefused as e:
-                console.print(
-                    Text.from_markup(
-                        f"[red]Upstream connection refused[/red] [{conn_id}]: "
-                    ),
-                    untrusted(e.message),
-                    sep="",
+            except (
+                RedirectRefused,
+                WebSocketException,
+                OSError,
+                asyncio.TimeoutError,
+            ) as e:
+                # A refused redirect is already coded (network_unavailable)
+                # and fails only this connection.
+                from deepctl_core import transport
+
+                mapped = transport.map_ws_open(
+                    e, (self.api_key,), host=self.upstream_host, path=path
                 )
-                return
-            except (WebSocketException, OSError, asyncio.TimeoutError) as e:
+                if mapped is not None and mapped.code in _FATAL_CODES:
+                    # The key itself was refused: every connection would fail
+                    # the same way. Stop, and let the command report the coded
+                    # error. Only the first refusal stops.
+                    if self.fatal is None:
+                        self.fatal = mapped
+                        await self._stop_all()
+                    return
                 console.print(
                     Text.from_markup(
-                        f"[red]Upstream connection failed[/red] [{conn_id}]: "
+                        f"[red]Deepgram connection failed[/red] [{conn_id}]: "
                     ),
-                    untrusted(str(e)),
+                    untrusted(f"{mapped.error} ({mapped.code})" if mapped else str(e)),
                     sep="",
                 )
                 return

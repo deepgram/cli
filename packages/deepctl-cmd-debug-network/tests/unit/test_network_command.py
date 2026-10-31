@@ -707,3 +707,17 @@ def test_missing_bundle_is_reported_like_requests(
     assert with_verify.success is False
     assert "Could not find a suitable TLS CA certificate bundle" in with_verify.error
     assert without_verify.success is True
+
+
+def test_default_endpoint_comes_from_hosts_default():
+    """The default host is hosts.DEFAULT_BASE_URL's, through the
+    Transport; debug network sends no credentials anywhere."""
+    from pathlib import Path
+
+    from deepctl_cmd_debug_network import command as network_module
+    from deepctl_core.hosts import DEFAULT_BASE_URL
+
+    assert f"https://{network_module._default_host()}" == DEFAULT_BASE_URL
+    source = Path(network_module.__file__).read_text(encoding="utf-8")
+    for credential_use in ("get_api_key", "Authorization", "auth_headers"):
+        assert credential_use not in source
