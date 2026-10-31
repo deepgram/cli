@@ -3,7 +3,8 @@
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlparse
+from typing import TypeAlias
+from urllib.parse import ParseResult, urlparse
 
 from .diagnostics import create_diagnostic_console
 from .models import FileInfo
@@ -54,8 +55,62 @@ AUDIO_MIME_TYPES = {
 }
 
 
+# A problem (the error to show, or None) and the warnings to show with it.
+Problems: TypeAlias = "tuple[str | None, list[str]]"
+
+
+def _supported() -> str:
+    return ", ".join(sorted(SUPPORTED_AUDIO_EXTENSIONS))
+
+
+def audio_file_problem(file_path: str | Path) -> Problems:
+    """Why ``file_path`` can't be sent as audio (None when it can), and any
+    warnings. Prints nothing: the caller reports both, once."""
+    # A URL passed as a path may carry a token: show it without one.
+    shown = display_url(str(file_path)) if "://" in str(file_path) else file_path
+    warnings: list[str] = []
+    try:
+        path = Path(file_path)
+        if not path.exists():
+            return f"File not found: {shown}", warnings
+        if not path.is_file():
+            return f"Not a file: {shown}", warnings
+        extension = path.suffix.lower()
+        if extension not in SUPPORTED_AUDIO_EXTENSIONS:
+            return (
+                f"{shown} doesn't look like an audio file "
+                f"({extension or 'no extension'}). Supported: {_supported()}. "
+                "Pass --no-validate to send it anyway.",
+                warnings,
+            )
+        if not os.access(path, os.R_OK):
+            return f"File is not readable: {shown}", warnings
+        size_mb = path.stat().st_size / (1024 * 1024)
+        if size_mb > 500:  # 500 MB
+            warnings.append(
+                f"Large file ({size_mb:.1f} MB): it may take longer to process."
+            )
+        return None, warnings
+    except Exception as e:
+        return (
+            f"Couldn't check {shown}: {scrub_url_text(e, str(file_path))}",
+            warnings,
+        )
+
+
+def _print(problems: Problems) -> bool:
+    problem, warnings = problems
+    for warning in warnings:
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
+    if problem is not None:
+        console.print(f"[red]Error:[/red] {problem}")
+    return problem is None
+
+
 def validate_audio_file(file_path: str | Path) -> bool:
     """Validate that a file exists and appears to be an audio file.
+
+    Prints the problem and warnings (see :func:`audio_file_problem`).
 
     Args:
         file_path: Path to the file
@@ -63,168 +118,224 @@ def validate_audio_file(file_path: str | Path) -> bool:
     Returns:
         True if file is valid audio file, False otherwise
     """
-    try:
-        path = Path(file_path)
-
-        # Check if file exists
-        if not path.exists():
-            console.print(f"[red]Error:[/red] File not found: {file_path}")
-            return False
-
-        # Check if it's a file (not directory)
-        if not path.is_file():
-            console.print(f"[red]Error:[/red] Path is not a file: {file_path}")
-            return False
-
-        # Check file extension
-        extension = path.suffix.lower()
-        if extension not in SUPPORTED_AUDIO_EXTENSIONS:
-            console.print(
-                f"[yellow]Warning:[/yellow] File extension '{extension}' "
-                f"is not in supported list"
-            )
-            console.print(
-                f"[dim]Supported extensions: "
-                f"{', '.join(sorted(SUPPORTED_AUDIO_EXTENSIONS))}[/dim]"
-            )
-            return False
-
-        # Check if file is readable
-        if not os.access(path, os.R_OK):
-            console.print(f"[red]Error:[/red] File is not readable: {file_path}")
-            return False
-
-        # Check file size (warn if very large)
-        size_mb = path.stat().st_size / (1024 * 1024)
-        if size_mb > 500:  # 500 MB
-            console.print(
-                f"[yellow]Warning:[/yellow] Large file detected ({size_mb:.1f} MB)"
-            )
-            console.print("[dim]Large files may take longer to process[/dim]")
-
-        return True
-
-    except Exception as e:
-        console.print(f"[red]Error validating file:[/red] {e}")
-        return False
+    return _print(audio_file_problem(file_path))
 
 
-def validate_url(url: str, check_accessibility: bool = True) -> bool:
-    """Validate URL format and optionally check accessibility.
+_SCHEME_RE = re.compile(r"\s*([A-Za-z][A-Za-z0-9+.\-]*)://(.*)", re.S)
 
-    Args:
-        url: URL to validate
-        check_accessibility: Whether to check if URL is accessible
 
-    Returns:
-        True if URL is valid, False otherwise
+def _parsed(url: str) -> ParseResult | None:
+    """``urlparse(url)`` when it has a scheme, a host and a valid port.
+
+    ``None`` otherwise: a password holding an unescaped ``/``, ``?`` or
+    ``#`` ends the authority early and shows up as a bad port or host.
     """
+    if not _SCHEME_RE.match(url):
+        return None
     try:
-        # Parse URL
-        parsed = urlparse(url)
+        parts = urlparse(url)
+        parts.port  # noqa: B018 (raises ValueError on a bad port)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.hostname:
+        return None
+    return parts
 
-        # Check basic URL structure
-        if not parsed.scheme or not parsed.netloc:
-            console.print(f"[red]Error:[/red] Invalid URL format: {url}")
-            return False
 
-        # Check scheme
+def _url_parts(url: str) -> tuple[str, str, str] | None:
+    """``(scheme, host[:port], path)`` when no user info can show.
+
+    ``None`` when the URL doesn't parse, or when an ``@`` appears outside the
+    parsed authority: that may be user info whose password holds ``/``, ``?``
+    or ``#``, so no part of it is shown.
+    """
+    parts = _parsed(url)
+    if parts is None:
+        return None
+    match = _SCHEME_RE.match(url)
+    rest = match.group(2) if match else ""
+    if rest.count("@") != parts.netloc.count("@"):
+        return None
+    return parts.scheme, parts.netloc.rpartition("@")[2], parts.path
+
+
+def _redacted(url: str) -> str:
+    """The shown form of a URL that can't be parsed safely."""
+    match = _SCHEME_RE.match(url)
+    if match:
+        return f"{match.group(1).lower()}://<redacted>/…"
+    if "@" in url:
+        return "<redacted>"
+    return re.split(r"[?#]", url, maxsplit=1)[0]
+
+
+def output_url(url: str) -> str:
+    """``url`` for machine output: no user info, query string or fragment.
+
+    Presigned URLs carry their token in the query string, so a URL is never
+    shown, logged or echoed whole. The path is kept: automation needs it to
+    identify the file. A URL that can't be parsed safely is shown as
+    ``scheme://<redacted>/…``.
+    """
+    parts = _url_parts(url)
+    if parts is None:
+        return _redacted(url)
+    scheme, host, path = parts
+    return f"{scheme}://{host}{path}"
+
+
+def display_url(url: str) -> str:
+    """``url`` for status lines and errors: ``scheme://host/…/<last segment>``.
+
+    As :func:`output_url`, and the path is cut to its last segment, since some
+    hosts put a token in the path. A path of one segment is shown whole.
+    """
+    parts = _url_parts(url)
+    if parts is None:
+        return _redacted(url)
+    scheme, host, path = parts
+    segments = [s for s in path.split("/") if s]
+    if len(segments) <= 1:
+        return f"{scheme}://{host}{path}"
+    tail = "/" if path.endswith("/") else ""
+    return f"{scheme}://{host}/…/{segments[-1]}{tail}"
+
+
+def scrub_url_text(text: object, url: str) -> str:
+    """``text`` (an error message) with ``url``'s query and user info removed.
+
+    Every piece of the raw text before the URL's last ``@`` is replaced, so a
+    message that quotes part of a password shows ``<redacted>`` instead.
+    """
+    out = str(text)
+    match = _SCHEME_RE.match(url)
+    rest = match.group(2) if match else url
+    if "@" in rest:
+        secret = rest.rpartition("@")[0]
+        pieces = [secret, *re.split(r"[:/?#@]", secret)]
+        for piece in sorted(pieces, key=len, reverse=True):
+            if len(piece) >= 2:
+                out = out.replace(piece, "<redacted>")
+    return _no_query(out)
+
+
+def url_problem(url: str, check_accessibility: bool = False) -> Problems:
+    """Why ``url`` can't be sent (None when it can), and any warnings.
+
+    By default only the format is checked (an http or https scheme and a
+    host), with no network access. ``check_accessibility`` also sends a
+    HEAD request (no credentials, no cookies). Prints nothing: the caller
+    reports both, once.
+    """
+    shown = display_url(url)
+    warnings: list[str] = []
+    try:
+        parsed = _parsed(url)
+        if parsed is None:
+            return f"Not a valid URL: {shown}", warnings
         if parsed.scheme not in ("http", "https"):
-            console.print(
-                f"[red]Error:[/red] Only HTTP/HTTPS URLs are supported: {url}"
-            )
-            return False
-
-        # Check if URL looks like an audio file
+            return f"URLs must start with http:// or https://: {shown}", warnings
         path = parsed.path.lower()
         if path:
             extension = Path(path).suffix
             if extension and extension not in SUPPORTED_AUDIO_EXTENSIONS:
-                console.print(
-                    f"[yellow]Warning:[/yellow] URL doesn't appear to be an "
-                    f"audio file: {url}"
+                warnings.append(
+                    f"{shown} doesn't look like an audio file ({extension}). "
+                    f"Supported: {_supported()}."
                 )
-                console.print(
-                    f"[dim]Expected extensions: "
-                    f"{', '.join(sorted(SUPPORTED_AUDIO_EXTENSIONS))}[/dim]"
-                )
-
-        # Check accessibility if requested
         if check_accessibility:
-            return _check_url_accessibility(url)
-
-        return True
-
+            problem, more = _url_reach_problem(url)
+            return problem, warnings + more
+        return None, warnings
     except Exception as e:
-        console.print(f"[red]Error validating URL:[/red] {e}")
-        return False
+        return f"Not a valid URL: {shown} ({scrub_url_text(e, url)})", warnings
 
 
-def _check_url_accessibility(url: str) -> bool:
-    """Check if URL is accessible.
+def validate_url(url: str, check_accessibility: bool = False) -> bool:
+    """Validate URL format and optionally check accessibility.
+
+    Prints the problem and warnings (see :func:`url_problem`).
 
     Args:
-        url: URL to check
+        url: URL to validate
+        check_accessibility: Also send a HEAD request (no credentials, no
+            cookies) to check the URL is reachable
 
     Returns:
-        True if accessible, False otherwise
+        True if URL is valid, False otherwise
+    """
+    return _print(url_problem(url, check_accessibility))
+
+
+def _no_query(text: object) -> str:
+    """``text`` with any URL query string removed."""
+    return re.sub(r"\?\S*", "", str(text))
+
+
+_CHECK_TIMEOUT_S = 10.0
+
+
+def _url_reach_problem(url: str) -> Problems:
+    """``--check-url``: why ``url`` can't be reached (None when it can),
+    and warnings about what it serves.
+
+    The request carries no API key and keeps no cookies: it goes to a host
+    the user named, not to Deepgram.
     """
     import httpx
 
-    try:
-        console.print("[dim]Checking URL accessibility...[/dim]")
+    shown = display_url(url)
+    warnings: list[str] = []
 
-        with httpx.Client(timeout=10.0) as client:
+    def unreachable(why: str) -> Problems:
+        return f"--check-url couldn't reach {shown} ({why})", warnings
+
+    try:
+        with httpx.Client(timeout=_CHECK_TIMEOUT_S) as client:
+            from http.cookiejar import DefaultCookiePolicy
+
+            client.cookies.jar.set_policy(DefaultCookiePolicy(allowed_domains=[]))
             # Try HEAD first; fall back to a ranged GET if the server
             # doesn't support HEAD (some CDNs/redirect services return
             # 404 or 405 for HEAD but serve GET fine).
             response = client.head(url, follow_redirects=True)
 
             if response.status_code not in range(200, 400):
-                response = client.get(
-                    url,
-                    follow_redirects=True,
-                    headers={"Range": "bytes=0-0"},
-                )
+                # Streamed, and the body is never read: a server that
+                # ignores Range can't make this load the whole file.
+                with client.stream(
+                    "GET", url, follow_redirects=True, headers={"Range": "bytes=0-0"}
+                ) as response:
+                    pass
 
-            if response.status_code in (200, 206):
-                # Check content type if available
-                content_type = response.headers.get("content-type", "").lower()
-                if content_type and not any(
-                    mime in content_type for mime in AUDIO_MIME_TYPES
-                ):
-                    console.print(
-                        f"[yellow]Warning:[/yellow] Content type may not be "
-                        f"audio: {content_type}"
+            if response.status_code not in (200, 206):
+                return unreachable(f"HTTP {response.status_code}")
+            content_type = response.headers.get("content-type", "").lower()
+            if content_type and not any(
+                mime in content_type for mime in AUDIO_MIME_TYPES
+            ):
+                warnings.append(
+                    f"{shown} is served as {content_type}, which may not be audio."
+                )
+            content_length = response.headers.get("content-length")
+            if content_length and content_length.isdigit():
+                size_mb = int(content_length) / (1024 * 1024)
+                if size_mb > 500:  # 500 MB
+                    warnings.append(
+                        f"Large file ({size_mb:.1f} MB): it may take longer to process."
                     )
-
-                # Check content length if available
-                content_length = response.headers.get("content-length")
-                if content_length:
-                    size_mb = int(content_length) / (1024 * 1024)
-                    if size_mb > 500:  # 500 MB
-                        console.print(
-                            f"[yellow]Warning:[/yellow] Large file detected "
-                            f"({size_mb:.1f} MB)"
-                        )
-
-                return True
-            else:
-                console.print(
-                    f"[red]Error:[/red] URL not accessible "
-                    f"(HTTP {response.status_code}): {url}"
-                )
-                return False
+            return None, warnings
 
     except httpx.TimeoutException:
-        console.print(f"[red]Error:[/red] URL request timed out: {url}")
-        return False
-    except httpx.RequestError as e:
-        console.print(f"[red]Error:[/red] Failed to access URL: {e}")
-        return False
+        return unreachable(f"no answer within {_CHECK_TIMEOUT_S:g} s")
     except Exception as e:
-        console.print(f"[red]Error checking URL accessibility:[/red] {e}")
-        return False
+        return unreachable(scrub_url_text(e, url) or type(e).__name__)
+
+
+def _check_url_accessibility(url: str) -> bool:
+    """Check if URL is accessible (see :func:`_url_reach_problem`); prints
+    the problem and warnings."""
+    return _print(_url_reach_problem(url))
 
 
 def validate_api_key(api_key: str) -> bool:
