@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import httpx
 from deepctl_core import Config
 from packaging import version
 from pydantic import BaseModel, Field
@@ -103,6 +102,8 @@ class VersionChecker:
         Returns:
             VersionInfo or None on error
         """
+        import httpx
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -149,6 +150,8 @@ class VersionChecker:
         Returns:
             VersionInfo or None on error
         """
+        import httpx
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(

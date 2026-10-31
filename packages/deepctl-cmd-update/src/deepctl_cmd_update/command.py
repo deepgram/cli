@@ -1,6 +1,5 @@
 """Update command implementation."""
 
-import asyncio
 import importlib.metadata
 import shlex
 import subprocess
@@ -21,6 +20,16 @@ from rich.prompt import Confirm
 from .installation import InstallationDetector
 from .models import UpdateResult
 from .version_check import VersionChecker, format_version_message
+
+
+# asyncio (and with it ssl) loads only when an update check runs, so
+# `dg update --help` doesn't import it.
+def __getattr__(name: str) -> Any:
+    if name == "asyncio":
+        import asyncio
+
+        return asyncio
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class UpdateCommand(BaseCommand):
@@ -79,6 +88,8 @@ class UpdateCommand(BaseCommand):
         status="cancelled" (exit 2). output_result unwraps either, so the
         JSON payload is the same shape from both.
         """
+        import asyncio
+
         console = get_console()
 
         # Extract arguments from kwargs

@@ -10,8 +10,6 @@ import warnings
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
-import urllib3
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 from rich.console import Console
 from rich.panel import Panel
@@ -210,6 +208,9 @@ class NetworkCommand(BaseCommand):
 
     def _collect_environment_info(self, result: NetworkDebugResult) -> None:
         """Collect environment information."""
+        import requests
+        import urllib3
+
         result.environment_info = {
             "python_version": sys.version,
             "platform": sys.platform,
@@ -264,6 +265,8 @@ class NetworkCommand(BaseCommand):
         self, hostname: str, result: NetworkDebugResult, timeout: int
     ) -> None:
         """Test basic HTTPS connectivity."""
+        import requests
+
         endpoint_test = EndpointTestResult(
             name="HTTPS", url=f"https://{hostname}", reachable=False
         )
@@ -410,6 +413,8 @@ class NetworkCommand(BaseCommand):
         simulate_blocked_crl: bool = False,
     ) -> None:
         """Test accessibility of CRL/OCSP/CA issuer endpoints."""
+        import requests
+
         all_endpoints = []
 
         for cert in tls_result.certificate_chain:
@@ -461,6 +466,9 @@ class NetworkCommand(BaseCommand):
         self, hostname: str, result: NetworkDebugResult, timeout: int
     ) -> None:
         """Test connectivity using Python requests library."""
+        import requests
+        import urllib3
+
         # Test with SSL verification enabled
         test_with_verify = PythonRequestsTest(
             url=f"https://{hostname}/", success=False, ssl_verify_enabled=True
@@ -662,6 +670,8 @@ class NetworkCommand(BaseCommand):
         self, result: NetworkDebugResult, timeout: int
     ) -> None:
         """Test latency to known Deepgram endpoints."""
+        import requests
+
         endpoints = [
             ("api.deepgram.com", "Primary API"),
         ]

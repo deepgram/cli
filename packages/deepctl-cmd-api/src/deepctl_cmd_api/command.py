@@ -4,10 +4,9 @@ import json
 import shutil
 import subprocess
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
-import httpx
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -37,6 +36,20 @@ from rich.panel import Panel
 
 from . import messages as msg
 from .models import ApiErrorResult, ApiResult
+
+if TYPE_CHECKING:
+    import httpx
+
+
+# httpx (and with it ssl) loads only when a request is sent, so `dg api
+# --help` doesn't import it.
+def __getattr__(name: str) -> Any:
+    if name == "httpx":
+        import httpx
+
+        return httpx
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 console = Console()
 
@@ -253,7 +266,7 @@ class ApiCommand(BaseCommand):
         )
 
     def _warn_redirect(
-        self, response: httpx.Response, target: UrlOrigin | None
+        self, response: "httpx.Response", target: UrlOrigin | None
     ) -> None:
         """Note a redirect that wasn't followed."""
         location = response.headers.get("location")
@@ -358,6 +371,8 @@ class ApiCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle API command execution."""
+        import httpx
+
         endpoint = kwargs.get("endpoint", "")
         method = (kwargs.get("method") or "GET").upper()
         fields = kwargs.get("field") or ()

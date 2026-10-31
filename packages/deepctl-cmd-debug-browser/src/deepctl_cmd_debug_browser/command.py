@@ -1,6 +1,5 @@
 """Browser debug command for deepctl."""
 
-import asyncio
 import importlib.resources
 import json
 import socket
@@ -9,7 +8,6 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from aiohttp import WSMsgType, web
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 from rich.console import Console
 from rich.panel import Panel
@@ -25,6 +23,24 @@ from .models import (
 )
 
 console = Console()
+
+
+# aiohttp and asyncio (with ssl) load only when the servers start, so
+# `dg debug browser --help` doesn't import them (W3.2).
+def __getattr__(name: str) -> Any:
+    if name == "asyncio":
+        import asyncio
+
+        return asyncio
+    if name == "web":
+        from aiohttp import web
+
+        return web
+    if name == "WSMsgType":
+        from aiohttp import WSMsgType
+
+        return WSMsgType
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class BrowserCommand(BaseCommand):
@@ -106,6 +122,8 @@ class BrowserCommand(BaseCommand):
 
     async def websocket_handler(self, request: Any) -> Any:
         """Handle WebSocket connections from the browser."""
+        from aiohttp import WSMsgType, web
+
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         self.ws_clients.add(ws)
@@ -174,6 +192,8 @@ class BrowserCommand(BaseCommand):
 
     async def http_handler(self, request: Any) -> Any:
         """Serve the debug HTML page."""
+        from aiohttp import web
+
         if request.path == "/":
             # Read the HTML template from the static directory
             try:
@@ -189,6 +209,10 @@ class BrowserCommand(BaseCommand):
 
     async def run_servers(self, port: int, timeout: int) -> dict[str, Any]:
         """Run both HTTP and WebSocket servers."""
+        import asyncio
+
+        from aiohttp import web
+
         # Create aiohttp app
         app = web.Application()
         app.router.add_get("/", self.http_handler)
@@ -333,6 +357,8 @@ class BrowserCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle browser debug command execution."""
+        import asyncio
+
         port = kwargs.get("port")
         no_browser = kwargs.get("no_browser", False)
         timeout = kwargs.get("timeout", 60)
