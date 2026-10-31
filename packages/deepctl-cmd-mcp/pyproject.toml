@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-mcp"
-version = "0.1.15" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "MCP server for deepctl: Deepgram documentation search over stdio"
 readme = "README.md"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "deepctl-core>=0.1.10",
+    "deepctl==0.4.1", # x-release-please-version
+    "deepctl-core==0.4.1", # x-release-please-version
     # The stdio proxy lives in deepctl_cmd_mcp.proxy (vendored from
     # deepgram-mcp), so installing deepctl adds no deepgram-mcp console
     # script. 1.22 is the oldest mcp that runs dg mcp with current pydantic
@@ -53,3 +54,7 @@ ignore = ["E501"]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+
+[tool.uv.sources]
+deepctl = { workspace = true }
+deepctl-core = { workspace = true }

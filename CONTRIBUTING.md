@@ -56,34 +56,45 @@ dg new-command
 
 Or manually create a package under `packages/` following the existing pattern. Every new package needs updates to:
 
-- `packages/<name>/pyproject.toml` — package metadata and entry point
+- `packages/<name>/pyproject.toml` — package metadata and entry point, at the root version
 - Root `pyproject.toml` — dependency + `[tool.uv.sources]`
-- `.github/release-please-config.json` — component definition
-- `.github/.release-please-manifest.json` — initial version
+- `.github/release-please-config.json` — the package's `pyproject.toml` in the root component's `extra-files`
 - `.github/workflows/test.yml` — test path
 
-Then run `make readmes` to update all READMEs.
+Then run `make floors-fix` (pins and back-edge) and `make readmes`.
 
-The root `pyproject.toml` dependency is not optional bookkeeping — it is the
-delivery manifest. `pip install --upgrade deepctl` (what `dg update` runs)
-only installs what root depends on, so a published package missing from that
-list never reaches anyone. `make floors-check` fails on both that omission and
-a floor left below the workspace version; run `make floors-fix` to pin floors.
+Every first-party package ships at one version (lockstep). The root
+`pyproject.toml` pins each package `==` that version and is the delivery
+manifest: `pip install --upgrade deepctl` (what `dg update` runs) only installs
+what root depends on. Every package pins its first-party dependencies `==` the
+same version and declares `deepctl==` it too (the back-edge), so upgrading any
+one package moves the whole set or the resolver refuses. Each of those pin
+lines carries `# x-release-please-version` so release-please moves it.
+`make floors-check` fails on any version or pin that differs, a missing
+back-edge, or a package root does not list; `make floors-fix` repairs them.
+`deepctl-plugin-example` is the exception: it is the third-party fixture and
+versions on its own. The per-package `packages/*/CHANGELOG.md` files stop at
+each package's last separate release; the root `CHANGELOG.md` covers every
+package from the first lockstep release on.
 
 ### Releasing
 
 Releases are driven by release-please. Two things are worth knowing before you
 run one:
 
-**Land your release-notes edits as a commit, not a PR description edit.**
-`sync-release-pr` regenerates `uv.lock` and the root dependency floors on the
-release branch automatically, but it pushes with `GITHUB_TOKEN`, which by
-design retriggers nothing — so the PR's checks still reflect the bot's first
-commit and stay red on content that is now correct. Editing `CHANGELOG.md` on
-the branch is a commit and retriggers them. Editing the PR *description* does
-not: that fires `pull_request: edited`, which is outside the default trigger
-types. If a release ever needs to go out unattended, switch that push to a
-dedicated PAT or GitHub App token.
+**One release PR, one version, one tag.** release-please bumps every
+package's version and every marked pin. The release workflow then re-pins the
+release branch in two jobs: `sync-release-pr` runs `make floors-fix` and
+`uv lock` with no credentials and hands over a patch, and `push-release-pr`
+applies it and pushes with the release GitHub App's token, so the required
+checks run on the release PR's final head (a `GITHUB_TOKEN` push would
+retrigger nothing). A release PR is only green once that push has landed. If
+the App isn't set up (the `RELEASE_APP_CLIENT_ID` variable and the
+`RELEASE_APP_PRIVATE_KEY` secret of the `release` environment, which only
+`main` may deploy to), `push-release-pr` fails at minting the token rather
+than leaving the checks stale. Land release-notes edits as a commit on the
+branch, not as a PR description edit: a description edit fires
+`pull_request: edited`, which is outside the default trigger types.
 
 **Nothing advertises a release until it is installable.** `verify-published`
 polls PyPI until `pip install deepctl==X` resolves its full closure, then

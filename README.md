@@ -617,8 +617,8 @@ cli/
 
 Merging [conventional commits](https://www.conventionalcommits.org/) to `main`
 triggers [release-please](https://github.com/googleapis/release-please) to open
-a release PR. Merging that PR creates tags and publishes all changed packages to
-PyPI. Each package is versioned independently.
+a release PR. Every first-party package is versioned in lockstep: merging that
+PR creates one tag and publishes every package at the same version to PyPI.
 
 ## Requirements
 
