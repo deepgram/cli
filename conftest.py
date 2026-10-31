@@ -88,3 +88,14 @@ def _restore_sigint():
     yield
     if before is not None:
         signal.signal(signal.SIGINT, before)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_credentials_state():
+    """Forget per-process resolver state (placeholder warnings, a keyring
+    timeout) between tests, as each dg run starts without it."""
+    from deepctl_core import credentials
+
+    credentials._reset_for_tests()
+    yield
+    credentials._reset_for_tests()
