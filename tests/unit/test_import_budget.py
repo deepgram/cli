@@ -206,3 +206,22 @@ def test_full_path_still_loads_click(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert "click" in modules
     assert proc.stdout.decode().startswith("deepctl, version ")
+
+
+def test_root_help_imports(tmp_path: Path) -> None:
+    """Root --help with the plugin discovery cache warm (the first run fills
+    it): no pydantic, no Config, no command module."""
+    first, _ = _imports(["--help"], tmp_path)
+    assert first.returncode == 0, first.stderr[-2000:]
+    proc, modules = _imports(["--help"], tmp_path)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert proc.stdout == first.stdout
+    assert _forbidden_hits(modules, GATES_IMPORTS["forbidden"]["help"]) == []
+    assert "deepctl_core.config" not in modules
+    assert "deepctl_core.plugin_manager" not in modules
+    assert not [m for m in modules if m.startswith("deepctl_cmd_")]
+
+
+def test_version_imports_no_command_module(tmp_path: Path) -> None:
+    _, modules = _imports(["--version"], tmp_path)
+    assert not [m for m in modules if m.startswith(("deepctl_cmd_", "deepctl_plugin"))]

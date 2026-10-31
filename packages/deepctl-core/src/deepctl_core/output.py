@@ -8,8 +8,6 @@ import sys
 from io import StringIO
 from typing import TYPE_CHECKING, Any, cast
 
-import yaml
-
 if TYPE_CHECKING:
     from rich.console import Console
     from rich.progress import Progress
@@ -248,6 +246,8 @@ class OutputFormatter:
 
     def _format_yaml(self, data: Any) -> str:
         """Format as YAML."""
+        import yaml
+
         try:
             if isinstance(data, str):
                 # Try to parse as JSON first

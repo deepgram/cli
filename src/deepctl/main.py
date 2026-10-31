@@ -33,6 +33,11 @@ LAUNCHER_ENV_VAR = "DEEPCTL_LAUNCHER"
 LAUNCHER: "str | None" = None
 LAUNCHER_CAPTURED = False
 
+HELP_CACHE_ENV_VAR = "DEEPCTL_HELP_CACHE"
+# Whether the launcher asked for a help-cache entry (DEEPCTL_HELP_CACHE=1).
+# main() removes the variable first thing, so nothing dg starts inherits it.
+HELP_CACHE = False
+
 # The `dg mcp` arguments the fast path accepts; anything else takes the full
 # path (and its Click errors).
 _FAST_MCP_ARGS: "tuple[list[str], ...]" = (
@@ -127,6 +132,8 @@ def main(prog: "str | None" = None) -> None:
 
     started_at = perf_counter()
     capture_launcher()
+    global HELP_CACHE
+    HELP_CACHE = os.environ.pop(HELP_CACHE_ENV_VAR, None) == "1"
     args = sys.argv[1:]
 
     if args == ["--version"]:
