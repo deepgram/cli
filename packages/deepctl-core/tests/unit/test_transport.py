@@ -574,7 +574,7 @@ def test_mode_a_two_stderr_lines_and_coded_stdout(monkeypatch):
     assert payload["code"] == "auth_invalid"
     assert payload["next_step"] == "dg login"
     assert payload["details"] == {"http_status": 401, "key_source": "config file"}
-    assert stderr.splitlines()[-2:] == [
+    assert stderr.splitlines() == [
         "ERROR: Deepgram rejected the API key (HTTP 401).",
         "HINT: " + transport.STRINGS["A-AUTH-INVALID"].format(prog="dg"),
     ]
@@ -591,6 +591,29 @@ def test_human_mode_renders_cross_and_hint(monkeypatch):
         "✗ This API key isn't allowed to make this request (HTTP 403).",
         "  " + transport.STRINGS["H-AUTH-FORBIDDEN"].format(prog="dg"),
     ]
+
+
+def test_success_in_mode_a_drops_chrome_only(monkeypatch):
+    result = _run(monkeypatch, status(200, {"models": []}), agentic=True, hard=False)
+    stdout, stderr = _split(result)
+    assert result.exit_code == 0
+    assert "Fetching models" not in stderr
+    assert json.loads(stdout)["status"] == "success"
+
+
+def test_other_commands_keep_chrome_in_mode_a(monkeypatch):
+    """Only commands that go through the Transport drop chrome: login's
+    device code, dg api's errors and the like stay on stderr."""
+    result = _run(
+        monkeypatch, status(200, {"models": []}), agentic=True, hard=True, name="login"
+    )
+    assert "Fetching models" in result.stderr
+
+
+def test_verbose_keeps_chrome(monkeypatch):
+    monkeypatch.setitem(output._output_config, "verbose", True)
+    result = _run(monkeypatch, status(200, {"models": []}), agentic=True, hard=False)
+    assert "Fetching models" in result.stderr
 
 
 def test_failure_after_stdout_payload_keeps_json_off_stdout(monkeypatch):
@@ -727,3 +750,11 @@ def test_shared_client_is_lazy_and_single():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert out.stdout.strip() == "False False"
+
+
+@pytest.mark.parametrize("ignore_quiet", [False, True])
+def test_print_warning_ignore_quiet(ignore_quiet, monkeypatch, capsys):
+    monkeypatch.setitem(output._output_config, "quiet", True)
+    monkeypatch.setitem(output._output_config, "agentic", True)
+    output.print_warning("needed", stderr=True, ignore_quiet=ignore_quiet)
+    assert ("WARN: needed" in capsys.readouterr().err) is ignore_quiet

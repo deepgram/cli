@@ -28,9 +28,10 @@ from deepctl_core import (
     Config,
     DeepgramClient,
 )
-from deepctl_core.output import _agentic
+from deepctl_core.output import _agentic, print_warning
 from deepctl_core.websocket import connect_async
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
@@ -402,9 +403,10 @@ class ListenCommand(BaseCommand):
         # from an explicit flag, so they stay silent; --interim still gates
         # client-side display.)
         if api_version >= 2 and diarize:
-            status.print(
-                "[yellow]Note:[/yellow] --diarize is not supported by Flux STT "
-                "(listen v2) models; ignoring it."
+            print_warning(
+                "Flux models don't support --diarize, so it was ignored.",
+                stderr=True,
+                ignore_quiet=True,
             )
             diarize = False
         save_to = kwargs.get("save_to")
@@ -888,7 +890,11 @@ class ListenCommand(BaseCommand):
 
                 def callback(indata: Any, frames: int, t: Any, s: Any) -> None:
                     if s:
-                        status.print(f"[yellow]Audio warning: {s}[/yellow]")
+                        print_warning(
+                            f"Audio warning: {escape(str(s))}",
+                            stderr=True,
+                            ignore_quiet=True,
+                        )
                     loop.call_soon_threadsafe(q.put_nowait, bytes(indata))
 
                 stream = sd.RawInputStream(
@@ -972,9 +978,11 @@ class ListenCommand(BaseCommand):
     ) -> BaseResult:
         resolved_encoding = encoding or "linear16"
         if not encoding:
-            status.print(
-                "[dim]No --encoding specified — assuming linear16. "
-                "Pass --encoding to suppress this warning.[/dim]"
+            print_warning(
+                "No --encoding specified — assuming linear16. "
+                "Pass --encoding to suppress this warning.",
+                stderr=True,
+                ignore_quiet=True,
             )
 
         caption_writer: StreamingCaptionWriter | None = None
