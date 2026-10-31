@@ -372,9 +372,15 @@ def _api_message(body: object, status: int, secrets: tuple[str, ...]) -> str:
 
 
 def map_exception(
-    exc: BaseException, secrets: tuple[str, ...] = ()
+    exc: BaseException,
+    secrets: tuple[str, ...] = (),
+    *,
+    timeout_s: float | None = None,
 ) -> TransportError | None:
-    """The coded error for a failed request, or ``None`` when ``exc`` isn't one."""
+    """The coded error for a failed request, or ``None`` when ``exc`` isn't one.
+
+    ``timeout_s`` is the request's timeout when it isn't the default.
+    """
     if isinstance(exc, TransportError):
         return exc
     if "httpx" in sys.modules:
@@ -382,10 +388,11 @@ def map_exception(
 
         if isinstance(exc, httpx.TimeoutException):
             host = _host(exc)
+            seconds = _seconds(timeout_s or DEFAULT_TIMEOUT_S)
             return TransportError(
                 "timeout",
-                {"host": host, "timeout_s": _seconds(DEFAULT_TIMEOUT_S)},
-                {"host": host, "timeout_s": _seconds(DEFAULT_TIMEOUT_S)},
+                {"host": host, "timeout_s": seconds},
+                {"host": host, "timeout_s": seconds},
             )
         if isinstance(exc, httpx.ProxyError):
             host = _host(exc)
@@ -461,9 +468,14 @@ def _seconds(value: float) -> int | float:
     return int(value) if float(value).is_integer() else value
 
 
-def raise_for(exc: BaseException, secrets: tuple[str, ...] = ()) -> None:
+def raise_for(
+    exc: BaseException,
+    secrets: tuple[str, ...] = (),
+    *,
+    timeout_s: float | None = None,
+) -> None:
     """Raise the coded :class:`TransportError` for ``exc``, if it maps to one."""
-    mapped = map_exception(exc, secrets)
+    mapped = map_exception(exc, secrets, timeout_s=timeout_s)
     if mapped is not None and mapped is not exc:
         raise mapped from exc
     if mapped is not None:

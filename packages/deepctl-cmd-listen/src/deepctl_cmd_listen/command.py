@@ -78,6 +78,11 @@ out = Console()
 # vocabulary ("pci", "ssn", …) earns an opaque HTTP 400 from the v2 endpoint.
 _FLUX_REDACT = ("numbers", "aggressive_numbers")
 
+# --timeout's default: a large file can take minutes to upload and process.
+_PRERECORDED_TIMEOUT_S = 300.0
+# One instance, so `dg transcribe` (an alias) has equal arguments.
+_TIMEOUT_TYPE = click.FloatRange(min=1)
+
 
 def _is_url(s: str) -> bool:
     return s.startswith(("http://", "https://"))
@@ -360,6 +365,16 @@ class ListenCommand(BaseCommand):
                 "is_flag": True,
                 "is_option": True,
             },
+            {
+                "names": ["--timeout"],
+                "help": (
+                    "Seconds to wait at each step (connecting, sending, the "
+                    "response) before giving up. Not a limit on the whole run. "
+                    "Default: 300. Files and URLs only."
+                ),
+                "type": _TIMEOUT_TYPE,
+                "is_option": True,
+            },
             # ── Caption output ────────────────────────────────────────
             {
                 "names": ["--webvtt"],
@@ -496,6 +511,11 @@ class ListenCommand(BaseCommand):
         save_to = kwargs.get("save_to")
         probe = kwargs.get("probe", False)
         no_validate = kwargs.get("no_validate", False)
+        timeout: float | None = kwargs.get("timeout")
+        if timeout is not None and mode in ("stream_mic", "stream_stdin"):
+            raise click.UsageError(
+                "--timeout applies only to a file or URL source, not to --mic or stdin."
+            )
 
         # Flux STT (listen v2) is streaming-only — there is no v2 pre-recorded
         # REST endpoint, so a file/URL routes to /v1/listen and the server
@@ -567,6 +587,7 @@ class ListenCommand(BaseCommand):
                 no_validate=no_validate,
                 caption_format=caption_format,
                 config=config,
+                timeout_s=timeout or _PRERECORDED_TIMEOUT_S,
             )
         elif mode == "prerecorded_url":
             assert source is not None
@@ -590,6 +611,7 @@ class ListenCommand(BaseCommand):
                 no_validate=no_validate,
                 caption_format=caption_format,
                 config=config,
+                timeout_s=timeout or _PRERECORDED_TIMEOUT_S,
             )
         elif mode == "stream_mic":
             return self._stream_mic(
@@ -698,6 +720,7 @@ class ListenCommand(BaseCommand):
         no_validate: bool,
         caption_format: str | None,
         config: Config,
+        timeout_s: float = _PRERECORDED_TIMEOUT_S,
     ) -> BaseResult | CodedErrorResult:
         from deepctl_shared_utils import (
             probe_file,
@@ -788,9 +811,13 @@ class ListenCommand(BaseCommand):
 
         try:
             if is_url:
-                result_dict = client.transcribe_url(source, options)
+                result_dict = client.transcribe_url(
+                    source, options, timeout_s=timeout_s
+                )
             else:
-                result_dict = client.transcribe_file(source, options, file_id=file_id)
+                result_dict = client.transcribe_file(
+                    source, options, timeout_s=timeout_s, file_id=file_id
+                )
         except UploadFileError as e:
             return coded_result(e)
         except Exception as e:
