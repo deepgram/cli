@@ -2,9 +2,15 @@
 
 import json
 import os
+import shutil
+import socket
+import subprocess
+import threading
+import time
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from deepctl_cmd_debug_audio import command as command_module
 from deepctl_cmd_debug_audio.command import AudioCommand
 from deepctl_cmd_debug_audio.models import (
     AudioDebugResult,
@@ -12,7 +18,6 @@ from deepctl_cmd_debug_audio.models import (
     AudioInfo,
     AudioStream,
 )
-from deepctl_cmd_debug_audio import command as command_module
 from deepctl_core import AuthManager, Config, DeepgramClient
 
 
@@ -24,6 +29,15 @@ def _ffprobe_lookup_via_which(monkeypatch):
     monkeypatch.setattr(
         command_module, "resolve_tool", lambda config, name, key: shutil.which(name)
     )
+
+
+def _completed(returncode: int, stdout: str, stderr: bytes = b"") -> Mock:
+    """A subprocess.run result carrying ffprobe's bytes output."""
+    result = Mock()
+    result.returncode = returncode
+    result.stdout = stdout.encode("utf-8")
+    result.stderr = stderr
+    return result
 
 
 class TestAudioCommand:
@@ -109,30 +123,103 @@ class TestAudioCommand:
         assert command.check_ffmpeg_installed() is False
 
     @patch("shutil.which", return_value="/usr/bin/ffprobe")
-    @patch("ffmpeg.probe")
+    @patch("subprocess.run")
     def test_run_ffprobe_standard(
-        self, mock_probe, mock_which, command, sample_probe_data
+        self, mock_run, mock_which, command, sample_probe_data
     ):
-        """Test running ffprobe without custom arguments."""
-        mock_probe.return_value = sample_probe_data
+        """The standard probe runs ffprobe's JSON argv as a list, no shell."""
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
 
         result = command.run_ffprobe("test.mp3")
 
         assert result == sample_probe_data
-        mock_probe.assert_called_once_with(
-            "file:" + os.path.abspath("test.mp3"), cmd="/usr/bin/ffprobe"
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        assert args[0] == [
+            "/usr/bin/ffprobe",
+            "-show_format",
+            "-show_streams",
+            "-of",
+            "json",
+            "-protocol_whitelist",
+            "file",
+            "file:" + os.path.abspath("test.mp3"),
+        ]
+        assert kwargs.get("shell", False) is False
+        assert kwargs["timeout"] == 30
+        assert kwargs["capture_output"] is True
+        assert kwargs["stdin"] is subprocess.DEVNULL
+
+    @pytest.mark.parametrize(
+        ("given", "probed"),
+        [
+            ("-v.wav", "file:" + os.path.abspath("-v.wav")),
+            ("-show_entries.wav", "file:" + os.path.abspath("-show_entries.wav")),
+            ("/abs/-v.wav", "file:" + os.path.abspath("/abs/-v.wav")),
+            ("dir/-v.wav", "file:" + os.path.abspath("dir/-v.wav")),
+        ],
+    )
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("subprocess.run")
+    def test_run_ffprobe_never_passes_a_path_as_an_option(
+        self, mock_run, mock_which, command, sample_probe_data, given, probed
+    ):
+        """A file name that starts with "-" reaches ffprobe as a file."""
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
+
+        command.run_ffprobe(given)
+        assert mock_run.call_args[0][0][-3:] == ["-protocol_whitelist", "file", probed]
+
+        command.run_ffprobe(given, "-show_streams")
+        assert mock_run.call_args[0][0][-3:] == ["-protocol_whitelist", "file", probed]
+
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("subprocess.run")
+    def test_run_ffprobe_failure_says_what_ffprobe_said(
+        self, mock_run, mock_which, command
+    ):
+        """A non-zero ffprobe exit shows the last line ffprobe wrote."""
+        mock_run.return_value = _completed(
+            1, "", b"ffprobe version 7\n\nbroken.mp4: moov atom not found\n"
         )
+
+        with pytest.raises(Exception) as exc:
+            command.run_ffprobe("broken.mp4")
+
+        assert str(exc.value) == (
+            "Failed to probe file: ffprobe couldn't read the file: "
+            "broken.mp4: moov atom not found"
+        )
+
+        mock_run.return_value = _completed(1, "", b"")
+        with pytest.raises(Exception) as exc:
+            command.run_ffprobe("broken.mp4")
+        assert str(exc.value).endswith("ffprobe couldn't read the file: exit 1")
+
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("subprocess.run")
+    def test_run_ffprobe_timeout_is_a_probe_failure(
+        self, mock_run, mock_which, command
+    ):
+        """An ffprobe that hangs past the timeout is reported, not waited on."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired(["ffprobe"], 30)
+
+        with pytest.raises(Exception) as exc:
+            command.run_ffprobe("slow.mp4")
+
+        assert str(exc.value).startswith("Failed to probe file: ")
+        assert "timed out after 30 seconds" in str(exc.value)
 
     @patch("shutil.which", return_value="/usr/bin/ffprobe")
     @patch("subprocess.run")
     def test_run_ffprobe_custom_args(
         self, mock_run, mock_which, command, sample_probe_data
     ):
-        """Test running ffprobe with custom arguments."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps(sample_probe_data)
-        mock_run.return_value = mock_result
+        """Custom arguments go before the input, which keeps the file-only
+        whitelist, the timeout and the closed stdin."""
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
 
         result = command.run_ffprobe("test.mp3", "-show_streams -show_format")
 
@@ -145,23 +232,44 @@ class TestAudioCommand:
             "json",
             "-show_streams",
             "-show_format",
+            "-protocol_whitelist",
+            "file",
             "file:" + os.path.abspath("test.mp3"),
         ]
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == expected_cmd
+        assert mock_run.call_args[1]["timeout"] == 30
+        assert mock_run.call_args[1]["stdin"] is subprocess.DEVNULL
 
     @patch("shutil.which", return_value="/usr/bin/ffprobe")
-    @patch("ffmpeg.probe")
+    @patch("subprocess.run")
+    def test_run_ffprobe_custom_args_cannot_widen_the_whitelist(
+        self, mock_run, mock_which, command, sample_probe_data
+    ):
+        """A user-supplied -protocol_whitelist comes before ours, so the
+        file-only one is the one that applies to the input."""
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
+
+        command.run_ffprobe("test.mp3", "-protocol_whitelist file,tcp")
+
+        assert mock_run.call_args[0][0][-3:] == [
+            "-protocol_whitelist",
+            "file",
+            "file:" + os.path.abspath("test.mp3"),
+        ]
+
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("subprocess.run")
     def test_option_like_file_name_is_probed_as_a_file(
-        self, mock_probe, mock_which, command, sample_probe_data, tmp_path, monkeypatch
+        self, mock_run, mock_which, command, sample_probe_data, tmp_path, monkeypatch
     ):
         """A file named "-f lavfi" is an input, not options."""
-        mock_probe.return_value = sample_probe_data
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
         monkeypatch.chdir(tmp_path)
 
         command.run_ffprobe("-f lavfi")
 
-        target = mock_probe.call_args.args[0]
+        target = mock_run.call_args[0][0][-1]
         assert target == f"file:{tmp_path}{os.sep}-f lavfi"
         assert not target.startswith("-")
 
@@ -171,7 +279,7 @@ class TestAudioCommand:
         self, mock_run, mock_which, command, sample_probe_data
     ):
         """--ffprobe-args keeps a quoted value as one argument (shlex)."""
-        mock_run.return_value = Mock(returncode=0, stdout=json.dumps(sample_probe_data))
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
 
         command.run_ffprobe(
             "-f lavfi", "-show_entries 'format=duration,size' -select_streams a"
@@ -183,6 +291,8 @@ class TestAudioCommand:
             "format=duration,size",
             "-select_streams",
             "a",
+            "-protocol_whitelist",
+            "file",
             "file:" + os.path.abspath("-f lavfi"),
         ]
 
@@ -235,10 +345,10 @@ class TestAudioCommand:
         assert result.ffmpeg_installed is False
 
     @patch("shutil.which")
-    @patch("ffmpeg.probe")
+    @patch("subprocess.run")
     def test_handle_success(
         self,
-        mock_probe,
+        mock_run,
         mock_which,
         command,
         mock_config,
@@ -248,7 +358,7 @@ class TestAudioCommand:
     ):
         """Test successful audio file analysis."""
         mock_which.return_value = "/usr/bin/ffprobe"
-        mock_probe.return_value = sample_probe_data
+        mock_run.return_value = _completed(0, json.dumps(sample_probe_data))
 
         result = command.handle(
             config=mock_config,
@@ -264,10 +374,10 @@ class TestAudioCommand:
         assert result.audio_info.format.filename == "test.mp3"
 
     @patch("shutil.which")
-    @patch("ffmpeg.probe")
+    @patch("subprocess.run")
     def test_handle_probe_error(
         self,
-        mock_probe,
+        mock_run,
         mock_which,
         command,
         mock_config,
@@ -276,7 +386,7 @@ class TestAudioCommand:
     ):
         """Test handling ffprobe errors."""
         mock_which.return_value = "/usr/bin/ffprobe"
-        mock_probe.side_effect = Exception("Failed to probe file")
+        mock_run.return_value = _completed(1, "", b"Invalid data found")
 
         result = command.handle(
             config=mock_config,
@@ -382,9 +492,7 @@ class TestOutputChannels:
     def test_human_rendering_is_suppressed_for_machines(
         self, _ffmpeg, _format, command, mocks, probe_data, capsys
     ):
-        with patch.object(
-            AudioCommand, "run_ffprobe", return_value=probe_data
-        ):
+        with patch.object(AudioCommand, "run_ffprobe", return_value=probe_data):
             result = command.handle(*mocks, file="test.mp3")
         captured = capsys.readouterr()
 
@@ -392,16 +500,12 @@ class TestOutputChannels:
         assert captured.out == ""
         assert "Analyzing audio file" in captured.err
 
-    @patch(
-        "deepctl_cmd_debug_audio.command.get_output_format", return_value="default"
-    )
+    @patch("deepctl_cmd_debug_audio.command.get_output_format", return_value="default")
     @patch.object(AudioCommand, "check_ffmpeg_installed", return_value=True)
     def test_human_rendering_still_prints_for_humans(
         self, _ffmpeg, _format, command, mocks, probe_data, capsys
     ):
-        with patch.object(
-            AudioCommand, "run_ffprobe", return_value=probe_data
-        ):
+        with patch.object(AudioCommand, "run_ffprobe", return_value=probe_data):
             command.handle(*mocks, file="test.mp3")
         captured = capsys.readouterr()
 
@@ -423,3 +527,81 @@ def test_ffprobe_never_from_current_directory(tmp_path, monkeypatch):
     assert command.check_ffmpeg_installed() is False
     with pytest.raises(Exception, match="ffprobe not found"):
         command.run_ffprobe("a.wav")
+
+
+# -- real ffprobe: the argv hardening holds against the binary itself -------
+
+_FFPROBE = shutil.which("ffprobe")
+needs_ffprobe = pytest.mark.skipif(_FFPROBE is None, reason="ffprobe not installed")
+
+
+def _write_wav(path) -> None:
+    import wave
+
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 1600)
+
+
+@pytest.fixture
+def real_command(monkeypatch):
+    """An AudioCommand that uses the real ffprobe on PATH."""
+    monkeypatch.setattr(command_module, "resolve_tool", lambda *a: _FFPROBE)
+    return AudioCommand()
+
+
+@needs_ffprobe
+class TestRealFfprobe:
+    def test_dash_named_file_is_probed_as_a_file(
+        self, real_command, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_wav(tmp_path / "-v.wav")
+
+        for custom in (None, "-show_streams"):
+            data = real_command.run_ffprobe("-v.wav", custom)
+            assert data["streams"][0]["codec_name"] == "pcm_s16le"
+
+    def test_tcp_input_is_refused_without_connecting(self, real_command):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(0.2)
+        port = listener.getsockname()[1]
+        accepted: list[object] = []
+        stop = threading.Event()
+
+        def accept() -> None:
+            while not stop.is_set():
+                try:
+                    accepted.append(listener.accept()[0])
+                except OSError:
+                    continue
+
+        thread = threading.Thread(target=accept, daemon=True)
+        thread.start()
+        try:
+            for custom in (None, "-show_streams", "-protocol_whitelist file,tcp"):
+                with pytest.raises(Exception, match="^Failed to probe file: "):
+                    real_command.run_ffprobe(f"tcp://127.0.0.1:{port}", custom)
+            time.sleep(0.3)
+        finally:
+            stop.set()
+            thread.join(2)
+            listener.close()
+        assert accepted == []
+
+    def test_concat_input_is_refused(self, real_command, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_wav(tmp_path / "a.wav")
+
+        with pytest.raises(Exception, match="^Failed to probe file: "):
+            real_command.run_ffprobe("concat:a.wav|a.wav")
+
+    def test_pipe_input_returns_promptly(self, real_command):
+        start = time.monotonic()
+        with pytest.raises(Exception, match="^Failed to probe file: "):
+            real_command.run_ffprobe("pipe:0")
+        assert time.monotonic() - start < 5
