@@ -812,6 +812,46 @@ def test_broken_pipe_on_stdout_ends_quietly(monkeypatch):
     assert silenced == [True]
 
 
+@pytest.mark.parametrize(
+    ("err", "text"),
+    [
+        (28, "No space left on device"),
+        (5, "Input/output error"),
+        (27, "File too large"),
+    ],
+)
+def test_other_stdout_write_errors_are_output_failures(monkeypatch, err, text):
+    """ENOSPC/EIO/EFBIG on stdout is not a network failure."""
+    silenced = []
+    monkeypatch.setattr(live, "silence_stdout", lambda: silenced.append(True))
+    install_fake_websockets(monkeypatch, FakeWS([_result("a"), _result("b")]))
+    seen = []
+
+    def on_message(raw):
+        seen.append(raw)
+        raise OSError(err, text)
+
+    async def main():
+        return await live.run_session(
+            "wss://x",
+            {},
+            on_message=on_message,
+            queue=asyncio.Queue(),
+            closing=threading.Event(),
+            start_source=lambda: None,
+            keepalive=False,
+            byte_rate=0,
+        )
+
+    outcome = run(main())
+    assert outcome.status == "error"
+    assert outcome.kind == "output"
+    assert outcome.os_error == text
+    assert outcome.error == f"Couldn't write the output to stdout: {text}."
+    assert silenced == [True]
+    assert len(seen) == 1  # stopped at the first failed write
+
+
 # ── SIGTERM and non-blocking stdin ─────────────────────────────────────────
 
 

@@ -12,6 +12,7 @@ CODE_INVALID_ARGUMENT = "invalid_argument"
 CODE_STREAM_DRAIN_TIMEOUT = "stream_drain_timeout"
 CODE_SERVER_ERROR = "server_error"
 CODE_NETWORK_UNAVAILABLE = "network_unavailable"
+CODE_OUTPUT_UNWRITABLE = "output_unwritable"
 
 # invalid_argument: a hard agent signal, no SOURCE, no --mic.
 E_LISTEN_NO_SOURCE = (
@@ -83,3 +84,17 @@ E_LISTEN_FLUX_ERROR = "Flux STT error ({flux_code}): {description}"
 
 # network_unavailable: the connection dropped without a closing handshake.
 E_LISTEN_CONNECTION_LOST = "The connection to the server was lost."
+
+# output_unwritable: writing the transcript or the final result to stdout
+# failed with an error other than EPIPE (ENOSPC, EIO, ...).
+# {reason} is details.reason. The texts are shared with speak.
+E_OUTPUT_UNWRITABLE = "Couldn't write the output to {output}: {reason}."
+H_OUTPUT_UNWRITABLE = (
+    "Choose another destination, or fix this one (free space, permissions), "
+    "then try again."
+)
+A_OUTPUT_UNWRITABLE = (
+    "If you chose this destination, choose another one. Otherwise tell the "
+    "user {prog} couldn't write its output ({reason}), and don't retry until "
+    "it's fixed."
+)

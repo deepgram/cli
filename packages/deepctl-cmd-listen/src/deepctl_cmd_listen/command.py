@@ -188,6 +188,10 @@ class ListenCommand(BaseCommand):
     _ws_host: str = ""
     #: Set after a SIGTERM drain; exit_code_for re-raises it.
     _reraise_signal: int | None = None
+    #: The finals kept by the last live session, for a late stdout failure.
+    _live_kept: dict[str, Any] | None = None
+    #: Writing the final result to stdout failed; the run exits 1.
+    _output_failed: bool = False
 
     examples = [
         "dg listen audio.mp3",
@@ -1232,6 +1236,10 @@ class ListenCommand(BaseCommand):
                 self._flush_v2(v2_state, transcript_acc, caption_writer=caption_writer)
             except BrokenPipeError:
                 live.silence_stdout()
+            except OSError as exc:
+                live.silence_stdout()
+                if outcome.status == "success":
+                    outcome = live.output_failed(exc)
 
         if outcome.status == "cancelled":
             status.print("\n[yellow]Stopped.[/yellow]")
@@ -1266,6 +1274,7 @@ class ListenCommand(BaseCommand):
                 out["saved_to"] = saved_to
             return out
 
+        self._live_kept = kept()
         if outcome.status == "drain_timeout":
             limit = round(outcome.drain_limit_s, 3)
             template = (
@@ -1311,7 +1320,9 @@ class ListenCommand(BaseCommand):
                 },
             )
 
-        if outcome.status == "error":
+        if outcome.status == "error" and outcome.kind == "output":
+            return self._output_unwritable(outcome.os_error or "", kept())
+        if outcome.status == "error" and outcome.kind == "read":
             # Reading stdin failed (EISDIR, EBADF, EIO on a hang-up). The
             # fix is the same as for a missing source: pass a file or URL.
             return self._coded_failure(
@@ -1321,6 +1332,16 @@ class ListenCommand(BaseCommand):
                 hint_agent=msg.A_LISTEN_STDIN_UNREADABLE,
                 details=kept(),
                 next_step=f"{_prog()} {self.name} --help",
+            )
+
+        if outcome.status == "error":
+            # An error of no known kind: report it without a stdin hint.
+            return self._coded_failure(
+                outcome.error or msg.E_LISTEN_CONNECTION_LOST,
+                code=msg.CODE_NETWORK_UNAVAILABLE,
+                hint_human=msg.H_NETWORK,
+                hint_agent=msg.A_NETWORK.format(prog=_prog()),
+                details={"host": self._ws_host, "reason": "connection lost", **kept()},
             )
 
         result = ListenResult(
@@ -1361,14 +1382,30 @@ class ListenCommand(BaseCommand):
             error=text, code=code, hint=hint, next_step=next_step, details=details
         )
 
+    def _output_unwritable(
+        self, os_error: str, kept: dict[str, Any]
+    ) -> ListenCodedError:
+        """stdout couldn't be written: fd 1 is already silenced,
+        so the envelope goes to stderr only, as its two lines."""
+        return self._coded_failure(
+            msg.E_OUTPUT_UNWRITABLE.format(output="stdout", reason=os_error),
+            code=msg.CODE_OUTPUT_UNWRITABLE,
+            hint_human=msg.H_OUTPUT_UNWRITABLE,
+            hint_agent=msg.A_OUTPUT_UNWRITABLE.format(prog=_prog(), reason=os_error),
+            details={"path": "-", "reason": os_error, **kept},
+        )
+
     def exit_code_for(self, result: Any) -> int:
         """A SIGTERM-drained stream ends by SIGTERM itself: the
-        result is already written, so flush and re-raise it here."""
+        result is already written, so flush and re-raise it here. A final
+        result that couldn't be written to stdout exits 1."""
         if self._reraise_signal is not None:
             signum, self._reraise_signal = self._reraise_signal, None
             from . import live
 
             live.die_by_signal(signum)
+        if self._output_failed:
+            return 1
         return super().exit_code_for(result)
 
     # ── Shared WebSocket helpers ───────────────────────────────────────
@@ -1512,7 +1549,12 @@ class ListenCommand(BaseCommand):
             print(line, flush=True)
         else:
             if self._verbose:
-                print_info(escape(line), stderr=True)
+                try:
+                    print_info(escape(line), stderr=True)
+                except OSError:
+                    # A failing stderr is not a failing stdout: keep
+                    # streaming, and keep the result that is the payload.
+                    pass
 
     def _print_interim(self, text: str) -> None:
         """An interim rewrite; dropped under a machine format."""
@@ -1686,10 +1728,26 @@ class ListenCommand(BaseCommand):
             except BrokenPipeError:
                 # The reader went away (`| true`): end quietly, exit as is.
                 live.silence_stdout()
+            except OSError as exc:
+                # stdout can't take the result (ENOSPC, EIO): output_unwritable
+                # on stderr, exit 1.
+                live.silence_stdout()
+                reason = live.output_failed(exc).os_error or ""
+                kept = self._live_kept or {
+                    "transcript": result.transcript,
+                    "transcript_chars": len(result.transcript),
+                }
+                self._output_unwritable(reason, kept)
+                self._output_failed = True
             return
 
         if not isinstance(result, ListenResult) or result.status != "success":
-            super().output_result(result, config)
+            try:
+                super().output_result(result, config)
+            except OSError:
+                # Already reported on stderr; keep the exit flush from
+                # failing again on a full or broken stdout.
+                live.silence_stdout()
             return
 
         # Caption mode: print captions to stdout regardless of output format
