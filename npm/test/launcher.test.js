@@ -49,6 +49,15 @@ function fakeSpawn(body) {
 
 const posixOnly = { skip: process.platform === 'win32' && 'POSIX shell scripts' };
 
+// Every name pythonCandidates probes on POSIX. A fake Python must shadow
+// all of them, or a real interpreter later on PATH (GitHub's ubuntu
+// runners have several) wins and builds a real venv.
+const PYTHON_NAMES = ['python3.14', 'python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3'];
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // A copy of the package as a release tarball has it: bin/, lib/,
 // package.json and requirements-<version>.txt, which the repository's npm/
 // directory does not have (the release writes it). `requirements: null`
@@ -718,7 +727,7 @@ describe('no trusted cache root: a one-run venv instead', () => {
     for (const c of calls) assert.equal(c[c.indexOf('--cache-dir') + 1], path.join(r.cleanup, '.setup-cache'));
     assert.equal(fs.existsSync(path.join(r.cleanup, '.setup-cache')), false);
     for (const spec of specs) assert.deepEqual(fs.readdirSync(spec.dir), ['1.0.0'], 'nothing written into an untrusted root');
-    assert.match(stderr, new RegExp(`for this run only: .*${specs[0].dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} isn't one\\.\\nHINT: `));
+    assert.match(stderr, new RegExp(`for this run only: .*${escapeRegExp(specs[0].dir)} isn't one\\.\\nHINT: `));
   }
 
   test('group-writable roots are not reused or written to', posixOnly, async () => {
@@ -1168,7 +1177,7 @@ describe('resolveRunner', () => {
     });
     assert.ok(r.cleanup, 'a one-run venv');
     for (const c of calls) assert.equal(c[c.indexOf('--cache-dir') + 1], path.join(r.cleanup, '.setup-cache'));
-    assert.match(lines.join(''), new RegExp(`${uvCache.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} isn't one\\.\\nHINT: Remove `));
+    assert.match(lines.join(''), new RegExp(`${escapeRegExp(uvCache)} isn't one\\.\\nHINT: Remove `));
   });
 
   test('a UV_CACHE_DIR the user set is left to uv', posixOnly, async () => {
@@ -1348,7 +1357,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     assert.equal(r.status, 1);
     assert.equal(r.stdout, '');
     assert.match(r.stderr, /Hash mismatch/);
-    assert.match(r.stderr, new RegExp(`ERROR: Installing deepctl==${pkg.version.replace(/\./g, '\\.')} failed \\(exit 1\\)\\.\\nHINT: .*hash mismatch above means a download did not match this release`));
+    assert.match(r.stderr, new RegExp(`ERROR: Installing deepctl==${escapeRegExp(pkg.version)} failed \\(exit 1\\)\\.\\nHINT: .*hash mismatch above means a download did not match this release`));
     assert.equal(fs.existsSync(ran), false);
     assert.deepEqual(fs.readdirSync(launcher.cacheRoots({ env, home })[0]), []);
   });
@@ -1404,7 +1413,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
       'exit 0',
       '',
     ].join('\n');
-    for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) {
+    for (const name of PYTHON_NAMES) {
       fakeExe(bin, name, fakePython);
     }
     fs.writeFileSync(path.join(home, 'checker'), checker);
@@ -1447,7 +1456,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
     const fakePython = '#!/bin/sh\n[ "$1" = -I ] && shift\ncase "$1 $2" in\n  "-c "*) echo "(3, 12)"; exit 0;;\nesac\nkill -KILL $$\n';
-    for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) fakeExe(bin, name, fakePython);
+    for (const name of PYTHON_NAMES) fakeExe(bin, name, fakePython);
     const r = runCopy(packageCopy(), { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_RUNNER: 'venv' });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /failed \(killed by SIGKILL\)/);
@@ -1513,7 +1522,7 @@ describe('a signal during first-run setup', posixOnly, () => {
       'exit 0',
       '',
     ].join('\n');
-    for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) fakeExe(bin, name, fakePython);
+    for (const name of PYTHON_NAMES) fakeExe(bin, name, fakePython);
     const cache = path.join(home, 'c');
     const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: cache, DEEPCTL_NPM_RUNNER: 'venv', HANG_AT: hangAt };
     // Where the launcher itself will put venvs and locks: XDG_CACHE_HOME
