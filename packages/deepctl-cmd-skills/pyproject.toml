@@ -8,8 +8,8 @@ authors = [{ name = "Deepgram DevRel", email = "devrel@deepgram.com" }]
 dependencies = [
     "deepctl==0.4.1", # x-release-please-version
     "deepctl-core==0.4.1", # x-release-please-version
-    "click>=8.0.0",
-    "rich>=13.0.0",
+    "click>=8.2.0,<9",
+    "rich>=13.0.0,<16",
 ]
 
 [project.entry-points."deepctl.commands"]

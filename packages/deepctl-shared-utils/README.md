@@ -29,10 +29,10 @@ pipx run deepctl --help
 
 ## Dependencies
 
-- `pydantic>=2.0.0`
-- `click>=8.0.0`
-- `httpx>=0.24.0`
-- `rich>=13.0.0`
+- `pydantic>=2.0.0,<3`
+- `click>=8.2.0,<9`
+- `httpx>=0.24.0,<1`
+- `rich>=13.0.0,<16`
 
 ## License
 

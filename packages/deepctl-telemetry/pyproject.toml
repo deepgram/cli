@@ -24,8 +24,8 @@ dependencies = [
     "deepctl==0.4.1", # x-release-please-version
     "deepctl-core==0.4.1", # x-release-please-version
     "sentry-sdk>=2.35.0,<3",
-    "click>=8.0.0",
-    "rich>=13.0.0",
+    "click>=8.2.0,<9",
+    "rich>=13.0.0,<16",
 ]
 
 [tool.setuptools]

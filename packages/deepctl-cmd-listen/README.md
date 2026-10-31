@@ -33,10 +33,10 @@ pipx run deepctl --help
 
 ## Dependencies
 
-- `click>=8.0.0`
-- `rich>=13.0.0`
-- `pydantic>=2.0.0`
-- `websockets>=13.1`
+- `click>=8.2.0,<9`
+- `rich>=13.0.0,<16`
+- `pydantic>=2.0.0,<3`
+- `websockets>=13.1,<18`
 - `deepgram-captions>=2.0.0`
 - `sounddevice>=0.4.6`
 - `numpy>=1.24.0`

@@ -142,9 +142,9 @@ from your MCP config.
 ## Dependencies
 
 - `mcp>=1.22.0,<2.0.0`
-- `rich>=13.9.4`
-- `click>=8.1.7`
-- `pydantic>=2.10.1`
+- `rich>=13.9.4,<16`
+- `click>=8.2.0,<9`
+- `pydantic>=2.10.1,<3`
 
 ## License
 

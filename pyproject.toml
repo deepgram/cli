@@ -33,7 +33,7 @@ keywords = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "click>=8.0.0",
+    "click>=8.2.0,<9",
     "deepgram-sdk>=7.7.0,<8",
     "deepctl-core==0.4.1", # x-release-please-version
     "deepctl-cmd-login==0.4.1", # x-release-please-version
@@ -64,15 +64,14 @@ dependencies = [
     "deepctl-cmd-completion==0.4.1", # x-release-please-version
     "deepctl-shared-utils==0.4.1", # x-release-please-version
     "deepctl-telemetry==0.4.1", # x-release-please-version
-    "pydantic>=2.0.0",
-    "rich>=13.0.0",
-    "httpx>=0.24.0",
+    "pydantic>=2.0.0,<3",
+    "rich>=13.0.0,<16",
+    "httpx>=0.24.0,<1",
     "requests>=2.31,<3.0",
     "pyjwt>=2.8.0",
-    "keyring>=24.0.0",
+    "keyring>=24.0.0,<26",
     "pyyaml>=6.0.0",
-    "typer>=0.9.0",
-    "platformdirs>=3.0.0",
+    "platformdirs>=3.0.0,<5",
 ]
 
 [project.optional-dependencies]
