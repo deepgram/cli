@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import click
+from deepctl_core.signals import die_by_signal as die_by_signal  # re-export
 
 from . import messages as msg
 
@@ -230,8 +231,11 @@ class LiveOutcome:
     #: Error text for "error" (already scrubbed and safe to print).
     error: str | None = None
     #: For "error": "server" (error close or error frame), "network" (the
-    #: connection dropped) or "read" (stdin failed).
+    #: connection dropped), "read" (stdin failed) or "output" (stdout
+    #: couldn't be written; fd 1 now points at the null device).
     kind: str | None = None
+    #: For an "output" error: the OS error text (strerror), cleaned.
+    os_error: str | None = None
     #: The server's close code, for a "server" error that closed the socket.
     close_code: int | None = None
     #: The request id the server reported, when it sent one.
@@ -334,6 +338,18 @@ def silence_stdout() -> None:
         os.close(devnull)
     except OSError:
         pass
+
+
+def output_failed(exc: OSError, secrets: tuple[str, ...] = ()) -> LiveOutcome:
+    """The outcome for a stdout write that failed with something other
+    than EPIPE."""
+    reason = _clean(exc.strerror or exc, 200, secrets) or exc.__class__.__name__
+    return LiveOutcome(
+        status="error",
+        kind="output",
+        error=msg.E_OUTPUT_UNWRITABLE.format(output="stdout", reason=reason),
+        os_error=reason,
+    )
 
 
 def _is_connection_closed(exc: BaseException) -> bool:
@@ -455,29 +471,6 @@ class EarlyStop:
             self._installed = False
 
 
-def die_by_signal(signum: int) -> None:
-    """End the process by ``signum`` with its default action, so the wait
-    status is "killed by signal N" (shells report 128+N).
-
-    PID 1 in a container ignores a default-action signal, so if the process
-    is still here afterwards it exits with the shell's 128+N.
-    """
-    import sys
-
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.flush()
-        except Exception:
-            pass
-    try:
-        signal.signal(signum, signal.SIG_DFL)
-        os.kill(os.getpid(), signum)
-        time.sleep(0.05)
-    except Exception:
-        pass
-    os._exit(128 + signum)
-
-
 async def _cancel_all(*tasks: asyncio.Task[Any] | None) -> None:
     live = [t for t in tasks if t is not None]
     for task in live:
@@ -554,7 +547,16 @@ async def run_session(
         try:
             async for raw in ws:
                 track(raw)
-                on_message(raw)
+                try:
+                    on_message(raw)
+                except BrokenPipeError:
+                    raise
+                except OSError as exc:
+                    # stdout can't be written (ENOSPC, EIO, ...): an output
+                    # failure, not a network one. Silence fd 1 so the exit
+                    # flush can't fail again.
+                    silence_stdout()
+                    return output_failed(exc, secrets)
         except BrokenPipeError:
             # Whoever read stdout is gone (``| head -n 1``): end quietly.
             silence_stdout()
