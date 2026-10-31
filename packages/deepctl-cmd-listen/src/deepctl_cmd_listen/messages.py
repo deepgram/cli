@@ -13,6 +13,14 @@ CODE_STREAM_DRAIN_TIMEOUT = "stream_drain_timeout"
 CODE_SERVER_ERROR = "server_error"
 CODE_NETWORK_UNAVAILABLE = "network_unavailable"
 
+# invalid_argument: a hard agent signal, no SOURCE, no --mic.
+E_LISTEN_NO_SOURCE = (
+    "{prog} listen needs a file, a URL, --mic, or - to read audio from stdin."
+)
+H_LISTEN_NO_SOURCE = (
+    "Pass a file path or URL. To stream audio from stdin, pass - explicitly."
+)
+
 # invalid_argument: reading stdin failed.
 E_LISTEN_STDIN_UNREADABLE = "Couldn't read audio from stdin: {os_error}."
 H_LISTEN_STDIN_UNREADABLE = (

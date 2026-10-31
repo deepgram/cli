@@ -95,8 +95,10 @@ class StreamingCaptionWriter:
     word-level speaker data is present.
     """
 
-    def __init__(self, fmt: str) -> None:
+    def __init__(self, fmt: str, *, echo: bool = True) -> None:
         self.fmt = fmt  # "webvtt" | "srt"
+        # False under a machine format: collect words, print nothing.
+        self.echo = echo
         self._count = 0
         self._all_words: list[dict[str, Any]] = []
 
@@ -106,7 +108,7 @@ class StreamingCaptionWriter:
         For WebVTT, an optional NOTE block can carry metadata (model, language,
         etc.) in a spec-compliant way. SRT has no header equivalent.
         """
-        if self.fmt == "webvtt":
+        if self.echo and self.fmt == "webvtt":
             print("WEBVTT", flush=True)
             print(flush=True)
             if note:
@@ -132,6 +134,8 @@ class StreamingCaptionWriter:
 
         self._count += 1
         self._all_words.extend(words)
+        if not self.echo:
+            return
 
         text = " ".join(w.get("punctuated_word") or w.get("word", "") for w in words)
         first_speaker: int | None = words[0].get("speaker") if words else None

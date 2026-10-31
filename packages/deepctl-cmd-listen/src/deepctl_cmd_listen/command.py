@@ -33,9 +33,12 @@ from deepctl_core import (
 from deepctl_core.hosts import CredentialHostError
 from deepctl_core.output import (
     _agentic,
+    format_source,
+    get_output_format,
     is_ai_agent,
     print_error,
     print_hint,
+    print_info,
     print_warning,
 )
 from rich.console import Console
@@ -106,6 +109,18 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _machine_format() -> bool:
+    """True when live transcript lines stay off stdout: a machine format
+    that was asked for (``-o json``/``-o yaml``) or chosen because of a hard
+    AI-agent signal. The final result is then the only payload.
+    JSON implied by soft detection alone (CI, cron, no TERM) keeps 0.4.0's
+    live lines, since those pipelines read stdout as a stream."""
+    return get_output_format() in ("json", "yaml") and format_source() in (
+        "explicit",
+        "hard_agent",
+    )
+
+
 _freeze_registered = False
 
 
@@ -165,6 +180,10 @@ class ListenCommand(BaseCommand):
     requires_project = False
     ci_friendly = True
 
+    #: Live transcript lines go to stdout; False under a machine format.
+    _echo: bool = True
+    #: ``--verbose``: under a machine format, finals go to stderr as INFO.
+    _verbose: bool = False
     #: Host of the live socket, for network_unavailable details.
     _ws_host: str = ""
     #: Set after a SIGTERM drain; exit_code_for re-raises it.
@@ -361,6 +380,28 @@ class ListenCommand(BaseCommand):
 
     # ── Entry point ────────────────────────────────────────────────────
 
+    def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
+        """Under a hard AI-agent signal, refuse a run with no source.
+
+        Without SOURCE or --mic, a non-TTY stdin would be streamed until an
+        end of input that may never come. Agents name stdin with ``-``
+        explicitly. Runs before authentication, so nothing is sent.
+        """
+        if kwargs.get("source") is not None or kwargs.get("mic"):
+            return None
+        if not is_ai_agent():
+            return None
+        prog = _prog()
+        text = msg.E_LISTEN_NO_SOURCE.format(prog=prog)
+        print_error(escape(text))
+        print_hint(escape(msg.H_LISTEN_NO_SOURCE))
+        return ListenCodedError(
+            error=text,
+            code=msg.CODE_INVALID_ARGUMENT,
+            hint=msg.H_LISTEN_NO_SOURCE,
+            next_step=f"{prog} {self.name} --help",
+        )
+
     def handle(
         self,
         config: Config,
@@ -371,6 +412,7 @@ class ListenCommand(BaseCommand):
         source: str | None = kwargs.get("source")
         use_mic: bool = kwargs.get("mic", False)
         guided_flow = False
+        self._verbose = config.get("output.verbose", False) is True
 
         # ── Resolve mode ───────────────────────────────────────────────
         if source == "-":
@@ -808,6 +850,7 @@ class ListenCommand(BaseCommand):
 
         from . import live
 
+        self._echo = not _machine_format()
         # From here on Ctrl-C ends the mic session, even before the
         # session's own handler is in place (imports, connecting).
         early = live.EarlyStop()
@@ -815,7 +858,7 @@ class ListenCommand(BaseCommand):
         caption_writer: StreamingCaptionWriter | None = None
 
         if caption_format:
-            caption_writer = StreamingCaptionWriter(caption_format)
+            caption_writer = StreamingCaptionWriter(caption_format, echo=self._echo)
             note = f"Model: {model} · Language: {language}"
             if diarize:
                 note += " · Speaker labels enabled"
@@ -1026,6 +1069,7 @@ class ListenCommand(BaseCommand):
 
         from . import live
 
+        self._echo = not _machine_format()
         resolved_encoding = encoding or "linear16"
         if not encoding:
             print_warning(
@@ -1038,7 +1082,7 @@ class ListenCommand(BaseCommand):
         caption_writer: StreamingCaptionWriter | None = None
 
         if caption_format:
-            caption_writer = StreamingCaptionWriter(caption_format)
+            caption_writer = StreamingCaptionWriter(caption_format, echo=self._echo)
             note = f"Model: {model} · Language: {language}"
             if diarize:
                 note += " · Speaker labels enabled"
@@ -1448,18 +1492,32 @@ class ListenCommand(BaseCommand):
                 line = format_diarized_words(words)
                 if line:
                     transcript_acc.append(line)
-                    print(line, flush=True)
+                    self._print_final(line)
                     return
 
             transcript = alt.get("transcript", "")
             if transcript:
                 transcript_acc.append(transcript)
-                print(transcript, flush=True)
+                self._print_final(transcript)
 
         elif interim and not caption_writer:
             transcript = alt.get("transcript", "")
             if transcript:
-                print(f"\r{transcript}          ", end="", flush=True)
+                self._print_interim(transcript)
+
+    def _print_final(self, line: str) -> None:
+        """A final transcript line: stdout, or under a machine format only
+        ``INFO:`` on stderr with ``--verbose`` (the result is the payload)."""
+        if self._echo:
+            print(line, flush=True)
+        else:
+            if self._verbose:
+                print_info(escape(line), stderr=True)
+
+    def _print_interim(self, text: str) -> None:
+        """An interim rewrite; dropped under a machine format."""
+        if self._echo:
+            print(f"\r{text}          ", end="", flush=True)
 
     @staticmethod
     def _new_v2_state() -> dict[str, Any]:
@@ -1514,7 +1572,7 @@ class ListenCommand(BaseCommand):
         if event == "EndOfTurn":
             self._emit_v2_turn(st, transcript_acc, caption_writer=caption_writer)
         elif event == "Update" and interim and not caption_writer and transcript:
-            print(f"\r{transcript}          ", end="", flush=True)
+            self._print_interim(transcript)
 
     def _emit_v2_turn(
         self,
@@ -1537,7 +1595,7 @@ class ListenCommand(BaseCommand):
             transcript_acc.append(transcript)
         else:
             transcript_acc.append(transcript)
-            print(transcript, flush=True)
+            self._print_final(transcript)
 
     @staticmethod
     def _timed_v2_words(
@@ -1593,29 +1651,45 @@ class ListenCommand(BaseCommand):
         import json as _json
         from datetime import date, datetime
 
+        from . import live
+
         def _default(obj: Any) -> str:
             if isinstance(obj, (datetime, date)):
                 return obj.isoformat()
             return str(obj)
 
-        from deepctl_core.output import get_output_format
-
         fmt = get_output_format()
+
+        # Live: transcript lines (or captions) were printed as they arrived.
+        # Under a machine format nothing was, and the final result, whatever
+        # its status, is the one payload on stdout.
+        if isinstance(result, ListenResult) and result.mode == "live":
+            if fmt not in ("json", "yaml"):
+                return
+            payload = result.model_dump(exclude_none=True)
+            try:
+                if fmt == "json":
+                    sys.stdout.write(
+                        _json.dumps(
+                            payload, indent=2, ensure_ascii=False, default=_default
+                        )
+                        + "\n"
+                    )
+                    sys.stdout.flush()
+                else:
+                    import yaml
+
+                    sys.stdout.write(
+                        yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+                    )
+                    sys.stdout.flush()
+            except BrokenPipeError:
+                # The reader went away (`| true`): end quietly, exit as is.
+                live.silence_stdout()
+            return
 
         if not isinstance(result, ListenResult) or result.status != "success":
             super().output_result(result, config)
-            return
-
-        # Live results are printed in real-time; only show a brief summary
-        if result.mode == "live":
-            if result.caption_format:
-                return  # captions were already printed incrementally
-            if result.status == "success" and not result.transcript:
-                return  # nothing to add
-            if fmt == "json":
-                out.print_json(
-                    _json.dumps(result.model_dump(exclude_none=True), default=_default)
-                )
             return
 
         # Caption mode: print captions to stdout regardless of output format
