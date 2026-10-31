@@ -31,7 +31,7 @@ E_FH_PROFILE = (
 # The command comes last, with no trailing period, so it can be copied.
 E_FH_PROFILE_HINT = (
     "If you trust {host}, add it to api.allowed_hosts in {user_config}. To "
-    "switch back to Deepgram, run: dg --base-url https://api.deepgram.com "
+    "switch back to Deepgram, run: dg --base-url https://api.deepgram.com "  # host-literal: user text
     "login --profile {profile} --save-base-url --force-write"
 )
 # Agent-mode hint shared by every foreign_host error. Never names a flag,

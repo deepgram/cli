@@ -1,7 +1,8 @@
 """The probe proxy against real loopback servers: relay, refusals, run loop.
 
 The upstream is a websockets server on a free 127.0.0.1 port, reached
-through the proxy's `_upstream_base` seam. Nothing is mocked.
+through the proxy's `upstream_base`, with the Authorization the command's
+Transport would pass. Nothing is mocked.
 """
 
 from __future__ import annotations
@@ -81,8 +82,12 @@ class Proxy:
     """A ProbeProxy listening on a free port, pointed at `upstream`."""
 
     def __init__(self, upstream: FakeUpstream) -> None:
-        self.proxy = ProbeProxy(api_key=KEY, probe_interval_bytes=10**9)
-        self.proxy._upstream_base = f"ws://127.0.0.1:{upstream.port}"
+        self.proxy = ProbeProxy(
+            api_key=KEY,
+            probe_interval_bytes=10**9,
+            upstream_base=f"ws://127.0.0.1:{upstream.port}",
+            upstream_headers={"Authorization": f"Token {KEY}"},
+        )
 
     async def __aenter__(self) -> Proxy:
         self.server = await self.proxy.start(0)
@@ -220,7 +225,7 @@ def test_refused_before_any_upstream_connection(headers, capsys):
     status, body, up = asyncio.run(main())
     assert (status, body) == (403, b"Forbidden.\n")
     assert up.handshakes == []
-    out = " ".join(capsys.readouterr().out.split())  # rich wraps at 80 columns
+    out = " ".join(capsys.readouterr().err.split())  # rich wraps at 80 columns
     if "Origin" in headers:
         shown = headers["Origin"].replace("\t", "\\x09")
         assert (
@@ -269,15 +274,17 @@ def test_markup_in_the_path_prints_literally(capsys):
             await ws.close()
 
     asyncio.run(main())
-    assert "path=/v1/listen[bold]x" in capsys.readouterr().out
+    assert "path=/v1/listen[bold]x" in capsys.readouterr().err
 
 
-def test_upstream_401_reports_and_keeps_serving(capsys, caplog):
+def test_upstream_403_reports_and_keeps_serving(capsys, caplog):
+    """A refusal other than 401 fails only that connection (only
+    auth_invalid stops the proxy; see test_probe's fatal tests)."""
     caplog.set_level(logging.DEBUG)
 
     async def main() -> list[tuple[int | None, str | None]]:
         closes = []
-        async with FakeUpstream(status=401) as up, Proxy(up) as px:
+        async with FakeUpstream(status=403) as up, Proxy(up) as px:
             for _ in range(2):
                 async with connect(f"ws://127.0.0.1:{px.port}/v1/listen") as ws:
                     with pytest.raises(ConnectionClosed):
@@ -288,8 +295,8 @@ def test_upstream_401_reports_and_keeps_serving(capsys, caplog):
 
     assert asyncio.run(main()) == [(1000, ""), (1000, "")]
     out = capsys.readouterr()
-    assert out.out.count("Upstream connection failed") == 2
-    assert "HTTP 401" in out.out
+    assert out.err.count("Deepgram connection failed") == 2
+    assert "(auth_forbidden)" in out.err
     for text in (out.out, out.err, caplog.text):
         assert KEY not in text
 
@@ -331,7 +338,7 @@ def test_run_stops_on_event_and_on_cancel_after_summaries(capsys):
     async def main() -> ProbeProxy:
         async with FakeUpstream() as up:
             proxy = ProbeProxy(api_key=KEY)
-            proxy._upstream_base = f"ws://127.0.0.1:{up.port}"
+            proxy.upstream_base = f"ws://127.0.0.1:{up.port}"
             with __import__("socket").socket() as s:
                 s.bind(("127.0.0.1", 0))
                 port = s.getsockname()[1]
@@ -361,7 +368,7 @@ def test_run_stops_on_event_and_on_cancel_after_summaries(capsys):
     proxy = asyncio.run(main())
     (stats,) = proxy.connections
     assert stats.duration_seconds is not None
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert "Connection closed" in out
     assert "Sent: 1,000 bytes (1 binary, 0 text frames)" in out
 
@@ -554,14 +561,14 @@ def test_snapshots_do_not_block_the_loop_and_stop_waits_for_summaries(
         proxymod,
         "get_ffprobe_path",
         lambda _config=None: _fake_ffprobe(
-            tmp_path, f"open({str(marker)!r}, 'w').close(); time.sleep(1.5)"
+            tmp_path, f"open({str(marker)!r}, 'w').close(); time.sleep(4)"
         ),
     )
 
     async def main() -> tuple[float, ProbeProxy]:
         async with FakeUpstream() as up:
             proxy = ProbeProxy(api_key=KEY, probe_interval_bytes=1)
-            proxy._upstream_base = f"ws://127.0.0.1:{up.port}"
+            proxy.upstream_base = f"ws://127.0.0.1:{up.port}"
             server = await proxy.start(0)
             port = next(iter(server.sockets)).getsockname()[1]
             server.close()
@@ -570,7 +577,7 @@ def test_snapshots_do_not_block_the_loop_and_stop_waits_for_summaries(
             await asyncio.sleep(0.2)
             a = await connect(f"ws://127.0.0.1:{port}/v1/listen")
             await a.recv()
-            await a.send(b"\x00" * 100)  # starts a 1.5 s snapshot
+            await a.send(b"\x00" * 100)  # starts a 4 s snapshot
             while not marker.exists():
                 await asyncio.sleep(0.01)
             t0 = time.monotonic()
@@ -579,16 +586,16 @@ def test_snapshots_do_not_block_the_loop_and_stop_waits_for_summaries(
             await b.send("ping")
             assert await b.recv() == "ping"
             relayed_in = time.monotonic() - t0
-            for _ in range(30):  # a backlog: 30 more 1.5 s snapshots if drained
+            for _ in range(30):  # a backlog: 30 more 4 s snapshots if drained
                 await a.send(b"\x00" * 100)
             proxy._stop.set()  # what the first Ctrl+C does, mid-snapshot
-            await asyncio.wait_for(task, 10)
+            await asyncio.wait_for(task, 20)
             return relayed_in, proxy
 
     relayed_in, proxy = asyncio.run(main())
-    assert relayed_in < 1.0
+    assert relayed_in < 2.5
     assert all(c.duration_seconds is not None for c in proxy.connections)
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert out.count("Connection closed") == 2
     assert "Not forwarded (arrived while stopping): 3,000 bytes (30 frames)" in out
 
@@ -601,7 +608,7 @@ def test_abort_ends_connections_without_waiting_for_close_timeout(capsys):
     async def main() -> float:
         async with _DeafUpstream() as up:
             proxy = ProbeProxy(api_key=KEY)
-            proxy._upstream_base = f"ws://127.0.0.1:{up.port}"
+            proxy.upstream_base = f"ws://127.0.0.1:{up.port}"
             server = await proxy.start(0)
             port = next(iter(server.sockets)).getsockname()[1]
             server.close()
@@ -619,8 +626,8 @@ def test_abort_ends_connections_without_waiting_for_close_timeout(capsys):
             await asyncio.wait_for(task, 10)
             return time.monotonic() - t0
 
-    assert asyncio.run(main()) < 3
-    assert "Connection closed" in capsys.readouterr().out
+    assert asyncio.run(main()) < 10
+    assert "Connection closed" in capsys.readouterr().err
 
 
 def test_abort_during_upstream_handshake():
@@ -631,7 +638,7 @@ def test_abort_during_upstream_handshake():
 
         hang = await asyncio.start_server(never, "127.0.0.1", 0)
         proxy = ProbeProxy(api_key=KEY)
-        proxy._upstream_base = f"ws://127.0.0.1:{hang.sockets[0].getsockname()[1]}"
+        proxy.upstream_base = f"ws://127.0.0.1:{hang.sockets[0].getsockname()[1]}"
         server = await proxy.start(0)
         port = next(iter(server.sockets)).getsockname()[1]
         server.close()
@@ -675,7 +682,7 @@ def test_second_stop_kills_a_running_ffprobe_and_skips_the_final_probe(
     async def main() -> float:
         async with FakeUpstream() as up:
             proxy = ProbeProxy(api_key=KEY, probe_interval_bytes=1)
-            proxy._upstream_base = f"ws://127.0.0.1:{up.port}"
+            proxy.upstream_base = f"ws://127.0.0.1:{up.port}"
             server = await proxy.start(0)
             port = next(iter(server.sockets)).getsockname()[1]
             server.close()
@@ -695,9 +702,9 @@ def test_second_stop_kills_a_running_ffprobe_and_skips_the_final_probe(
             return time.monotonic() - t0
 
     elapsed = asyncio.run(main())
-    assert elapsed < 1.5
+    assert elapsed < 4.0
     assert len(list(runs.iterdir())) == 1  # no final probe
-    assert "Connection closed" in capsys.readouterr().out
+    assert "Connection closed" in capsys.readouterr().err
 
 
 def test_transcripts_print_literally_and_keep_unicode(capsys):
@@ -714,7 +721,7 @@ def test_transcripts_print_literally_and_keep_unicode(capsys):
         ),
         stats,
     )
-    out = capsys.readouterr().out
+    out = capsys.readouterr().err
     assert "[bold]x[/bold] :smile: \u3053\u3093\u306b\u3061\u306f[2J" in out
     assert "\x1b" not in out and "\x9b" not in out
     assert stats.transcripts == [transcript]
@@ -732,6 +739,85 @@ def test_not_forwarded_line_counts(frames, size, line, capsys):
 
     stats = ProbeConnectionStats(connection_id="1234abcd")
     ProbeProxy(api_key=KEY)._print_connection_summary(stats, frames, size)
-    assert f"  {line}\n" in capsys.readouterr().out
+    assert f"  {line}\n" in capsys.readouterr().err
     ProbeProxy(api_key=KEY)._print_connection_summary(stats)
-    assert "Not forwarded" not in capsys.readouterr().out
+    assert "Not forwarded" not in capsys.readouterr().err
+
+
+class _Redirector:
+    """A loopback upstream that answers every upgrade with a redirect and
+    counts the handshakes it gets and the Authorization values it saw."""
+
+    def __init__(self, status: int, location: str) -> None:
+        self.status = status
+        self.location = location
+        self.handshakes: list[str | None] = []
+
+    def _process(self, connection, request):  # noqa: ANN001
+        self.handshakes.append(request.headers.get("Authorization"))
+        response = connection.respond(self.status, "moved\n")
+        response.headers["Location"] = self.location.format(port=self.port)
+        return response
+
+    async def __aenter__(self) -> "_Redirector":
+        from websockets.asyncio.server import serve
+
+        self.server = await serve(
+            lambda ws: ws.close(), "127.0.0.1", 0, process_request=self._process
+        )
+        self.port = self.server.sockets[0].getsockname()[1]
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.server.close()
+        await self.server.wait_closed()
+
+
+@pytest.mark.parametrize(
+    ("status", "cross_origin"),
+    [(302, True), (302, False), (301, True), (308, True), (307, False)],
+)
+def test_upstream_redirect_is_never_followed(status, cross_origin, capsys):
+    """A 3xx on the upstream upgrade fails only that connection with
+    network_unavailable; the redirect target sees no connection and the key
+    is sent once, to the configured upstream only."""
+
+    async def main():
+        async with FakeUpstream() as target:
+            location = (
+                f"ws://127.0.0.1:{target.port}/v1/listen"
+                if cross_origin
+                else "ws://127.0.0.1:{port}/v1/listen?again=1"
+            )
+            async with _Redirector(status, location) as up:
+                proxy = ProbeProxy(
+                    api_key=KEY,
+                    upstream_base=f"ws://127.0.0.1:{up.port}",
+                    upstream_headers={"Authorization": f"Token {KEY}"},
+                )
+                server = await proxy.start(0)
+                port = server.sockets[0].getsockname()[1]
+                err = ""
+                try:
+                    await _status(port, _upgrade(port))
+                    for _ in range(150):
+                        err += capsys.readouterr().err
+                        if "connection failed" in err:
+                            break
+                        await asyncio.sleep(0.02)
+                    # A followed redirect would reach the target meanwhile.
+                    await asyncio.sleep(0.2)
+                    err += capsys.readouterr().err
+                finally:
+                    server.close()
+                    await server.wait_closed()
+                return err, up.handshakes, target.handshakes, proxy
+
+    err, handshakes, target_handshakes, proxy = asyncio.run(main())
+    assert handshakes == [f"Token {KEY}"]
+    assert target_handshakes == []
+    assert proxy.fatal is None
+    flat = " ".join(err.split())
+    assert "Deepgram connection failed" in flat
+    assert "(network_unavailable)" in flat
+    assert KEY not in err

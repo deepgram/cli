@@ -32,11 +32,15 @@ if TYPE_CHECKING:
 
 console = Console()
 
-# Default Deepgram endpoints to test
-DEEPGRAM_ENDPOINTS = {
-    "api": "https://api.deepgram.com",
-    "auth": "https://auth.dx.deepgram.com",
-}
+
+def _default_host() -> str:
+    """The Deepgram API host (``hosts.DEFAULT_BASE_URL``, via the Transport).
+
+    The default endpoint only: this command sends no credentials anywhere.
+    """
+    from deepctl_core import transport
+
+    return transport.default_host()
 
 
 def _is_ssl_error(exc: BaseException) -> bool:
@@ -131,7 +135,7 @@ class NetworkCommand(BaseCommand):
         return [
             {
                 "names": ["--endpoint", "-e"],
-                "help": ("Specific endpoint to test (default: api.deepgram.com)"),
+                "help": f"Specific endpoint to test (default: {_default_host()})",
                 "type": str,
                 "is_option": True,
             },
@@ -205,7 +209,7 @@ class NetworkCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle network debug command execution."""
-        endpoint = kwargs.get("endpoint") or "api.deepgram.com"
+        endpoint = kwargs.get("endpoint") or _default_host()
         verbose = kwargs.get("verbose", False)
         skip_commands = kwargs.get("skip_commands", False)
         timeout = kwargs.get("timeout", 10)
@@ -744,7 +748,7 @@ class NetworkCommand(BaseCommand):
     ) -> None:
         """Test latency to known Deepgram endpoints."""
         endpoints = [
-            ("api.deepgram.com", "Primary API"),
+            (_default_host(), "Primary API"),
         ]
 
         console.print("\n[bold]Multi-Region Latency:[/bold]")
@@ -1054,7 +1058,7 @@ class NetworkCommand(BaseCommand):
             recommendations.append(
                 "ℹ️  Proxy configuration detected. Ensure your proxy allows access to:"
             )
-            recommendations.append("   • api.deepgram.com (port 443)")
+            recommendations.append(f"   • {_default_host()} (port 443)")
             recommendations.append("   • Certificate validation endpoints (port 80)")
 
         # Display recommendations
