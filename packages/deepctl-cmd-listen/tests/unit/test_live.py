@@ -101,7 +101,7 @@ def run(coro):
 async def session(ws_messages, *, audio=(), eof=True, stop_after=None, **kw):
     """Run run_session with an in-memory source; returns (outcome, messages)."""
     loop = asyncio.get_running_loop()
-    q: asyncio.Queue = asyncio.Queue()
+    q: asyncio.Queue = asyncio.Queue(maxsize=live.QUEUE_MAX)
     closing = threading.Event()
     got: list = []
 
@@ -125,6 +125,7 @@ async def session(ws_messages, *, audio=(), eof=True, stop_after=None, **kw):
         queue=q,
         closing=closing,
         start_source=start,
+        keepalive=kw.pop("keepalive", True),
         byte_rate=kw.pop("byte_rate", 32000),
         stop=stop,
     )
@@ -132,15 +133,93 @@ async def session(ws_messages, *, audio=(), eof=True, stop_after=None, **kw):
     return outcome, got
 
 
+# ── Frame sizing ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("encoding", "rate", "channels", "expected"),
+    [
+        ("linear16", 16000, 1, 1600),  # 50 ms
+        ("linear16", 8000, 1, 800),
+        ("linear16", 48000, 2, 9600),
+        ("mulaw", 8000, 1, 400),
+        ("alaw", 8000, 1, 400),
+        ("linear32", 16000, 1, 3200),
+        ("LINEAR16", 16000, 1, 1600),
+        ("opus", 48000, 1, live.DEFAULT_READ_BYTES),
+        ("flac", 16000, 1, live.DEFAULT_READ_BYTES),
+        (None, 16000, 1, live.DEFAULT_READ_BYTES),
+    ],
+)
+def test_frame_bytes(encoding, rate, channels, expected):
+    assert live.frame_bytes(encoding, rate, channels) == expected
+
+
+@pytest.mark.parametrize(
+    ("encoding", "rate", "channels"),
+    [
+        ("linear16", 16000, 1),
+        ("linear16", 11025, 3),
+        ("mulaw", 8000, 1),
+        ("linear32", 22050, 2),
+    ],
+)
+def test_frame_bytes_is_20_to_100_ms_of_whole_samples(encoding, rate, channels):
+    size = live.frame_bytes(encoding, rate, channels)
+    bps = live.bytes_per_second(encoding, rate, channels)
+    assert 0.020 <= size / bps <= 0.100
+    width = {"linear16": 2, "linear32": 4, "mulaw": 1}[encoding] * channels
+    assert size % width == 0
+
+
 def test_bytes_per_second_unknown_is_zero():
     assert live.bytes_per_second("opus", 48000, 1) == 0
     assert live.bytes_per_second("linear16", 0, 1) == 0
 
 
+# ── Drop-oldest (microphone) ───────────────────────────────────────────────
+
+
+def test_drop_oldest_keeps_newest_and_counts():
+    async def main():
+        q: asyncio.Queue = asyncio.Queue(maxsize=3)
+        buf = live.DropOldestBuffer(asyncio.get_running_loop(), q, threading.Event())
+        for i in range(5):
+            buf.offer(bytes([i]) * 10)
+        kept = [q.get_nowait() for _ in range(q.qsize())]
+        return buf, kept
+
+    buf, kept = run(main())
+    assert kept == [b"\x02" * 10, b"\x03" * 10, b"\x04" * 10]
+    assert buf.dropped_buffers == 2
+    assert buf.dropped_bytes == 20
+
+
+def test_drop_oldest_threadsafe_never_raises_after_close():
+    loop = asyncio.new_event_loop()
+    q: asyncio.Queue = asyncio.Queue(maxsize=2)
+    buf = live.DropOldestBuffer(loop, q, threading.Event())
+    loop.close()
+    buf.offer_threadsafe(b"x")  # loop closed: silently ignored
+
+
+def test_drop_oldest_ignores_audio_once_closing():
+    async def main():
+        q: asyncio.Queue = asyncio.Queue(maxsize=2)
+        closing = threading.Event()
+        closing.set()
+        buf = live.DropOldestBuffer(asyncio.get_running_loop(), q, closing)
+        buf.offer_threadsafe(b"x")
+        await asyncio.sleep(0.01)
+        return q.qsize()
+
+    assert run(main()) == 0
+
+
 # ── Stdin reader ───────────────────────────────────────────────────────────
 
 
-def test_reader_reads_capped_reads_then_eof():
+def test_reader_reads_capped_frames_then_eof():
     r, w = os.pipe()
     os.write(w, b"a" * 5000)
     os.close(w)
@@ -162,6 +241,33 @@ def test_reader_reads_capped_reads_then_eof():
     assert all(len(i) <= 1600 for i in items)
     assert b"".join(items) == b"a" * 5000
     assert items[-1] == b""
+
+
+def test_reader_blocks_on_full_queue_instead_of_buffering():
+    """Backpressure: with nobody consuming, the reader holds at most
+    maxsize buffers plus the one it is handing over."""
+    r, w = os.pipe()
+    os.set_blocking(w, False)
+    written = 0
+
+    async def main():
+        nonlocal written
+        q: asyncio.Queue = asyncio.Queue(maxsize=4)
+        live.StdinReader(
+            asyncio.get_running_loop(), q, threading.Event(), read_size=100, fd=r
+        ).start()
+        for _ in range(200):
+            try:
+                written += os.write(w, b"z" * 100)
+            except BlockingIOError:
+                break
+            await asyncio.sleep(0.001)
+        await asyncio.sleep(0.2)
+        return q.qsize()
+
+    assert run(main()) == 4
+    os.close(w)
+    os.close(r)
 
 
 def test_reader_stops_without_put_when_closing():
@@ -217,7 +323,7 @@ _SHUTDOWN_SCRIPT = textwrap.dedent(
 
     async def main():
         loop = asyncio.get_running_loop()
-        q = asyncio.Queue(maxsize=32)
+        q = asyncio.Queue(maxsize=live.QUEUE_MAX)
         closing = threading.Event()
         stop = asyncio.Event()
         guard = live._SignalGuard(loop, stop)
@@ -302,6 +408,15 @@ def test_eof_sends_closestream_and_keeps_late_finals(monkeypatch):
     assert ws.sent[-1] == live.CLOSE_STREAM
 
 
+def test_connect_uses_no_compression(monkeypatch):
+    ws = FakeWS()
+    calls = install_fake_websockets(monkeypatch, ws)
+    run(session([]))
+    ((args, kwargs),) = calls
+    assert kwargs["compression"] is None
+    assert args[1] == {"Authorization": "Token k"}
+
+
 def test_server_close_ends_session_cleanly(monkeypatch):
     ws = FakeWS([_result("hi")])
     install_fake_websockets(monkeypatch, ws)
@@ -334,6 +449,7 @@ def test_server_error_frame_is_an_error(monkeypatch):
             queue=q,
             closing=threading.Event(),
             start_source=lambda: None,
+            keepalive=False,
             byte_rate=0,
         )
 
@@ -473,6 +589,7 @@ def test_eof_cap_uses_send_time_without_byte_rate(monkeypatch):
             queue=q,
             closing=threading.Event(),
             start_source=start,
+            keepalive=False,
             byte_rate=0,
         )
 
@@ -480,6 +597,32 @@ def test_eof_cap_uses_send_time_without_byte_rate(monkeypatch):
     assert outcome.drain_reason == "cap"
     # about 0.2 s between the first and last send -> cap about 0.4 s
     assert 0.4 <= outcome.drain_limit_s <= 2.0
+
+
+def test_keepalive_after_silence(monkeypatch):
+    monkeypatch.setattr(live, "KEEPALIVE_AFTER_S", 0.2)
+    ws = FakeWS()
+    install_fake_websockets(monkeypatch, ws)
+
+    async def main():
+        asyncio.get_running_loop().call_later(1.3, ws.finish)
+        return await session([], eof=False)
+
+    run(main())
+    assert ws.sent.count(live.KEEP_ALIVE) >= 2
+
+
+def test_no_keepalive_when_disabled(monkeypatch):
+    monkeypatch.setattr(live, "KEEPALIVE_AFTER_S", 0.1)
+    ws = FakeWS()
+    install_fake_websockets(monkeypatch, ws)
+
+    async def main():
+        asyncio.get_running_loop().call_later(0.5, ws.finish)
+        return await session([], eof=False, keepalive=False)
+
+    run(main())
+    assert live.KEEP_ALIVE not in ws.sent
 
 
 def test_shutdown_sets_closing_before_cancelling(monkeypatch):
@@ -508,6 +651,7 @@ def test_shutdown_sets_closing_before_cancelling(monkeypatch):
             queue=SpyQueue(maxsize=4),
             closing=closing,
             start_source=lambda: None,
+            keepalive=True,
             byte_rate=0,
             stop=stop,
         )
@@ -604,6 +748,7 @@ def test_server_close_reason_echoing_the_key_is_scrubbed(monkeypatch):
             queue=asyncio.Queue(),
             closing=threading.Event(),
             start_source=lambda: None,
+            keepalive=False,
             byte_rate=0,
         )
 
@@ -628,6 +773,7 @@ def test_flux_error_description_echoing_the_key_is_scrubbed(monkeypatch):
             queue=asyncio.Queue(),
             closing=threading.Event(),
             start_source=lambda: None,
+            keepalive=False,
             byte_rate=0,
         )
 
@@ -656,6 +802,7 @@ def test_broken_pipe_on_stdout_ends_quietly(monkeypatch):
             queue=asyncio.Queue(),
             closing=threading.Event(),
             start_source=lambda: None,
+            keepalive=False,
             byte_rate=0,
         )
 
@@ -716,6 +863,7 @@ def test_session_outcome_records_sigterm(monkeypatch):
             queue=asyncio.Queue(),
             closing=threading.Event(),
             start_source=lambda: None,
+            keepalive=False,
             byte_rate=0,
         )
 

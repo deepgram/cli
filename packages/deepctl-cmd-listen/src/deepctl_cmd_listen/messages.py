@@ -57,6 +57,11 @@ W_LISTEN_STOP_INCOMPLETE = (
     "so the transcript may be incomplete."
 )
 
+# Microphone: audio dropped because sending fell behind. Once per stream.
+W_MIC_DROPPED = (
+    "Dropped {seconds} s of microphone audio because the connection couldn't keep up."
+)
+
 # server_error: the server closed the stream with an error close code.
 E_LISTEN_SERVER_CLOSED = (
     "The server ended the stream with an error ({close_code}): {close_reason}"
