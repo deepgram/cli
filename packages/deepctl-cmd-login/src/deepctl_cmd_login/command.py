@@ -1647,7 +1647,9 @@ class WhoamiCommand(BaseCommand):
             masked = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else "****"
 
         project_id = auth_manager.get_project_id()
-        base_url = profile_cfg.base_url or "https://api.deepgram.com"
+        from deepctl_core.hosts import DEFAULT_BASE_URL
+
+        base_url = profile_cfg.base_url or DEFAULT_BASE_URL
 
         # Render the human block only in default mode. For json/yaml/csv the
         # framework serialises the returned result to stdout, so printing the
@@ -1666,7 +1668,7 @@ class WhoamiCommand(BaseCommand):
                     if project_id
                     else "  Project ID: [dim]not set[/dim]"
                 )
-                if base_url != "https://api.deepgram.com":
+                if base_url != DEFAULT_BASE_URL:
                     console.print(f"  Base URL:   {base_url}")
                 if profile_cfg.dg_token_expires_at and has_profile_key:
                     console.print(f"  Expires:    {profile_cfg.dg_token_expires_at}")

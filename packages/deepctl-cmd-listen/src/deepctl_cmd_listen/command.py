@@ -101,6 +101,14 @@ def _ws_base(client: DeepgramClient) -> str:
     return f"{'ws' if scheme.lower() in ('http', 'ws') else 'wss'}://{rest}"
 
 
+def _socket_headers(api_key: str | None) -> dict[str, str]:
+    """What a live stream's WebSocket open carries: the transport's request
+    headers. The host was checked when the URL was built (``_ws_base``)."""
+    from deepctl_core import transport
+
+    return transport.request_headers(api_key or "")
+
+
 # asyncio (and with it ssl) loads only when a live stream starts, so
 # `dg listen --help` and the prerecorded path don't import it.
 # The live engine imports asyncio, so it loads lazily too.
@@ -852,7 +860,16 @@ class ListenCommand(BaseCommand):
             # Raise (not return an error result) so an API rejection — e.g. a
             # --redact value the v1 endpoint refuses — exits non-zero and is
             # visible, rather than printing nothing and exiting 0.
-            detail = scrub_url_text(e, source) if url_like else e
+            from deepctl_core.output import print_debug
+            from deepctl_core.transport import plain_detail
+
+            # The cause in its own words, never the SDK error's field dump;
+            # the whole exception only with --verbose.
+            raw = plain_detail(e)
+            detail = scrub_url_text(raw, source) if url_like else raw
+            print_debug(
+                escape(scrub_url_text(repr(e), source) if url_like else repr(e))
+            )
             raise click.ClickException(f"Transcription failed: {detail}")
 
         # ── Format transcript ──────────────────────────────────────────
@@ -1081,7 +1098,7 @@ class ListenCommand(BaseCommand):
         try:
             outcome = await live.run_session(
                 url,
-                {"Authorization": f"Token {api_key}"},
+                _socket_headers(api_key),
                 on_message=on_message,
                 queue=queue,
                 closing=closing,
@@ -1263,7 +1280,7 @@ class ListenCommand(BaseCommand):
 
         outcome = await live.run_session(
             url,
-            {"Authorization": f"Token {api_key}"},
+            _socket_headers(api_key),
             on_message=on_message,
             queue=queue,
             closing=closing,

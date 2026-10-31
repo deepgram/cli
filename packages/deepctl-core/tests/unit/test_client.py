@@ -72,10 +72,13 @@ class TestDeepgramClient:
         # Verify auth guard was called
         mock_auth_manager.guard.assert_called_once()
 
-        # Verify DGClient was created with keyword args, without redirects
+        # Verify DGClient was created with keyword args, on the shared
+        # client, which follows no redirects
         assert mock_dg_client.called
         assert mock_dg_client.call_args.kwargs["api_key"] == "sk-test"
-        assert mock_dg_client.call_args.kwargs["follow_redirects"] is False
+        http = mock_dg_client.call_args.kwargs["httpx_client"]
+        assert http is transport.shared_client()
+        assert http.follow_redirects is False
 
         # Verify client is cached
         assert client._client == mock_instance
@@ -130,8 +133,8 @@ class TestDeepgramClient:
         mock_dg_client.assert_called_once_with(
             api_key="sk-test",
             httpx_client=transport.shared_client(),
+            session_id=transport.session_id(),
             environment=mock_env.return_value,
-            follow_redirects=False,
         )
 
     @patch("deepctl_core.client.DGClient")
