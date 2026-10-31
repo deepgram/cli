@@ -202,8 +202,14 @@ class DeepgramClient:
         self,
         file_path: str | Path,
         options: dict[str, Any] | None = None,
+        *,
+        file_id: tuple[int, int] | None = None,
     ) -> dict[str, Any]:
-        """Transcribe an audio file."""
+        """Transcribe an audio file.
+
+        ``file_id`` is ``(st_dev, st_ino)`` of the file the caller validated;
+        the upload stops if the path now names another file.
+        """
         file_path = Path(file_path)
         if not file_path.exists():
             raise FileNotFoundError(f"Audio file not found: {file_path}")
@@ -216,15 +222,22 @@ class DeepgramClient:
         if options:
             default_options.update(options)
 
-        try:
-            with open(file_path, "rb") as audio_file:
-                audio_data = audio_file.read()
+        from .upload import FileBody, UploadFileError
 
-            response = self.client.listen.v1.media.transcribe_file(
-                request=audio_data, **default_options
-            )
+        try:
+            # Streamed from disk; the SDK resends the same body on a retry.
+            with FileBody(file_path, file_id=file_id) as body:
+                response = self.client.listen.v1.media.transcribe_file(
+                    request=body,
+                    request_options={
+                        "additional_headers": {"Content-Length": str(len(body))}
+                    },
+                    **default_options,
+                )
             return cast("dict[str, Any]", response.model_dump())
 
+        except UploadFileError:
+            raise
         except Exception as e:
             transport.raise_for(e, self._secrets)
             raise self._failed("Transcription failed", e)
