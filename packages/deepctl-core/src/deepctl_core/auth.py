@@ -4,14 +4,10 @@ import os
 import time
 import webbrowser
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
-import httpx
-import keyring
-from keyring.errors import PasswordDeleteError
 from pydantic import BaseModel
-from rich.markup import escape
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import hosts, output
 from . import messages as msg
@@ -20,6 +16,41 @@ from .config import Config
 from .hosts import check_credential_host, check_identity_host
 from .models import ProfileInfo, ProfilesResult
 from .output import stderr_console
+
+if TYPE_CHECKING:
+    # Bound at run time by _load_modules() below, not by these imports.
+    import httpx  # noqa: TC004
+    import keyring  # noqa: TC004
+
+# httpx and keyring load when the first AuthManager is built, not when this
+# module is imported (every command module imports it). _load_modules()
+# binds them as module globals; __getattr__ makes `deepctl_core.auth.keyring`
+# the real module before that, so tests can patch it as before.
+_LAZY_MODULES = ("httpx", "keyring")
+
+
+def _bind_module(name: str) -> Any:
+    import importlib
+
+    module = importlib.import_module(name)
+    globals()[name] = module
+    return module
+
+
+# Only at run time: type checkers see the TYPE_CHECKING imports above.
+if not TYPE_CHECKING:
+
+    def __getattr__(name: str) -> Any:
+        if name not in _LAZY_MODULES:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        return _bind_module(name)
+
+
+def _load_modules() -> None:
+    for name in _LAZY_MODULES:
+        if name not in globals():
+            _bind_module(name)
+
 
 # Diagnostics only: everything printed here is status or error chrome, so
 # it goes to stderr and can never corrupt the machine-readable payload a
@@ -78,7 +109,7 @@ def _insecure_allowed() -> bool:
 _INSECURE_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
-def _insecure_mounts() -> dict[str, httpx.BaseTransport]:
+def _insecure_mounts() -> "dict[str, httpx.BaseTransport]":
     """Unverified transports for the loopback hosts only.
 
     Host-specific mounts take precedence over the scheme-wide proxy mounts
@@ -92,8 +123,10 @@ def _insecure_mounts() -> dict[str, httpx.BaseTransport]:
     }
 
 
-def _warn_if_verified(request: httpx.Request) -> None:
+def _warn_if_verified(request: "httpx.Request") -> None:
     """Say once per host that DEEPGRAM_CLI_INSECURE did not apply to it."""
+    from rich.markup import escape
+
     host = request.url.host
     if host in _INSECURE_HOSTS:
         return
@@ -126,6 +159,7 @@ class AuthManager:
             explicit_api_key: Explicitly provided API key (e.g., from CLI flags)
             explicit_project_id: Explicitly provided project ID (e.g., from CLI flags)
         """
+        _load_modules()
         self.config = config
         self.explicit_api_key = explicit_api_key
         self.explicit_project_id = explicit_project_id
@@ -289,6 +323,8 @@ class AuthManager:
 
     def _delete_keyring_credential(self, keyring_key: str) -> None:
         """Remove a credential when present without masking keyring failures."""
+        from keyring.errors import PasswordDeleteError
+
         try:
             keyring.delete_password(KEYRING_SERVICE, keyring_key)
         except PasswordDeleteError:
@@ -707,6 +743,8 @@ class AuthManager:
 
         base = identity_url or check_identity_host(self.config)
         poll_url = f"{base}/device/token?{urlencode(query_params)}"
+
+        from rich.progress import Progress, SpinnerColumn, TextColumn
 
         with Progress(
             SpinnerColumn(),

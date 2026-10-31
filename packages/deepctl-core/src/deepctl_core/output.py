@@ -1,24 +1,18 @@
 """Output formatting utilities for deepctl."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
 from io import StringIO
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
-from rich.console import Console
-from rich.json import JSON
-from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
-from rich.syntax import Syntax
-from rich.table import Table
+
+if TYPE_CHECKING:
+    from rich.console import Console
+    from rich.progress import Progress
 
 # ── Agentic / non-TTY detection ──────────────────────────────────
 
@@ -99,9 +93,58 @@ def is_ai_agent() -> bool:
 
 _agentic = is_agentic()
 
+
+class _LazyConsole:
+    """A rich ``Console`` that is built, and rich imported, on first use.
+
+    Importing rich costs every command, including ``--help``; most runs
+    print through a console only on some paths. Attribute reads, writes and
+    deletes go to the real console, so ``console.print(...)``,
+    ``console.quiet = True`` and ``mock.patch.object(console, "print")``
+    behave as before, and the module-level identity of ``console`` and
+    ``stderr_console`` never changes.
+    """
+
+    __slots__ = ("_deepctl_console", "_deepctl_kwargs")
+
+    def __init__(self, **kwargs: Any) -> None:
+        object.__setattr__(self, "_deepctl_kwargs", kwargs)
+        object.__setattr__(self, "_deepctl_console", None)
+
+    def _deepctl_real(self) -> Console:
+        real = object.__getattribute__(self, "_deepctl_console")
+        if real is None:
+            from rich.console import Console
+
+            real = Console(**object.__getattribute__(self, "_deepctl_kwargs"))
+            object.__setattr__(self, "_deepctl_console", real)
+        return cast("Console", real)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._deepctl_real(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._deepctl_real(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(self._deepctl_real(), name)
+
+    def __enter__(self) -> Console:
+        return self._deepctl_real().__enter__()
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self._deepctl_real().__exit__(*exc_info)
+
+    def __repr__(self) -> str:
+        return f"<lazy {object.__getattribute__(self, '_deepctl_kwargs')!r} console>"
+
+
 # Global console instance — plain when agentic, rich when interactive
-console = Console(no_color=_agentic, highlight=not _agentic)
-stderr_console = Console(stderr=True, no_color=_agentic, highlight=not _agentic)
+console = cast("Console", _LazyConsole(no_color=_agentic, highlight=not _agentic))
+stderr_console = cast(
+    "Console",
+    _LazyConsole(stderr=True, no_color=_agentic, highlight=not _agentic),
+)
 
 # Global output configuration
 _output_config: dict[str, Any] = {
@@ -286,6 +329,8 @@ class OutputFormatter:
 
     def _create_table_from_dict_list(self, data: list[dict[str, Any]]) -> str:
         """Create table from list of dictionaries."""
+        from rich.table import Table
+
         table = Table(show_header=True, header_style="bold blue")
 
         # Add columns
@@ -312,6 +357,8 @@ class OutputFormatter:
 
     def _create_table_from_dict(self, data: dict[str, Any]) -> str:
         """Create table from dictionary."""
+        from rich.table import Table
+
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("Key")
         table.add_column("Value")
@@ -331,6 +378,8 @@ class OutputFormatter:
 
     def _create_simple_table(self, data: list[Any]) -> str:
         """Create simple table from list."""
+        from rich.table import Table
+
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("Value")
 
@@ -358,6 +407,8 @@ def print_output(data: Any, format_type: str | None = None) -> None:
     formatter = OutputFormatter(format_type)
 
     if format_type == "json":
+        from rich.json import JSON
+
         # Use Rich's JSON formatter for better display
         if isinstance(data, str):
             try:
@@ -369,6 +420,8 @@ def print_output(data: Any, format_type: str | None = None) -> None:
             console.print(JSON.from_data(data))
     elif format_type == "yaml":
         # Use Rich's syntax highlighting for YAML
+        from rich.syntax import Syntax
+
         yaml_str = formatter.format(data)
         syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=False)
         console.print(syntax)
@@ -481,6 +534,14 @@ def create_progress_bar(description: str = "Processing...") -> Progress:
     Returns:
         Progress bar instance
     """
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+    )
+
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -500,6 +561,8 @@ def create_spinner(description: str = "Processing...") -> Progress:
     Returns:
         Spinner instance
     """
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -517,6 +580,8 @@ def print_panel(content: str, title: str = "", border_style: str = "blue") -> No
         border_style: Border style
     """
     if not _output_config["quiet"]:
+        from rich.panel import Panel
+
         panel = Panel(content, title=title, border_style=border_style)
         console.print(panel)
 

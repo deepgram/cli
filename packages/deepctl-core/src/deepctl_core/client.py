@@ -7,10 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlencode
 
-from deepgram import DeepgramClient as DGClient
-from deepgram import DeepgramClientEnvironment
-from deepgram.core.api_error import ApiError
-
 from .hosts import DEFAULT_BASE_URL
 from .output import stderr_console
 
@@ -18,8 +14,49 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from datetime import datetime
 
+    # Bound at run time by _sdk() below, not by these imports.
+    from deepgram import DeepgramClient as DGClient  # noqa: TC004
+    from deepgram import DeepgramClientEnvironment  # noqa: TC004
+    from deepgram.core.api_error import ApiError  # noqa: TC004
+
     from .auth import AuthManager
     from .config import Config
+
+# The Deepgram SDK loads on first use, not when this module is imported (it
+# pulls in httpx and pydantic models for every API). _sdk() binds these
+# module globals; __getattr__ lets `deepctl_core.client.DGClient` (and
+# mock.patch of it) work before anything here has used the SDK.
+_SDK_NAMES: dict[str, tuple[str, str]] = {
+    "ApiError": ("deepgram.core.api_error", "ApiError"),
+    "DGClient": ("deepgram", "DeepgramClient"),
+    "DeepgramClientEnvironment": ("deepgram", "DeepgramClientEnvironment"),
+}
+
+
+def _bind_sdk_name(name: str) -> Any:
+    module, attr = _SDK_NAMES[name]
+    import importlib
+
+    value = getattr(importlib.import_module(module), attr)
+    globals()[name] = value
+    return value
+
+
+# Only at run time: type checkers see the TYPE_CHECKING imports above.
+if not TYPE_CHECKING:
+
+    def __getattr__(name: str) -> Any:
+        if name not in _SDK_NAMES:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        return _bind_sdk_name(name)
+
+
+def _sdk(*names: str) -> None:
+    """Bind SDK names that aren't bound yet (all of them by default)."""
+    for name in names or tuple(_SDK_NAMES):
+        if name not in globals():
+            _bind_sdk_name(name)
+
 
 # Diagnostics only: everything printed here is status or error chrome, so
 # it goes to stderr and can never corrupt the machine-readable payload a
@@ -47,6 +84,7 @@ class DeepgramClient:
     """Wrapper around Deepgram SDK with authentication integration."""
 
     def __init__(self, config: Config, auth_manager: AuthManager):
+        _sdk("ApiError")  # raised before the client exists, too
         self.config = config
         self.auth_manager = auth_manager
         self._client: DGClient | None = None
@@ -73,6 +111,7 @@ class DeepgramClient:
 
     def _create_client(self) -> DGClient:
         """Create authenticated Deepgram client."""
+        _sdk()
         self.auth_manager.guard()
         api_key = self.auth_manager.get_api_key()
         project_id = self.auth_manager.get_project_id()
