@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from deepctl_core.launcher import launched_via_npm, npm_upgrade_command
+from deepctl_core._launcher import launched_via_npm, npm_upgrade_command
 
 # Sentinel used when the background check is suppressed or has no result
 _NO_RESULT: dict[str, Any] = {}

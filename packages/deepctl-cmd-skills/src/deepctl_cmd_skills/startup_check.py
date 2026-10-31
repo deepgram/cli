@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from deepctl_core.launcher import launched_via_npm
+from deepctl_core._launcher import launched_via_npm
 
 # Environment variables that indicate a CI environment
 _CI_ENV_VARS = (

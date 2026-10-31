@@ -19,7 +19,7 @@ from deepctl_core import (
     print_timing_summary,
     setup_output,
 )
-from deepctl_core.launcher import capture_launcher
+from deepctl_core._launcher import capture_launcher
 from deepctl_core.output import stderr_console
 from rich.traceback import install
 

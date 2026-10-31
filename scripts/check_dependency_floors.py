@@ -29,7 +29,7 @@ Four rules, the first three learned from the 0.3.0 release (PRs #100/#102):
 
 4. **Coupled sibling floors equal workspace versions.** Some sub-packages
    import a sibling API that only exists in the sibling's newest release
-   (deepctl-cmd-update needs `deepctl_core.launcher`; deepctl-cmd-plugin
+   (deepctl-cmd-update needs `deepctl_core._launcher`; deepctl-cmd-plugin
    needs `InstallMethod.NPM` from deepctl-cmd-update). Rule 2 only stops a
    floor from going *above* the sibling, so a stale floor lets pip pair the
    new package with an old published sibling that lacks the API, which is an
@@ -86,7 +86,7 @@ NOT_SHIPPED = {
 # version (rule 4). Add a pair when a package starts importing an API that
 # only the sibling's newest release has; the floor then tracks every release.
 SIBLING_FLOORS: dict[str, tuple[str, ...]] = {
-    # deepctl_core.launcher (npm launcher detection)
+    # deepctl_core._launcher (npm launcher detection)
     "deepctl-cmd-update": ("deepctl-core",),
     "deepctl-cmd-skills": ("deepctl-core",),
     # deepctl_cmd_update.installation.InstallMethod.NPM

@@ -8,7 +8,7 @@ every package whose code changed. It does not always: a `chore:` or
 then keeps serving the old code under the same version number, and a
 sibling that needs the new code installs next to it and fails at import.
 On this branch, a clean `pip install` of the root wheel resolved
-deepctl-core 0.3.0 from PyPI, which has no `deepctl_core.launcher`.
+deepctl-core 0.3.0 from PyPI, which has no `deepctl_core._launcher`.
 
 So before anything is published: for every package in the release-please
 manifest whose current version already has a release tag, `src/` and the

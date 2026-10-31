@@ -21,7 +21,7 @@ def _clean_deepgram_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _fresh_launcher_capture():
     """Re-read DEEPCTL_LAUNCHER in each test, so env patches take effect."""
-    from deepctl_core.launcher import reset_launcher_for_tests
+    from deepctl_core._launcher import reset_launcher_for_tests
 
     reset_launcher_for_tests()
     yield
