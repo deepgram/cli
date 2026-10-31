@@ -27,6 +27,7 @@ from deepctl_core import (
     AuthManager,
     BaseCommand,
     BaseResult,
+    CodedErrorResult,
     Config,
     DeepgramClient,
 )
@@ -412,7 +413,7 @@ class ListenCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult | ListenCodedError:
+    ) -> BaseResult | CodedErrorResult:
         source: str | None = kwargs.get("source")
         use_mic: bool = kwargs.get("mic", False)
         guided_flow = False
@@ -697,7 +698,7 @@ class ListenCommand(BaseCommand):
         no_validate: bool,
         caption_format: str | None,
         config: Config,
-    ) -> BaseResult:
+    ) -> BaseResult | CodedErrorResult:
         from deepctl_shared_utils import (
             probe_file,
             require_ffprobe,
@@ -706,6 +707,18 @@ class ListenCommand(BaseCommand):
         )
 
         source_kind = "url" if is_url else "file"
+
+        # The file validated (and probed) must be the file uploaded: its
+        # identity now, compared again once the upload opens it.
+        file_id: tuple[int, int] | None = None
+        if not is_url:
+            import os
+
+            try:
+                st = os.stat(source)
+                file_id = (st.st_dev, st.st_ino)
+            except OSError:
+                pass  # reported below (or by the upload, with --no-validate)
 
         # ── Validation ─────────────────────────────────────────────────
         if not no_validate:
@@ -771,11 +784,15 @@ class ListenCommand(BaseCommand):
         status.print(f"[dim]Transcribing[/dim] {source}")
         status.print(f"[dim]Model:[/dim] {model}  [dim]Language:[/dim] {language}")
 
+        from deepctl_core.upload import UploadFileError, coded_result
+
         try:
             if is_url:
                 result_dict = client.transcribe_url(source, options)
             else:
-                result_dict = client.transcribe_file(source, options)
+                result_dict = client.transcribe_file(source, options, file_id=file_id)
+        except UploadFileError as e:
+            return coded_result(e)
         except Exception as e:
             # Raise (not return an error result) so an API rejection — e.g. a
             # --redact value the v1 endpoint refuses — exits non-zero and is
