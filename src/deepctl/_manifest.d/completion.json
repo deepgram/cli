@@ -1,0 +1,9 @@
+{
+  "name": "completion",
+  "module": "deepctl_cmd_completion.command",
+  "attr": "CompletionCommand",
+  "dist": "deepctl-cmd-completion",
+  "summary": "Generate shell completion",
+  "hidden": false,
+  "requires_auth": false
+}

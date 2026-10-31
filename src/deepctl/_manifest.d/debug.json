@@ -1,0 +1,10 @@
+{
+  "name": "debug",
+  "module": "deepctl_cmd_debug.command",
+  "attr": "DebugCommand",
+  "dist": "deepctl-cmd-debug",
+  "summary": "Debug utilities",
+  "hidden": false,
+  "group": true,
+  "requires_auth": false
+}

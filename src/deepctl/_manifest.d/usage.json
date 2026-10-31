@@ -1,0 +1,9 @@
+{
+  "name": "usage",
+  "module": "deepctl_cmd_usage.command",
+  "attr": "UsageCommand",
+  "dist": "deepctl-cmd-usage",
+  "summary": "View usage statistics",
+  "hidden": false,
+  "requires_auth": true
+}

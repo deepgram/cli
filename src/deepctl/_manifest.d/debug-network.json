@@ -1,0 +1,13 @@
+{
+  "name": "network",
+  "parent": "debug",
+  "module": "deepctl_cmd_debug_network.command",
+  "attr": "NetworkCommand",
+  "dist": "deepctl-cmd-debug-network",
+  "summary": "Debug network issues",
+  "hidden": false,
+  "requires_auth": false,
+  "aliases": [
+    "debug-network"
+  ]
+}

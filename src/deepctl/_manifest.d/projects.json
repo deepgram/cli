@@ -1,0 +1,9 @@
+{
+  "name": "projects",
+  "module": "deepctl_cmd_projects.command",
+  "attr": "ProjectsCommand",
+  "dist": "deepctl-cmd-projects",
+  "summary": "Manage projects",
+  "hidden": false,
+  "requires_auth": true
+}

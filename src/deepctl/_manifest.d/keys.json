@@ -1,0 +1,9 @@
+{
+  "name": "keys",
+  "module": "deepctl_cmd_keys.command",
+  "attr": "KeysCommand",
+  "dist": "deepctl-cmd-keys",
+  "summary": "Manage API keys",
+  "hidden": false,
+  "requires_auth": true
+}

@@ -1,0 +1,9 @@
+{
+  "name": "profiles",
+  "module": "deepctl_cmd_login.command",
+  "attr": "ProfilesCommand",
+  "dist": "deepctl-cmd-login",
+  "summary": "Manage profiles",
+  "hidden": false,
+  "requires_auth": false
+}

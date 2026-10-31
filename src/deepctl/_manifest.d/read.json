@@ -1,0 +1,9 @@
+{
+  "name": "read",
+  "module": "deepctl_cmd_read.command",
+  "attr": "ReadCommand",
+  "dist": "deepctl-cmd-read",
+  "summary": "Text intelligence",
+  "hidden": false,
+  "requires_auth": true
+}

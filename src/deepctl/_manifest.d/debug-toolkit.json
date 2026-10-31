@@ -1,0 +1,13 @@
+{
+  "name": "toolkit",
+  "parent": "debug",
+  "module": "deepctl_cmd_debug_toolkit.command",
+  "attr": "ToolkitCommand",
+  "dist": "deepctl-cmd-debug-toolkit",
+  "summary": "Field support scripts (deepgram/support-toolkit)",
+  "hidden": false,
+  "requires_auth": false,
+  "aliases": [
+    "debug-toolkit"
+  ]
+}

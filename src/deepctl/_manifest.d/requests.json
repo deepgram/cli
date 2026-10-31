@@ -1,0 +1,9 @@
+{
+  "name": "requests",
+  "module": "deepctl_cmd_requests.command",
+  "attr": "RequestsCommand",
+  "dist": "deepctl-cmd-requests",
+  "summary": "Request history",
+  "hidden": false,
+  "requires_auth": true
+}

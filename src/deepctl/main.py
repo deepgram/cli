@@ -52,6 +52,30 @@ def capture_launcher() -> "str | None":
     return LAUNCHER
 
 
+PROG_NAME_ENV_VAR = "DEEPCTL_PROG_NAME"
+_PROG_FIRST = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+)
+_PROG_REST = _PROG_FIRST | frozenset("._-")
+
+
+def prog_name_from_env() -> "str | None":
+    """``DEEPCTL_PROG_NAME`` without surrounding whitespace, when it is a
+    plain program name: an ASCII letter or digit, then ASCII letters,
+    digits, ``.``, ``_`` or ``-``, at most 64 characters. Anything else (a
+    path, a control character, a space, a shell metacharacter) is ignored,
+    as if unset: dg prints this name in usage lines, ``--version`` and
+    notices."""
+    name = os.environ.get(PROG_NAME_ENV_VAR, "").strip()
+    if (
+        0 < len(name) <= 64
+        and name[0] in _PROG_FIRST
+        and all(char in _PROG_REST for char in name)
+    ):
+        return name
+    return None
+
+
 def _rich_excepthook(
     exc_type: "type[BaseException]",
     exc: BaseException,
@@ -124,8 +148,12 @@ def _print_version() -> None:
             pass
 
 
-def main() -> None:
-    """Run deepctl for ``sys.argv``."""
+def main(prog: "str | None" = None) -> None:
+    """Run deepctl for ``sys.argv``.
+
+    ``prog`` is the program name for usage lines when ``DEEPCTL_PROG_NAME``
+    isn't set; the console scripts leave it to ``argv[0]``.
+    """
     from time import perf_counter
 
     started_at = perf_counter()
@@ -149,7 +177,7 @@ def main() -> None:
     sys.excepthook = _rich_excepthook
     from deepctl._cli import run
 
-    run(args, started_at)
+    run(args, started_at, prog)
 
 
 # Only at run time: type checkers then flag a misspelled name.
