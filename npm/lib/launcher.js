@@ -1143,15 +1143,15 @@ async function run(argv = process.argv.slice(2), opts = {}) {
       // The setup child is gone, its partial venv removed and the lock
       // released (buildVenv's finally); now die from the same signal.
       const sig = session.interrupted;
-      stderr.write(`dg: setup interrupted (${sig}).\n`);
+      stderr.write(`ERROR: setup interrupted (${sig}).\n`);
       if (isWindows(process.platform)) process.exit(signalExitCode(sig));
       dieBySignal(sig, signalExitCode(sig));
       return;
     }
     // Filesystem surprises (a cache directory changing underneath us) get
     // the same one-line treatment as expected failures, not a stack trace.
-    const hint = err instanceof LauncherError && err.hint ? `\n${err.hint}` : '';
-    stderr.write(`dg: ${String(err.message || err).trimStart()}${hint}\n`);
+    const hint = err instanceof LauncherError && err.hint ? `\nHINT: ${err.hint}` : '';
+    stderr.write(`ERROR: ${String(err.message || err).trimStart()}${hint}\n`);
     process.exit(1);
   }
 
@@ -1164,7 +1164,7 @@ async function run(argv = process.argv.slice(2), opts = {}) {
   session.child = child;
 
   child.on('error', (err) => {
-    stderr.write(`dg: could not start ${runner.command}: ${err.message}\n`);
+    stderr.write(`ERROR: could not start ${runner.command}: ${err.message}\n`);
     cleanup();
     process.exit(1);
   });
@@ -1175,7 +1175,7 @@ async function run(argv = process.argv.slice(2), opts = {}) {
     removeHandlers();
     const action = exitAction(code, signal);
     // A crash otherwise surfaces only as a bare exit status (139 and so on).
-    if (CRASH_SIGNALS.has(signal)) stderr.write(`dg: ${runner.command} crashed (${signal}).\n`);
+    if (CRASH_SIGNALS.has(signal)) stderr.write(`ERROR: ${runner.command} crashed (${signal}).\n`);
     if (action.signal) {
       // Die the same way the child did.
       dieBySignal(action.signal, action.exit);
