@@ -8,7 +8,7 @@
   "requires_auth": true,
   "help": {
     "name": "speak",
-    "help": "Convert text to speech using Deepgram TTS\n\nExamples:\n  dg speak \"Hello from Deepgram\" --play\n  dg speak --list-voices\n  dg speak \"Hello world\"\n  dg speak \"Hello world\" -o hello.wav\n  dg speak \"Hello world\" -o hello.wav --play\n  dg speak --file message.txt -o output.wav\n  dg speak \"Hello\" | ffplay -loglevel error -nodisp -autoexit -\n  dg speak \"A little slower, please\" --speed 0.9 -o slow.wav\n  dg speak \"So exciting!\" --expressivity 2 -o lively.wav  # beta; default: 0\n  dg speak \"Hello\" -m aura-2-asteria-en -o hello.mp3\n  dg speak \"Hello\" -m aura-2-luna-en -o hello.wav --encoding linear16 --container wav\n  echo \"Hello\" | dg speak -o hello.mp3 -m aura-2-asteria-en\n  dg speak \"Hola, mundo\" -m aura-2-selena-es -o hola.mp3\n\n\nFor agents, use --agent-friendly.",
+    "help": "Convert text to speech using Deepgram TTS\n\nExamples:\n  dg speak \"Hello from Deepgram\" --play\n  dg speak --list-voices\n  dg speak \"Hello world\"\n  dg speak \"Hello world\" --out-file hello.wav\n  dg speak \"Hello world\" --out-file hello.wav --play\n  dg speak --file message.txt --out-file output.wav\n  dg speak \"Hello\" | ffplay -loglevel error -nodisp -autoexit -\n  dg speak \"A little slower, please\" --speed 0.9 --out-file slow.wav\n  dg speak \"So exciting!\" --expressivity 2 --out-file lively.wav  # beta; default: 0\n  dg speak \"Hello\" -m aura-2-asteria-en --out-file hello.mp3\n  dg speak \"Hello\" -m aura-2-luna-en --out-file hello.wav --encoding linear16 --container wav\n  echo \"Hello\" | dg speak --out-file hello.mp3 -m aura-2-asteria-en\n  dg speak \"Hola, mundo\" -m aura-2-selena-es --out-file hola.mp3\n\n\nFor agents, use --agent-friendly.",
     "short_help": "Text-to-speech",
     "epilog": null,
     "hidden": false,
@@ -56,7 +56,7 @@
         "is_flag": true,
         "count": false,
         "hidden": false,
-        "help": "Play the audio through your system player (ffplay, afplay, paplay, or aplay). Can be combined with -o to save and play."
+        "help": "Play the audio through your system player (ffplay, afplay, paplay, or aplay). Can be combined with --out-file to save and play."
       },
       {
         "class": "option",
@@ -220,14 +220,56 @@
         },
         "required": false,
         "nargs": 1,
-        "metavar": null,
+        "metavar": "FILE",
         "eager": false,
         "expose": true,
         "multiple": false,
         "is_flag": false,
         "count": false,
         "hidden": false,
-        "help": "Output file path (required if stdout is a terminal)"
+        "help": "Deprecated: use --out-file. Saves the audio to FILE and overwrites it. In 1.0, -o will set the output format."
+      },
+      {
+        "class": "option",
+        "name": "force",
+        "opts": [
+          "--force"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "With --out-file, overwrite FILE if it already exists."
+      },
+      {
+        "class": "option",
+        "name": "out_file",
+        "opts": [
+          "--out-file"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": "FILE",
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Save the audio to FILE. An existing file isn't overwritten unless you add --force."
       },
       {
         "class": "argument",

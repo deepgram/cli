@@ -44,6 +44,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
     "module",
     [
         "deepctl_cmd_speak.command",
+        "deepctl_cmd_speak.sinks",
         "deepctl_cmd_speak.messages",
         "deepctl_cmd_speak.models",
     ],
