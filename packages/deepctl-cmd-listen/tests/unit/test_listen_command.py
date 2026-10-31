@@ -1099,6 +1099,201 @@ class TestFluxV2TurnHandling:
         assert command.exit_code_for(result) == 0
         assert '{"type": "CloseStream"}' in ws.sent
 
+    def test_ws_mic_streams_raw_int16_frames_without_numpy(self, command, monkeypatch):
+        """The mic path opens a raw int16 stream and forwards each callback
+        buffer to the socket byte for byte, with numpy unimportable."""
+        import asyncio as _asyncio
+        import json as _json
+        import signal
+        import sys
+        import types
+        from array import array
+        from unittest.mock import MagicMock
+
+        from deepctl_cmd_listen import live
+
+        # Any `import numpy` now raises ImportError.
+        monkeypatch.setitem(sys.modules, "numpy", None)
+
+        # Fixed fixture: three 4-sample blocks of native-order int16, as
+        # PortAudio delivers them to the callback.
+        samples = [0, 1, -1, 32767, -32768, 1234, -1234, 7, 8, 9, -9, 0]
+        blocks = [array("h", samples[i : i + 4]).tobytes() for i in range(0, 12, 4)]
+
+        opened: dict = {}
+
+        class _FakeRawInputStream:
+            def __init__(self, **kwargs):
+                opened.update(kwargs)
+                self.events: list[str] = []
+                opened["stream"] = self
+
+            def start(self):
+                self.events.append("start")
+                for block in blocks:
+                    # sounddevice hands the callback a CFFI buffer; a
+                    # memoryview is the same buffer-protocol object.
+                    opened["callback"](memoryview(block), 4, None, None)
+
+            def stop(self):
+                self.events.append("stop")
+
+            def close(self):
+                self.events.append("close")
+
+        fake_sd = types.ModuleType("sounddevice")
+        fake_sd.RawInputStream = _FakeRawInputStream
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+        ws = _EndOnCloseStream()
+        _install_websockets(monkeypatch, ws)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        loop = _asyncio.new_event_loop()
+        # The user's Ctrl-C, once the three blocks are on the socket.
+        loop.call_later(0.2, signal.raise_signal, signal.SIGINT)
+        try:
+            loop.run_until_complete(
+                command._ws_mic(
+                    client,
+                    model="nova-3",
+                    language="en-US",
+                    api_version=1,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    sample_rate=16000,
+                    channels=1,
+                )
+            )
+        finally:
+            loop.close()
+
+        audio = [frame for frame in ws.sent if isinstance(frame, bytes)]
+        assert opened["dtype"] == "int16"
+        assert opened["samplerate"] == 16000
+        assert opened["channels"] == 1
+        assert opened["blocksize"] == live.frame_bytes("linear16", 16000, 1) // 2
+        assert audio == blocks
+        assert _json.loads(ws.sent[-1]) == {"type": "CloseStream"}
+        assert opened["stream"].events == ["start", "stop", "close"]
+
+    def test_sigint_during_mic_capture_stops_cleanly(self, command, monkeypatch):
+        """A real SIGINT while frames are flowing stops the capture: the
+        stream is stopped and closed, CloseStream is sent, and the transcript
+        so far is kept on every Python version. Ctrl-C is how a mic session
+        ends, so the result is success, exit 0."""
+        import json as _json
+        import os
+        import signal
+        import sys
+        import threading
+        import time
+        import types
+        from unittest.mock import MagicMock
+
+        if signal.getsignal(signal.SIGINT) is not signal.default_int_handler:
+            pytest.skip("SIGINT is not Python's default handler here")
+        monkeypatch.setitem(sys.modules, "numpy", None)
+
+        events: list[str] = []
+
+        class _PacedStream:
+            def __init__(self, *, callback, blocksize, samplerate, **kwargs):
+                self._callback = callback
+                self._period = blocksize / samplerate
+                self._stop = threading.Event()
+                self._thread = threading.Thread(target=self._run, daemon=True)
+
+            def _run(self):
+                while not self._stop.wait(self._period):
+                    self._callback(memoryview(b"\x01\x00" * 800), 800, None, None)
+
+            def start(self):
+                events.append("start")
+                self._thread.start()
+
+            def stop(self):
+                events.append("stop")
+                self._stop.set()
+
+            def close(self):
+                events.append("close")
+
+        fake_sd = types.ModuleType("sounddevice")
+        fake_sd.RawInputStream = _PacedStream
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+        class _OneResultThenEndOnClose(_EndOnCloseStream):
+            def __init__(self):
+                super().__init__()
+                self._said = False
+                self._pressed = False
+
+            async def send(self, data):
+                await super().send(data)
+                audio = [f for f in self.sent if isinstance(f, bytes)]
+                if len(audio) == 3 and not self._pressed:
+                    # Frames are flowing: the user presses Ctrl-C, once (a
+                    # later CloseStream send must not schedule another).
+                    self._pressed = True
+                    threading.Timer(0.05, os.kill, (os.getpid(), signal.SIGINT)).start()
+
+            async def __anext__(self):
+                if not self._said:
+                    self._said = True
+                    return _json.dumps(
+                        {
+                            "type": "Results",
+                            "is_final": True,
+                            "start": 0.0,
+                            "duration": 1.0,
+                            "channel": {
+                                "alternatives": [{"transcript": "hi", "words": []}]
+                            },
+                        }
+                    )
+                return await super().__anext__()
+
+        ws = _OneResultThenEndOnClose()
+        _install_websockets(monkeypatch, ws)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        start = time.monotonic()
+        result = command._stream_mic(
+            client,
+            model="nova-3",
+            language="en-US",
+            api_version=1,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            redact=(),
+            numerals=False,
+            sample_rate=16000,
+            channels=1,
+            save_to=None,
+            caption_format=None,
+        )
+
+        assert time.monotonic() - start < 5
+        assert events == ["start", "stop", "close"]
+        assert all(isinstance(frame, bytes) for frame in ws.sent[:3])
+        assert _json.loads(ws.sent[-1]) == {"type": "CloseStream"}
+        assert result.status == "success"
+        assert result.transcript == "hi"
+        assert command.exit_code_for(result) == 0
+
     def test_end_of_turn_with_empty_transcript_is_noop(self, command, capsys):
         """An EndOfTurn that never carried text emits nothing (no blank line)."""
         acc: list[str] = []
@@ -1214,10 +1409,7 @@ class TestFluxV2TurnHandling:
 
         fake_sounddevice = types.ModuleType("sounddevice")
         fake_sounddevice.RawInputStream = _FakeInputStream
-        fake_numpy = types.ModuleType("numpy")
-        fake_numpy.int16 = "int16"
         monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
-        monkeypatch.setitem(sys.modules, "numpy", fake_numpy)
 
         client = MagicMock()
         client.config.get_profile.return_value.base_url = "https://api.deepgram.com"

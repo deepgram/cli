@@ -1017,7 +1017,6 @@ class ListenCommand(BaseCommand):
     ) -> BaseResult | ListenCodedError:
         import asyncio
 
-        import numpy as np
         import sounddevice as sd
 
         from . import live
@@ -1062,7 +1061,7 @@ class ListenCommand(BaseCommand):
             stream = sd.RawInputStream(
                 samplerate=sample_rate,
                 channels=channels,
-                dtype=np.int16,
+                dtype="int16",
                 callback=callback,
                 blocksize=live.frame_bytes("linear16", sample_rate, channels)
                 // (2 * channels),

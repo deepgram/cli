@@ -20,6 +20,8 @@ DIST=$(cd "$1" && pwd); PY=${2:-python3}; PHASE=${3:-all}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ENV=${LOWEST_ENV:-${TMPDIR:-/tmp}/lowest-direct}
 export DEEPCTL_TELEMETRY_DISABLED=1 DEEPCTL_TELEMETRY_DSN=http://k@127.0.0.1:9/1
+# tests/unit/test_dependency_allowlist.py checks its floors-only entries here.
+export DEEPCTL_LOWEST_DIRECT=1
 TEST_TOOLS="pytest pytest-asyncio pytest-mock pytest-timeout responses"
 
 if [ "$PHASE" != test ]; then
