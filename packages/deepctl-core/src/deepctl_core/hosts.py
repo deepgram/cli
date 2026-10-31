@@ -23,8 +23,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from rich.markup import escape
-
 from . import messages as msg
 from . import output
 
@@ -373,6 +371,8 @@ def warn_env_host(
     identity: bool = False,
 ) -> None:
     """Say, once, that the key goes to (or comes from) a host the env chose."""
+    from rich.markup import escape
+
     host = msg.display(origin.host)
     if not _first_time(("W-ENV-BASEURL", f"{identity}:{variable}:{host}")):
         return
@@ -404,6 +404,8 @@ def _first_time(key: tuple[str, str]) -> bool:
 
 def report(err: CredentialHostError) -> None:
     """Print a refusal and its hint to stderr, once per process."""
+    from rich.markup import escape
+
     if not _first_time((err.message_id, err.error)):
         return
     output.print_error(escape(err.error))
