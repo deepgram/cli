@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 import yaml
-from deepctl_core import hosts, output
+from deepctl_core import hosts, output, transport
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
@@ -24,6 +24,7 @@ def _isolated(tmp_path, monkeypatch):
         lambda: tmp_path / "user" / "config.yaml",
     )
     monkeypatch.setattr(hosts, "_reported", set())
+    monkeypatch.setattr(transport, "_client", None)
     monkeypatch.setattr(output, "is_ai_agent", lambda: False)
     monkeypatch.setattr(output, "is_agentic", lambda: False)
     monkeypatch.setattr(output.stderr_console, "_width", 400)
@@ -38,12 +39,14 @@ def user(tmp_path, data) -> str:
 
 def recording(config):
     seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"projects": []})
+
     auth = AuthManager(config)
-    auth.client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda r: seen.append(r) or httpx.Response(200, json={"projects": []})
-        )
-    )
+    auth.client = httpx.Client(transport=httpx.MockTransport(handler))
+    transport._set_client(httpx.Client(transport=httpx.MockTransport(handler)))
     return auth, seen
 
 
@@ -61,6 +64,8 @@ def test_env_source(tmp_path, monkeypatch):
     auth, seen = recording(config)
     assert auth.check_base_url() == PROXY
     auth.guard()
+    assert seen == []  # guard() checks the host and the key, and sends nothing
+    DeepgramClient(config, auth).get_projects()
     assert str(seen[0].url) == PROXY + "/v1/projects"
 
 

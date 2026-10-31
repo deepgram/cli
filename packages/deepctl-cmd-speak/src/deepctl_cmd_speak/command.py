@@ -789,6 +789,9 @@ class SpeakCommand(BaseCommand):
                 for chunk in stream:
                     if not chunk:
                         continue
+                    # stdout now carries audio: a later failure is reported
+                    # on stderr only, never as JSON after the audio.
+                    self.stdout_is_protocol = True
                     if eff_encoding == "linear16" and not wrote_header:
                         out.write(
                             _streaming_wav_header(sample_rate=int(eff_sample_rate))
@@ -894,6 +897,9 @@ class SpeakCommand(BaseCommand):
                 # Write to stdout (piping)
                 stdout_buffer = sys.stdout.buffer
                 for chunk in audio_iter:
+                    # stdout now carries audio: a later failure is reported
+                    # on stderr only, never as JSON after the audio.
+                    self.stdout_is_protocol = True
                     stdout_buffer.write(chunk)
                     total_bytes += len(chunk)
                 stdout_buffer.flush()

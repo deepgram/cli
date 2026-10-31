@@ -10,9 +10,16 @@ from .client import DeepgramClient
 from .config import Config, flush_config_notices
 from .hosts import CredentialHostError
 from .models import CodedErrorResult, ErrorResult
-from .output import _agentic, print_error, print_error_hint, stderr_console
+from .output import (
+    _agentic,
+    print_error,
+    print_error_hint,
+    print_hint,
+    stderr_console,
+)
 from .output import console as stdout_console
 from .timing import TimingContext
+from .transport import TransportError
 
 # The PAYLOAD console -- stdout, deliberately. Tables, JSON and raw text
 # written by _output_* are the machine-readable result and belong there.
@@ -210,6 +217,10 @@ class BaseCommand(ABC):
                 stderr_console.print("\n[yellow]Command cancelled by user[/yellow]")
                 raise click.Abort()
 
+            except TransportError as e:
+                self._report_transport_error(e, ctx, config, auth_manager)
+                raise SystemExit(1) from None
+
             except CredentialHostError as e:
                 # Already reported on stderr; nothing was sent.
                 try:
@@ -233,6 +244,31 @@ class BaseCommand(ABC):
             exit_code = self.exit_code_for(result)
             if exit_code:
                 raise SystemExit(exit_code)
+
+    def _report_transport_error(
+        self,
+        error: TransportError,
+        ctx: click.Context,
+        config: Config,
+        auth_manager: AuthManager,
+    ) -> None:
+        """Two stderr lines, and the coded result on stdout."""
+        from rich.markup import escape
+
+        from . import transport
+
+        command_path = " ".join(ctx.command_path.split()[1:])
+        result = transport.render(
+            error, command_path=command_path, auth_manager=auth_manager
+        )
+        print_error(escape(result.error))
+        print_hint(escape(result.hint))
+        if self.stdout_is_protocol:
+            return
+        try:
+            self.output_result(result, config)
+        except (OSError, ValueError):
+            pass
 
     def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
         """Return a result to stop with before authentication, or ``None``.

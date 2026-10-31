@@ -13,7 +13,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 import yaml
-from deepctl_core import hosts, output
+from deepctl_core import hosts, output, transport
 from deepctl_core.auth import AuthManager
 from deepctl_core.base_command import BaseCommand
 from deepctl_core.client import DeepgramClient
@@ -48,6 +48,7 @@ def _isolated(tmp_path, monkeypatch):
         "deepctl_core.config._trust_root_location", lambda: (tmp_path, tmp_path / "user" / "config.yaml")
     )
     monkeypatch.setattr(hosts, "_reported", set())
+    monkeypatch.setattr(transport, "_client", None)
     monkeypatch.setattr(output, "is_agentic", lambda: False)
     monkeypatch.setattr(output, "is_ai_agent", lambda: False)
     output._output_config.update(agentic=False, quiet=False, format="default")
@@ -79,7 +80,8 @@ def write_user(tmp_path, data) -> str:
 
 
 def recording_auth(config: Config) -> tuple[AuthManager, list[httpx.Request]]:
-    """AuthManager whose HTTP client records requests instead of sending."""
+    """AuthManager whose HTTP clients (its own, and the shared one the SDK
+    uses) record requests instead of sending."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -88,7 +90,15 @@ def recording_auth(config: Config) -> tuple[AuthManager, list[httpx.Request]]:
 
     auth = AuthManager(config)
     auth.client = httpx.Client(transport=httpx.MockTransport(handler))
+    transport._set_client(httpx.Client(transport=httpx.MockTransport(handler)))
     return auth, seen
+
+
+def send(auth: AuthManager) -> None:
+    """What an authed command does: guard(), then its own request through
+    the SDK. There is no separate key check."""
+    auth.guard()
+    DeepgramClient(auth.config, auth).get_projects()
 
 
 KEYED = {"profiles": {"default": {"api_key": "sk-USERKEY"}}}
@@ -250,7 +260,7 @@ def test_agent_rendering_gets_agent_hint(signal, monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("DEEPGRAM_BASE_URL", "https://proxy.example")
     config = Config(config_path=write_user(tmp_path, data))
     auth, seen = recording_auth(config)
-    auth.guard()  # sent: CI is not an AI-agent marker
+    send(auth)  # sent: CI is not an AI-agent marker
     assert seen
     captured = capsys.readouterr()
     for text in (captured.err, captured.out):
@@ -268,11 +278,11 @@ def test_untrusted_text_is_sanitized():
 
 
 class TestCredentialPaths:
-    def test_preflight_check_refuses_flag_host(self, tmp_path, capsys):
+    def test_command_path_refuses_flag_host(self, tmp_path, capsys):
         config = Config(config_path=write_user(tmp_path, KEYED), base_url=FOREIGN)
         auth, seen = recording_auth(config)
         with pytest.raises(CredentialHostError):
-            auth.guard()
+            send(auth)
         assert seen == []
         err = capsys.readouterr().err
         assert err.count("Not sending your API key to evil.example") == 1
@@ -293,11 +303,11 @@ class TestCredentialPaths:
         auth.verify_credentials("sk-USERKEY", "P1")
         assert [str(r.url) for r in seen] == ["http://127.0.0.1:8080/v1/projects/P1"]
 
-    def test_preflight_sends_to_trusted_flag_host(self, tmp_path):
+    def test_command_path_sends_to_trusted_flag_host(self, tmp_path):
         data = {**KEYED, "api": {"allowed_hosts": ["evil.example"]}}
         config = Config(config_path=write_user(tmp_path, data), base_url=FOREIGN)
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert [r.url.host for r in seen] == ["evil.example"]
         assert seen[0].headers["Authorization"] == "Token sk-USERKEY"
 
@@ -360,7 +370,7 @@ class TestWhoCanApproveAHost:
         config = Config(config_path=write_user(tmp_path, KEYED), base_url=FOREIGN)
         auth, seen = recording_auth(config)
         with pytest.raises(CredentialHostError) as err:
-            auth.guard()
+            send(auth)
         assert err.value.code == "foreign_host"
         assert seen == []
 
@@ -370,7 +380,7 @@ class TestWhoCanApproveAHost:
         config = Config(config_path=write_user(tmp_path, data))
         auth, seen = recording_auth(config)
         with pytest.raises(CredentialHostError) as err:
-            auth.guard()
+            send(auth)
         assert err.value.message_id == "E-FH-PROFILE"
         assert seen == []
 
@@ -381,7 +391,7 @@ class TestWhoCanApproveAHost:
         }
         config = Config(config_path=write_user(tmp_path, data))
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert len(seen) == 1
 
     def test_agent_env_host_refused(self, tmp_path, monkeypatch, agentic):
@@ -390,7 +400,7 @@ class TestWhoCanApproveAHost:
         config = Config(config_path=write_user(tmp_path, KEYED))
         auth, seen = recording_auth(config)
         with pytest.raises(CredentialHostError) as err:
-            auth.guard()
+            send(auth)
         assert err.value.code == "foreign_host"
         assert seen == []
 
@@ -399,14 +409,14 @@ class TestWhoCanApproveAHost:
         data = {**KEYED, "api": {"allowed_hosts": ["evil.example"]}}
         config = Config(config_path=write_user(tmp_path, data))
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert seen[0].headers["Authorization"] == "Token sk-USERKEY"
 
     def test_non_agent_loopback_env_allowed(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DEEPGRAM_BASE_URL", "http://127.0.0.1:8080")
         config = Config(config_path=write_user(tmp_path, KEYED))
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert seen[0].url.host == "127.0.0.1"
         assert seen[0].headers["Authorization"] == "Token sk-USERKEY"
 
@@ -545,8 +555,8 @@ class TestHardAgentSignals:
         monkeypatch.setenv("DEEPGRAM_BASE_URL", "https://proxy.example")
         config = Config(config_path=write_user(tmp_path, KEYED))
         auth, seen = recording_auth(config)
-        auth.guard()
-        auth.guard()
+        send(auth)
+        send(auth)
         assert [r.url.host for r in seen] == ["proxy.example", "proxy.example"]
         assert seen[0].headers["Authorization"] == "Token sk-USERKEY"
         err = capsys.readouterr().err
@@ -567,7 +577,7 @@ class TestHardAgentSignals:
         config = Config(config_path=write_user(tmp_path, KEYED))
         auth, seen = recording_auth(config)
         with pytest.raises(CredentialHostError) as err:
-            auth.guard()
+            send(auth)
         assert err.value.code == "foreign_host"
         assert seen == []
 
@@ -577,7 +587,7 @@ class TestHardAgentSignals:
         monkeypatch.setenv("DEEPGRAM_BASE_URL", "https://selfhosted.example")
         config = Config(config_path=write_user(tmp_path, KEYED))
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert seen[0].headers["Authorization"] == "Token sk-USERKEY"
         assert capsys.readouterr().err.count("(from DEEPGRAM_BASE_URL)") == 1
 
@@ -588,7 +598,7 @@ class TestHardAgentSignals:
         data = {**KEYED, "api": {"allowed_hosts": ["proxy.example"]}}
         config = Config(config_path=write_user(tmp_path, data))
         auth, _ = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert "(from DEEPGRAM_BASE_URL)" not in capsys.readouterr().err
 
 
@@ -621,7 +631,7 @@ class TestCustomConfigFile:
         assert config.get_profile().base_url == "http://127.0.0.1:8000"
         assert config.get("tools.ffprobe_path") == "/repo/ffprobe"
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert seen[0].url.host == "127.0.0.1"
 
     def test_other_path_cannot_widen_trust(self, tmp_path, agentic, monkeypatch):
@@ -654,7 +664,7 @@ class TestCustomConfigFile:
         ) in texts
         assert not any(str(repo_file) in (h or "") for h in hints)
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert [r.url.host for r in seen] == ["api.deepgram.com"]
 
     def test_other_path_keeps_credentials_and_regional_url(self, tmp_path):
@@ -677,7 +687,7 @@ class TestCustomConfigFile:
         )
         auth, seen = recording_auth(config)
         with pytest.raises(CredentialHostError):
-            auth.guard()
+            send(auth)
         assert seen == []
 
 
@@ -761,7 +771,7 @@ class TestNormalizedUrl:
         assert base == base.lower()
         assert base.startswith("https://api.")
         assert not base.endswith(".")
-        auth.guard()
+        send(auth)
         assert seen[0].url.host.startswith("api.")
         with (
             patch.object(AuthManager, "guard"),
@@ -808,7 +818,7 @@ class TestAllowlistEntries:
         )
         assert config.allowed_hosts() == ["proxy.example"]
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert seen
         assert not [w for w in recwarn if "serializer" in str(w.message).lower()]
 
@@ -817,7 +827,7 @@ class TestAllowlistEntries:
         config = Config(config_path=write_user(tmp_path, data), base_url=LOOPBACK)
         assert config.allowed_hosts() == ["127.0.0.1:8000"]
         auth, seen = recording_auth(config)
-        auth.guard()
+        send(auth)
         assert seen
 
     def test_scheme_entry_does_not_match_host_named_https(self):
@@ -835,7 +845,7 @@ def test_custom_config_reads_allowlist_from_default_file(tmp_path):
     config = Config(config_path=str(other), base_url="https://h.example")
     assert config.allowed_hosts() == ["h.example"]
     auth, seen = recording_auth(config)
-    auth.guard()
+    send(auth)
     assert seen[0].url.host == "h.example"
 
 
@@ -846,6 +856,6 @@ def test_custom_config_hint_names_default_file(tmp_path, capsys):
     config = Config(config_path=str(other), base_url=FOREIGN)
     auth, _ = recording_auth(config)
     with pytest.raises(CredentialHostError) as err:
-        auth.guard()
+        send(auth)
     assert str(tmp_path / "user" / "config.yaml") in err.value.hint
     assert str(other) not in err.value.hint
