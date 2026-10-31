@@ -28,18 +28,38 @@ same version as the npm package:
 
 1. If an earlier run already set up a private Python environment for this
    version, it runs that. This is fast and works offline.
-2. Otherwise, if [uv](https://docs.astral.sh/uv/) is installed, it runs
-   `uv tool run --from deepctl==<version> deepctl`. uv brings its own Python.
-3. Otherwise it finds Python 3.10 or newer and builds a private venv under
-   your cache directory (`~/.cache/deepgram-cli` or
-   `~/Library/Caches/deepgram-cli`). The first run takes about a minute.
+2. Otherwise, if [uv](https://docs.astral.sh/uv/) is installed, uv builds that
+   environment. uv brings its own Python, and setup takes a few seconds.
+3. Otherwise it finds Python 3.10 to 3.14 and builds the environment with
+   `venv` and `pip`. The first run takes about a minute.
+
+Either way, the environment lives under your cache directory
+(`~/.cache/deepgram-cli` or `~/Library/Caches/deepgram-cli`), and setup
+installs exactly the packages listed in the npm package's
+`requirements-<version>.txt`, each checked against its sha256 hash, and only
+as prebuilt wheels (`--require-hashes --no-deps --only-binary :all:`). A
+download that doesn't match the release is refused and nothing runs. Setup
+runs in a directory the launcher owns, so running `dg` inside a cloned
+repository can't change what gets installed: uv ignores any `uv.toml` or
+`pyproject.toml` there.
+
+Your own package-index settings still apply, so a company mirror keeps
+working:
+
+- pip: your user and global `pip.conf` (`pip config set global.index-url …`),
+  `PIP_CONFIG_FILE` and `PIP_*` variables such as `PIP_INDEX_URL`.
+- uv: `UV_*` variables such as `UV_INDEX_URL` or `UV_DEFAULT_INDEX`,
+  `UV_CONFIG_FILE`, and one `uv.toml`: your user file
+  (`~/.config/uv/uv.toml`, or `%APPDATA%\uv\uv.toml` on Windows) if it
+  exists, otherwise the system file (`/etc/uv/uv.toml`, or
+  `%PROGRAMDATA%\uv\uv.toml`).
 
 On Windows, step 1 is skipped: the launcher can't verify who controls a cache
-directory there, so it never runs a venv left by an earlier run. Without uv,
-every run builds a fresh venv under `%LOCALAPPDATA%\deepgram-cli` and deletes
-it afterwards, which takes about a minute each time. Install uv to avoid that.
-The launcher needs a real `uv.exe` or `python.exe` on `PATH`: pyenv-win's
-`python.bat` shims and `uv.cmd` wrappers are skipped.
+directory there, so it never runs an environment left by an earlier run. Every
+run builds a fresh one under `%LOCALAPPDATA%\deepgram-cli` and deletes it
+afterwards. With uv that takes a few seconds; without it, about a minute each
+time, so install uv. The launcher needs a real `uv.exe` or `python.exe` on
+`PATH`: pyenv-win's `python.bat` shims and `uv.cmd` wrappers are skipped.
 
 Launcher messages go to stderr, so stdout carries only the CLI's own output
 (`dg ... -o json`, `dg mcp`).
@@ -51,7 +71,7 @@ One of:
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (recommended):
   `curl -LsSf https://astral.sh/uv/install.sh | sh`, or on Windows
   `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`
-- Python 3.10 or newer with `venv`. On Debian and Ubuntu that means
+- Python 3.10 to 3.14 with `venv`. On Debian and Ubuntu that means
   `sudo apt install python3-venv`.
 
 Node.js 20 or newer runs the launcher.
@@ -72,10 +92,24 @@ Update the npm version with `npm install -g @deepgram/cli@latest`, or run
 | Variable | Effect |
 | --- | --- |
 | `DEEPCTL_NPM_RUNNER=uvx\|venv\|path` | Force one strategy. `path` runs a `deepctl` you installed yourself from your `PATH`. |
-| `DEEPCTL_NPM_PYPI_SPEC` | Replace the requirement installed from PyPI (default `deepctl==<version>`). Meant for testing. |
+| `DEEPCTL_NPM_PYPI_SPEC` | Replace the requirement installed from PyPI (default: the pinned, hash-checked `requirements-<version>.txt`). Meant for testing: an override isn't hash-checked. |
 | `XDG_CACHE_HOME` | Cache directory base on Linux. |
 
-## Known limitation: nohup and ignored signals
+## Known limitations
+
+### Platforms without prebuilt wheels
+
+Setup installs prebuilt wheels only, never source builds. A few of the CLI's
+dependencies don't publish wheels for every platform, so setup fails there
+with "no matching distribution" or "no wheels":
+
+- Intel Macs and Windows on ARM64: `cryptography` has no wheel for them.
+- Python 3.15: not supported yet; the launcher picks Python 3.10 to 3.14.
+
+On those machines, install the CLI another way that can build those packages
+from source, such as `pipx install deepctl` or `brew install deepgram/tap/deepgram`.
+
+### nohup and ignored signals
 
 `nohup dg ...`, or a script that runs `dg` in the background after
 `trap '' INT`, does not protect the CLI the way it protects a native program.

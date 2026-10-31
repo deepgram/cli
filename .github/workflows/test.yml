@@ -222,6 +222,80 @@ jobs:
             [ -z "${LEFT}" ] || { echo "::error::one-run venv left behind: ${LEFT}"; exit 1; }
           fi
 
+  # The release path, end to end, without PyPI: build this commit's
+  # packages, serve them and their locked dependencies from a local index
+  # (simple pages plus the JSON API write_requirements.py reads), write the
+  # hash-locked requirements file against it, and run the launcher through
+  # uv and through the pip fallback. The `launcher` job's smoke tests use
+  # the unhashed DEEPCTL_NPM_PYPI_SPEC override; this one does not.
+  launcher-hashed:
+    name: npm launcher hash-locked install / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEEPCTL_TELEMETRY_DISABLED: "1"
+      DEEPCTL_TELEMETRY_DSN: "http://k@127.0.0.1:9/1"
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          version: "0.13.6"
+
+      # One step: the index server only lives as long as the step's shell.
+      - name: Install through the launcher from a local index
+        run: |
+          set -euo pipefail
+          uv build --all-packages -q -o dist
+          uv export --frozen --no-dev --no-emit-workspace --no-header --no-annotate > third.txt
+          # Wheels for every Python the launcher may pick (it prefers the
+          # newest supported one, and runners have several installed).
+          for v in 3.12 3.13 3.14; do
+            python -m pip download -q --disable-pip-version-check --only-binary :all: --no-deps --require-hashes --python-version "${v}" -r third.txt -d wheels
+          done
+          python npm/scripts/local_index.py --out idx dist wheels
+          python -m http.server -b 127.0.0.1 -d idx 8765 > /dev/null 2>&1 &
+          SERVER=$!
+          trap 'kill "${SERVER}"' EXIT
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8765/simple/ > /dev/null && break; sleep 1; done
+          python npm/scripts/write_requirements.py --index-url http://127.0.0.1:8765 --dist dist
+          VERSION="$(node -p 'require("./npm/package.json").version')"
+          export UV_INDEX_URL=http://127.0.0.1:8765/simple PIP_INDEX_URL=http://127.0.0.1:8765/simple
+          for runner in uvx venv; do
+            # A fresh HOME per runner, so the venv run cannot reuse the venv
+            # the uv run cached (macOS keeps it under ~/Library/Caches).
+            # tr: Python on Windows ends lines with CRLF.
+            mkdir -p "${RUNNER_TEMP}/home-${runner}"
+            OUT="$(HOME="${RUNNER_TEMP}/home-${runner}" DEEPCTL_NPM_RUNNER="${runner}" node npm/bin/dg.js --version | tr -d '\r')"
+            printf '%s: %s\n' "${runner}" "${OUT}"
+            [ "${OUT}" = "deepctl, version ${VERSION}" ]
+          done
+          # Windows never reuses a venv: the one-run venvs must be gone.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            LEFT="$(ls -A "$(cygpath "${LOCALAPPDATA}")/deepgram-cli/venvs")"
+            [ -z "${LEFT}" ] || { echo "::error::one-run venv left behind: ${LEFT}"; exit 1; }
+          fi
+
   # The release PR's bump gate (scripts/check_release_bumps.py), for commits
   # people push to the release PR, such as a CHANGELOG edit. Commits from
   # release-please and the release workflow's sync job use GITHUB_TOKEN and
@@ -261,7 +335,7 @@ jobs:
   # cancelled and skipped prerequisites are failures here too.
   all-checks:
     name: All checks
-    needs: [test, lint, floors, build-test, launcher-node, launcher]
+    needs: [test, lint, floors, build-test, launcher-node, launcher, launcher-hashed]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -273,6 +347,7 @@ jobs:
           echo "build-test: ${{ needs.build-test.result }}"
           echo "launcher-node: ${{ needs.launcher-node.result }}"
           echo "launcher:   ${{ needs.launcher.result }}"
+          echo "launcher-hashed: ${{ needs.launcher-hashed.result }}"
 
       - name: Fail unless every prerequisite succeeded
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
