@@ -1,0 +1,9 @@
+{
+  "name": "ffprobe",
+  "module": "deepctl_cmd_ffprobe.command",
+  "attr": "FfprobeCommand",
+  "dist": "deepctl-cmd-ffprobe",
+  "summary": "Configure ffprobe",
+  "hidden": false,
+  "requires_auth": false
+}

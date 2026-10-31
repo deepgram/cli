@@ -7,6 +7,7 @@ import sys
 from collections.abc import Collection, Mapping
 from importlib import metadata
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 import click
@@ -40,49 +41,40 @@ from .timing import TimingContext
 # corrupt `dg ... -o json` payloads on stdout.
 console = stderr_console
 
-# Built-in command names and the exact module each one may be loaded from.
-# A command is built-in only when its entry point's module is the one
-# listed here: never by a ``deepctl_cmd_`` prefix or a distribution name, since
-# any wheel can ship such a package or a dist-info named like ours. Every
-# listed name is reserved: a command with that name from any other module is
-# skipped, even when the built-in itself is missing.
-BUILTIN_COMMAND_MODULES: Mapping[str, str] = {
-    "api": "deepctl_cmd_api.command",
-    "billing": "deepctl_cmd_billing.command",
-    "completion": "deepctl_cmd_completion.command",
-    "debug": "deepctl_cmd_debug.command",
-    "ffprobe": "deepctl_cmd_ffprobe.command",
-    "init": "deepctl_cmd_init.command",
-    "keys": "deepctl_cmd_keys.command",
-    "listen": "deepctl_cmd_listen.command",
-    "login": "deepctl_cmd_login.command",
-    "logout": "deepctl_cmd_login.command",
-    "mcp": "deepctl_cmd_mcp.command",
-    "members": "deepctl_cmd_members.command",
-    "models": "deepctl_cmd_models.command",
-    "plugin": "deepctl_cmd_plugin.command",
-    "profiles": "deepctl_cmd_login.command",
-    "projects": "deepctl_cmd_projects.command",
-    "read": "deepctl_cmd_read.command",
-    "requests": "deepctl_cmd_requests.command",
-    "skills": "deepctl_cmd_skills.command",
-    "speak": "deepctl_cmd_speak.command",
-    "transcribe": "deepctl_cmd_transcribe.command",
-    "update": "deepctl_cmd_update.command",
-    "usage": "deepctl_cmd_usage.command",
-    "whoami": "deepctl_cmd_login.command",
-}
+# Built-in command names and the exact module each one may be loaded from,
+# from the command manifest (``deepctl._manifest``). A command is
+# built-in only when its module is the one listed here: never by a
+# ``deepctl_cmd_`` prefix or a distribution name, since any wheel can ship
+# such a package or a dist-info named like ours. Every listed name is
+# reserved: a command with that name from any other module is skipped, even
+# when the built-in itself is missing.
+
+
+def _manifest_tables() -> tuple[
+    dict[str, str], dict[str, dict[str, str]], frozenset[str]
+]:
+    try:
+        from deepctl import _manifest
+    except ImportError:
+        # deepctl-core without the deepctl CLI: nothing is built in.
+        return {}, {}, frozenset()
+    return (
+        _manifest.builtin_command_modules(),
+        _manifest.builtin_subcommand_modules(),
+        frozenset(_manifest.aliases()),
+    )
+
+
+_COMMANDS, _SUBCOMMANDS, _ALIASES = _manifest_tables()
+BUILTIN_COMMAND_MODULES: Mapping[str, str] = MappingProxyType(_COMMANDS)
 
 # Built-in subcommands per built-in group, with the same rule.
-BUILTIN_SUBCOMMAND_MODULES: Mapping[str, Mapping[str, str]] = {
-    "debug": {
-        "audio": "deepctl_cmd_debug_audio.command",
-        "browser": "deepctl_cmd_debug_browser.command",
-        "network": "deepctl_cmd_debug_network.command",
-        "probe": "deepctl_cmd_debug_probe.command",
-        "toolkit": "deepctl_cmd_debug_toolkit.command",
-    },
-}
+BUILTIN_SUBCOMMAND_MODULES: Mapping[str, Mapping[str, str]] = MappingProxyType(
+    {group: MappingProxyType(subs) for group, subs in _SUBCOMMANDS.items()}
+)
+# Hidden aliases (``debug-audio``) are reserved like built-in names.
+BUILTIN_ALIASES: frozenset[str] = _ALIASES
+del _COMMANDS, _SUBCOMMANDS, _ALIASES
 
 
 # Messages.
@@ -324,6 +316,8 @@ class PluginManager:
         if expected is not None and _entry_point_module(entry_point) == expected:
             return "builtin"
         taken = set(builtin_modules) | set(reserved)
+        if not path_prefix:
+            taken |= BUILTIN_ALIASES
         command_path = f"{path_prefix}{name}"
         if _VALID_PLUGIN_NAME.fullmatch(name) is None:
             self._warn_bad_name(ascii(f"{path_prefix}{name}"), entry_point)
@@ -454,6 +448,71 @@ class PluginManager:
         # Bridge plugins installed in the isolated plugin venv
         with TimingContext("plugin_venv_loading"):
             self._load_plugin_venv_entries(cli_group)
+
+    def load_builtin(
+        self, cli_group: click.Group, name: str, entry: Mapping[str, Any]
+    ) -> None:
+        """Load one built-in command from its manifest entry.
+
+        The module comes from the manifest, never from an entry point, so a
+        stray dist-info can't stand in for it. An ``ImportError`` propagates:
+        the caller reports ``dependency_missing``.
+        """
+        entry_point = metadata.EntryPoint(
+            name=name,
+            value=f"{entry['module']}:{entry['attr']}",
+            group="deepctl.commands",
+        )
+        self._register(cli_group, entry_point, frozenset())
+
+    def load_builtin_subcommand(
+        self, group: click.Group, group_name: str, name: str, entry: Mapping[str, Any]
+    ) -> None:
+        """Load one built-in subcommand from its manifest entry when the
+        group's entry point scan didn't find it. ``ImportError`` propagates."""
+        subcommand_class = metadata.EntryPoint(
+            name=name,
+            value=f"{entry['module']}:{entry['attr']}",
+            group=f"deepctl.subcommands.{group_name}",
+        ).load()
+        instance = subcommand_class()
+        if _command_name(instance) != name:
+            return
+        click_subcommand = self._create_click_command(instance)
+        if _command_name(click_subcommand) == name:
+            group.add_command(click_subcommand, name=name)
+
+    def discover_plugins(self, cli_group: click.Group) -> None:
+        """Register every plugin command, leaving the built-ins to the
+        manifest.
+
+        Scans ``deepctl.commands`` for entries whose module isn't the
+        built-in's own, then ``deepctl.plugins`` and the plugin venv, with
+        the same checks as ``load_plugins``: reserved built-in names, the
+        name rule and ``plugins.allow_override``.
+        """
+        with TimingContext("external_plugins_loading"):
+            self._load_foreign_commands(cli_group)
+            self._load_external_plugins(cli_group)
+        with TimingContext("plugin_venv_loading"):
+            self._load_plugin_venv_entries(cli_group)
+
+    def _load_foreign_commands(self, cli_group: click.Group) -> None:
+        """``deepctl.commands`` entries other than the built-ins themselves."""
+        try:
+            entry_points = metadata.entry_points().select(group="deepctl.commands")
+            reserved = self._existing_names(cli_group)
+            for entry_point in entry_points:
+                if BUILTIN_COMMAND_MODULES.get(entry_point.name) == _entry_point_module(
+                    entry_point
+                ):
+                    continue  # the built-in's own entry point
+                try:
+                    self._register(cli_group, entry_point, reserved)
+                except Exception as e:
+                    _load_error("command", entry_point.name, e)
+        except Exception as e:
+            _load_error("commands", "", e)
 
     def _load_builtin_commands(self, cli_group: click.Group) -> None:
         """Load built-in commands from the commands entry point group."""

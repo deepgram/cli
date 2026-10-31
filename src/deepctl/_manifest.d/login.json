@@ -1,0 +1,9 @@
+{
+  "name": "login",
+  "module": "deepctl_cmd_login.command",
+  "attr": "LoginCommand",
+  "dist": "deepctl-cmd-login",
+  "summary": "Log in to Deepgram",
+  "hidden": false,
+  "requires_auth": false
+}

@@ -935,6 +935,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "build" },
+    { name = "jsonschema" },
     { name = "mypy" },
     { name = "packaging" },
     { name = "pre-commit" },
@@ -954,6 +955,7 @@ dev = [
 dev = [
     { name = "build" },
     { name = "deepctl-plugin-example" },
+    { name = "jsonschema" },
     { name = "mypy" },
     { name = "packaging" },
     { name = "pre-commit" },
@@ -971,6 +973,7 @@ dev = [
 ]
 testing = [
     { name = "deepctl-plugin-example" },
+    { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1015,6 +1018,7 @@ requires-dist = [
     { name = "deepctl-telemetry", editable = "packages/deepctl-telemetry" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
     { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.18.0" },
     { name = "keyring", specifier = ">=24.0.0,<26" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "packaging", marker = "extra == 'dev'", specifier = ">=23.0" },
@@ -1042,6 +1046,7 @@ provides-extras = ["dev"]
 dev = [
     { name = "build", specifier = ">=0.10.0" },
     { name = "deepctl-plugin-example", editable = "packages/deepctl-plugin-example" },
+    { name = "jsonschema", specifier = ">=4.18.0" },
     { name = "mypy", specifier = ">=1.0.0" },
     { name = "packaging", specifier = ">=23.0" },
     { name = "pre-commit", specifier = ">=3.0.0" },
@@ -1059,6 +1064,7 @@ dev = [
 ]
 testing = [
     { name = "deepctl-plugin-example", editable = "packages/deepctl-plugin-example" },
+    { name = "jsonschema", specifier = ">=4.18.0" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.0.0" },

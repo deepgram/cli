@@ -359,31 +359,32 @@ class TestHelpNotice:
         assert capsys.readouterr().out.rstrip().endswith("Telemetry is off.")
 
     def test_no_telemetry_keeps_hyphenated_commands(self) -> None:
-        from types import SimpleNamespace
+        import click
 
-        from deepctl.main import preprocess_hyphenated_commands
+        from deepctl._cli import cli
 
-        def select(group: str) -> list[Any]:
-            if group == "deepctl.commands":
-                return [SimpleNamespace(name="debug")]
-            if group == "deepctl.subcommands.debug":
-                return [SimpleNamespace(name="audio")]
-            return []
+        seen: list[list[str]] = []
 
-        with patch("importlib.metadata.entry_points") as mock_eps:
-            mock_eps.return_value.select.side_effect = select
-            assert preprocess_hyphenated_commands(
-                ["--no-telemetry", "debug-audio", "--help"]
-            ) == ["--no-telemetry", "debug", "audio", "--help"]
-            assert preprocess_hyphenated_commands(["--quiet", "debug-audio"]) == [
-                "--quiet",
-                "debug",
-                "audio",
-            ]
+        def record(self: Any, ctx: Any, args: list[str]) -> Any:
+            seen.append(list(args))
+            raise click.exceptions.Exit(0)
+
+        for argv in (
+            ["--no-telemetry", "debug-audio", "--help"],
+            ["--quiet", "debug-audio"],
             # An option that takes a value still consumes the next token.
-            assert preprocess_hyphenated_commands(
-                ["--profile", "debug-audio", "debug-audio"]
-            ) == ["--profile", "debug-audio", "debug", "audio"]
+            ["--profile", "debug-audio", "debug-audio"],
+        ):
+            with patch.object(click.Group, "resolve_command", record):
+                try:
+                    cli.main(args=argv, prog_name="dg", standalone_mode=False)
+                except click.exceptions.Exit:
+                    pass
+        assert seen == [
+            ["debug", "audio", "--help"],
+            ["debug", "audio"],
+            ["debug", "audio"],
+        ]
 
     def test_root_help_default_is_on(
         self, telemetry_on, capsys: pytest.CaptureFixture[str]

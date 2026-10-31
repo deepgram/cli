@@ -1,19 +1,25 @@
-"""The Click CLI behind ``dg``: the root group, plugin loading and ``run()``.
+"""The Click CLI behind ``dg``: the root group, command loading and ``run()``.
 
 ``deepctl.main`` imports this module only on the full path. ``dg --version``
 and the ``dg mcp`` handshake never load it (or Click, or ``deepctl_core``).
-Plugin commands load in ``run()``, inside its error handling, not at import.
+
+Commands load lazily. The root group is a ``LazyGroup``: it lists the
+built-in commands from the manifest (``deepctl._manifest``) and imports a
+command's module only when that command runs or shows its own help. Plugins
+are discovered only for a name that isn't built in, for root ``--help`` and
+for ``dg plugin list``. ``DEEPCTL_EAGER_LOAD=1`` (0.5.x only) loads every
+command up front, as 0.4.x did.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 from deepctl_core import (
-    Config,
     TimingContext,
     enable_timing,
     print_timing_summary,
@@ -21,10 +27,333 @@ from deepctl_core import (
 )
 from deepctl_core.output import stderr_console
 
-from deepctl import __version__
+from deepctl import __version__, _manifest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from deepctl_core import Config
+    from deepctl_core.plugin_manager import PluginManager
+
+# 0.5.x only: load every command at startup, as 0.4.x did (removed in 0.6.0).
+EAGER_LOAD_ENV_VAR = "DEEPCTL_EAGER_LOAD"
+# The program name shown in usage lines (the launcher and `python -m deepctl`
+# set it; `--version` ignores it).
+PROG_NAME_ENV_VAR = "DEEPCTL_PROG_NAME"
+
+E_DEPENDENCY = "{prog} {command_path} needs {dependency}, which isn't installed."
+H_DEPENDENCY_REINSTALL = "Reinstall {prog} with the tool you installed it with."
+A_DEPENDENCY = (
+    "Tell the user {prog} needs {dependency}. Suggested fix: {dependency_install_hint}"
+)
+# Agent-mode usage errors print ``ERROR: {message}`` and then this hint.
+A_USAGE = "Run {prog} {command_path} --help to see valid options."
+
+
+def eager_load_requested() -> bool:
+    """``DEEPCTL_EAGER_LOAD=1``: load every command up front (0.5.x only)."""
+    return os.environ.get(EAGER_LOAD_ENV_VAR, "") == "1"
+
+
+class DependencyMissingError(click.ClickException):
+    """A command's module couldn't be imported: ``dependency_missing``.
+
+    The catalogue entry: exit 1, ``next_step`` null and
+    ``details.dependency`` naming what is missing (the command's
+    distribution when its own package is gone).
+    """
+
+    exit_code = 1
+
+    def __init__(self, prog: str, command_path: str, dependency: str) -> None:
+        self.prog = prog
+        self.command_path = command_path
+        self.dependency = dependency
+        super().__init__(
+            E_DEPENDENCY.format(
+                prog=prog, command_path=command_path, dependency=dependency
+            )
+        )
+
+    def payload(self, hint: str) -> dict[str, Any]:
+        """The coded error object, keys in the catalogue's order."""
+        return {
+            "error": self.message,
+            "status": "error",
+            "code": "dependency_missing",
+            "hint": hint,
+            "next_step": None,
+            "schema_version": 1,
+            "details": {"dependency": self.dependency},
+        }
+
+    def show(self, file: Any = None) -> None:  # noqa: ARG002 (stderr/stdout)
+        from deepctl_core import output
+
+        install_hint = H_DEPENDENCY_REINSTALL.format(prog=self.prog)
+        if output.is_agentic() or output.is_ai_agent():
+            hint = A_DEPENDENCY.format(
+                prog=self.prog,
+                dependency=self.dependency,
+                dependency_install_hint=install_hint,
+            )
+        else:
+            hint = install_hint
+        from rich.markup import escape
+
+        # The program name comes from argv or DEEPCTL_PROG_NAME: text, not markup.
+        output.print_error(escape(self.message))
+        output.print_hint(escape(hint))
+        if output.get_output_format() in ("json", "yaml"):
+            payload = self.payload(hint)
+            if output.get_output_format() == "yaml":
+                import yaml
+
+                text = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+            else:
+                import json
+
+                text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+            try:
+                sys.stdout.write(text)
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+
+
+def _missing_dependency(error: ImportError, entry: dict[str, Any]) -> str:
+    """What to name in ``dependency_missing``: the command's distribution when
+    its own package is what's missing, else the module that failed."""
+    missing = (error.name or "").split(".")[0]
+    own = str(entry["module"]).split(".")[0]
+    if not missing or missing == own:
+        return str(entry["dist"])
+    return missing
+
+
+def _setup_output_from(ctx: click.Context) -> None:
+    """Apply the root output options before the root callback has run
+    (commands are resolved before it), so an error renders as asked."""
+    params = ctx.find_root().params
+    setup_output(
+        format_type=params.get("output") or "default",
+        quiet=bool(params.get("quiet")),
+        verbose=bool(params.get("verbose")),
+    )
+
+
+class _Listed(click.Command):
+    """A command as root ``--help`` lists it, built from the manifest without
+    importing it. Only the attributes ``format_commands`` reads are set."""
+
+    def __init__(self, name: str, entry: dict[str, Any]) -> None:
+        super().__init__(
+            name,
+            short_help=entry.get("summary"),
+            help=entry.get("help"),
+            hidden=bool(entry.get("hidden", False)),
+            deprecated=entry.get("deprecated", False),
+        )
+
+
+class _MissingCommand(click.Command):
+    """A built-in subcommand whose module can't be imported. Hidden, as a
+    missing command was in 0.4.x; running it reports ``dependency_missing``."""
+
+    def __init__(self, name: str, error: DependencyMissingError) -> None:
+        super().__init__(name, hidden=True, add_help_option=False)
+        self.error = error
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        del info_name, args, extra  # nothing to parse: it can't run
+        if parent is not None:
+            _setup_output_from(parent)
+        raise self.error
+
+
+class LazyGroup(click.Group):
+    """The root group: built-in commands come from the manifest and load on
+    first use; plugins are discovered only when needed.
+
+    Discovery (``PluginManager.discover_plugins``) runs for a name that
+    isn't built in, for root ``--help``, for ``dg plugin list`` and for a
+    built-in name listed in ``plugins.allow_override``. Every 0.4.2 plugin
+    rule applies unchanged there: reserved built-in names,
+    ``W-PLUGIN-BADNAME``, ``plugins.allow_override`` and the trust root.
+    Built-ins are never loaded through an entry point: their module comes
+    from the manifest.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.eager = False
+        self._manager: PluginManager | None = None
+        self._discovered = False
+
+    def _plugin_manager(self) -> PluginManager:
+        if self._manager is None:
+            from deepctl_core.plugin_manager import PluginManager
+
+            self._manager = PluginManager()
+        return self._manager
+
+    def discover(self) -> None:
+        """Register plugin commands (once per process)."""
+        if self._discovered or self.eager:
+            return
+        self._discovered = True
+        with TimingContext("plugin_discovery"):
+            try:
+                self._plugin_manager().discover_plugins(self)
+            except OSError as exc:
+                from deepctl_core.plugin_manager import warn_plugins_unavailable
+
+                warn_plugins_unavailable(exc)
+
+    def _overridden(self, name: str) -> bool:
+        """Whether ``plugins.allow_override`` lists this built-in name."""
+        from deepctl_core._plugin_trust import allow_override_names
+
+        return name in allow_override_names()
+
+    def _load_builtin(self, ctx: click.Context, name: str) -> click.Command | None:
+        entry = _manifest.top_level()[name]
+        try:
+            with TimingContext(f"load_command_{name}"):
+                self._plugin_manager().load_builtin(self, name, entry)
+        except ImportError as exc:
+            _setup_output_from(ctx)
+            raise DependencyMissingError(
+                ctx.find_root().info_name or "dg",
+                name,
+                _missing_dependency(exc, entry),
+            ) from exc
+        command = self.commands.get(name)
+        if isinstance(command, click.Group):
+            self._fill_subcommands(ctx, name, command)
+        return command
+
+    def _fill_subcommands(
+        self, ctx: click.Context, group_name: str, group: click.Group
+    ) -> None:
+        """Load the group's built-in subcommands its entry point scan missed,
+        from the manifest; one that can't be imported reports
+        ``dependency_missing`` when it's used."""
+        from deepctl_core.plugin_manager import _load_error
+
+        prog = ctx.find_root().info_name or "dg"
+        for name, entry in _manifest.subcommands(group_name).items():
+            if name in group.commands:
+                continue
+            try:
+                self._plugin_manager().load_builtin_subcommand(
+                    group, group_name, name, entry
+                )
+            except ImportError as exc:
+                group.add_command(
+                    _MissingCommand(
+                        name,
+                        DependencyMissingError(
+                            prog,
+                            f"{group_name} {name}",
+                            _missing_dependency(exc, entry),
+                        ),
+                    )
+                )
+            except Exception as exc:
+                _load_error("subcommand", f"{name} for {group_name}", exc)
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        command = self.commands.get(cmd_name)
+        if command is not None or self.eager:
+            return command
+        if cmd_name in _manifest.top_level():
+            if self._overridden(cmd_name):
+                self.discover()
+                command = self.commands.get(cmd_name)
+                if command is not None:
+                    return command
+            return self._load_builtin(ctx, cmd_name)
+        self.discover()
+        return self.commands.get(cmd_name)
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        if self.eager:
+            return super().list_commands(ctx)
+        if ctx.resilient_parsing:
+            # Shell completion offers plugin commands too, as 0.4.x did.
+            self.discover()
+        return sorted(set(self.commands) | set(_manifest.top_level()))
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        if args:
+            args = self._expand_command_word(ctx, args)
+        if args[:2] == ["plugin", "list"]:
+            # 0.4.x loaded (and vetted) every plugin before `plugin list`.
+            self.discover()
+        return super().resolve_command(ctx, args)
+
+    def _expand_command_word(self, ctx: click.Context, args: list[str]) -> list[str]:
+        """Rewrite a hyphenated command word to its command path.
+
+        Only the command word changes; the rest of argv is the command's own
+        as in 0.4.x. A hidden alias (``debug-audio``) always means its built-in,
+        unless ``plugins.allow_override`` lists the alias. Any other
+        ``<group>-<x>`` runs ``<group> <x>`` when ``<group>`` is a built-in
+        group and ``<x>`` is one of its subcommands, a plugin's included
+        (0.4.2 parity); otherwise argv is left for unknown-name discovery.
+        """
+        word = args[0]
+        if word in _manifest.top_level():
+            return args
+        target = _manifest.aliases().get(word)
+        if target is not None:
+            if self._overridden(word):
+                # The plugin allowed to replace the alias runs, if one did
+                # register it; otherwise the built-in does, as for names.
+                self.discover()
+                if word in self.commands:
+                    return args
+            return [*target, *args[1:]]
+        prefix, _, rest = word.partition("-")
+        if rest and prefix in _manifest.groups():
+            try:
+                group = self.get_command(ctx, prefix)
+            except DependencyMissingError:
+                # The group can't load: leave the word to plugin discovery.
+                return args
+            if isinstance(group, click.Group) and group.get_command(ctx, rest):
+                return [prefix, rest, *args[1:]]
+        return args
+
+    def format_commands(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        if self.eager:
+            super().format_commands(ctx, formatter)
+            return
+        self.discover()
+        listed = _manifest.top_level()
+        rows: list[tuple[str, click.Command]] = []
+        for name in self.list_commands(ctx):
+            command = self.commands.get(name) or _Listed(name, listed[name])
+            if not command.hidden:
+                rows.append((name, command))
+        if rows:
+            limit = formatter.width - 6 - max(len(name) for name, _ in rows)
+            with formatter.section("Commands"):
+                formatter.write_dl(
+                    [(name, cmd.get_short_help_str(limit)) for name, cmd in rows]
+                )
+
 
 # Diagnostics go to stderr so stdout carries only the requested payload -- a
 # crash or usage error must not corrupt `dg -o json ...` for a script piping
@@ -40,6 +369,8 @@ def _record_install_method_cb(
     """Write the installation method to config. Called by install scripts."""
     if not value or ctx.resilient_parsing:
         return
+    from deepctl_core import Config
+
     try:
         config = Config()
         config._set_config_value("update.installation_method", value)
@@ -84,77 +415,6 @@ def _takes_next_token(arg: str, flag_opts: set[str]) -> bool:
         # attached value; nothing after it means the next token is.
         return index == len(letters) - 1
     return False
-
-
-def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
-    """Convert hyphenated commands to nested commands.
-
-    This function looks for commands in the format 'group-subcommand' and
-    converts them to the nested format Click expects (e.g., 'group
-    subcommand').
-
-    Args:
-        args: Command line arguments
-
-    Returns:
-        Modified arguments with hyphenated commands converted to nested format
-    """
-    if not args:
-        return args
-
-    # Get all registered commands to know which are groups
-    from importlib import metadata
-
-    group_commands = set()
-
-    # Discover group commands from entry points
-    try:
-        entry_points = metadata.entry_points()
-        for entry_point in entry_points.select(group="deepctl.commands"):
-            # We'll need to check if it's a group, but for now we'll use a
-            # heuristic
-            subcommand_group = f"deepctl.subcommands.{entry_point.name}"
-            try:
-                subcommand_eps = list(entry_points.select(group=subcommand_group))
-                if subcommand_eps:
-                    group_commands.add(entry_point.name)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    flag_opts = _root_flag_opts()
-
-    # Walk the root options to find the command token. Only that token is
-    # expanded; everything after it belongs to the command and is kept
-    # verbatim (`dg listen debug-call.wav` must not be split).
-    new_args: list[str] = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg == "--":
-            break
-        if arg.startswith("-"):
-            new_args.append(arg)
-            i += 1
-            # An option that takes a value consumes the next token too,
-            # unless the value is attached (`--opt=value`, `-Xvalue`).
-            if (
-                _takes_next_token(arg, flag_opts)
-                and i < len(args)
-                and not args[i].startswith("-")
-            ):
-                new_args.append(args[i])
-                i += 1
-            continue
-
-        group_name, sep, subcommand = arg.partition("-")
-        if sep and group_name in group_commands:
-            new_args.extend([group_name, subcommand])
-            i += 1
-        break
-
-    return new_args + args[i:]
 
 
 def _root_option_tokens(args: list[str]) -> list[str]:
@@ -252,7 +512,7 @@ def _argv_config_path(args: list[str]) -> str | None:
 
 
 # Create CLI group
-@click.group(name="deepctl")
+@click.group(name="deepctl", cls=LazyGroup)
 @click.version_option(version=__version__, prog_name="deepctl")
 @click.option(
     "--config",
@@ -373,6 +633,8 @@ def cli(
         # came from the command line, so it is never saved and gets
         # credentials only if the host is trusted.
         ctx.ensure_object(dict)
+        from deepctl_core import Config
+
         try:
             ctx.obj["config"] = Config(
                 config_path=config, profile=profile, base_url=base_url
@@ -405,10 +667,12 @@ _commands_loaded = False
 
 
 def load_commands() -> None:
-    """Load the commands from package entry points into ``cli``, once.
+    """Load every command into ``cli`` up front, once, as 0.4.x did.
 
-    Runs inside ``run()``'s error handling (W1.3), so an unreadable HOME or
-    plugin cache degrades to one ``WARN:`` line instead of a traceback.
+    For ``DEEPCTL_EAGER_LOAD=1`` and for importers that read ``cli.commands``
+    (``get_cli()``). Runs inside ``run()``'s error handling, so an
+    unreadable HOME or plugin cache degrades to one ``WARN:`` line instead
+    of a traceback.
     """
     global _commands_loaded
     if _commands_loaded:
@@ -416,6 +680,7 @@ def load_commands() -> None:
     _commands_loaded = True
     from deepctl_core import PluginManager
 
+    cli.eager = True
     with TimingContext("plugin_loading"):
         try:
             PluginManager().load_plugins(cli)
@@ -425,13 +690,32 @@ def load_commands() -> None:
             warn_plugins_unavailable(exc)
 
 
-def get_cli() -> click.Group:
-    """The root group with its commands loaded (for importers and tests)."""
+def get_cli() -> LazyGroup:
+    """The root group with every command loaded (for importers and tests)."""
     load_commands()
     return cli
 
 
-def _global_option_hint(message: str) -> str | None:
+def _command_names(ctx: click.Context | None) -> tuple[str, str]:
+    """``(root, command)`` for ``ctx``: the program name as typed (or
+    ``DEEPCTL_PROG_NAME``) and the subcommand path after it ("" at the root)."""
+    if ctx is None:
+        return prog_name("dg") or "dg", ""
+    root = ctx.find_root().info_name or prog_name("dg") or "dg"
+    path = ctx.command_path
+    command = path[len(root) :].strip() if path.startswith(root) else ""
+    return root, command
+
+
+def _usage_hint(ctx: click.Context | None) -> str:
+    """``A-USAGE`` filled for ``ctx``, with no double space at the root."""
+    root, command = _command_names(ctx)
+    return " ".join(A_USAGE.format(prog=root, command_path=command).split())
+
+
+def _global_option_hint(
+    message: str, ctx: click.Context | None = None, *, markup: bool = True
+) -> str | None:
     """Build a placement hint when a 'No such option' names a global option.
 
     Global options belong before the subcommand (``dg -o json models``).
@@ -439,7 +723,8 @@ def _global_option_hint(message: str) -> str | None:
     staging``), Click reports "No such option" with no explanation, which
     reads as if the option does not exist at all. This looks the failing
     option up on the root group and, when it is a global one, returns a
-    hint showing the working placement.
+    hint showing the working placement, with the root and subcommand names
+    taken from ``ctx``.
     """
     import re
 
@@ -455,11 +740,16 @@ def _global_option_hint(message: str) -> str | None:
         if token in opts:
             takes_value = not getattr(param, "is_flag", False)
             usage = f"{token} <value>" if takes_value else token
-            return (
-                f"[yellow]Hint: '{token}' is a global option and must come "
-                f"before the subcommand, for example: "
-                f"dg {usage} <command> ...[/yellow]"
+            root, command = _command_names(ctx)
+            text = (
+                f"{token} is a global option, so it goes before the command: "
+                f"{root} {usage} {command or '<command>'} …"
             )
+            if not markup:
+                return text
+            from rich.markup import escape
+
+            return f"[yellow]Hint: {escape(text)}[/yellow]"
     return None
 
 
@@ -477,12 +767,73 @@ def _safe_console_print(message: str) -> None:
         pass
 
 
+def _print_usage(ctx: click.Context | None) -> None:
+    """Click's usage line and "Try ... --help" before a usage error, so the
+    program name a user typed (or ``DEEPCTL_PROG_NAME``) shows up.
+
+    People only: in agent mode ``run()`` prints its two prefixed lines and
+    exits before this is called.
+    """
+    if ctx is None:
+        return
+    try:
+        lines = ctx.get_usage()
+        if ctx.command.get_help_option(ctx) is not None:
+            lines += (
+                f"\nTry '{ctx.command_path} {ctx.help_option_names[0]}' for help.\n"
+            )
+        click.echo(lines, err=True, color=ctx.color)
+    except (OSError, ValueError):
+        pass
+
+
 def _best_effort(notice: Callable[..., object], **kwargs: Any) -> None:
     """Run a startup check or notice; an unreadable cache skips it."""
     try:
         notice(**kwargs)
     except OSError:
         pass
+
+
+def _start_checks(quiet: bool) -> list[Callable[[], object]]:
+    """Start the background update, plugin-update and AI-CLI checks; return
+    the functions that print what they found."""
+    pending: list[Callable[[], object]] = []
+    try:
+        from deepctl_cmd_update.startup_check import (
+            check_and_notify,
+            print_pending_notification,
+        )
+
+        _best_effort(check_and_notify, quiet=quiet)
+        pending.append(print_pending_notification)
+    except ImportError:
+        pass
+
+    try:
+        from deepctl_cmd_update.plugin_update_check import (
+            check_plugins_and_notify,
+            print_pending_plugin_notifications,
+        )
+
+        _best_effort(check_plugins_and_notify, quiet=quiet)
+        pending.append(print_pending_plugin_notifications)
+    except ImportError:
+        pass
+
+    try:
+        from deepctl_cmd_skills.startup_check import (
+            check_and_notify as skills_check_and_notify,
+        )
+        from deepctl_cmd_skills.startup_check import (
+            print_pending_notification as print_pending_skills_notification,
+        )
+
+        _best_effort(skills_check_and_notify, quiet=quiet)
+        pending.append(print_pending_skills_notification)
+    except ImportError:
+        pass
+    return pending
 
 
 def _record_startup(started_at: float) -> None:
@@ -494,11 +845,45 @@ def _record_startup(started_at: float) -> None:
     get_timing_collector().entries[entry.name] = entry
 
 
-def run(args: list[str], started_at: float | None = None) -> None:
+class _HelpConfig:
+    """What the telemetry notice reads for root ``--help``: the config file
+    path, with the text left for it to read. Root ``--help`` runs before the
+    root callback builds a ``Config``, and loading one there would cost the
+    pydantic import that ``dg --help`` otherwise never pays."""
+
+    def __init__(self, config_path: str | None) -> None:
+        from pathlib import Path
+
+        self.config_path = Path(config_path) if config_path else None
+        self.user_config_text = None
+
+
+def _is_help_run(args: list[str]) -> bool:
+    """Whether ``--help`` appears among the options (before any ``--``)."""
+    words = args[: args.index("--")] if "--" in args else args
+    return "--help" in words
+
+
+def prog_name(default: str | None = None) -> str | None:
+    """The program name for usage lines: ``DEEPCTL_PROG_NAME`` when it is
+    a plain program name (``deepctl.main.prog_name_from_env``), else
+    ``default`` (``None`` lets Click use ``argv[0]``)."""
+    from deepctl.main import prog_name_from_env
+
+    return prog_name_from_env() or default
+
+
+def run(
+    args: list[str],
+    started_at: float | None = None,
+    prog: str | None = None,
+) -> None:
     """Run the CLI for ``args`` (argv without the program name).
 
     ``started_at`` is ``time.perf_counter()`` from the first line of
-    ``deepctl.main.main()``, so ``--timing`` includes the imports.
+    ``deepctl.main.main()``, so ``--timing`` includes the imports. ``prog``
+    is the program name to show when ``DEEPCTL_PROG_NAME`` isn't set
+    (``python -m deepctl`` passes ``dg``).
     """
     global _run_args
     if started_at is None:
@@ -514,7 +899,8 @@ def run(args: list[str], started_at: float | None = None) -> None:
             enable_timing()
             _record_startup(started_at)
 
-        load_commands()
+        if eager_load_requested():
+            load_commands()
 
         # Install the --help telemetry footer. Telemetry itself is decided in
         # the root callback, after option parsing. `--no-telemetry` is also
@@ -524,54 +910,25 @@ def run(args: list[str], started_at: float | None = None) -> None:
 
             if "--no-telemetry" in _root_option_tokens(args):
                 disable_for_run()
-            install_help_notice(lambda: Config(config_path=_argv_config_path(args)))
+            install_help_notice(
+                lambda: cast("Config", _HelpConfig(_argv_config_path(args)))
+            )
         except Exception:
             pass
 
-        # Start background update checks (non-blocking)
-        try:
-            from deepctl_cmd_update.startup_check import (
-                check_and_notify,
-                print_pending_notification,
-            )
-
-            _best_effort(check_and_notify, quiet=quiet_requested)
-        except ImportError:
-            check_and_notify = None  # type: ignore[assignment]
-            print_pending_notification = None  # type: ignore[assignment]
-
-        try:
-            from deepctl_cmd_update.plugin_update_check import (
-                check_plugins_and_notify,
-                print_pending_plugin_notifications,
-            )
-
-            _best_effort(check_plugins_and_notify, quiet=quiet_requested)
-        except ImportError:
-            print_pending_plugin_notifications = None  # type: ignore[assignment]
-
-        # Start background AI CLI detection (non-blocking)
-        try:
-            from deepctl_cmd_skills.startup_check import (
-                check_and_notify as skills_check_and_notify,
-            )
-            from deepctl_cmd_skills.startup_check import (
-                print_pending_notification as print_pending_skills_notification,
-            )
-
-            _best_effort(skills_check_and_notify, quiet=quiet_requested)
-        except ImportError:
-            print_pending_skills_notification = None  # type: ignore[assignment]
+        # Background update and AI-CLI checks (non-blocking). Not for help,
+        # which makes no network connection and prints only the help.
+        pending = [] if _is_help_run(args) else _start_checks(quiet_requested)
 
         with TimingContext("total_execution"):
-            with TimingContext("argument_preprocessing"):
-                # Preprocess arguments to handle hyphenated commands
-                processed_args = preprocess_hyphenated_commands(args)
-
             exit_code = 0
             with TimingContext("cli_execution"):
                 try:
-                    cli(args=processed_args, standalone_mode=False)
+                    cli(
+                        args=list(args),
+                        prog_name=prog_name(prog),
+                        standalone_mode=False,
+                    )
                 except SystemExit as exc:
                     # Click calls sys.exit() even in non-standalone mode, so we
                     # cannot let this propagate — the notifications and timing
@@ -582,12 +939,8 @@ def run(args: list[str], started_at: float | None = None) -> None:
                     exit_code = exc.code if isinstance(exc.code, int) else 0
 
         # Print update notifications if available (before timing summary)
-        if print_pending_notification is not None:
-            _best_effort(print_pending_notification)
-        if print_pending_plugin_notifications is not None:
-            _best_effort(print_pending_plugin_notifications)
-        if print_pending_skills_notification is not None:
-            _best_effort(print_pending_skills_notification)
+        for print_pending in pending:
+            _best_effort(print_pending)
 
         # Print timing summary if timing was enabled
         if timing_requested:
@@ -608,11 +961,35 @@ def run(args: list[str], started_at: float | None = None) -> None:
         # after the subcommand, where Click says "No such option" about an
         # option that very much exists.
         message = e.format_message()
-        _safe_console_print(f"[red]Error: {message}[/red]")
-        hint = _global_option_hint(message)
+        from deepctl_core.output import is_agentic
+
+        if is_agentic():
+            # Agent mode: exactly two prefixed lines (ERROR:, HINT:) and no
+            # Usage/Try lines. A global option after the command gets its
+            # placement hint in place of the generic one.
+            hint = _global_option_hint(message, e.ctx, markup=False)
+            lines = [f"ERROR: {message}", f"HINT: {hint or _usage_hint(e.ctx)}"]
+            try:
+                click.echo("\n".join(lines), err=True, color=False)
+            except (OSError, ValueError):
+                pass
+            sys.exit(1)
+        _print_usage(e.ctx)
+        from rich.markup import escape
+
+        # The message quotes what was typed: text, not markup.
+        _safe_console_print(f"[red]Error: {escape(message)}[/red]")
+        hint = _global_option_hint(message, e.ctx)
         if hint:
             _safe_console_print(hint)
         sys.exit(1)
+    except DependencyMissingError as e:
+        # The install is incomplete; nothing unexpected to report.
+        try:
+            e.show()
+        except (OSError, ValueError):
+            pass
+        sys.exit(e.exit_code)
     except Exception as e:
         _safe_console_print(f"[red]Error: {e}[/red]")
         _report_error(e)

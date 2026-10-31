@@ -1,0 +1,9 @@
+{
+  "name": "transcribe",
+  "module": "deepctl_cmd_transcribe.command",
+  "attr": "TranscribeCommand",
+  "dist": "deepctl-cmd-transcribe",
+  "summary": "Transcribe audio (deprecated alias for dg listen)",
+  "hidden": true,
+  "requires_auth": true
+}

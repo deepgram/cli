@@ -1,0 +1,9 @@
+{
+  "name": "update",
+  "module": "deepctl_cmd_update.command",
+  "attr": "UpdateCommand",
+  "dist": "deepctl-cmd-update",
+  "summary": "Check for and install updates to deepctl",
+  "hidden": false,
+  "requires_auth": false
+}

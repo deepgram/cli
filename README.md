@@ -423,8 +423,11 @@ dg plugin remove <package>              # Remove
 
 Create your own — see the [plugin example](packages/deepctl-plugin-example).
 
-A plugin can't replace a built-in command such as `login` or `debug audio`.
-dg runs the built-in and prints a warning that names the plugin's package.
+A plugin can't replace a built-in command such as `login` or `debug audio`
+(or its hidden alias `debug-audio`). dg runs the built-in without loading the
+plugin. The warning that names the plugin's package shows whenever dg looks
+for plugins: on `dg --help`, `dg plugin list` and command names dg doesn't
+know. Use `dg plugin list` to see refused or shadowing plugins.
 A plugin whose entry point is named like a built-in command is skipped before
 it's imported, so none of its code runs; give the entry point a different name.
 To use a plugin's version anyway, list the command in the user config file

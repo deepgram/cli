@@ -1,0 +1,10 @@
+{
+  "name": "plugin",
+  "module": "deepctl_cmd_plugin.command",
+  "attr": "PluginCommand",
+  "dist": "deepctl-cmd-plugin",
+  "summary": "Manage deepctl plugins",
+  "hidden": false,
+  "group": true,
+  "requires_auth": false
+}

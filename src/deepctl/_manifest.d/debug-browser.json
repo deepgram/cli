@@ -1,0 +1,13 @@
+{
+  "name": "browser",
+  "parent": "debug",
+  "module": "deepctl_cmd_debug_browser.command",
+  "attr": "BrowserCommand",
+  "dist": "deepctl-cmd-debug-browser",
+  "summary": "Debug browser capabilities",
+  "hidden": false,
+  "requires_auth": false,
+  "aliases": [
+    "debug-browser"
+  ]
+}

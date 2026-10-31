@@ -1,0 +1,13 @@
+{
+  "name": "audio",
+  "parent": "debug",
+  "module": "deepctl_cmd_debug_audio.command",
+  "attr": "AudioCommand",
+  "dist": "deepctl-cmd-debug-audio",
+  "summary": "Debug audio issues",
+  "hidden": false,
+  "requires_auth": false,
+  "aliases": [
+    "debug-audio"
+  ]
+}

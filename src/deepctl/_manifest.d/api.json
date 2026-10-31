@@ -1,0 +1,9 @@
+{
+  "name": "api",
+  "module": "deepctl_cmd_api.command",
+  "attr": "ApiCommand",
+  "dist": "deepctl-cmd-api",
+  "summary": "Make API requests",
+  "hidden": false,
+  "requires_auth": true
+}

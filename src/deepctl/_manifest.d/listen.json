@@ -1,0 +1,9 @@
+{
+  "name": "listen",
+  "module": "deepctl_cmd_listen.command",
+  "attr": "ListenCommand",
+  "dist": "deepctl-cmd-listen",
+  "summary": "Speech-to-text",
+  "hidden": false,
+  "requires_auth": true
+}
