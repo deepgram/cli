@@ -183,7 +183,17 @@ _output_config: dict[str, Any] = {
     "verbose": False,
     "color": not _agentic,
     "agentic": _agentic,
+    "format_source": "default",
 }
+
+
+def _format_source(requested: str) -> str:
+    """Why the output format is what it is; see format_source()."""
+    if requested != "default":
+        return "explicit"
+    if not _output_config["agentic"]:
+        return "default"
+    return "hard_agent" if is_ai_agent() else "soft"
 
 
 def setup_output(
@@ -195,6 +205,7 @@ def setup_output(
     requested (format_type == "default"), auto-switch to JSON for
     machine-friendly output.
     """
+    _output_config["format_source"] = _format_source(format_type)
     # Auto-default to JSON in agentic mode when user didn't pick a format
     if format_type == "default" and _output_config["agentic"]:
         format_type = "json"
@@ -219,6 +230,7 @@ def update_output(
     verbose state the root group already applied.
     """
     if format_type is not None:
+        _output_config["format_source"] = _format_source(format_type)
         if format_type == "default" and _output_config["agentic"]:
             format_type = "json"
         _output_config["format"] = format_type
@@ -696,6 +708,17 @@ def get_output_format() -> str:
         Output format string ("default", "json", "yaml", "table", "csv")
     """
     return str(_output_config["format"])
+
+
+def format_source() -> str:
+    """Why the output format is what it is.
+
+    ``"explicit"``: asked for with ``-o``. ``"hard_agent"``: JSON chosen
+    implicitly while an AI-agent marker (``is_ai_agent()``) is set.
+    ``"soft"``: JSON chosen implicitly by the TTY/CI heuristics alone.
+    ``"default"``: no format was chosen.
+    """
+    return str(_output_config.get("format_source", "default"))
 
 
 def get_console() -> Console:
