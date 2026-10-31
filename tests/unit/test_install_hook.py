@@ -11,7 +11,7 @@ import pytest
 
 def test_record_install_method_exits_1_when_save_fails():
     # Imported here so the CLI module is already set up by the other tests.
-    main_module = importlib.import_module("deepctl.main")
+    main_module = importlib.import_module("deepctl._cli")
 
     ctx = MagicMock(resilient_parsing=False)
     with (
@@ -25,7 +25,7 @@ def test_record_install_method_exits_1_when_save_fails():
 
 
 def test_record_install_method_success_exits_via_ctx():
-    main_module = importlib.import_module("deepctl.main")
+    main_module = importlib.import_module("deepctl._cli")
 
     ctx = MagicMock(resilient_parsing=False)
     with patch.object(main_module, "Config"):

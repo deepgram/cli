@@ -185,11 +185,62 @@ def _notice(message: str) -> None:
 def _load_error(what: str, name: Any, error: BaseException) -> None:
     """A plugin load error, with the plugin's text shown literally."""
     label = f"{what} {_printable(str(name))}" if name else what
+    if isinstance(error, PermissionError) and _under_home(error.filename):
+        # An unreadable HOME or cache, not a broken plugin.
+        warn_plugins_unavailable(error, label)
+        return
     console.print(
         f"[red]Error loading {label}:[/red] {_printable(str(error))}",
         soft_wrap=True,
         emoji=False,
     )
+
+
+def _under_home(filename: Any) -> bool:
+    """Whether an error's path is in the user's home (plugin venv, cache)."""
+    if not isinstance(filename, (str, bytes)):
+        return False
+    home = os.path.expanduser("~").rstrip(os.sep)
+    path = os.fsdecode(filename)
+    return home not in ("", "~") and path.startswith(home + os.sep)
+
+
+def plugins_unavailable_line(error: OSError, label: str | None = None) -> str:
+    """``WARN: Couldn't load plugins: <reason>. ...`` for an unreadable plugin home.
+
+    ``<reason>`` is the error text and the path it names, as plain text,
+    then what was being loaded when ``label`` names it.
+    """
+    reason = error.strerror or str(error) or type(error).__name__
+    if error.filename is not None:
+        reason = f"{reason}: {_display_path(Path(os.fsdecode(error.filename)))}"
+    if label:
+        reason = f"{reason} (while loading {label})"
+    return (
+        f"WARN: Couldn't load plugins: {_printable(reason)}. "
+        "Built-in commands still work."
+    )
+
+
+_plugins_unavailable_warned = False
+
+
+def warn_plugins_unavailable(error: OSError, label: str | None = None) -> None:
+    """Report, on one stderr line, that plugins couldn't be read.
+
+    An unreadable HOME, plugin venv or cache is normal in sandboxes, so it
+    costs the plugins, not the run: built-in commands still load. Only the
+    first such error is shown; later ones have the same cause.
+    """
+    global _plugins_unavailable_warned
+    if _plugins_unavailable_warned:
+        return
+    _plugins_unavailable_warned = True
+    try:
+        sys.stderr.write(plugins_unavailable_line(error, label) + "\n")
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        pass
 
 
 def _display_path(path: Path) -> str:
@@ -546,6 +597,14 @@ class PluginManager:
         when it resolves through a symlink or inside the working directory
         (see ``agent_plugin_venv``).
         """
+        try:
+            self._bridge_plugin_venv(cli_group)
+        except OSError as exc:
+            # PLUGIN_VENV.exists() and friends raise on EACCES (Python 3.12+).
+            warn_plugins_unavailable(exc)
+
+    def _bridge_plugin_venv(self, cli_group: click.Group) -> None:
+        """``_load_plugin_venv_entries``'s body; may raise ``OSError``."""
         venv = PLUGIN_VENV
         state_file = None
         if is_ai_agent():

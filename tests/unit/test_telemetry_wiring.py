@@ -121,12 +121,21 @@ def mode_command():
 def _run_main(argv: list[str]) -> int:
     from deepctl.main import main
 
-    with patch("sys.argv", argv):
-        try:
-            main()
-        except SystemExit as exc:
-            return exc.code if isinstance(exc.code, int) else 0
-    return 0
+    # main() blocks httpx's CLI module; don't leave that to later tests.
+    missing = object()
+    saved = sys.modules.get("httpx._main", missing)
+    try:
+        with patch("sys.argv", argv):
+            try:
+                main()
+            except SystemExit as exc:
+                return exc.code if isinstance(exc.code, int) else 0
+        return 0
+    finally:
+        if saved is missing:
+            sys.modules.pop("httpx._main", None)
+        else:
+            sys.modules["httpx._main"] = saved  # type: ignore[assignment]
 
 
 def _opt_out_config(tmp_path: Path) -> str:

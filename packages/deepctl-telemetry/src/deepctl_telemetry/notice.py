@@ -99,7 +99,14 @@ def install_help_notice(fallback_config: Callable[[], Config]) -> None:
     original_get_help = click.Command.get_help
 
     def get_help_with_notice(self: click.Command, ctx: click.Context) -> str:
-        notice = render_notice(_config_for_help(ctx, _fallback[0]))
+        try:
+            notice = render_notice(_config_for_help(ctx, _fallback[0]))
+        except OSError:
+            # No readable config (an unreadable HOME): telemetry was never
+            # turned on for this run, so it is off. Help still prints.
+            notice = NOTICE_OFF
+            if not os.environ.get("NO_COLOR") and _stdout_is_tty():
+                notice = click.style(notice, dim=True)
         return original_get_help(self, ctx) + "\n\n" + notice
 
     click.Command.get_help = get_help_with_notice  # type: ignore[method-assign]
