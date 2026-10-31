@@ -203,10 +203,12 @@ class DeepgramClient:
         file_path: str | Path,
         options: dict[str, Any] | None = None,
         *,
+        timeout_s: float | None = None,
         file_id: tuple[int, int] | None = None,
     ) -> dict[str, Any]:
         """Transcribe an audio file.
 
+        ``timeout_s`` replaces the client's 60 s timeout for this request.
         ``file_id`` is ``(st_dev, st_ino)`` of the file the caller validated;
         the upload stops if the path now names another file.
         """
@@ -222,30 +224,41 @@ class DeepgramClient:
         if options:
             default_options.update(options)
 
+        if TYPE_CHECKING:
+            from deepgram.core.request_options import RequestOptions
+
         from .upload import FileBody, UploadFileError
 
         try:
             # Streamed from disk; the SDK resends the same body on a retry.
             with FileBody(file_path, file_id=file_id) as body:
+                request_options: RequestOptions = {
+                    "additional_headers": {"Content-Length": str(len(body))}
+                }
+                if timeout_s is not None:
+                    request_options["timeout"] = timeout_s
                 response = self.client.listen.v1.media.transcribe_file(
-                    request=body,
-                    request_options={
-                        "additional_headers": {"Content-Length": str(len(body))}
-                    },
-                    **default_options,
+                    request=body, request_options=request_options, **default_options
                 )
             return cast("dict[str, Any]", response.model_dump())
 
         except UploadFileError:
             raise
         except Exception as e:
-            transport.raise_for(e, self._secrets)
+            transport.raise_for(e, self._secrets, timeout_s=timeout_s)
             raise self._failed("Transcription failed", e)
 
     def transcribe_url(
-        self, url: str, options: dict[str, Any] | None = None
+        self,
+        url: str,
+        options: dict[str, Any] | None = None,
+        *,
+        timeout_s: float | None = None,
     ) -> dict[str, Any]:
-        """Transcribe audio from URL."""
+        """Transcribe audio from URL.
+
+        ``timeout_s`` replaces the client's 60 s timeout for this request.
+        """
         default_options: dict[str, Any] = {
             "model": "nova-3",
             "smart_format": True,
@@ -254,14 +267,20 @@ class DeepgramClient:
         if options:
             default_options.update(options)
 
+        if TYPE_CHECKING:
+            from deepgram.core.request_options import RequestOptions
+
+        request_options: RequestOptions = {}
+        if timeout_s is not None:
+            request_options["timeout"] = timeout_s
         try:
             response = self.client.listen.v1.media.transcribe_url(
-                url=url, **default_options
+                url=url, request_options=request_options, **default_options
             )
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            transport.raise_for(e, self._secrets)
+            transport.raise_for(e, self._secrets, timeout_s=timeout_s)
             raise self._failed("Transcription failed", e)
 
     # ── Text-to-Speech ─────────────────────────────────────────────
