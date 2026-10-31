@@ -543,6 +543,27 @@ function ancestorsSafe(start, uid, gid, lstat, allowLinks) {
   }
 }
 
+// A directory of ours for uv's cache: created 0700 if missing. One that
+// already exists is refused if it is a link (a junction on Windows) rather
+// than a plain directory, or, on POSIX, if another user owns it or group or
+// others can write to it: it may have been prepared by someone else, so the
+// fix is to remove it, not to chmod it.
+function ownedDir(dir, opts = {}) {
+  const refuse = (why) => {
+    const err = new LauncherError(`${dir} ${why}.`, `Remove ${dir} and run dg again; dg recreates it.`);
+    err.dir = dir;
+    return err;
+  };
+  mkdirPrivate(dir);
+  const st = (opts.lstat || fs.lstatSync)(dir);
+  if (st.isSymbolicLink() || !st.isDirectory()) throw refuse('is a link, not a plain directory');
+  if (!isWindows(opts.platform || process.platform)) {
+    if (st.uid !== currentUid(opts)) throw refuse('belongs to another user');
+    if ((st.mode & 0o022) !== 0) throw refuse('is writable by group or others');
+  }
+  return dir;
+}
+
 function mkdirPrivate(dir) {
   try {
     fs.mkdirSync(dir, { mode: 0o700 });
@@ -906,26 +927,70 @@ function pruneSiblings(root, keep, now = Date.now()) {
   }
 }
 
+// Where a one-run venv goes: a parent directory, and whether leftovers from
+// crashed runs should be pruned there.
+//
+// Windows (no cache reuse at all): %LOCALAPPDATA%\deepgram-cli\venvs. Node
+// cannot read its owner or ACLs, but it can see links: the two levels the
+// launcher creates must be plain directories, not symlinks or junctions
+// (lstat reports both as links), so nothing there can redirect the build
+// into a directory someone else controls. The venv inside gets a fresh,
+// unpredictable name.
+//
+// POSIX, when no cache root passed rootTrusted (`untrusted`): the system
+// temp directory, held to the ancestor check a cache root gets (each level
+// root's or ours, sticky if others can write to it), so another user can
+// neither predict nor swap the 0700 directory mkdtemp creates there.
+function oneRunBase(untrusted, opts = {}) {
+  const lstat = opts.lstat || fs.lstatSync;
+  if (untrusted) {
+    const tmp = (opts.realpath || fs.realpathSync)(opts.tmpdir || os.tmpdir());
+    const uid = currentUid(opts);
+    const gid = opts.gid !== undefined ? opts.gid : process.getgid ? process.getgid() : null;
+    if (!ancestorsSafe(tmp, uid, gid, lstat, false)) throw new Error(`${tmp} is not safe from other users`);
+    return { base: tmp, prefix: 'deepgram-cli-', prune: false };
+  }
+  const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;
+  const base = cacheRootSpecs(opts)[0].dir;
+  (opts.mkdir || fs.mkdirSync)(base, { recursive: true, mode: 0o700 });
+  for (const dir of [p.dirname(base), base]) {
+    const st = lstat(dir);
+    if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`${dir} is a link or junction, not a plain directory`);
+  }
+  return { base, prefix: '', prune: true };
+}
+
 // Builds a venv for this run only, in a directory created fresh with an
 // unpredictable name, so nothing another process prepared can be picked up.
 // The caller deletes it once deepctl exits.
-async function buildPrivateVenv({ installer, key, spec, locked, version, opts = {} }) {
+async function buildPrivateVenv({ installer, key, spec, locked, version, untrusted, hint, opts = {} }) {
   const stderr = opts.stderr || fdStderr;
   const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;
-  const base = cacheRootSpecs(opts)[0].dir;
   let dir;
+  let uvCache;
   try {
-    fs.mkdirSync(base, { recursive: true, mode: 0o700 });
-    pruneOneRunVenvs(base, p);
-    dir = fs.mkdtempSync(p.join(base, `${key}-`));
+    const { base, prefix, prune } = oneRunBase(untrusted, opts);
+    if (prune) pruneOneRunVenvs(base, p);
+    dir = fs.mkdtempSync(p.join(base, `${prefix}${key}-`));
+    // Windows: a uv cache kept beside the one-run venvs, held to the same
+    // plain-directory check (oneRunBase), so runs after the first are quick.
+    if (!untrusted && installer.uv) uvCache = ownedDir(p.join(p.dirname(base), 'uv-cache'), opts);
   } catch (err) {
-    throw new LauncherError(`No writable directory for the Deepgram CLI: ${err.message}`, 'Install uv instead: it needs no setup on each run.');
+    throw new LauncherError(`No safe, writable directory to set up the Deepgram CLI in: ${err.message}`, untrusted ? 'Point TMPDIR at a directory only you can write to.' : 'Point LOCALAPPDATA at a directory only you can write to.');
   }
   const layout = venvLayout(dir, opts.platform);
-  if (installer.uv) stderr.write(`Setting up Deepgram CLI ${version} for this run...\n`);
+  if (untrusted) {
+    stderr.write(`Setting up Deepgram CLI ${version} for this run only: dg reuses a cache only from a directory you own that others can't write to, and ${untrusted} isn't one.\n`);
+    const elsewhere = (opts.platform || process.platform) === 'darwin' ? '' : ', or set XDG_CACHE_HOME to such a directory';
+    stderr.write(hint ? `HINT: ${hint}\n` : `HINT: Make it yours and not group- or world-writable (chmod go-w)${elsewhere}.\n`);
+  } else if (installer.uv) stderr.write(`Setting up Deepgram CLI ${version} for this run...\n`);
   else stderr.write(`Setting up Deepgram CLI ${version} for this run (~1 min each time; install uv to speed it up: ${UV_INSTALL_WINDOWS})...\n`);
+  // No trusted root: uv's cache for this run lives inside the run's own
+  // directory and goes once setup is done; pip runs without a cache.
+  const privateCache = untrusted ? p.join(dir, '.setup-cache') : undefined;
   try {
-    await installInto(installer, layout, spec, locked, opts, { cwd: dir });
+    await installInto(installer, layout, spec, locked, opts, { cwd: dir, uvCache: privateCache || uvCache, noPipCache: Boolean(untrusted) });
+    if (privateCache) fs.rmSync(privateCache, { recursive: true, force: true });
   } catch (err) {
     fs.rmSync(dir, { recursive: true, force: true });
     throw err;
@@ -1008,7 +1073,11 @@ async function installInto(installer, layout, spec, locked, opts, where = {}) {
   const what = `Installing ${spec}`;
   const hint = locked ? INSTALL_HINT : NETWORK_HINT;
   if (installer.uv) {
-    const cache = where.privateCache ? ['--cache-dir', where.privateCache] : [];
+    // uv installs the files it extracted into its cache without hashing them
+    // again, so its cache must be as private as the venv: never uv's default
+    // ($XDG_CACHE_HOME/uv may be group-writable), always one the launcher
+    // owns, unless the user chose one with UV_CACHE_DIR.
+    const cache = where.uvCache && !env.UV_CACHE_DIR ? ['--cache-dir', where.uvCache] : [];
     const config = uvConfigArgs(env, opts);
     const uv = (sub) => [...sub, '--no-config', ...config, '--quiet', ...cache];
     await runStep(installer.uv, [...uv(['venv']), '--allow-existing', '--python', PYTHON_RANGE, layout.dir], 'Creating the Python venv', UV_VENV_HINT, opts, where.cwd);
@@ -1017,7 +1086,7 @@ async function installInto(installer, layout, spec, locked, opts, where = {}) {
   }
   const { python } = installer;
   await runStep(python.command, [...python.args, '-I', '-m', 'venv', layout.dir], 'Creating the Python venv', VENV_HINT, opts, where.cwd);
-  const noCache = where.privateCache ? ['--no-cache-dir'] : [];
+  const noCache = where.noPipCache ? ['--no-cache-dir'] : [];
   const pip = [layout.python, '-I', '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '-q', ...noCache, ...source];
   await runStep(pip[0], pip.slice(1), what, hint, opts, where.cwd);
 }
@@ -1031,7 +1100,22 @@ async function buildVenv({ installer, key, spec, locked, version, opts = {} }) {
   const prepare = opts.prepareRoot || ((spec) => prepareRoot(spec, opts));
   const rootSpec = cacheRootSpecs(opts).find(prepare);
   const root = rootSpec && rootSpec.dir;
-  if (!root) throw new LauncherError('No writable cache directory for the Deepgram CLI.', 'Set XDG_CACHE_HOME to a writable directory, or install uv.');
+  // No root we can show is ours (another owner, writable by others, a
+  // symlink, or not writable at all): never reuse or populate one; build a
+  // venv for this run in a fresh private directory instead.
+  if (!root) return buildPrivateVenv({ installer, key, spec, locked, version, untrusted: cacheRootSpecs(opts)[0].dir, opts });
+  // uv's cache sits beside the venvs, under the root rootTrusted passed. If
+  // an existing one is not ours alone, nothing in it can be trusted either.
+  let uvCache;
+  if (installer.uv) {
+    try {
+      uvCache = ownedDir(path.join(path.dirname(root), 'uv-cache'), opts);
+    } catch (err) {
+      const dir = err.dir || path.join(path.dirname(root), 'uv-cache');
+      const hint = err instanceof LauncherError ? err.hint : `Remove ${dir} and run dg again; dg recreates it.`;
+      return buildPrivateVenv({ installer, key, spec, locked, version, untrusted: dir, hint, opts });
+    }
+  }
   // Built in place: venv console scripts carry absolute shebangs, so a venv
   // built elsewhere and renamed into place would not run.
   const layout = venvLayout(path.join(root, key), opts.platform);
@@ -1047,7 +1131,7 @@ async function buildVenv({ installer, key, spec, locked, version, opts = {} }) {
     fs.rmSync(layout.dir, { recursive: true, force: true });
     stderr.write(`Setting up Deepgram CLI ${version} (one-time${installer.uv ? '' : ', ~1 min'})...\n`);
     try {
-      await installInto(installer, layout, spec, locked, opts, { cwd: root });
+      await installInto(installer, layout, spec, locked, opts, { cwd: root, uvCache });
       fs.writeFileSync(layout.marker, `${spec}\n`);
     } catch (err) {
       fs.rmSync(layout.dir, { recursive: true, force: true });
@@ -1309,6 +1393,8 @@ module.exports = {
   writeOwner,
   mentionsDir,
   uvConfigArgs,
+  oneRunBase,
+  ownedDir,
   findPython,
   findUv,
   installHelp,

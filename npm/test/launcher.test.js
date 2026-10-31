@@ -659,6 +659,139 @@ describe('cache root ownership (POSIX)', () => {
   });
 });
 
+describe('no trusted cache root: a one-run venv instead', () => {
+  // Fake uv steps: `venv DIR` makes DIR/bin, `pip install --python PY`
+  // puts deepctl and python next to PY.
+  function uvSpawn(calls) {
+    return fakeSpawn((command, args) => {
+      calls.push(args);
+      if (args[0] === 'venv') fs.mkdirSync(path.join(args[args.length - 1], 'bin'), { recursive: true });
+      if (args[0] === 'pip') for (const f of ['python', 'deepctl']) fs.writeFileSync(path.join(path.dirname(args[args.indexOf('--python') + 1]), f), '');
+      return 0;
+    });
+  }
+
+  // A complete-looking venv planted in each cache root; both roots are
+  // made untrusted by `spoil`. Returns what resolveRunner did.
+  async function runWith(spoil) {
+    const home = tmpdir();
+    const tmp = tmpdir();
+    const cache = path.join(home, 'c');
+    const env = { PATH: '/bin', XDG_CACHE_HOME: cache };
+    const specs = launcher.cacheRootSpecs({ env, home, tmpdir: tmp, platform: 'linux' });
+    for (const spec of specs) {
+      fs.mkdirSync(path.join(spec.dir, '1.0.0', 'bin'), { recursive: true, mode: 0o700 });
+      for (const f of ['.complete', 'bin/deepctl', 'bin/python']) fs.writeFileSync(path.join(spec.dir, '1.0.0', f), '');
+    }
+    spoil(specs, home);
+    const requirementsFile = path.join(home, 'requirements-1.0.0.txt');
+    fs.writeFileSync(requirementsFile, '');
+    const calls = [];
+    const lines = [];
+    const r = await launcher.resolveRunner(['x'], {
+      env,
+      home,
+      tmpdir: tmp,
+      version: '1.0.0',
+      platform: 'linux',
+      isExecutable: (f) => f === '/bin/uv',
+      requirementsFile,
+      spawn: uvSpawn(calls),
+      stderr: { write: (t) => lines.push(t) },
+    });
+    return { r, calls, stderr: lines.join(''), tmp, specs };
+  }
+
+  function assertOneRun({ r, calls, stderr, tmp, specs }) {
+    // Built fresh under the temp directory, not in (or from) either root.
+    assert.equal(path.dirname(r.cleanup), fs.realpathSync(tmp));
+    assert.match(path.basename(r.cleanup), /^deepgram-cli-1\.0\.0-.{6}$/);
+    assert.equal(fs.statSync(r.cleanup).mode & 0o777, 0o700);
+    assert.equal(r.command, path.join(r.cleanup, 'bin', 'deepctl'));
+    assert.equal(calls.length, 2);
+    // Hash-locked, wheels only, and uv's cache private to this run (an
+    // untrusted root may hold uv's cache too); the cache is gone afterwards.
+    const req = calls[1][calls[1].indexOf('-r') + 1];
+    assert.deepEqual(calls[1].slice(-6), ['--require-hashes', '--no-deps', '-r', req, '--only-binary', ':all:']);
+    for (const c of calls) assert.equal(c[c.indexOf('--cache-dir') + 1], path.join(r.cleanup, '.setup-cache'));
+    assert.equal(fs.existsSync(path.join(r.cleanup, '.setup-cache')), false);
+    for (const spec of specs) assert.deepEqual(fs.readdirSync(spec.dir), ['1.0.0'], 'nothing written into an untrusted root');
+    assert.match(stderr, new RegExp(`for this run only: .*${specs[0].dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} isn't one\\.\\nHINT: `));
+  }
+
+  test('group-writable roots are not reused or written to', posixOnly, async () => {
+    const out = await runWith((specs) => {
+      for (const spec of specs) fs.chmodSync(path.dirname(spec.dir), 0o770);
+    });
+    assertOneRun(out);
+  });
+
+  test('symlinked roots are not reused or written to', posixOnly, async () => {
+    const out = await runWith((specs, home) => {
+      for (const [i, spec] of specs.entries()) {
+        const top = path.dirname(spec.dir);
+        const real = path.join(home, `real-${i}`);
+        fs.renameSync(top, real);
+        fs.symlinkSync(real, top);
+      }
+    });
+    // readdir follows the links: the planted venvs are still all there is.
+    assertOneRun(out);
+  });
+
+  test('roots owned by another user are not reused (lstat stand-in)', async () => {
+    const st = (uid, mode = 0o40700) => ({ uid, gid: uid, mode, isDirectory: () => true, isSymbolicLink: () => false });
+    const opts = { platform: 'linux', uid: 1000, gid: 1000, realpath: (f) => f };
+    for (const shared of [false, true]) {
+      const spec = { dir: '/h/.cache/deepgram-cli/venvs', shared };
+      assert.equal(launcher.rootTrusted(spec, { ...opts, lstat: (d) => (d.startsWith('/h/.cache/deepgram-cli') ? st(2000) : st(0, 0o40755)) }), false);
+    }
+  });
+
+  test('the temp directory must itself be safe from other users', () => {
+    const st = (uid, mode) => ({ uid, gid: uid, mode, isDirectory: () => true, isSymbolicLink: () => false });
+    const base = { platform: 'linux', uid: 1000, gid: 1000, realpath: (f) => f, tmpdir: '/scratch' };
+    // World-writable without the sticky bit: anyone could rename our directory.
+    assert.throws(() => launcher.oneRunBase('/h/.cache', { ...base, lstat: (d) => (d === '/scratch' ? st(0, 0o40777) : st(0, 0o40755)) }), /not safe/);
+    // /tmp-style sticky 1777 is fine.
+    assert.equal(launcher.oneRunBase('/h/.cache', { ...base, lstat: (d) => (d === '/scratch' ? st(0, 0o41777) : st(0, 0o40755)) }).base, '/scratch');
+  });
+
+  test('Windows: a junction or symlink where the one-run venvs go is refused', async () => {
+    const lstatWith = (linked) => (d) => ({
+      isDirectory: () => d !== linked,
+      isSymbolicLink: () => d === linked,
+    });
+    const win = {
+      env: { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' },
+      platform: 'win32',
+      home: 'C:\\Users\\u',
+      mkdir: () => {},
+    };
+    const top = 'C:\\Users\\u\\AppData\\Local\\deepgram-cli';
+    for (const linked of [top, `${top}\\venvs`]) {
+      assert.throws(() => launcher.oneRunBase(undefined, { ...win, lstat: lstatWith(linked) }), /link or junction/);
+    }
+    assert.deepEqual(launcher.oneRunBase(undefined, { ...win, lstat: lstatWith(null) }), { base: `${top}\\venvs`, prefix: '', prune: true });
+    let spawned = false;
+    await assert.rejects(
+      launcher.resolveRunner([], {
+        ...win,
+        env: { ...win.env, Path: 'C:\\bin' },
+        version: '1.0.0',
+        pkgDir: 'C:\\npm\\node_modules\\@deepgram\\cli',
+        realpath: (f) => f,
+        isExecutable: (f) => f === 'C:\\bin\\uv.exe',
+        isRequirementsFile: () => true,
+        lstat: lstatWith(top),
+        spawn: () => (spawned = true),
+      }),
+      /No safe, writable directory.*link or junction/,
+    );
+    assert.equal(spawned, false);
+  });
+});
+
 describe('pruning other versions', () => {
   const DAY = 24 * 60 * 60 * 1000;
   function venv(root, name, { markerAgeDays, dirAgeMs } = {}) {
@@ -963,14 +1096,94 @@ describe('resolveRunner', () => {
     });
     const root = path.join(cache, 'deepgram-cli', 'venvs');
     const dir = path.join(root, '1.2.3');
+    // uv's cache is the launcher's own, beside the venvs, never uv's default.
+    const uvCache = path.join(cache, 'deepgram-cli', 'uv-cache');
     assert.deepEqual(calls, [
-      ['/bin/uv', 'venv', '--no-config', '--quiet', '--allow-existing', '--python', '>=3.10,<3.15', dir],
-      ['/bin/uv', 'pip', 'install', '--no-config', '--quiet', '--python', path.join(dir, 'bin', 'python'), '--require-hashes', '--no-deps', '-r', requirementsFile, '--only-binary', ':all:'],
+      ['/bin/uv', 'venv', '--no-config', '--quiet', '--cache-dir', uvCache, '--allow-existing', '--python', '>=3.10,<3.15', dir],
+      ['/bin/uv', 'pip', 'install', '--no-config', '--quiet', '--cache-dir', uvCache, '--python', path.join(dir, 'bin', 'python'), '--require-hashes', '--no-deps', '-r', requirementsFile, '--only-binary', ':all:'],
     ]);
+    assert.equal(fs.statSync(uvCache).mode & 0o777, 0o700);
     // Never the user's directory: a project's uv.toml there must not apply.
     assert.deepEqual(cwds, [root, root]);
     assert.deepEqual(r, { command: path.join(dir, 'bin', 'deepctl'), args: ['--version'], strategy: 'uvx' });
     assert.equal(fs.existsSync(path.join(dir, '.complete')), true);
+  });
+
+  test('an existing uv cache that is not ours alone is refused, with a hint to remove it', () => {
+    const dir = tmpdir();
+    const st = (uid, mode) => () => ({ uid, mode, isDirectory: () => true, isSymbolicLink: () => false });
+    const opts = { platform: 'linux', uid: 1000 };
+    assert.equal(launcher.ownedDir(dir, { ...opts, lstat: st(1000, 0o40700) }), dir);
+    for (const [lstat, why] of [[st(2000, 0o40700), /belongs to another user/], [st(1000, 0o40775), /writable by group or others/], [st(1000, 0o40707), /writable by group or others/]]) {
+      assert.throws(() => launcher.ownedDir(dir, { ...opts, lstat }), (err) => {
+        assert.match(err.message, why);
+        assert.match(err.hint, /^Remove .* and run dg again/);
+        assert.doesNotMatch(err.hint, /chmod/);
+        return true;
+      });
+    }
+    // Windows has no uid or mode bits to go on; only links are refused there.
+    assert.equal(launcher.ownedDir(dir, { platform: 'win32', lstat: st(2000, 0o40777) }), dir);
+  });
+
+  test('a uv cache others can write to under a trusted root: a one-run venv instead, nothing used from it', posixOnly, async () => {
+    const home = tmpdir();
+    const cache = path.join(home, 'c');
+    const requirementsFile = path.join(home, 'requirements-1.2.3.txt');
+    fs.writeFileSync(requirementsFile, '');
+    const uvCache = path.join(cache, 'deepgram-cli', 'uv-cache');
+    fs.mkdirSync(uvCache, { recursive: true });
+    fs.chmodSync(uvCache, 0o777);
+    const calls = [];
+    const lines = [];
+    const spawn = fakeSpawn((command, args) => {
+      calls.push(args);
+      if (args[0] === 'venv') fs.mkdirSync(path.join(args[args.length - 1], 'bin'), { recursive: true });
+      if (args[0] === 'pip') for (const f of ['python', 'deepctl']) fs.writeFileSync(path.join(path.dirname(args[args.indexOf('--python') + 1]), f), '');
+      return 0;
+    });
+    const r = await launcher.resolveRunner([], {
+      env: { PATH: '/bin', XDG_CACHE_HOME: cache },
+      version: '1.2.3',
+      platform: 'linux',
+      home,
+      isExecutable: (f) => f === '/bin/uv',
+      requirementsFile,
+      prepareRoot: (spec) => fs.mkdirSync(spec.dir, { recursive: true }) || true,
+      spawn,
+      stderr: { write: (t) => lines.push(t) },
+    });
+    assert.ok(r.cleanup, 'a one-run venv');
+    for (const c of calls) assert.equal(c[c.indexOf('--cache-dir') + 1], path.join(r.cleanup, '.setup-cache'));
+    assert.match(lines.join(''), new RegExp(`${uvCache.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} isn't one\\.\\nHINT: Remove `));
+  });
+
+  test('a UV_CACHE_DIR the user set is left to uv', async () => {
+    const home = tmpdir();
+    const requirementsFile = path.join(home, 'requirements-1.2.3.txt');
+    fs.writeFileSync(requirementsFile, '');
+    const calls = [];
+    const spawn = fakeSpawn((command, args) => {
+      calls.push(args);
+      if (args[0] === 'venv') fs.mkdirSync(path.join(args[args.length - 1], 'bin'), { recursive: true });
+      if (args[0] === 'pip') for (const f of ['python', 'deepctl']) fs.writeFileSync(path.join(path.dirname(args[args.indexOf('--python') + 1]), f), '');
+      return 0;
+    });
+    await launcher.resolveRunner([], {
+      env: { PATH: '/bin', XDG_CACHE_HOME: path.join(home, 'c'), UV_CACHE_DIR: '/mine' },
+      version: '1.2.3',
+      platform: 'linux',
+      home,
+      realpath: (f) => f,
+      isExecutable: (f) => f === '/bin/uv',
+      requirementsFile,
+      prepareRoot: (spec) => fs.mkdirSync(spec.dir, { recursive: true }) || true,
+      trustRoot: () => false,
+      spawn,
+      stderr: { write: () => {} },
+    });
+    assert.equal(calls.length, 2);
+    for (const c of calls) assert.equal(c.includes('--cache-dir'), false);
   });
 
   test('a missing requirements file is refused before anything is installed', async () => {
@@ -1091,7 +1304,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     assert.equal(r.stdout, 'npm listen a b.wav\n');
     const calls = readLog(log);
     assert.equal(calls.length, 2);
-    assert.match(calls[1], new RegExp(`^pip install --no-config --quiet --python \\S+/bin/python --require-hashes --no-deps -r ${pkg.requirementsFile} --only-binary :all:$`));
+    assert.match(calls[1], new RegExp(`^pip install --no-config --quiet --cache-dir \\S+/deepgram-cli/uv-cache --python \\S+/bin/python --require-hashes --no-deps -r ${pkg.requirementsFile} --only-binary :all:$`));
     // The second run reuses the venv: uv is not called again.
     assert.equal(runCopy(pkg, env, ['x']).stdout, 'npm x\n');
     assert.equal(readLog(log).length, 2);
