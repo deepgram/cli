@@ -1,0 +1,9 @@
+{
+  "name": "whoami",
+  "module": "deepctl_cmd_login.command",
+  "attr": "WhoamiCommand",
+  "dist": "deepctl-cmd-login",
+  "summary": "Show auth status",
+  "hidden": false,
+  "requires_auth": false
+}

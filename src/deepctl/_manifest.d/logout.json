@@ -1,0 +1,9 @@
+{
+  "name": "logout",
+  "module": "deepctl_cmd_login.command",
+  "attr": "LogoutCommand",
+  "dist": "deepctl-cmd-login",
+  "summary": "Log out of Deepgram",
+  "hidden": false,
+  "requires_auth": false
+}

@@ -1,0 +1,9 @@
+{
+  "name": "init",
+  "module": "deepctl_cmd_init.command",
+  "attr": "InitCommand",
+  "dist": "deepctl-cmd-init",
+  "summary": "Scaffold a Deepgram starter app (alpha)",
+  "hidden": false,
+  "requires_auth": false
+}

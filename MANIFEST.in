@@ -1,0 +1,2 @@
+# The command manifest fragments are build input for the sdist.
+graft src/deepctl/_manifest.d

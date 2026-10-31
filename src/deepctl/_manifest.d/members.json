@@ -1,0 +1,9 @@
+{
+  "name": "members",
+  "module": "deepctl_cmd_members.command",
+  "attr": "MembersCommand",
+  "dist": "deepctl-cmd-members",
+  "summary": "Manage members",
+  "hidden": false,
+  "requires_auth": true
+}

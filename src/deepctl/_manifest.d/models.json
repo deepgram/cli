@@ -1,0 +1,9 @@
+{
+  "name": "models",
+  "module": "deepctl_cmd_models.command",
+  "attr": "ModelsCommand",
+  "dist": "deepctl-cmd-models",
+  "summary": "List models",
+  "hidden": false,
+  "requires_auth": true
+}

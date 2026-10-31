@@ -1,0 +1,9 @@
+{
+  "name": "speak",
+  "module": "deepctl_cmd_speak.command",
+  "attr": "SpeakCommand",
+  "dist": "deepctl-cmd-speak",
+  "summary": "Text-to-speech",
+  "hidden": false,
+  "requires_auth": true
+}

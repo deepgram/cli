@@ -1,0 +1,9 @@
+{
+  "name": "mcp",
+  "module": "deepctl_cmd_mcp.command",
+  "attr": "McpCommand",
+  "dist": "deepctl-cmd-mcp",
+  "summary": "Run MCP proxy for Deepgram AI",
+  "hidden": false,
+  "requires_auth": false
+}

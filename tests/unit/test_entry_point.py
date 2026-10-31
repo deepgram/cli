@@ -114,7 +114,7 @@ class TestPackage:
         assert main_mod.cli is cli_mod.cli
         # Reading `cli` loads the commands, as importing this module used to.
         assert cli_mod._commands_loaded
-        assert callable(main_mod.preprocess_hyphenated_commands)
+        assert callable(main_mod.load_commands)
         with pytest.raises(AttributeError):
             main_mod.no_such_name  # noqa: B018
 

@@ -1,0 +1,9 @@
+{
+  "name": "billing",
+  "module": "deepctl_cmd_billing.command",
+  "attr": "BillingCommand",
+  "dist": "deepctl-cmd-billing",
+  "summary": "Billing info",
+  "hidden": false,
+  "requires_auth": true
+}
