@@ -49,6 +49,46 @@ function fakeSpawn(body) {
 
 const posixOnly = { skip: process.platform === 'win32' && 'POSIX shell scripts' };
 
+// A copy of the package as a release tarball has it: bin/, lib/,
+// package.json and requirements-<version>.txt, which the repository's npm/
+// directory does not have (the release writes it). `requirements: null`
+// leaves the file out.
+function packageCopy(requirements = 'deepctl==0.0.0 \\\n    --hash=sha256:0000\n') {
+  const dir = tmpdir();
+  for (const sub of ['bin', 'lib']) fs.cpSync(path.join(PKG_DIR, sub), path.join(dir, sub), { recursive: true });
+  fs.copyFileSync(path.join(PKG_DIR, 'package.json'), path.join(dir, 'package.json'));
+  const version = launcher.packageVersion(PKG_DIR);
+  const requirementsFile = path.join(dir, `requirements-${version}.txt`);
+  if (requirements !== null) fs.writeFileSync(requirementsFile, requirements);
+  return { dir, bin: path.join(dir, 'bin', 'dg.js'), version, requirementsFile };
+}
+
+// A stand-in uv that logs its arguments to `log`. `uv venv DIR` lays down
+// DIR/bin/python; `uv pip install --python PY ...` installs `deepctlBody`
+// as deepctl next to PY, or fails with `pipExit` and a pip-like message.
+function fakeUv(bin, deepctlBody, log, pipExit = 0) {
+  const template = path.join(bin, '..', 'deepctl-template');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(template, deepctlBody);
+  return fakeExe(bin, 'uv', [
+    '#!/bin/sh',
+    `echo "$*" >> "${log}"`,
+    'case "$1" in',
+    '  venv) for a; do d="$a"; done',
+    '    mkdir -p "$d/bin" && printf \'#!/bin/sh\\nexit 0\\n\' > "$d/bin/python" && chmod +x "$d/bin/python"; exit 0;;',
+    '  pip) prev=; for a; do [ "$prev" = --python ] && py="$a"; prev="$a"; done',
+    `    if [ ${pipExit} != 0 ]; then echo "error: Hash mismatch for deepctl" >&2; exit ${pipExit}; fi`,
+    `    cp "${template}" "$(dirname "$py")/deepctl" && chmod +x "$(dirname "$py")/deepctl"; exit 0;;`,
+    'esac',
+    'exit 3',
+    '',
+  ].join('\n'));
+}
+
+function readLog(log) {
+  return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
+}
+
 describe('package.json', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(PKG_DIR, 'package.json'), 'utf8'));
 
@@ -183,7 +223,7 @@ describe('Python discovery', () => {
     assert.deepEqual(linux, ['/usr/local/bin/python3.11', '/usr/local/bin/python3', '/usr/bin/python3']);
   });
 
-  test('Windows tries py -3.13..-3.10 and -3, then python, with WindowsApps last', () => {
+  test('Windows tries py -3.14..-3.10 and -3, then python, with WindowsApps last', () => {
     const present = new Set([
       'C:\\Windows\\py.exe',
       'C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe',
@@ -198,6 +238,7 @@ describe('Python discovery', () => {
     };
     const got = launcher.pythonCandidates(opts).map((c) => [c.command, ...c.args].join(' '));
     assert.deepEqual(got, [
+      'C:\\Windows\\py.exe -3.14',
       'C:\\Windows\\py.exe -3.13',
       'C:\\Windows\\py.exe -3.12',
       'C:\\Windows\\py.exe -3.11',
@@ -220,10 +261,10 @@ describe('Python discovery', () => {
       isExecutable: (f) => present.has(f),
     };
     const got = launcher.pythonCandidates(opts).map((c) => [c.command, ...c.args].join(' '));
-    assert.equal(got.length, 6);
-    assert.equal(got[0], `${apps}\\py.exe -3.13`);
-    assert.equal(got[4], `${apps}\\py.exe -3`);
-    assert.equal(got[5], `${apps}\\python.exe`);
+    assert.equal(got.length, 7);
+    assert.equal(got[0], `${apps}\\py.exe -3.14`);
+    assert.equal(got[5], `${apps}\\py.exe -3`);
+    assert.equal(got[6], `${apps}\\python.exe`);
   });
 
   test('the version probe rejects a Store stub that prints no version', async () => {
@@ -252,14 +293,32 @@ describe('Python discovery', () => {
   });
 
   test('the help text names the fix for what was found', () => {
-    const noVenv = launcher.installHelp([{ version: [3, 12], ok: false, hasVenv: false }]);
+    const noVenv = launcher.installHelp([{ version: [3, 12], ok: false, hasVenv: false }]).message;
     assert.match(noVenv, /python3-venv/);
     assert.match(noVenv, /astral\.sh\/uv\/install\.sh/);
     assert.match(noVenv, /brew install deepgram\/tap\/deepgram/);
     assert.match(noVenv, /python\.bat shims and uv\.cmd are skipped/);
-    const old = launcher.installHelp([{ version: [3, 9], ok: false, hasVenv: true }]);
+    const old = launcher.installHelp([{ version: [3, 9], ok: false, hasVenv: true }]).message;
     assert.match(old, /found 3\.9/);
     assert.doesNotMatch(old, /python3-venv/);
+  });
+
+  test('Python 3.15+ is not used: the lock has no wheels for it yet', async () => {
+    const probe = (version) => launcher.probePython({ command: 'py', args: [] }, async () => ({ status: 0, stdout: `(${version.join(', ')})` }));
+    assert.equal((await probe([3, 14])).ok, true);
+    assert.equal((await probe([3, 15])).ok, false);
+    const err = launcher.installHelp([{ version: [3, 15], ok: false, hasVenv: true }]);
+    assert.match(err.message, /^Python 3\.15 is too new for this release.*no Python 3\.10 to 3\.14/);
+    assert.match(err.hint, /Install Python 3\.12, or uv/);
+  });
+
+  test('the version probe runs isolated (-I), so the cwd cannot shadow venv or ensurepip', async () => {
+    let seen;
+    await launcher.probePython({ command: 'python3', args: [] }, async (cmd, args) => {
+      seen = args;
+      return { status: 0, stdout: '(3, 12)' };
+    });
+    assert.deepEqual(seen.slice(0, 2), ['-I', '-c']);
   });
 });
 
@@ -344,7 +403,10 @@ describe('Windows never reuses a cached venv', () => {
   });
 
   test('resolveRunner goes to uv instead of the cached venv', async () => {
-    const r = await launcher.resolveRunner(['--version'], { ...win, version: '1.0.0', isExecutable: (f) => f === 'C:\\bin\\uv.exe' });
+    // The spec override skips the one-run build, which would write win32
+    // paths to this filesystem; the next test covers that build.
+    const env = { ...win.env, DEEPCTL_NPM_PYPI_SPEC: 'deepctl==1.0.0' };
+    const r = await launcher.resolveRunner(['--version'], { ...win, env, version: '1.0.0', isExecutable: (f) => f === 'C:\\bin\\uv.exe' });
     assert.equal(r.strategy, 'uvx');
     assert.equal(r.command, 'C:\\bin\\uv.exe');
   });
@@ -362,13 +424,16 @@ describe('Windows never reuses a cached venv', () => {
     for (const f of ['.complete', 'bin/deepctl', 'bin/python']) fs.writeFileSync(path.join(root, '1.0.0', f), '');
     const calls = [];
     const spawn = fakeSpawn((command, args) => {
-      calls.push(args.slice(-2).join(' '));
+      calls.push(args);
       if (args.includes('venv')) fs.mkdirSync(path.join(args[args.length - 1], 'bin'), { recursive: true });
       return 0;
     });
     const lines = [];
+    const requirementsFile = path.join(home, 'requirements-1.0.0.txt');
+    fs.writeFileSync(requirementsFile, '');
     const r = await launcher.resolveRunner(['x'], {
-      env: { PATH: '/usr/bin', XDG_CACHE_HOME: path.join(home, 'c') },
+      requirementsFile,
+      env: { PATH: '/usr/bin', XDG_CACHE_HOME: path.join(home, 'c'), PIP_INDEX_URL: 'http://idx/simple' },
       version: '1.0.0',
       platform: 'linux',
       cacheReuse: false,
@@ -382,11 +447,38 @@ describe('Windows never reuses a cached venv', () => {
     assert.equal(path.dirname(r.cleanup), root);
     assert.match(path.basename(r.cleanup), /^1\.0\.0-.{6}$/);
     assert.equal(r.command, path.join(r.cleanup, 'bin', 'deepctl'));
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0].slice(0, 3), ['-I', '-m', 'venv']);
+    // pip installs only the release's pinned, hashed wheels. Its own config
+    // (pip.conf, PIP_*) applies; -I keeps cwd modules out.
+    assert.deepEqual(calls[1].slice(0, 4), ['-I', '-m', 'pip', 'install']);
+    assert.ok(!calls[1].includes('--isolated'));
+    assert.deepEqual(calls[1].slice(-6), ['--require-hashes', '--no-deps', '-r', requirementsFile, '--only-binary', ':all:']);
     assert.match(lines.join(''), /for this run.*install uv.*install\.ps1/);
     assert.equal(lines.join('').trimEnd().split('\n').length, 1, 'the hint is one line');
     assert.equal(fs.existsSync(path.join(r.cleanup, '.complete')), false);
     assert.equal(fs.existsSync(leaked), false, 'a leaked one-run venv was pruned');
+  });
+});
+
+describe("uv's own configuration", () => {
+  const files = (...present) => (f) => present.includes(f);
+  test('the user uv.toml is passed explicitly, else the machine one; a project one never is', () => {
+    const base = { platform: 'linux', home: '/home/u' };
+    assert.deepEqual(launcher.uvConfigArgs({}, { ...base, configExists: files('/home/u/.config/uv/uv.toml', '/etc/uv/uv.toml') }), ['--config-file', '/home/u/.config/uv/uv.toml']);
+    assert.deepEqual(launcher.uvConfigArgs({ XDG_CONFIG_HOME: '/x' }, { ...base, configExists: files('/x/uv/uv.toml') }), ['--config-file', '/x/uv/uv.toml']);
+    assert.deepEqual(launcher.uvConfigArgs({}, { ...base, configExists: files('/etc/xdg/uv/uv.toml') }), ['--config-file', '/etc/xdg/uv/uv.toml']);
+    assert.deepEqual(launcher.uvConfigArgs({}, { ...base, configExists: files('/etc/uv/uv.toml') }), ['--config-file', '/etc/uv/uv.toml']);
+    assert.deepEqual(launcher.uvConfigArgs({}, { ...base, configExists: files('/home/u/project/uv.toml') }), []);
+    // UV_CONFIG_FILE is read by uv itself.
+    assert.deepEqual(launcher.uvConfigArgs({ UV_CONFIG_FILE: '/c.toml' }, { ...base, configExists: () => true }), []);
+  });
+
+  test('Windows: %APPDATA%, then %PROGRAMDATA%', () => {
+    const env = { APPDATA: 'C:\\Users\\u\\AppData\\Roaming', PROGRAMDATA: 'C:\\ProgramData' };
+    const opts = { platform: 'win32', home: 'C:\\Users\\u' };
+    assert.deepEqual(launcher.uvConfigArgs(env, { ...opts, configExists: files('C:\\ProgramData\\uv\\uv.toml') }), ['--config-file', 'C:\\ProgramData\\uv\\uv.toml']);
+    assert.deepEqual(launcher.uvConfigArgs(env, { ...opts, configExists: files('C:\\Users\\u\\AppData\\Roaming\\uv\\uv.toml', 'C:\\ProgramData\\uv\\uv.toml') }), ['--config-file', 'C:\\Users\\u\\AppData\\Roaming\\uv\\uv.toml']);
   });
 });
 
@@ -839,9 +931,74 @@ describe('resolveRunner', () => {
     await assert.rejects(launcher.resolveRunner([], { env: { DEEPCTL_NPM_RUNNER: 'pipx' }, version: '1.0.0' }), /must be one of/);
   });
 
-  test('uses uv with the pinned spec when no venv is cached', async () => {
+  test('with no venv cached, uv builds one from the hash-locked requirements file', async () => {
+    const home = tmpdir();
+    const cache = path.join(home, 'c');
+    const requirementsFile = path.join(home, 'requirements-1.2.3.txt');
+    fs.writeFileSync(requirementsFile, 'deepctl==1.2.3 --hash=sha256:00\n');
+    const calls = [];
+    const cwds = [];
+    const spawn = (command, args, options) => {
+      cwds.push(options.cwd);
+      return fakeSpawnBody(command, args);
+    };
+    const fakeSpawnBody = fakeSpawn((command, args) => {
+      calls.push([command, ...args]);
+      if (args[0] === 'venv') fs.mkdirSync(path.join(args[args.length - 1], 'bin'), { recursive: true });
+      if (args[0] === 'pip') for (const f of ['python', 'deepctl']) fs.writeFileSync(path.join(path.dirname(args[args.indexOf('--python') + 1]), f), '');
+      return 0;
+    });
     const r = await launcher.resolveRunner(['--version'], {
-      env: { PATH: '/bin' },
+      env: { PATH: '/bin', XDG_CACHE_HOME: cache },
+      version: '1.2.3',
+      platform: 'linux',
+      home,
+      realpath: (f) => f,
+      isExecutable: (f) => f === '/bin/uv',
+      requirementsFile,
+      prepareRoot: (spec) => fs.mkdirSync(spec.dir, { recursive: true }) || true,
+      trustRoot: () => false,
+      spawn,
+      stderr: { write: () => {} },
+    });
+    const root = path.join(cache, 'deepgram-cli', 'venvs');
+    const dir = path.join(root, '1.2.3');
+    assert.deepEqual(calls, [
+      ['/bin/uv', 'venv', '--no-config', '--quiet', '--allow-existing', '--python', '>=3.10,<3.15', dir],
+      ['/bin/uv', 'pip', 'install', '--no-config', '--quiet', '--python', path.join(dir, 'bin', 'python'), '--require-hashes', '--no-deps', '-r', requirementsFile, '--only-binary', ':all:'],
+    ]);
+    // Never the user's directory: a project's uv.toml there must not apply.
+    assert.deepEqual(cwds, [root, root]);
+    assert.deepEqual(r, { command: path.join(dir, 'bin', 'deepctl'), args: ['--version'], strategy: 'uvx' });
+    assert.equal(fs.existsSync(path.join(dir, '.complete')), true);
+  });
+
+  test('a missing requirements file is refused before anything is installed', async () => {
+    let spawned = false;
+    await assert.rejects(
+      launcher.resolveRunner([], {
+        env: { PATH: '/bin' },
+        version: '1.2.3',
+        platform: 'linux',
+        home: '/nonexistent',
+        realpath: (f) => f,
+        isExecutable: (f) => f === '/bin/uv',
+        exists: () => false,
+        isRequirementsFile: () => false,
+        spawn: () => (spawned = true),
+      }),
+      (err) => {
+        assert.match(err.message, /missing requirements-1\.2\.3\.txt/);
+        assert.match(err.hint, /npm install -g @deepgram\/cli@1\.2\.3/);
+        return true;
+      },
+    );
+    assert.equal(spawned, false);
+  });
+
+  test('DEEPCTL_NPM_PYPI_SPEC (testing) runs the spec through uv tool run, without a requirements file', async () => {
+    const r = await launcher.resolveRunner(['--version'], {
+      env: { PATH: '/bin', DEEPCTL_NPM_PYPI_SPEC: 'deepctl==1.2.3' },
       version: '1.2.3',
       platform: 'linux',
       home: '/nonexistent',
@@ -850,7 +1007,8 @@ describe('resolveRunner', () => {
       isExecutable: (f) => f === '/bin/uv',
       exists: () => false,
     });
-    assert.deepEqual(r, { command: '/bin/uv', args: ['tool', 'run', '--from', 'deepctl==1.2.3', 'deepctl', '--version'], strategy: 'uvx' });
+    assert.deepEqual(r, { command: '/bin/uv', args: ['tool', 'run', '--no-config', '--from', 'deepctl==1.2.3', 'deepctl', '--version'], strategy: 'uvx' });
+    assert.equal(launcher.lockedRequirements({ DEEPCTL_NPM_PYPI_SPEC: 'x' }, '1.2.3'), null);
   });
 
   test('a cached venv wins over uv', async () => {
@@ -900,35 +1058,73 @@ describe('resolveRunner', () => {
 });
 
 describe('bin/dg.js end to end', posixOnly, () => {
-  function runBin(env, args = []) {
-    return spawnSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
+  function runCopy(pkg, env, args = []) {
+    return spawnSync(process.execPath, [pkg.bin, ...args], { env, encoding: 'utf8' });
   }
 
   test('a dg run from inside deepctl (nested launcher) still works', () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
-    fakeExe(bin, 'uv', '#!/bin/sh\necho nested-ok\n');
-    const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_LAUNCHER_DEPTH: '1' });
+    fakeUv(bin, '#!/bin/sh\necho nested-ok\n', path.join(home, 'uv.log'));
+    const r = runCopy(packageCopy(), { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_LAUNCHER_DEPTH: '1' });
     assert.equal(r.status, 0);
     assert.equal(r.stdout, 'nested-ok\n');
   });
 
   test('no uv and no Python: clear error on stderr, nothing on stdout, exit 1', () => {
     const home = tmpdir();
-    const r = runBin({ PATH: '/nonexistent', HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
+    const r = runCopy(packageCopy(), { PATH: '/nonexistent', HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
     assert.equal(r.status, 1);
     assert.equal(r.stdout, '');
-    assert.match(r.stderr, /^ERROR: The Deepgram CLI needs uv or Python 3\.10\+/);
+    assert.match(r.stderr, /^ERROR: The Deepgram CLI needs uv or Python 3\.10 to 3\.14/);
   });
 
-  test('passes arguments, env and exit code through a fake uv', () => {
+  test('passes arguments, env and exit code through, from a venv uv built from the requirements file', () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
-    fakeExe(bin, 'uv', '#!/bin/sh\necho "$DEEPCTL_LAUNCHER $*"\nexit 7\n');
-    const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') }, ['listen', 'a b.wav']);
-    assert.equal(r.status, 7);
-    const version = launcher.packageVersion(PKG_DIR);
-    assert.equal(r.stdout, `npm tool run --from deepctl==${version} deepctl listen a b.wav\n`);
+    const log = path.join(home, 'uv.log');
+    fakeUv(bin, '#!/bin/sh\necho "$DEEPCTL_LAUNCHER $*"\nexit 7\n', log);
+    const pkg = packageCopy();
+    const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') };
+    const r = runCopy(pkg, env, ['listen', 'a b.wav']);
+    assert.equal(r.status, 7, r.stderr);
+    assert.equal(r.stdout, 'npm listen a b.wav\n');
+    const calls = readLog(log);
+    assert.equal(calls.length, 2);
+    assert.match(calls[1], new RegExp(`^pip install --no-config --quiet --python \\S+/bin/python --require-hashes --no-deps -r ${pkg.requirementsFile} --only-binary :all:$`));
+    // The second run reuses the venv: uv is not called again.
+    assert.equal(runCopy(pkg, env, ['x']).stdout, 'npm x\n');
+    assert.equal(readLog(log).length, 2);
+  });
+
+  test('without its requirements file the package installs nothing and says how to fix it', () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    const log = path.join(home, 'uv.log');
+    fakeUv(bin, '#!/bin/sh\necho ran\n', log);
+    const pkg = packageCopy(null);
+    const r = runCopy(pkg, { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    assert.equal(r.stderr, `ERROR: This @deepgram/cli package is missing requirements-${pkg.version}.txt, so dg can't install the CLI safely.\nHINT: Reinstall it: npm install -g @deepgram/cli@${pkg.version}\n`);
+    assert.deepEqual(readLog(log), []);
+  });
+
+  test('a download that fails its hash check: exit 1, nothing runs, no venv left', () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    const log = path.join(home, 'uv.log');
+    const ran = path.join(home, 'ran');
+    fakeUv(bin, `#!/bin/sh\ntouch "${ran}"\n`, log, 1);
+    const pkg = packageCopy();
+    const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') };
+    const r = runCopy(pkg, env);
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    assert.match(r.stderr, /Hash mismatch/);
+    assert.match(r.stderr, new RegExp(`ERROR: Installing deepctl==${pkg.version.replace(/\./g, '\\.')} failed \\(exit 1\\)\\.\\nHINT: .*hash mismatch above means a download did not match this release`));
+    assert.equal(fs.existsSync(ran), false);
+    assert.deepEqual(fs.readdirSync(launcher.cacheRoots({ env, home })[0]), []);
   });
 
   test('a SIGINT sent only to the launcher reaches the child after the grace period', async () => {
@@ -974,6 +1170,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     // GitHub's ubuntu runners) wins and builds a real venv.
     const fakePython = [
       '#!/bin/sh',
+      '[ "$1" = -I ] && shift',
       'case "$1 $2" in',
       '  "-c "*) echo "(3, 12)"; exit 0;;',
       `  "-m venv") mkdir -p "$3/bin" && cp "${path.join(home, 'checker')}" "$3/bin/deepctl" && printf '#!/bin/sh\\nexit 0\\n' > "$3/bin/python" && chmod +x "$3/bin/deepctl" "$3/bin/python"; exit 0;;`,
@@ -986,7 +1183,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     }
     fs.writeFileSync(path.join(home, 'checker'), checker);
     const { spawn } = require('node:child_process');
-    const child = spawn(process.execPath, [BIN], {
+    const child = spawn(process.execPath, [packageCopy().bin], {
       env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_RUNNER: 'venv' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -1004,8 +1201,8 @@ describe('bin/dg.js end to end', posixOnly, () => {
   test('re-raises the signal the child died from', () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
-    fakeExe(bin, 'uv', '#!/bin/sh\nkill -TERM $$\n');
-    const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
+    fakeUv(bin, '#!/bin/sh\nkill -TERM $$\n', path.join(home, 'uv.log'));
+    const r = runCopy(packageCopy(), { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
     assert.equal(r.status, null);
     assert.equal(r.signal, 'SIGTERM');
     assert.doesNotMatch(r.stderr, /crashed/);
@@ -1014,18 +1211,18 @@ describe('bin/dg.js end to end', posixOnly, () => {
   test('names the signal when the child crashes', { skip: process.platform === 'win32' && 'POSIX signals' }, () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
-    fakeExe(bin, 'uv', '#!/bin/sh\nkill -SEGV $$\n');
-    const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
+    fakeUv(bin, '#!/bin/sh\nkill -SEGV $$\n', path.join(home, 'uv.log'));
+    const r = runCopy(packageCopy(), { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
     assert.equal(r.signal, 'SIGSEGV');
-    assert.match(r.stderr, /^ERROR: .*uv crashed \(SIGSEGV\)\./m);
+    assert.match(r.stderr, /^ERROR: .*\/bin\/deepctl crashed \(SIGSEGV\)\./m);
   });
 
   test('a venv build step killed by a signal says so', { skip: process.platform === 'win32' && 'POSIX signals' }, () => {
     const home = tmpdir();
     const bin = path.join(home, 'bin');
-    const fakePython = '#!/bin/sh\ncase "$1 $2" in\n  "-c "*) echo "(3, 12)"; exit 0;;\nesac\nkill -KILL $$\n';
+    const fakePython = '#!/bin/sh\n[ "$1" = -I ] && shift\ncase "$1 $2" in\n  "-c "*) echo "(3, 12)"; exit 0;;\nesac\nkill -KILL $$\n';
     for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) fakeExe(bin, name, fakePython);
-    const r = runBin({ PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_RUNNER: 'venv' });
+    const r = runCopy(packageCopy(), { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: path.join(home, 'c'), DEEPCTL_NPM_RUNNER: 'venv' });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /failed \(killed by SIGKILL\)/);
   });
@@ -1038,6 +1235,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
 // until the test signals the launcher.
 describe('a signal during first-run setup', posixOnly, () => {
   const version = launcher.packageVersion(PKG_DIR);
+  const pkg = packageCopy();
 
   // Dead, or a zombie nobody has reaped yet (PID 1 in a container).
   function gone(pid) {
@@ -1078,15 +1276,13 @@ describe('a signal during first-run setup', posixOnly, () => {
     // pip leaves build subprocesses, and records both pids.
     const fakePython = [
       '#!/bin/sh',
+      '[ "$1" = -I ] && shift',
       `hang() { sleep 300 & echo "$$ $!" > "${pidfile}.tmp"; mv "${pidfile}.tmp" "${pidfile}"; wait; exit 0; }`,
       'case "$1 $2" in',
       '  "-c "*) echo "(3, 12)"; exit 0;;',
       '  "-m venv") mkdir -p "$3/bin" && cp "$0" "$3/bin/python" && printf \'#!/bin/sh\\nexit 0\\n\' > "$3/bin/deepctl" && chmod +x "$3/bin/deepctl"',
       '    [ "$HANG_AT" = venv ] && hang; exit 0;;',
-      '  "-m pip") case "$*" in',
-      '      *" -U pip"*) [ "$HANG_AT" = pip-upgrade ] && hang;;',
-      '      *) [ "$HANG_AT" = pip-install ] && hang;;',
-      '    esac; exit 0;;',
+      '  "-m pip") [ "$HANG_AT" = pip-install ] && hang; exit 0;;',
       'esac',
       'exit 0',
       '',
@@ -1102,7 +1298,7 @@ describe('a signal during first-run setup', posixOnly, () => {
 
   function start(env) {
     const { spawn } = require('node:child_process');
-    const child = spawn(process.execPath, [BIN], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [pkg.bin], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (d) => (stderr += d));
     child.stdout.resume();
@@ -1110,7 +1306,7 @@ describe('a signal during first-run setup', posixOnly, () => {
     return { child, exited, stderr: () => stderr };
   }
 
-  for (const step of ['venv', 'pip-upgrade', 'pip-install']) {
+  for (const step of ['venv', 'pip-install']) {
     test(`SIGTERM while the ${step} step runs: no orphan, no lock, no partial venv, dies by SIGTERM`, async () => {
       const ws = workspace(step);
       const run = start(ws.env);

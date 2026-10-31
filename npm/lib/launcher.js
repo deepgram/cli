@@ -14,6 +14,10 @@ const { setTimeout: delay } = require('node:timers/promises');
 
 const PKG_DIR = path.resolve(__dirname, '..');
 const MIN_PYTHON = [3, 10];
+// Exclusive: the release's locked dependencies have no wheels for 3.15 yet,
+// and setup installs wheels only (--only-binary :all:).
+const MAX_PYTHON = [3, 15];
+const PYTHON_RANGE = `>=${MIN_PYTHON.join('.')},<${MAX_PYTHON.join('.')}`;
 const LOCK_WAIT_MS = 5 * 60 * 1000;
 const LOCK_STALE_MS = 10 * 60 * 1000;
 // No first-run install takes this long; past it a same-host lock is
@@ -196,6 +200,32 @@ function pypiSpec(env, version) {
   return env.DEEPCTL_NPM_PYPI_SPEC || `deepctl==${version}`;
 }
 
+// Every release ships requirements-<version>.txt next to package.json: the
+// exact deepctl distributions and dependencies of that release, each with
+// its sha256 hashes. Setup installs only from it, with --require-hashes and
+// --no-deps, so a download that differs by a byte from what was released
+// is refused and nothing outside the list is installed. Returns {file},
+// or null for a DEEPCTL_NPM_PYPI_SPEC override (CI runs against a deepctl
+// other than the packaged one): there is nothing to hash that against.
+function lockedRequirements(env, version, opts = {}) {
+  if (env.DEEPCTL_NPM_PYPI_SPEC) return null;
+  const file = opts.requirementsFile || path.join(opts.pkgDir || PKG_DIR, `requirements-${version}.txt`);
+  const isFile = opts.isRequirementsFile || ((f) => {
+    try {
+      return fs.statSync(f).isFile();
+    } catch {
+      return false;
+    }
+  });
+  if (!isFile(file)) {
+    throw new LauncherError(
+      `This @deepgram/cli package is missing ${path.basename(file)}, so dg can't install the CLI safely.`,
+      `Reinstall it: npm install -g @deepgram/cli@${version}`,
+    );
+  }
+  return { file };
+}
+
 // Venvs are keyed by version. An overridden spec gets its own directory so
 // a CI run against a different deepctl never poisons the real cache entry.
 function venvKey(env, version) {
@@ -321,13 +351,13 @@ function pythonCandidates(opts = {}) {
         candidates.push({ command: f, args: [] });
         continue;
       }
-      for (const minor of [13, 12, 11, 10]) candidates.push({ command: f, args: [`-3.${minor}`] });
-      // Newer than 3.13, or a launcher configured with only a default.
+      for (const minor of [14, 13, 12, 11, 10]) candidates.push({ command: f, args: [`-3.${minor}`] });
+      // A launcher configured with only a default.
       candidates.push({ command: f, args: ['-3'] });
     }
     return candidates;
   }
-  for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) {
+  for (const name of ['python3.14', 'python3.13', 'python3.12', 'python3.11', 'python3.10', 'python3']) {
     for (const exe of whichAll(name, opts)) {
       // Running Apple's stub pops the "install command line developer
       // tools" dialog instead of failing quietly.
@@ -369,10 +399,13 @@ async function execProbe(command, args, session) {
 }
 
 async function probePython(candidate, exec = execProbe) {
-  const result = await exec(candidate.command, [...candidate.args, '-c', PROBE_CODE]);
+  // -I: the current directory (an arbitrary project) must not shadow the
+  // venv or ensurepip modules the probe imports.
+  const result = await exec(candidate.command, [...candidate.args, '-I', '-c', PROBE_CODE]);
   const version = parseProbeOutput(result.stdout);
   if (!version) return { version: null, ok: false };
-  return { version, ok: result.status === 0 && versionAtLeast(version, MIN_PYTHON), hasVenv: result.status === 0 };
+  const supported = versionAtLeast(version, MIN_PYTHON) && !versionAtLeast(version, MAX_PYTHON);
+  return { version, ok: result.status === 0 && supported, hasVenv: result.status === 0 };
 }
 
 // Returns the first usable Python plus what was seen on the way, so the
@@ -822,12 +855,12 @@ function releaseLock(lockDir, owner) {
 
 const CRASH_SIGNALS = new Set(['SIGSEGV', 'SIGBUS', 'SIGILL', 'SIGFPE', 'SIGABRT']);
 
-async function runStep(command, args, what, hint, opts = {}) {
+async function runStep(command, args, what, hint, opts = {}, cwd = undefined) {
   const session = opts.session;
   throwIfInterrupted(session);
   // stdout goes to stderr: `dg -o json` and `dg mcp` own stdout. A process
   // group of its own (POSIX) lets an interrupt take down pip's children too.
-  const options = { stdio: ['ignore', 2, 2], windowsHide: true, detached: !isWindows(process.platform) };
+  const options = { stdio: ['ignore', 2, 2], windowsHide: true, detached: !isWindows(process.platform), cwd };
   const result = await superviseChild(command, args, options, session, opts.spawn);
   throwIfInterrupted(session);
   if (result.error) throw new LauncherError(`${what} failed: ${result.error.message}.`, hint);
@@ -838,7 +871,9 @@ async function runStep(command, args, what, hint, opts = {}) {
 }
 
 const VENV_HINT = 'On Debian or Ubuntu, install python3-venv (sudo apt install python3-venv), or install uv instead.';
+const UV_VENV_HINT = `uv could not create a Python ${PYTHON_RANGE} environment; see its message above. If no such Python is installed: uv python install 3.12`;
 const NETWORK_HINT = 'Check your network connection and that PyPI is reachable, then run dg again.';
+const INSTALL_HINT = `Check that PyPI (or your package index) is reachable, then run dg again. A hash mismatch above means a download did not match this release, so nothing was installed. "No matching distribution" or "no wheels" means this platform or Python has no prebuilt package for one of the CLI's dependencies (see "Known limitations" in the npm package README); use Python 3.10 to 3.14, or install the CLI another way.`;
 
 // Removes other versions' venvs, but only ones nobody has used for a long
 // time: a dg pinned to an older npm version (npx @deepgram/cli@0.4.0, a
@@ -874,7 +909,7 @@ function pruneSiblings(root, keep, now = Date.now()) {
 // Builds a venv for this run only, in a directory created fresh with an
 // unpredictable name, so nothing another process prepared can be picked up.
 // The caller deletes it once deepctl exits.
-async function buildPrivateVenv({ python, key, spec, version, opts = {} }) {
+async function buildPrivateVenv({ installer, key, spec, locked, version, opts = {} }) {
   const stderr = opts.stderr || fdStderr;
   const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;
   const base = cacheRootSpecs(opts)[0].dir;
@@ -887,9 +922,10 @@ async function buildPrivateVenv({ python, key, spec, version, opts = {} }) {
     throw new LauncherError(`No writable directory for the Deepgram CLI: ${err.message}`, 'Install uv instead: it needs no setup on each run.');
   }
   const layout = venvLayout(dir, opts.platform);
-  stderr.write(`Setting up Deepgram CLI ${version} for this run (~1 min each time; install uv to skip it: ${UV_INSTALL_WINDOWS})...\n`);
+  if (installer.uv) stderr.write(`Setting up Deepgram CLI ${version} for this run...\n`);
+  else stderr.write(`Setting up Deepgram CLI ${version} for this run (~1 min each time; install uv to speed it up: ${UV_INSTALL_WINDOWS})...\n`);
   try {
-    await installInto(python, layout, spec, opts);
+    await installInto(installer, layout, spec, locked, opts, { cwd: dir });
   } catch (err) {
     fs.rmSync(dir, { recursive: true, force: true });
     throw err;
@@ -925,18 +961,72 @@ function pruneOneRunVenvs(base, p = path, now = Date.now()) {
   }
 }
 
-async function installInto(python, layout, spec, opts) {
-  const pip = [layout.python, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '-q'];
-  await runStep(python.command, [...python.args, '-m', 'venv', layout.dir], 'Creating the Python venv', VENV_HINT, opts);
-  await runStep(pip[0], [...pip.slice(1), '-U', 'pip'], 'Upgrading pip', NETWORK_HINT, opts);
-  await runStep(pip[0], [...pip.slice(1), spec], `Installing ${spec}`, NETWORK_HINT, opts);
+// uv's own configuration files, without its project discovery: --no-config
+// stops uv reading uv.toml or pyproject.toml from the directory it runs in
+// and its parents (a cloned repository, or a /tmp anyone can write to), and
+// this passes the user's or the machine's uv.toml back explicitly, so a
+// mirror configured there still applies. UV_CONFIG_FILE, when set, is read
+// by uv itself.
+function uvConfigArgs(env, opts = {}) {
+  if (env.UV_CONFIG_FILE) return [];
+  const platform = opts.platform || process.platform;
+  const p = isWindows(platform) ? path.win32 : path.posix;
+  const exists = opts.configExists || fs.existsSync;
+  const home = opts.home || os.homedir();
+  const candidates = [];
+  if (isWindows(platform)) {
+    if (env.APPDATA && p.isAbsolute(env.APPDATA)) candidates.push(p.join(env.APPDATA, 'uv', 'uv.toml'));
+    if (env.PROGRAMDATA && p.isAbsolute(env.PROGRAMDATA)) candidates.push(p.join(env.PROGRAMDATA, 'uv', 'uv.toml'));
+  } else {
+    const xdg = env.XDG_CONFIG_HOME && p.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : p.join(home, '.config');
+    candidates.push(p.join(xdg, 'uv', 'uv.toml'));
+    for (const dir of (env.XDG_CONFIG_DIRS || '/etc/xdg').split(':').filter((d) => p.isAbsolute(d))) candidates.push(p.join(dir, 'uv', 'uv.toml'));
+    candidates.push('/etc/uv/uv.toml');
+  }
+  const found = candidates.find((f) => exists(f));
+  return found ? ['--config-file', found] : [];
+}
+
+// Creates the venv with uv or with Python's own venv module, then installs
+// into it. With a requirements file (every release), pip or uv installs
+// exactly what it lists and checks every download against its hashes;
+// --no-deps keeps anything unlisted out. --only-binary :all: means no
+// source build, whose build backend would be an unhashed download that
+// runs code. The venv's bundled pip is used as is: upgrading it would be
+// an unhashed download of its own.
+//
+// Nothing a project can ship applies: every step runs in `where.cwd` (a
+// directory the launcher created, never the user's); uv ignores uv.toml and
+// pyproject.toml found there (--no-config) but reads the user's or the
+// machine's uv.toml (uvConfigArgs) and UV_* variables; Python runs with -I,
+// so no module in the cwd can shadow venv or pip. pip has no per-project
+// configuration: its user and global pip.conf, PIP_CONFIG_FILE and PIP_*
+// variables apply as usual.
+async function installInto(installer, layout, spec, locked, opts, where = {}) {
+  const env = opts.env || process.env;
+  const source = [...(locked ? ['--require-hashes', '--no-deps', '-r', locked.file] : [spec]), '--only-binary', ':all:'];
+  const what = `Installing ${spec}`;
+  const hint = locked ? INSTALL_HINT : NETWORK_HINT;
+  if (installer.uv) {
+    const cache = where.privateCache ? ['--cache-dir', where.privateCache] : [];
+    const config = uvConfigArgs(env, opts);
+    const uv = (sub) => [...sub, '--no-config', ...config, '--quiet', ...cache];
+    await runStep(installer.uv, [...uv(['venv']), '--allow-existing', '--python', PYTHON_RANGE, layout.dir], 'Creating the Python venv', UV_VENV_HINT, opts, where.cwd);
+    await runStep(installer.uv, [...uv(['pip', 'install']), '--python', layout.python, ...source], what, hint, opts, where.cwd);
+    return;
+  }
+  const { python } = installer;
+  await runStep(python.command, [...python.args, '-I', '-m', 'venv', layout.dir], 'Creating the Python venv', VENV_HINT, opts, where.cwd);
+  const noCache = where.privateCache ? ['--no-cache-dir'] : [];
+  const pip = [layout.python, '-I', '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '-q', ...noCache, ...source];
+  await runStep(pip[0], pip.slice(1), what, hint, opts, where.cwd);
 }
 
 // The lock is released in `finally`, not from process.on('exit'): that hook
 // never runs when the process dies from a signal. run() turns signals into
 // an Interrupted error instead, so this unwinds normally.
-async function buildVenv({ python, key, spec, version, opts = {} }) {
-  if (!cacheReuse(opts)) return buildPrivateVenv({ python, key, spec, version, opts });
+async function buildVenv({ installer, key, spec, locked, version, opts = {} }) {
+  if (!cacheReuse(opts)) return buildPrivateVenv({ installer, key, spec, locked, version, opts });
   const stderr = opts.stderr || fdStderr;
   const prepare = opts.prepareRoot || ((spec) => prepareRoot(spec, opts));
   const rootSpec = cacheRootSpecs(opts).find(prepare);
@@ -955,9 +1045,9 @@ async function buildVenv({ python, key, spec, version, opts = {} }) {
     if (venvUsable(layout)) return layout;
     // Half-built, or broken by a removed base interpreter: start over.
     fs.rmSync(layout.dir, { recursive: true, force: true });
-    stderr.write(`Setting up Deepgram CLI ${version} (one-time, ~1 min)...\n`);
+    stderr.write(`Setting up Deepgram CLI ${version} (one-time${installer.uv ? '' : ', ~1 min'})...\n`);
     try {
-      await installInto(python, layout, spec, opts);
+      await installInto(installer, layout, spec, locked, opts, { cwd: root });
       fs.writeFileSync(layout.marker, `${spec}\n`);
     } catch (err) {
       fs.rmSync(layout.dir, { recursive: true, force: true });
@@ -1001,26 +1091,33 @@ function exitAction(code, signal, platform = process.platform) {
 // --- Plan -----------------------------------------------------------------
 
 function installHelp(seen) {
-  const lines = ['', 'The Deepgram CLI needs uv or Python 3.10+ (with venv) to run. Fix one of:', ''];
+  const tooNew = seen.find((s) => s.version && versionAtLeast(s.version, MAX_PYTHON));
+  if (tooNew && !seen.some((s) => s.ok)) {
+    return new LauncherError(
+      `Python ${tooNew.version.join('.')} is too new for this release of the Deepgram CLI, and no Python 3.10 to 3.14 was found.`,
+      'Install Python 3.12, or uv (which brings its own Python), then run dg again.',
+    );
+  }
+  const lines = ['', 'The Deepgram CLI needs uv or Python 3.10 to 3.14 (with venv) to run. Fix one of:', ''];
   lines.push('  1. Install uv (recommended), then run dg again:');
   lines.push('       curl -LsSf https://astral.sh/uv/install.sh | sh');
   lines.push(`       ${UV_INSTALL_WINDOWS}   (Windows)`);
   lines.push('     On Windows, the launcher only runs real uv.exe / python.exe files: pyenv-win\'s');
   lines.push('     python.bat shims and uv.cmd are skipped, since a .bat or .cmd needs a shell');
   lines.push('     that would re-parse your arguments.');
-  const noVenv = seen.find((s) => s.version && versionAtLeast(s.version, MIN_PYTHON) && !s.hasVenv);
+  const noVenv = seen.find((s) => s.version && versionAtLeast(s.version, MIN_PYTHON) && !versionAtLeast(s.version, MAX_PYTHON) && !s.hasVenv);
   if (noVenv) {
     lines.push(`  2. Python ${noVenv.version.join('.')} was found without venv/ensurepip. Install it:`);
     lines.push('       sudo apt install python3-venv   (Debian/Ubuntu)');
   } else {
     const old = seen.find((s) => s.version && !versionAtLeast(s.version, MIN_PYTHON));
     const found = old ? ` (found ${old.version.join('.')})` : '';
-    lines.push(`  2. Install Python 3.10 or newer${found}.`);
+    lines.push(`  2. Install Python 3.10 to 3.14${found}.`);
   }
   lines.push('  3. Or install the CLI directly:');
   lines.push('       curl -fsSL https://deepgram.com/install.sh | sh');
   lines.push('       brew install deepgram/tap/deepgram');
-  return `${lines.join('\n')}\n`;
+  return new LauncherError(`${lines.join('\n')}\n`);
 }
 
 // Decides how to run deepctl. Resolves to {command, args, strategy}, plus
@@ -1049,18 +1146,26 @@ async function resolveRunner(argv, opts = {}) {
     }
   }
 
-  if (!forced || forced === 'uvx') {
-    const uv = findUv(opts);
-    if (uv) return { command: uv, args: ['tool', 'run', '--from', spec, 'deepctl', ...argv], strategy: 'uvx' };
-    if (forced) throw new LauncherError('DEEPCTL_NPM_RUNNER=uvx, but uv was not found.');
+  const uv = !forced || forced === 'uvx' ? findUv(opts) : null;
+  if (forced === 'uvx' && !uv) throw new LauncherError('DEEPCTL_NPM_RUNNER=uvx, but uv was not found.');
+  const locked = lockedRequirements(env, version, opts);
+  const venvRunner = (layout, strategy) => {
+    const runner = { command: layout.deepctl, args: argv, strategy };
+    if (layout.ephemeral) runner.cleanup = layout.dir;
+    return runner;
+  };
+
+  if (uv) {
+    // `uv tool run --with-requirements` does not check hashes, so with a
+    // requirements file uv builds a venv like the Python fallback does
+    // (in seconds, from uv's cache), through `uv pip install`, which does.
+    if (!locked) return { command: uv, args: ['tool', 'run', '--no-config', '--from', spec, 'deepctl', ...argv], strategy: 'uvx' };
+    return venvRunner(await buildVenv({ installer: { uv }, key, spec, locked, version, opts }), 'uvx');
   }
 
   const { python, seen } = await findPython(opts);
-  if (!python) throw new LauncherError(installHelp(seen));
-  const layout = await buildVenv({ python, key, spec, version, opts });
-  const runner = { command: layout.deepctl, args: argv, strategy: 'venv' };
-  if (layout.ephemeral) runner.cleanup = layout.dir;
-  return runner;
+  if (!python) throw installHelp(seen);
+  return venvRunner(await buildVenv({ installer: { python }, key, spec, locked, version, opts }), 'venv');
 }
 
 async function run(argv = process.argv.slice(2), opts = {}) {
@@ -1203,10 +1308,12 @@ module.exports = {
   readOwner,
   writeOwner,
   mentionsDir,
+  uvConfigArgs,
   findPython,
   findUv,
   installHelp,
   lockIsStale,
+  lockedRequirements,
   packageVersion,
   parseProbeOutput,
   probePython,
