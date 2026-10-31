@@ -106,3 +106,25 @@ class TestSetDefaultValidation:
 
         with pytest.raises(TransportError):
             self._run("server_error")
+
+
+def test_create_without_an_id_says_how_to_find_it(monkeypatch):
+    monkeypatch.setattr("deepctl_core.transport.prog", lambda: "dg")
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "deepctl_cmd_projects.command.print_warning",
+        lambda text, **kwargs: warnings.append(text),
+    )
+    client = Mock(spec=DeepgramClient)
+    client.create_project.return_value = {"name": "Acme"}
+    result = ProjectsCommand().handle(
+        config=Mock(spec=Config),
+        auth_manager=Mock(spec=AuthManager),
+        client=client,
+        create="Acme",
+    )
+    assert result.status == "warning"
+    assert warnings == [
+        "Deepgram created the project but didn't return its ID. Run dg projects "
+        "--list to find it."
+    ]
