@@ -1531,12 +1531,10 @@ class ProfilesCommand(BaseCommand):
 
             # Try to get API key from keyring to verify access
             try:
-                import keyring
-                from deepctl_core.auth import KEYRING_SERVICE
+                from deepctl_core import credentials
 
-                api_key = keyring.get_password(
-                    KEYRING_SERVICE, f"api-key.{switch_profile}"
-                )
+                # Bounded off a terminal (2 s); no answer counts as no entry.
+                api_key = credentials.keyring_get(f"api-key.{switch_profile}")
 
                 if not api_key:
                     # Check if API key is in config instead
@@ -1625,48 +1623,23 @@ class WhoamiCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle whoami command."""
-        import os
-
-        import keyring as _keyring
-        from deepctl_core.auth import KEYRING_SERVICE
-
         if kwargs.get("profile"):
             config.profile = kwargs["profile"]
 
         profile_name = config.profile or "default"
         profile_cfg = config.get_profile(profile_name)
 
-        # Determine key and its exact storage source. Expired finite profile
-        # credentials must not mask a valid environment variable.
-        api_key: str | None = None
-        key_source = "not set"
-        env_key = os.environ.get("DEEPGRAM_API_KEY")
-        has_profile_key, _ = auth_manager.has_profile_credentials(profile_name)
-
-        if has_profile_key:
-            try:
-                api_key = _keyring.get_password(
-                    KEYRING_SERVICE, f"api-key.{profile_name}"
-                )
-                if api_key:
-                    key_source = "system keyring"
-            except Exception:
-                pass
-
-        if has_profile_key and not api_key and profile_cfg.api_key:
-            # Config merges DEEPGRAM_API_KEY into the profile at load time
-            # (environment overrides the file), so a profile key equal to the
-            # environment value came from the environment, not the config
-            # file — label it accordingly instead of claiming "config file".
-            api_key = profile_cfg.api_key
-            if env_key and profile_cfg.api_key == env_key:
-                key_source = "DEEPGRAM_API_KEY (env)"
-            else:
-                key_source = "config file"
-
-        if not api_key and env_key:
-            api_key = env_key
-            key_source = "DEEPGRAM_API_KEY (env)"
+        # The key and its exact storage source, from the one resolver (its
+        # key_source uses these same words): one bounded keyring read, and an
+        # expired finite profile credential doesn't mask the environment's.
+        # Like before, --api-key isn't a storage source here. Read-only, as in
+        # 0.4.2: an expired credential's keyring entry stays (prune=False).
+        resolved = auth_manager.resolve(
+            profile=profile_name, use_flags=False, prune=False
+        )
+        api_key = resolved.api_key
+        key_source = resolved.key_source
+        has_profile_key = resolved.profile_has_key
 
         authenticated = auth_manager.is_authenticated()
         masked: str | None = None

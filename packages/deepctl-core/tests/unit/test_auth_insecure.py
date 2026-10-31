@@ -25,7 +25,8 @@ def _isolated(monkeypatch):
 
 def client_kwargs(config) -> dict:
     with patch.object(auth_module.httpx, "Client") as client:
-        AuthManager(config)
+        # The client is built on first use (login's device flow and verify).
+        _ = AuthManager(config).client
     return dict(client.call_args.kwargs)
 
 

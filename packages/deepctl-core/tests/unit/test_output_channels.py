@@ -218,7 +218,8 @@ class TestCredentialSourceDiagnostics:
         payload = json.loads(captured.out)
         assert payload["status"] == "success"
         assert "Using credentials from" in captured.err
-        assert "No project ID specified" in captured.err
+        # Only commands that need a project say it's missing.
+        assert "No project ID specified" not in captured.err
         assert "Using credentials from" not in captured.out
 
     def test_project_id_line_also_goes_to_stderr(self, capsys) -> None:

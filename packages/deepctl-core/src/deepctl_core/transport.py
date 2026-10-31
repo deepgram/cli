@@ -28,6 +28,8 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Any
 
+from . import credentials
+
 if TYPE_CHECKING:
     import httpx
 
@@ -95,6 +97,25 @@ def _set_client(client: httpx.Client | None) -> None:
 # ── Catalogue text (error_codes.json "strings") ──────────────────────
 
 STRINGS: dict[str, str] = {
+    # The 0.4.x error text, frozen: scripts match on it (legacy_error_text_frozen).
+    "E-AUTH-REQUIRED": "DEEPGRAM_API_KEY is not set",
+    "H-AUTH-REQUIRED": "Run {prog} login, or set DEEPGRAM_API_KEY.",
+    "A-AUTH-REQUIRED": (
+        "Run {prog} login and give the user the verification link and code it "
+        "prints. Never ask the user for an API key in a chat, and don't search "
+        "files for one."
+    ),
+    "C-AUTH-REQUIRED": (
+        "Set DEEPGRAM_API_KEY in this job's environment, or run {prog} login."
+    ),
+    # 0.4.1's messages.E_KEY_UNTRUSTED and W_CFG_UNTRUSTED_FILE_HINT, verbatim.
+    "E-KEY-UNTRUSTED": (
+        "dg didn't use the API key in {user_config} (see the warning above), and no "
+        "other API key is set."
+    ),
+    "W_CFG_UNTRUSTED_FILE_HINT": (
+        "A person must fix this file. If you are an AI agent, ask the user."
+    ),
     "E-AUTH-INVALID": "Deepgram rejected the API key (HTTP 401).",
     "H-AUTH-INVALID": (
         "The API key may have expired or been revoked. Run {prog} login to log "
@@ -193,6 +214,12 @@ STRINGS: dict[str, str] = {
 # code -> (error message ID, human hint, agent hint, automation hint or None)
 Messages = tuple[str, str, str, "str | None"]
 CODES: dict[str, Messages] = {
+    "auth_required": (
+        "E-AUTH-REQUIRED",
+        "H-AUTH-REQUIRED",
+        "A-AUTH-REQUIRED",
+        "C-AUTH-REQUIRED",
+    ),
     "auth_invalid": (
         "E-AUTH-INVALID",
         "H-AUTH-INVALID",
@@ -228,6 +255,16 @@ NETWORK_UNREADABLE: Messages = (
     None,
 )
 
+# auth_required's other message: the only key was in a user config file this
+# AI agent session doesn't trust. next_step is null: a person
+# has to fix the file.
+KEY_UNTRUSTED: Messages = (
+    "E-KEY-UNTRUSTED",
+    "W_CFG_UNTRUSTED_FILE_HINT",
+    "W_CFG_UNTRUSTED_FILE_HINT",
+    None,
+)
+
 # Network failure reasons for E-NETWORK's {reason}.
 REASON_DNS = "name resolution failed"
 REASON_REFUSED = "connection refused"
@@ -239,10 +276,10 @@ REASON_UNREADABLE = "unreadable response"
 REASON_PROXY = "the proxy refused the connection"
 REASON_OTHER = "connection failed"
 
-KEY_SOURCE_ENV = "DEEPGRAM_API_KEY (env)"
-KEY_SOURCE_FLAG = "--api-key"
-KEY_SOURCE_KEYRING = "system keyring"
-KEY_SOURCE_FILE = "config file"
+KEY_SOURCE_ENV = credentials.KEY_SOURCE_ENV
+KEY_SOURCE_FLAG = credentials.KEY_SOURCE_FLAG
+KEY_SOURCE_KEYRING = credentials.KEY_SOURCE_KEYRING
+KEY_SOURCE_FILE = credentials.KEY_SOURCE_FILE
 
 
 class TransportError(BaseException):
@@ -517,33 +554,17 @@ def prog() -> str | None:
 
 
 def _key_source(auth_manager: AuthManager | None) -> str | None:
+    """Where the key that was sent came from: the resolver's answer, so the
+    error path reads the keyring no second time."""
     if auth_manager is None:
         return None
     if auth_manager.explicit_api_key:
         return KEY_SOURCE_FLAG
     try:
-        key = auth_manager.get_api_key()
+        source = auth_manager.resolve().key_source
     except Exception:
         return None
-    if not key:
-        return None
-    # The order `dg whoami` uses: keyring, then the config file (a profile key
-    # equal to the env value came from the env), then the env.
-    import keyring
-
-    from .auth import KEYRING_SERVICE
-
-    env_key = os.environ.get("DEEPGRAM_API_KEY")
-    profile = auth_manager.config.profile or "default"
-    try:
-        stored = keyring.get_password(KEYRING_SERVICE, f"api-key.{profile}")
-    except Exception:
-        stored = None
-    if stored and stored == key:
-        return KEY_SOURCE_KEYRING
-    # Config merges the env key into the profile, so a file key equal to the
-    # env value came from the env.
-    return KEY_SOURCE_ENV if env_key == key else KEY_SOURCE_FILE
+    return None if source == credentials.KEY_SOURCE_NONE else source
 
 
 def render(
@@ -564,7 +585,12 @@ def render(
 
     next_step: str | None = None
     hint_id = human if not agentic else (automation or agent) if soft_only else agent
-    if err.code == "auth_invalid":
+    if err.code == "auth_required":
+        # Nobody can approve a device code under soft-only signals (CI, cron),
+        # and a person has to fix an untrusted file.
+        if not soft_only and program and err.messages[0] == "E-AUTH-REQUIRED":
+            next_step = f"{program} login"
+    elif err.code == "auth_invalid":
         source = _key_source(auth_manager)
         if source:
             details["key_source"] = source
