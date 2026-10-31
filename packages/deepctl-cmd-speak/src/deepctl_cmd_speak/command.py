@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import wave
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
@@ -24,12 +26,19 @@ from deepctl_core import (
     get_output_format,
     get_status_console,
 )
-from deepctl_core.output import print_warning
+from deepctl_core.output import (
+    _agentic,
+    is_ai_agent,
+    print_error,
+    print_hint,
+    print_warning,
+)
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from .models import SpeakResult, SpeakVoicesResult, VoiceInfo
+from . import messages as msg
+from .models import SpeakCodedError, SpeakResult, SpeakVoicesResult, VoiceInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -224,6 +233,107 @@ def _play_audio(player: str, audio: bytes, *, suffix: str) -> None:
 
     with _player_stdin(player) as sink, suppress(BrokenPipeError):
         sink.write(audio)
+
+
+def _prog() -> str:
+    """The program name to show in messages and ``next_step``.
+
+    The bare name when it resolves on PATH to the running executable;
+    otherwise ``dg``.
+    """
+    try:
+        argv0 = sys.argv[0]
+        name = os.path.basename(argv0)
+        if name in ("dg", "deepgram", "deepctl"):
+            found = shutil.which(name)
+            if found and os.path.realpath(found) == os.path.realpath(argv0):
+                return name
+    except Exception:
+        pass
+    return "dg"
+
+
+def _silence_stdout() -> None:
+    """Point fd 1 at the null device, so buffered output and later writes,
+    including the flush at exit, succeed quietly. Used once the reader of
+    stdout went away (EPIPE) or stdout can't be written (ENOSPC, EIO)."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        os.close(devnull)
+    except OSError:
+        pass
+
+
+def _os_error_text(exc: OSError) -> str:
+    """The OS error text for a message: printable, one line, bounded."""
+    text = exc.strerror or str(exc) or exc.__class__.__name__
+    return "".join(ch if ch.isprintable() else " " for ch in text).strip()[:200]
+
+
+#: Longest wait for an audio stream to close: a WebSocket closing handshake
+#: the server doesn't answer (Ctrl-C mid-stream) must not hold up the exit.
+_CLOSE_TIMEOUT_S = 2.0
+
+
+def _close(*streams: object, timeout: float = _CLOSE_TIMEOUT_S) -> None:
+    """Close audio iterators (and the responses behind them), quietly and in
+    order, and wait at most ``timeout`` seconds for all of them together."""
+    closes = [c for c in (getattr(s, "close", None) for s in streams) if c]
+    if not closes:
+        return
+
+    def run() -> None:
+        for close in closes:
+            with suppress(BaseException):
+                close()
+
+    closer = threading.Thread(target=run, name="deepctl-speak-close", daemon=True)
+    closer.start()
+    closer.join(timeout)
+
+
+def _coded(
+    text: str,
+    *,
+    code: str,
+    hint_human: str,
+    hint_agent: str,
+    next_step: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> SpeakCodedError:
+    """Report a coded failure on stderr (two lines) and return its envelope."""
+    hint = hint_agent if (_agentic or is_ai_agent()) else hint_human
+    print_error(escape(text))
+    print_hint(escape(hint))
+    return SpeakCodedError(
+        error=text, code=code, hint=hint, next_step=next_step, details=details
+    )
+
+
+def _output_unwritable(exc: OSError, *, path: str) -> SpeakCodedError:
+    """``output_unwritable`` for a failed write to ``path`` (``-`` = stdout)."""
+    reason = _os_error_text(exc)
+    return _coded(
+        msg.E_OUTPUT_UNWRITABLE.format(
+            output="stdout" if path == "-" else path, reason=reason
+        ),
+        code=msg.CODE_OUTPUT_UNWRITABLE,
+        hint_human=msg.H_OUTPUT_UNWRITABLE,
+        hint_agent=msg.A_OUTPUT_UNWRITABLE.format(prog=_prog(), reason=reason),
+        details={"path": path, "reason": reason},
+    )
+
+
+def _stdout_unwritable(exc: OSError) -> SpeakCodedError:
+    """stdout failed (not EPIPE): silence fd 1 first, so the envelope goes
+    to stderr only and the flush at exit can't fail again."""
+    _silence_stdout()
+    return _output_unwritable(exc, path="-")
+
+
+class _NoAudio(Exception):
+    """The stream ended without a single audio byte."""
 
 
 def _fail(message: str) -> BaseResult:
@@ -512,7 +622,7 @@ class SpeakCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult | None:
+    ) -> BaseResult | SpeakCodedError | None:
         text = kwargs.get("text")
         output_path = kwargs.get("output")
         model = kwargs.get("model") or _DEFAULT_MODEL
@@ -675,9 +785,12 @@ class SpeakCommand(BaseCommand):
                             except BrokenPipeError:
                                 # The player exited first (ffplay's "q", for
                                 # instance). That is the user stopping
-                                # playback, not a failure — but keep draining
-                                # the stream so a -o file is still complete.
+                                # playback, not a failure. With -o, keep
+                                # draining so the file is still complete;
+                                # otherwise stop and close the stream.
                                 player_gone = True
+                                if not output_path:
+                                    break
 
                         if output_path and pcm:
                             # Save before waiting on the player (that wait
@@ -694,6 +807,8 @@ class SpeakCommand(BaseCommand):
                     raise
                 except Exception as e:
                     raise click.ClickException(f"Flux streaming failed: {e}")
+                finally:
+                    _close(stream)
 
                 if prog.total == 0:
                     raise click.ClickException(
@@ -786,26 +901,22 @@ class SpeakCommand(BaseCommand):
             # "streaming by default"). For linear16 we emit a streaming WAV
             # header before the first frame so `| ffplay -` plays with no
             # extra flags; raw mulaw/alaw stream as-is.
-            out = sys.stdout.buffer
-            wrote_header = False
+            header = (
+                _streaming_wav_header(sample_rate=int(eff_sample_rate))
+                if eff_encoding == "linear16"
+                else b""
+            )
             try:
-                for chunk in stream:
-                    if not chunk:
-                        continue
-                    # stdout now carries audio: a later failure is reported
-                    # on stderr only, never as JSON after the audio.
-                    self.stdout_is_protocol = True
-                    if eff_encoding == "linear16" and not wrote_header:
-                        out.write(
-                            _streaming_wav_header(sample_rate=int(eff_sample_rate))
-                        )
-                        wrote_header = True
-                    out.write(chunk)
-                    out.flush()
+                _, outcome = self._stream_to_stdout(stream, header=header)
             except click.ClickException:
                 raise
             except Exception as e:
                 raise click.ClickException(f"Flux streaming failed: {e}")
+            finally:
+                _close(stream)
+            if outcome is not True:
+                # The reader went away (quiet, exit 0) or stdout failed.
+                return outcome or None
 
             if prog.total == 0:
                 # Guard before anything is written: the header is only emitted
@@ -826,9 +937,10 @@ class SpeakCommand(BaseCommand):
             return None
 
         # REST path (Speak v1, including Aura and unknown-model pass-through).
+        # Each chunk goes on as the SDK yields it: to stdout (flushed), or to
+        # a stdin-reading player, so neither waits for the whole utterance.
+        console.print(f"[blue]Generating speech with {model}...[/blue]")
         try:
-            console.print(f"[blue]Generating speech with {model}...[/blue]")
-
             audio_iter = client.speak_text(
                 text=text,
                 model=model,
@@ -836,51 +948,26 @@ class SpeakCommand(BaseCommand):
                 container=container,
                 sample_rate=sample_rate,
             )
+        except Exception as e:
+            raise click.ClickException(f"Error generating speech: {e}")
 
-            total_bytes = 0
-
+        try:
+            if player in _STDIN_PLAYER_ARGV:
+                return self._v1_play_streaming(
+                    audio_iter, player=player, output_path=output_path, model=model
+                )
             if player:
-                # Playback needs the full utterance, so buffer it. When -o is
-                # also given, save the same bytes to the file too.
-                audio = bytearray()
-                for chunk in audio_iter:
-                    audio.extend(chunk)
-                audio_bytes = bytes(audio)
-                total_bytes = len(audio_bytes)
-
-                if not audio_bytes:
-                    return _fail("TTS returned no audio.")
-
-                if output_path:
-                    Path(output_path).write_bytes(audio_bytes)
-                    console.print(
-                        f"[green]Audio saved to {output_path}[/green] "
-                        f"({total_bytes:,} bytes)"
-                    )
-
-                suffix = _play_suffix(
-                    is_flux=False, encoding=encoding, container=container
-                )
-                console.print(f"[blue]Playing audio ({player})...[/blue]")
-                _play_audio(player, audio_bytes, suffix=suffix)
-
-                message = (
-                    f"Audio saved to {output_path}"
-                    if output_path
-                    else f"Played {total_bytes:,} bytes"
-                )
-                return SpeakResult(
-                    status="success",
-                    message=message,
-                    output_path=output_path or "",
+                return self._v1_play_buffered(
+                    audio_iter,
+                    player=player,
+                    output_path=output_path,
                     model=model,
-                    bytes_written=total_bytes,
-                    played=True,
+                    encoding=encoding,
+                    container=container,
                 )
-            elif output_path:
-                # Write to file
-                out = Path(output_path)
-                with open(out, "wb") as f:
+            if output_path:
+                total_bytes = 0
+                with open(Path(output_path), "wb") as f:
                     for chunk in audio_iter:
                         f.write(chunk)
                         total_bytes += len(chunk)
@@ -888,7 +975,6 @@ class SpeakCommand(BaseCommand):
                 console.print(
                     f"[green]Audio saved to {output_path}[/green] ({total_bytes:,} bytes)"
                 )
-
                 return SpeakResult(
                     status="success",
                     message=f"Audio saved to {output_path}",
@@ -896,23 +982,17 @@ class SpeakCommand(BaseCommand):
                     model=model,
                     bytes_written=total_bytes,
                 )
-            else:
-                # Write to stdout (piping)
-                stdout_buffer = sys.stdout.buffer
-                for chunk in audio_iter:
-                    # stdout now carries audio: a later failure is reported
-                    # on stderr only, never as JSON after the audio.
-                    self.stdout_is_protocol = True
-                    stdout_buffer.write(chunk)
-                    total_bytes += len(chunk)
-                stdout_buffer.flush()
 
-                console.print(f"[green]✓ Wrote {total_bytes:,} bytes to stdout[/green]")
-                # Return None so the framework skips output_result — otherwise
-                # agentic/CI (or --output json) mode serializes JSON onto the
-                # same stdout as the audio, corrupting a `> out` redirect. The
-                # summary above went to the stderr console.
-                return None
+            total_bytes, outcome = self._stream_to_stdout(audio_iter)
+            if outcome is not True:
+                # The reader went away (quiet, exit 0) or stdout failed.
+                return outcome or None
+            console.print(f"[green]✓ Wrote {total_bytes:,} bytes to stdout[/green]")
+            # Return None so the framework skips output_result — otherwise
+            # agentic/CI (or --output json) mode serializes JSON onto the
+            # same stdout as the audio, corrupting a `> out` redirect. The
+            # summary above went to the stderr console.
+            return None
 
         except click.ClickException:
             raise
@@ -922,6 +1002,186 @@ class SpeakCommand(BaseCommand):
             # still exits 0. Reachable now that unknown models (e.g. a bare
             # "flux" typo) route here instead of the raising v2 path.
             raise click.ClickException(f"Error generating speech: {e}")
+        finally:
+            _close(audio_iter)
+
+    def _stream_to_stdout(
+        self, stream: Iterator[bytes], *, header: bytes = b""
+    ) -> tuple[int, SpeakCodedError | bool]:
+        """Write each chunk to stdout and flush it as it arrives.
+
+        ``header`` goes out just before the first chunk, so a stream with no
+        audio writes nothing. Returns the audio bytes written and ``True``
+        when the stream ran to its end; ``False`` when the reader of stdout
+        went away (EPIPE: fd 1 now points at the null device and the caller
+        ends quietly); or the ``output_unwritable`` envelope when the write
+        failed (ENOSPC, EIO, ...). Errors from the stream itself propagate.
+        """
+        out = sys.stdout.buffer
+        total = 0
+        for chunk in stream:
+            if not chunk:
+                continue
+            # stdout now carries audio: a later failure is reported on
+            # stderr only, never as JSON after the audio.
+            self.stdout_is_protocol = True
+            try:
+                if header:
+                    out.write(header)
+                    header = b""
+                out.write(chunk)
+                out.flush()
+            except BrokenPipeError:
+                _silence_stdout()
+                return total, False
+            except OSError as exc:
+                return total, _stdout_unwritable(exc)
+            total += len(chunk)
+        return total, True
+
+    def _v1_play_streaming(
+        self,
+        audio_iter: Iterator[bytes],
+        *,
+        player: str,
+        output_path: str | None,
+        model: str,
+    ) -> BaseResult:
+        """Speak v1 into a stdin-reading player, chunk by chunk.
+
+        The player is started before the request, so sound starts as the
+        first chunk arrives. With -o, every chunk also goes to the file.
+        """
+        console.print(f"[blue]Playing audio ({player})...[/blue]")
+        total = 0
+        player_gone = False
+        try:
+            with (
+                _player_stdin(player) as sink,
+                open(Path(output_path), "wb")
+                if output_path
+                else nullcontext() as saved,
+            ):
+                for chunk in audio_iter:
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if saved is not None:
+                        saved.write(chunk)
+                    if player_gone:
+                        continue
+                    try:
+                        sink.write(chunk)
+                        sink.flush()
+                    except BrokenPipeError:
+                        # The user stopped playback (ffplay's "q"). With -o,
+                        # keep draining so the file is complete; otherwise
+                        # stop and close the response.
+                        player_gone = True
+                        if saved is None:
+                            break
+                if not total:
+                    # Kill the player rather than hand it an empty stream.
+                    raise _NoAudio
+        except _NoAudio:
+            return _fail("TTS returned no audio.")
+
+        if output_path:
+            console.print(
+                f"[green]Audio saved to {output_path}[/green] ({total:,} bytes)"
+            )
+        return SpeakResult(
+            status="success",
+            message=(
+                f"Audio saved to {output_path}"
+                if output_path
+                else f"Played {total:,} bytes"
+            ),
+            output_path=output_path or "",
+            model=model,
+            bytes_written=total,
+            played=True,
+        )
+
+    def _v1_play_buffered(
+        self,
+        audio_iter: Iterator[bytes],
+        *,
+        player: str,
+        output_path: str | None,
+        model: str,
+        encoding: str | None,
+        container: str | None,
+    ) -> BaseResult:
+        """Speak v1 into a player that has no stdin mode (afplay).
+
+        It is handed a complete temp file, so the utterance is buffered.
+        """
+        audio = bytearray()
+        for chunk in audio_iter:
+            audio.extend(chunk)
+        audio_bytes = bytes(audio)
+        total_bytes = len(audio_bytes)
+
+        if not audio_bytes:
+            return _fail("TTS returned no audio.")
+
+        if output_path:
+            Path(output_path).write_bytes(audio_bytes)
+            console.print(
+                f"[green]Audio saved to {output_path}[/green] ({total_bytes:,} bytes)"
+            )
+
+        suffix = _play_suffix(is_flux=False, encoding=encoding, container=container)
+        console.print(f"[blue]Playing audio ({player})...[/blue]")
+        _play_audio(player, audio_bytes, suffix=suffix)
+
+        return SpeakResult(
+            status="success",
+            message=(
+                f"Audio saved to {output_path}"
+                if output_path
+                else f"Played {total_bytes:,} bytes"
+            ),
+            output_path=output_path or "",
+            model=model,
+            bytes_written=total_bytes,
+            played=True,
+        )
+
+    # ── Result on stdout ──────────────────────────────────────────────
+
+    #: Writing the result to stdout failed; the run exits 1.
+    _output_failed: bool = False
+
+    def output_result(self, result: Any, config: Config) -> None:
+        """Write the result; a stdout that can't take it is
+        ``output_unwritable`` (exit 1), never an exit-time "Exception
+        ignored"."""
+        try:
+            super().output_result(result, config)
+            if result is not None:
+                sys.stdout.flush()
+        except BrokenPipeError:
+            _silence_stdout()
+        except SystemExit as exc:
+            # rich handles EPIPE itself: it points stdout at the null device
+            # and raises SystemExit(1). The reader went away, which ends the
+            # run quietly with 0, as the streaming paths do.
+            if not isinstance(exc.__context__, BrokenPipeError):
+                raise
+            _silence_stdout()
+        except OSError as exc:
+            _silence_stdout()
+            if isinstance(result, SpeakCodedError):
+                return  # already reported on stderr; it exits 1 anyway
+            _output_unwritable(exc, path="-")
+            self._output_failed = True
+
+    def exit_code_for(self, result: Any) -> int:
+        if self._output_failed:
+            return 1
+        return super().exit_code_for(result)
 
     def _list_voices(self, client: DeepgramClient) -> BaseResult:
         """List available TTS voices as a table (mirrors `dg models`)."""

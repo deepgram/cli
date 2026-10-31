@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from deepctl_core import BaseResult
+from typing import Any
+
+from deepctl_core import BaseResult, CodedErrorResult
 from pydantic import BaseModel, Field
 
 
@@ -23,3 +25,20 @@ class VoiceInfo(BaseModel):
 class SpeakVoicesResult(BaseResult):
     voices: list[VoiceInfo] = Field(default_factory=list)
     count: int = 0
+
+
+class SpeakCodedError(CodedErrorResult):
+    """A coded error from ``dg speak``, keys in the catalogue's order.
+
+    ``details`` is left out of the payload when there are none.
+    """
+
+    next_step: str | None = None
+    schema_version: int = 1
+    details: dict[str, Any] | None = None
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        data = super().model_dump(**kwargs)
+        if data.get("details") is None:
+            data.pop("details", None)
+        return data
