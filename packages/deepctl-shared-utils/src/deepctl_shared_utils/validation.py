@@ -5,8 +5,6 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
-
 from .diagnostics import create_diagnostic_console
 from .models import FileInfo
 
@@ -171,6 +169,8 @@ def _check_url_accessibility(url: str) -> bool:
     Returns:
         True if accessible, False otherwise
     """
+    import httpx
+
     try:
         console.print("[dim]Checking URL accessibility...[/dim]")
 

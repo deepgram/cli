@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import httpx
 import platformdirs
 from rich.console import Console
 
@@ -50,6 +49,8 @@ def _fetch_github_contents(path: str) -> tuple[str, bytes]:
 
     Returns (blob_sha, raw_bytes). Raises on any HTTP error or SHA mismatch.
     """
+    import httpx
+
     url = f"{GITHUB_API_BASE}/{path}"
     resp = httpx.get(
         url,

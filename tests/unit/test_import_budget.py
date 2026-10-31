@@ -225,3 +225,12 @@ def test_root_help_imports(tmp_path: Path) -> None:
 def test_version_imports_no_command_module(tmp_path: Path) -> None:
     _, modules = _imports(["--version"], tmp_path)
     assert not [m for m in modules if m.startswith(("deepctl_cmd_", "deepctl_plugin"))]
+
+
+def test_subcommand_help_imports(tmp_path: Path) -> None:
+    """`dg transcribe --help` (the T3 row): no network stack, no SDK."""
+    proc, modules = _imports(["transcribe", "--help"], tmp_path)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _forbidden_hits(modules, GATES_IMPORTS["forbidden"]["subhelp"]) == []
+    commands = {m.split(".")[0] for m in modules if m.startswith("deepctl_cmd_")}
+    assert commands == {"deepctl_cmd_transcribe", "deepctl_cmd_listen"}

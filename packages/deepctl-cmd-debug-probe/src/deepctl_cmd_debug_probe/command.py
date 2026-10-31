@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import socket
 import time
 from typing import Any
 
-from aiohttp import web
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
 from deepctl_shared_utils import require_ffprobe
 from rich.console import Console
 from rich.panel import Panel
 
 from .models import ProbeDebugResult
-from .proxy import ProbeProxy
 
 console = Console()
 
@@ -97,6 +94,12 @@ class ProbeCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle debug probe command execution."""
+        import asyncio
+
+        from aiohttp import web
+
+        from .proxy import ProbeProxy
+
         port = kwargs.get("port")
         probe_interval_bytes = kwargs.get("probe_interval_bytes") or 131072
         probe_interval_seconds = kwargs.get("probe_interval_seconds") or 10.0
