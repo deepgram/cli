@@ -918,7 +918,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     const r = runBin({ PATH: '/nonexistent', HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
     assert.equal(r.status, 1);
     assert.equal(r.stdout, '');
-    assert.match(r.stderr, /needs uv or Python 3\.10\+/);
+    assert.match(r.stderr, /^ERROR: The Deepgram CLI needs uv or Python 3\.10\+/);
   });
 
   test('passes arguments, env and exit code through a fake uv', () => {
@@ -1017,7 +1017,7 @@ describe('bin/dg.js end to end', posixOnly, () => {
     fakeExe(bin, 'uv', '#!/bin/sh\nkill -SEGV $$\n');
     const r = runBin({ PATH: bin, HOME: home, XDG_CACHE_HOME: path.join(home, 'c') });
     assert.equal(r.signal, 'SIGSEGV');
-    assert.match(r.stderr, /dg: .*uv crashed \(SIGSEGV\)\./);
+    assert.match(r.stderr, /^ERROR: .*uv crashed \(SIGSEGV\)\./m);
   });
 
   test('a venv build step killed by a signal says so', { skip: process.platform === 'win32' && 'POSIX signals' }, () => {
