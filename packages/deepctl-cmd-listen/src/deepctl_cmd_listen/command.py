@@ -13,12 +13,11 @@ Handles all Deepgram STT modes from a single entry point:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 import click
@@ -49,6 +48,9 @@ from .formatters import (
     format_diarized_words,
 )
 from .models import ListenResult
+
+if TYPE_CHECKING:
+    import asyncio
 
 # Status messages → stderr so stdout stays clean for transcript piping
 status = Console(stderr=True)
@@ -90,6 +92,16 @@ def _live_connect(url: str, api_key: str | None) -> Any:
         command="dg listen",
         payload="audio",
     )
+
+
+# asyncio (and with it ssl) loads only when a live stream starts, so
+# `dg listen --help` and the prerecorded path don't import it.
+def __getattr__(name: str) -> Any:
+    if name == "asyncio":
+        import asyncio
+
+        return asyncio
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 async def _cancel_and_drain(*tasks: asyncio.Task[Any]) -> None:
@@ -771,6 +783,8 @@ class ListenCommand(BaseCommand):
             if diarize:
                 status.print("[dim]Speaker labels enabled[/dim]")
 
+        import asyncio
+
         try:
             result = asyncio.run(
                 self._ws_mic(
@@ -841,6 +855,8 @@ class ListenCommand(BaseCommand):
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
     ) -> ListenResult:
+        import asyncio
+
         import numpy as np
         import sounddevice as sd
 
@@ -977,6 +993,8 @@ class ListenCommand(BaseCommand):
                 f"[green]✓[/green] Streaming stdin · {model} · send EOF (Ctrl+D) to finish"
             )
 
+        import asyncio
+
         try:
             result = asyncio.run(
                 self._ws_stdin(
@@ -1033,6 +1051,8 @@ class ListenCommand(BaseCommand):
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
     ) -> ListenResult:
+        import asyncio
+
         url = self._ws_url(
             client,
             api_version=api_version,

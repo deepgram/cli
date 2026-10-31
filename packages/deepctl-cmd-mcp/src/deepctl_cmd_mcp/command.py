@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import signal
 import sys
@@ -35,6 +34,17 @@ from .proxy import (
 
 if TYPE_CHECKING:
     pass
+
+
+# asyncio (and with it ssl) loads only when the proxy runs, so `dg mcp
+# --help` doesn't import it.
+def __getattr__(name: str) -> Any:
+    if name == "asyncio":
+        import asyncio
+
+        return asyncio
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Use stderr for all output: when `dg mcp --transport stdio` is invoked by an
 # MCP host (Claude Desktop, Codex, etc.), stdout is the JSON-RPC protocol
@@ -218,6 +228,8 @@ class McpCommand(BaseCommand):
             signal.SIGINT, self._handle_shutdown
         )
         signal.signal(signal.SIGTERM, self._handle_shutdown)
+
+        import asyncio
 
         # From here on only JSON-RPC reaches the client: anything else
         # written to stdout (fd 1) goes to stderr.

@@ -9,7 +9,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import ffmpeg  # type: ignore[import-untyped]
-import httpx
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -125,6 +124,8 @@ class AudioCommand(BaseCommand):
 
     def _download_url(self, url: str) -> str:
         """Download a URL to a temporary file and return the path."""
+        import httpx
+
         status_console.print(f"[blue]Downloading:[/blue] {url}")
 
         parsed = urlparse(url)
