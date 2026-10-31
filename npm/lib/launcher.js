@@ -554,7 +554,10 @@ function ownedDir(dir, opts = {}) {
     err.dir = dir;
     return err;
   };
-  mkdirPrivate(dir);
+  if (opts.mkdir) opts.mkdir(dir, { mode: 0o700 });
+  else mkdirPrivate(dir);
+  // lstat only: a link or junction is refused for what it is. Nothing here
+  // compares path spellings, so an 8.3 short name (RUNNER~1) is fine.
   const st = (opts.lstat || fs.lstatSync)(dir);
   if (st.isSymbolicLink() || !st.isDirectory()) throw refuse('is a link, not a plain directory');
   if (!isWindows(opts.platform || process.platform)) {
