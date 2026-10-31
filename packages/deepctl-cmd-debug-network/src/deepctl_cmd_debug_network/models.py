@@ -70,9 +70,11 @@ class TLSTestResult(BaseModel):
 
 
 class PythonRequestsTest(BaseModel):
-    """Result of testing with Python requests library."""
+    """Result of one Python HTTP client request (the payload keeps its
+    requests-era name; ``library`` says which client made it)."""
 
     url: str
+    library: str = "httpx"
     success: bool
     status_code: int | None = None
     response_time_ms: float | None = None

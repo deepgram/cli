@@ -6,8 +6,7 @@ import socket
 import subprocess
 import sys
 import time
-import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
@@ -26,6 +25,11 @@ from .models import (
     TLSTestResult,
 )
 
+if TYPE_CHECKING:
+    import ssl
+
+    import httpx
+
 console = Console()
 
 # Default Deepgram endpoints to test
@@ -35,8 +39,73 @@ DEEPGRAM_ENDPOINTS = {
 }
 
 
+def _is_ssl_error(exc: BaseException) -> bool:
+    """True when an httpx error was caused by a TLS failure (the case
+    requests raised as SSLError)."""
+    import ssl
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, ssl.SSLError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _requests_ca_bundle() -> str | None:
+    """The CA bundle requests would have used from the environment.
+
+    httpx reads SSL_CERT_FILE and SSL_CERT_DIR itself; when either is set it
+    wins. Otherwise REQUESTS_CA_BUNDLE, then CURL_CA_BUNDLE, as requests
+    resolved them (an empty value counts as unset).
+    """
+    if os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        return None
+    return (
+        os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE") or None
+    )
+
+
+def _verify_setting(verify: bool) -> "bool | ssl.SSLContext":
+    """httpx's verify argument: False stays False; True becomes an SSL
+    context on the requests-style bundle when one is set in the
+    environment, and otherwise stays True (httpx defaults, which honour
+    SSL_CERT_FILE / SSL_CERT_DIR)."""
+    import ssl
+
+    if not verify:
+        return False
+    bundle = _requests_ca_bundle()
+    if bundle is None:
+        return True
+    if os.path.isdir(bundle):
+        return ssl.create_default_context(capath=bundle)
+    if not os.path.isfile(bundle):
+        # requests' wording for the same mistake.
+        raise OSError(
+            "Could not find a suitable TLS CA certificate bundle, "
+            f"invalid path: {bundle}"
+        )
+    return ssl.create_default_context(cafile=bundle)
+
+
+def _dist_version(name: str) -> str:
+    """Installed version of a distribution, read without importing it."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return "not installed"
+
+
 class NetworkCommand(BaseCommand):
     """Debug network connectivity issues with Deepgram services."""
+
+    # Tests swap in an httpx.MockTransport; None means the real network.
+    _transport: "httpx.BaseTransport | None" = None
 
     name = "network"
     help = "Debug network connectivity issues with Deepgram services"
@@ -105,6 +174,29 @@ class NetworkCommand(BaseCommand):
             },
         ]
 
+    def _http_client(
+        self, *, timeout: float, verify: bool = True, follow_redirects: bool = False
+    ) -> "httpx.Client":
+        """A throwaway client for one diagnostic request.
+
+        Never the shared CLI client: it carries no credentials (httpx does
+        not read ~/.netrc), and a verify=False client must not outlive its
+        one test. trust_env applies HTTP(S)_PROXY / NO_PROXY as requests did.
+
+        CA trust, first match wins (verify=False skips all of it):
+        SSL_CERT_FILE or SSL_CERT_DIR (read by httpx), then
+        REQUESTS_CA_BUNDLE, then CURL_CA_BUNDLE, then httpx's default bundle.
+        """
+        import httpx
+
+        return httpx.Client(
+            timeout=timeout,
+            verify=_verify_setting(verify),
+            follow_redirects=follow_redirects,
+            trust_env=True,
+            transport=self._transport,
+        )
+
     def handle(
         self,
         config: Config,
@@ -169,7 +261,7 @@ class NetworkCommand(BaseCommand):
                 progress.remove_task(task)
 
             # 5. Python requests tests
-            task = progress.add_task("Testing Python requests library...", total=None)
+            task = progress.add_task("Testing Python HTTP client...", total=None)
             self._test_python_requests(endpoint, result, timeout)
             progress.remove_task(task)
 
@@ -208,14 +300,12 @@ class NetworkCommand(BaseCommand):
 
     def _collect_environment_info(self, result: NetworkDebugResult) -> None:
         """Collect environment information."""
-        import requests
-        import urllib3
-
         result.environment_info = {
             "python_version": sys.version,
             "platform": sys.platform,
-            "requests_version": requests.__version__,
-            "urllib3_version": getattr(urllib3, "__version__", "unknown"),
+            "requests_version": _dist_version("requests"),
+            "urllib3_version": _dist_version("urllib3"),
+            "httpx_version": _dist_version("httpx"),
             "proxy_env_vars": {
                 "http_proxy": os.environ.get("http_proxy", "Not set"),
                 "https_proxy": os.environ.get("https_proxy", "Not set"),
@@ -265,28 +355,25 @@ class NetworkCommand(BaseCommand):
         self, hostname: str, result: NetworkDebugResult, timeout: int
     ) -> None:
         """Test basic HTTPS connectivity."""
-        import requests
-
         endpoint_test = EndpointTestResult(
             name="HTTPS", url=f"https://{hostname}", reachable=False
         )
 
         try:
             start_time = time.time()
-            response = requests.get(
-                f"https://{hostname}/", timeout=timeout, allow_redirects=False
-            )
+            with self._http_client(timeout=timeout) as http:
+                response = http.get(f"https://{hostname}/")
             endpoint_test.response_time_ms = (time.time() - start_time) * 1000
             endpoint_test.status_code = response.status_code
             endpoint_test.reachable = True
             endpoint_test.ssl_valid = True
 
-        except requests.exceptions.SSLError as e:
-            endpoint_test.error = f"SSL Error: {e!s}"
-            endpoint_test.ssl_valid = False
-            result.network_issues_detected = True
         except Exception as e:
-            endpoint_test.error = str(e)
+            if _is_ssl_error(e):
+                endpoint_test.error = f"SSL Error: {e!s}"
+                endpoint_test.ssl_valid = False
+            else:
+                endpoint_test.error = str(e)
             result.network_issues_detected = True
 
         result.endpoint_results.append(endpoint_test)
@@ -413,8 +500,6 @@ class NetworkCommand(BaseCommand):
         simulate_blocked_crl: bool = False,
     ) -> None:
         """Test accessibility of CRL/OCSP/CA issuer endpoints."""
-        import requests
-
         all_endpoints = []
 
         for cert in tls_result.certificate_chain:
@@ -451,7 +536,8 @@ class NetworkCommand(BaseCommand):
             else:
                 try:
                     start_time = time.time()
-                    response = requests.head(url, timeout=5, allow_redirects=True)
+                    with self._http_client(timeout=5, follow_redirects=True) as http:
+                        response = http.head(url)
                     endpoint_test.response_time_ms = (time.time() - start_time) * 1000
                     endpoint_test.status_code = response.status_code
                     endpoint_test.accessible = response.status_code < 400
@@ -465,10 +551,8 @@ class NetworkCommand(BaseCommand):
     def _test_python_requests(
         self, hostname: str, result: NetworkDebugResult, timeout: int
     ) -> None:
-        """Test connectivity using Python requests library."""
-        import requests
-        import urllib3
-
+        """Test connectivity with Python's HTTP client (httpx), with and
+        without certificate verification. Each request gets its own client."""
         # Test with SSL verification enabled
         test_with_verify = PythonRequestsTest(
             url=f"https://{hostname}/", success=False, ssl_verify_enabled=True
@@ -476,21 +560,18 @@ class NetworkCommand(BaseCommand):
 
         try:
             start_time = time.time()
-            response = requests.get(
-                f"https://{hostname}/",
-                timeout=timeout,
-                verify=True,
-                allow_redirects=False,
-            )
+            with self._http_client(timeout=timeout, verify=True) as http:
+                response = http.get(f"https://{hostname}/")
             test_with_verify.response_time_ms = (time.time() - start_time) * 1000
             test_with_verify.status_code = response.status_code
             test_with_verify.success = True
 
-        except requests.exceptions.SSLError as e:
-            test_with_verify.error = f"SSL verification failed: {e!s}"
-            result.network_issues_detected = True
         except Exception as e:
-            test_with_verify.error = str(e)
+            if _is_ssl_error(e):
+                test_with_verify.error = f"SSL verification failed: {e!s}"
+                result.network_issues_detected = True
+            else:
+                test_with_verify.error = str(e)
 
         result.python_requests_tests.append(test_with_verify)
 
@@ -500,25 +581,17 @@ class NetworkCommand(BaseCommand):
         )
 
         try:
-            # Disable SSL warnings temporarily
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+            # An isolated, credential-free client that is closed right after
+            # this one request; nothing else ever sees verify=False.
             start_time = time.time()
-            response = requests.get(
-                f"https://{hostname}/",
-                timeout=timeout,
-                verify=False,
-                allow_redirects=False,
-            )
+            with self._http_client(timeout=timeout, verify=False) as http:
+                response = http.get(f"https://{hostname}/")
             test_without_verify.response_time_ms = (time.time() - start_time) * 1000
             test_without_verify.status_code = response.status_code
             test_without_verify.success = True
 
         except Exception as e:
             test_without_verify.error = str(e)
-        finally:
-            # Re-enable warnings
-            warnings.resetwarnings()
 
         result.python_requests_tests.append(test_without_verify)
 
@@ -670,8 +743,6 @@ class NetworkCommand(BaseCommand):
         self, result: NetworkDebugResult, timeout: int
     ) -> None:
         """Test latency to known Deepgram endpoints."""
-        import requests
-
         endpoints = [
             ("api.deepgram.com", "Primary API"),
         ]
@@ -704,11 +775,8 @@ class NetworkCommand(BaseCommand):
 
                 # HTTPS connection timing
                 connect_start = time.time()
-                resp = requests.get(
-                    f"https://{hostname}/",
-                    timeout=timeout,
-                    allow_redirects=False,
-                )
+                with self._http_client(timeout=timeout) as http:
+                    resp = http.get(f"https://{hostname}/")
                 total_ms = (time.time() - connect_start) * 1000
                 connect_ms = total_ms - dns_ms if total_ms and dns_ms else None
                 tls_ms = connect_ms * 0.6 if connect_ms else None
@@ -855,7 +923,7 @@ class NetworkCommand(BaseCommand):
 
         # Python Requests Tests
         if result.python_requests_tests:
-            console.print("[bold]Python Requests Library Tests:[/bold]")
+            console.print("[bold]Python HTTP Client Tests (httpx):[/bold]")
             for test in result.python_requests_tests:
                 verify_status = (
                     "with SSL verification"
