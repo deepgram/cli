@@ -11,6 +11,7 @@ from deepctl_core import (
     get_output_format,
     get_status_console,
 )
+from deepctl_core.transport import TransportError
 from rich.console import Console
 
 from .models import ProjectInfo, ProjectsResult
@@ -321,7 +322,14 @@ class ProjectsCommand(BaseCommand):
             try:
                 client.get_project(project_id)
                 status_console.print("[green]✓[/green] Project ID validated")
-            except Exception as e:
+            except (Exception, TransportError) as e:
+                # A project the key can't see (404/403) can still be set,
+                # after a warning; any other failure stops here.
+                if isinstance(e, TransportError) and e.code not in (
+                    "not_found",
+                    "auth_forbidden",
+                ):
+                    raise
                 status_console.print(
                     f"[yellow]Warning:[/yellow] Could not validate project: {e}"
                 )

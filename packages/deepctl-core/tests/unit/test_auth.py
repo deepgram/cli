@@ -266,22 +266,19 @@ class TestAuthManager:
             ):
                 auth_manager.guard()
 
-    def test_guard_with_invalid_credentials(self, auth_manager):
-        """Test guard method with invalid credentials."""
-        # Set up API key
+    def test_guard_sends_nothing(self, auth_manager):
+        """guard() only checks that a key is there: no pre-flight request.
+
+        An invalid key is reported by the command's own request (401 ->
+        auth_invalid, deepctl_core.transport)."""
         with patch.object(
             auth_manager, "get_api_key", return_value="sk-test-key"
-        ):
-            # Mock failed key verification
-            with patch.object(
-                auth_manager,
-                "verify_api_key",
-                return_value=(False, "Invalid API key", "auth"),
-            ):
-                with pytest.raises(
-                    AuthenticationError, match="Invalid API key"
-                ):
-                    auth_manager.guard()
+        ), patch.object(auth_manager, "verify_api_key") as verify, patch.object(
+            auth_manager, "client"
+        ) as http:
+            auth_manager.guard()
+        verify.assert_not_called()
+        assert http.method_calls == []
 
     def test_guard_does_not_require_project_id(self, auth_manager):
         """Test that guard() only checks API key, not project_id."""
