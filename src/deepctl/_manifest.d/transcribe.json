@@ -60,6 +60,32 @@
       },
       {
         "class": "option",
+        "name": "timeout",
+        "opts": [
+          "--timeout"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "float range",
+          "min": 1,
+          "max": null,
+          "min_open": false,
+          "max_open": false,
+          "clamp": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Seconds to wait at each step (connecting, sending, the response) before giving up. Not a limit on the whole run. Default: 300. Files and URLs only."
+      },
+      {
+        "class": "option",
         "name": "no_validate",
         "opts": [
           "--no-validate"

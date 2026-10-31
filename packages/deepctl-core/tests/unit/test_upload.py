@@ -65,8 +65,13 @@ def facade(handler) -> tuple[DeepgramClient, list[tuple[httpx.Request, bytes]]]:
         seen.append((request, request.read()))
         return handler(request)
 
+    # The same timeout and redirect settings as transport.shared_client().
     transport._set_client(
-        httpx.Client(transport=httpx.MockTransport(record), follow_redirects=True)
+        httpx.Client(
+            transport=httpx.MockTransport(record),
+            timeout=transport.DEFAULT_TIMEOUT_S,
+            follow_redirects=True,
+        )
     )
     config = Config(config_path=str(Path.cwd() / "none.yaml"))
     return DeepgramClient(config, AuthManager(config)), seen
@@ -357,3 +362,47 @@ def test_no_module_level_import_cost():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert out.stdout.strip() == "[]"
+
+
+# ── --timeout ────────────────────────────────────────────────────────
+
+
+def _timed_out(request: httpx.Request) -> httpx.Response:
+    raise httpx.ReadTimeout("timed out", request=request)
+
+
+@pytest.mark.parametrize(
+    ("timeout_s", "reported"), [(None, 60), (2.0, 2), (2.5, 2.5), (300.0, 300)]
+)
+def test_timeout_reports_the_effective_value(tmp_path, timeout_s, reported):
+    path = _audio(tmp_path, 10)
+    client, seen = facade(_timed_out)
+    with pytest.raises(transport.TransportError) as err:
+        client.transcribe_file(path, timeout_s=timeout_s)
+    assert err.value.code == "timeout"
+    assert err.value.details == {"host": "api.deepgram.com", "timeout_s": reported}
+    assert err.value.error == f"api.deepgram.com didn't respond within {reported} s."
+    ((request, _),) = seen
+    assert request.extensions["timeout"]["read"] == (timeout_s or 60)
+
+
+def test_url_timeout_reports_the_effective_value():
+    client, seen = facade(_timed_out)
+    with pytest.raises(transport.TransportError) as err:
+        client.transcribe_url("https://example.com/a.wav", timeout_s=120)
+    assert err.value.details["timeout_s"] == 120
+    ((request, _),) = seen
+    assert request.extensions["timeout"] == {
+        "connect": 120,
+        "read": 120,
+        "write": 120,
+        "pool": 120,
+    }
+
+
+def test_other_requests_keep_the_60_s_timeout():
+    client, seen = facade(_timed_out)
+    with pytest.raises(transport.TransportError) as err:
+        client.list_models()
+    assert err.value.details["timeout_s"] == 60
+    assert seen[0][0].extensions["timeout"]["read"] == 60
