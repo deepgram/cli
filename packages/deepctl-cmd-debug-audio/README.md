@@ -38,7 +38,6 @@ pipx run deepctl --help
 - `click>=8.2.0,<9`
 - `rich>=13.0.0,<16`
 - `pydantic>=2.0.0,<3`
-- `ffmpeg-python>=0.2.0`
 - `httpx>=0.24.0,<1`
 
 ## License

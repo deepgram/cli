@@ -45,7 +45,6 @@ Status lines and errors show the URL as `scheme://host/…/<last path segment>`,
 - `websockets>=13.1,<18`
 - `deepgram-captions>=2.0.0`
 - `sounddevice>=0.4.6`
-- `numpy>=1.24.0`
 
 ## License
 

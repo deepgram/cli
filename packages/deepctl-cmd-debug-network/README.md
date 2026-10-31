@@ -39,7 +39,6 @@ pipx run deepctl --help
 - `rich>=13.0.0,<16`
 - `pydantic>=2.0.0,<3`
 - `httpx>=0.24.0,<1`
-- `requests>=2.31,<3.0`
 
 ## License
 
