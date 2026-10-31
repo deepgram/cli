@@ -1212,6 +1212,8 @@ class PluginManager:
                     }
                     if not is_flag:
                         option_kwargs["type"] = arg.get("type", str)
+                    if "metavar" in arg:
+                        option_kwargs["metavar"] = arg["metavar"]
                     cmd = click.option(*arg.get("names", []), **option_kwargs)(cmd)
                 else:
                     # Add as argument

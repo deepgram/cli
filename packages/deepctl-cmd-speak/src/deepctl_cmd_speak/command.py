@@ -1,10 +1,18 @@
-"""Speak (text-to-speech) command for deepctl."""
+"""Speak (text-to-speech) command for deepctl.
+
+Signal handling (SIGINT/SIGTERM/SIGHUP during a request) is written for
+the dg process; running this command in-process inside another program
+isn't supported for signal semantics.
+"""
 
 from __future__ import annotations
 
 import io
 import os
+import secrets
+import shlex
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -12,9 +20,12 @@ import tempfile
 import threading
 import time
 import wave
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import click
 from deepctl_core import (
@@ -28,20 +39,27 @@ from deepctl_core import (
 )
 from deepctl_core.output import (
     _agentic,
+    format_source,
     is_ai_agent,
     print_error,
     print_hint,
     print_warning,
+    stderr_console,
 )
+from deepctl_core.signals import coalescing as _coalescing
+from deepctl_core.signals import defer_in_importlib as _defer_in_importlib
+from deepctl_core.signals import die_by_signal as _die_by_signal
+from deepctl_core.signals import send_to_main as _send_to_main
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
 from . import messages as msg
+from . import sinks
 from .models import SpeakCodedError, SpeakResult, SpeakVoicesResult, VoiceInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 console = get_status_console()
 # Tables and other stdout-bound rendering (only used when no audio goes to
@@ -157,9 +175,9 @@ def _check_playable(
     )
     if raw:
         return (
-            f"--play cannot play raw {eff_encoding} audio: it has no container "
-            "for the player to detect. Use the default linear16 audio, add "
-            "--container wav (Aura), or save it with -o."
+            f"--play can't play raw {eff_encoding} audio because the player "
+            "can't tell its format. Use linear16 (the default), add "
+            "--container wav (Aura only), or save it with --out-file FILE."
         )
 
     unplayable = _UNPLAYABLE_BY_PLAYER.get(player, ())
@@ -170,9 +188,9 @@ def _check_playable(
             if e not in unplayable
         )
         return (
-            f"'{player}' cannot decode {eff_encoding}; it plays {playable}. "
-            "Pick one of those with --encoding, install ffmpeg (ffplay) to play "
-            f"{eff_encoding}, or save it with -o."
+            f"'{player}' can't decode {eff_encoding}; it plays {playable}. "
+            "Pick one of those with --encoding, install ffmpeg (for ffplay) to "
+            f"play {eff_encoding}, or save it with --out-file FILE."
         )
     return None
 
@@ -336,6 +354,311 @@ class _NoAudio(Exception):
     """The stream ended without a single audio byte."""
 
 
+# Raised by an AudioFile; they pass through the "request failed" handlers.
+_SINK_ERRORS = (sinks.Exists, sinks.WriteFailed, sinks.ReaderGone)
+
+# Values of `speak -o` that are output formats, not file names.
+_FORMAT_WORDS = ("json", "yaml", "text", "table", "csv")
+
+# Root -o values: the formats a corrected command line can actually use.
+_ROOT_FORMATS = ("json", "yaml", "table", "csv")
+
+# Root options that take a value, used when no Click context is available.
+_ROOT_VALUE_OPTS = frozenset(
+    {"--config", "-c", "--profile", "-p", "--base-url", "--api-key", "--output", "-o"}
+)
+
+_deprecation_shown = False
+
+
+def _argv() -> list[str]:
+    """The user's arguments after the program name (a seam for tests)."""
+    return list(sys.argv[1:])
+
+
+def _root_value_opts() -> frozenset[str]:
+    """Root options that take a value, from the running root command."""
+    ctx = click.get_current_context(silent=True)
+    if ctx is None:
+        return _ROOT_VALUE_OPTS
+    opts: set[str] = set()
+    for param in ctx.find_root().command.params:
+        if isinstance(param, click.Option) and (param.is_flag or param.count):
+            continue
+        opts.update(param.opts)
+        opts.update(param.secondary_opts)
+    return frozenset(opts)
+
+
+def _split_argv(argv: list[str], command: str) -> tuple[list[str], list[str]] | None:
+    """Split argv into (root options, command arguments), or ``None``."""
+    value_opts = _root_value_opts()
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == command:
+            return argv[:i], argv[i + 1 :]
+        if token == "--" or not token.startswith("-"):
+            return None
+        if token in value_opts:
+            i += 2
+            continue
+        if not token.startswith("--"):
+            # A cluster such as -qo: a value letter takes the rest of the
+            # token, or the next one when it is last.
+            for j, letter in enumerate(token[1:]):
+                if f"-{letter}" in value_opts:
+                    if j == len(token) - 2:
+                        i += 1
+                    break
+        i += 1
+    return None
+
+
+def _drop_output(args: list[str]) -> list[str]:
+    """``args`` without -o/--output and its value."""
+    kept: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--":
+            kept.extend(args[i:])
+            break
+        if token in ("-o", "--output"):
+            i += 2
+            continue
+        if token.startswith("--output=") or (
+            token.startswith("-o") and not token.startswith("--")
+        ):
+            i += 1
+            continue
+        kept.append(token)
+        i += 1
+    return kept
+
+
+def _secret_bearing(tokens: list[str]) -> bool:
+    """True when argv holds a key or a URL with userinfo or a query."""
+    for token in tokens:
+        if token in ("--api-key", "-k") or token.startswith("--api-key="):
+            return True
+        if token.startswith("-k") and not token.startswith("--"):
+            return True
+        if "://" in token:
+            try:
+                parts = urlsplit(token)
+            except ValueError:
+                return True
+            if parts.username or parts.password or parts.query:
+                return True
+    return False
+
+
+def _next_step(tokens: list[str]) -> str | None:
+    """A command line runnable verbatim, or ``None``."""
+    if _secret_bearing(tokens):
+        return None
+    for token in tokens:
+        if token.startswith("=") or (
+            token.startswith("<") and token.endswith(">") and token[1:-1].isupper()
+        ):
+            return None
+    line = shlex.join(tokens)
+    if os.name == "nt" and line != " ".join(tokens):
+        return None
+    if shlex.join(shlex.split(line)) != line or tokens[:1] == ["sudo"]:
+        return None
+    return line
+
+
+def _proposed_out_file(
+    *, is_flux: bool, encoding: str | None, container: str | None
+) -> str:
+    """A new file name in the cwd for next_step: never an existing file."""
+    ext = _play_suffix(is_flux=is_flux, encoding=encoding, container=container)
+    while True:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        name = f"speech-{stamp}-{secrets.token_hex(2)}{ext}"
+        if not os.path.lexists(name):
+            return name
+
+
+def _deprecate_output() -> None:
+    """The one DEPRECATED line for speak -o/--output FILE, even under -q."""
+    global _deprecation_shown
+    if _deprecation_shown:
+        return
+    _deprecation_shown = True
+    text = msg.D_SPEAK_OUTPUT.format(prog=_prog())
+    if _agentic:
+        stderr_console.print(f"DEPRECATED: {escape(text)}", soft_wrap=True)
+    else:
+        stderr_console.print(
+            f"[yellow]⚠[/yellow] Deprecated: {escape(text)}", soft_wrap=True
+        )
+
+
+class _Terminated(BaseException):
+    """SIGTERM or SIGHUP arrived mid-stream: unwind so a partial file
+    or temp file is removed, then end by that signal."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+#: How long a signalled run may take to unwind before the signal is
+#: delivered again and ends it. This timer is how a Flux run ends after a
+#: signal when the server doesn't answer the closing handshake: the SDK
+#: waits up to 10 s for it in the main thread. A close still waiting in
+#: ``finally`` is cut short the same way. SIGTERM and SIGHUP then end at
+#: once; Ctrl-C runs the usual cancel path, so it ends a little later.
+#: Both stay well inside the 2.6 s a signalled run may take to exit.
+_SIGNAL_GRACE_S = 1.5
+
+
+def _end_by_signal(signum: int) -> None:
+    """End the process by ``signum`` (POSIX); on Windows, exit 128+N."""
+    if os.name == "nt":
+        raise SystemExit(128 + signum)
+    _die_by_signal(signum)
+
+
+@contextmanager
+def _terminate_cleanly(cleanup: Callable[[], None]) -> Iterator[None]:
+    """For the duration of a request and stream:
+
+    - SIGTERM and SIGHUP raise :class:`_Terminated` in the main thread
+      instead of killing the process before ``cleanup`` can run;
+    - SIGINT raises ``KeyboardInterrupt`` as before.
+
+    Unwinding can stall in a WebSocket closing handshake the server doesn't
+    answer. So the first signal also arms a timer: if the run is still here
+    after ``_SIGNAL_GRACE_S``, the signal is delivered again, and a second
+    signal runs ``cleanup`` and ends the run: SIGINT by ``KeyboardInterrupt``
+    again (the usual cancel message, exit 2, exit handlers run; a hard exit
+    follows only if that unwind stalls too), SIGTERM and SIGHUP by the signal
+    itself. A double Ctrl-C after the guard has exited is the default
+    handler's: exit by SIGINT (130), as before.
+
+    Signals that arrive during a file critical section are deferred (see
+    ``sinks.critical_section``); the most severe is delivered after it.
+
+    A signal is left exactly as it was when its handler isn't ours to
+    replace:
+
+    - ``SIG_IGN`` (nohup ignores SIGHUP, a background job in a script starts
+      with SIGINT ignored, ``trap '' TERM``): the run keeps going, as 0.4.0
+      did, and the file is completed;
+    - a handler not installed from Python (``signal.getsignal`` returns
+      ``None``): ``signal.signal`` can't put it back afterwards, so it is
+      not replaced at all.
+
+    On exit the guard is closed first (its handler then only records a
+    signal, and the timer sends nothing more), the signals are blocked where
+    ``pthread_sigmask`` exists, the previous handlers are restored and the
+    timers cancelled, the mask is restored, and a signal recorded meanwhile
+    is raised again through the restored handler. The guard is closed before
+    the mask call because that call itself runs pending handlers.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    first: list[int] = []
+    timers: list[threading.Timer] = []
+    closed: list[bool] = []
+    late: list[int] = []
+    sent: list[int] = []  # re-deliveries the timer made
+    lock = threading.Lock()
+
+    def redeliver(signum: int) -> None:
+        # Under the lock, so nothing is sent once the guard is closing.
+        with lock:
+            if closed:
+                return
+            sent.append(signum)
+            _send_to_main(signum)
+
+    def arm(delay: float, action: Callable[..., None], *args: Any) -> None:
+        timer = threading.Timer(delay, action, args)
+        timer.daemon = True
+        timer.start()
+        timers.append(timer)
+
+    @_coalescing  # a signal while this runs is coalesced (core, as for main)
+    def handler(signum: int, _frame: Any) -> None:
+        if signum in sent:
+            sent.remove(signum)
+            if closed:
+                return  # our own re-delivery, arriving late: drop it
+        elif closed:
+            late.append(signum)
+            return
+        if _defer_in_importlib(signum, _frame):
+            return  # raising inside importlib could leave its lock held
+        if sinks.defer_signal(signum):
+            return  # creating, committing or removing the file
+        if first:
+            # Second signal, or the timer: stop waiting for the stream.
+            cleanup()
+            decisive = sinks.most_severe([first[0], signum]) or signum
+            if decisive == signal.SIGINT:
+                # Unwind again from wherever the stall is; if that stalls
+                # too, end without waiting any longer.
+                arm(_SIGNAL_GRACE_S, os._exit, 2)
+                raise KeyboardInterrupt
+            _end_by_signal(decisive)
+        first.append(signum)
+        arm(_SIGNAL_GRACE_S, redeliver, signum)
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
+        raise _Terminated(signum)
+
+    handler._deepctl_defers = True  # type: ignore[attr-defined]
+
+    previous: dict[int, Any] = {}
+    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        current = signal.getsignal(sig)
+        if current is signal.SIG_IGN or current is None:
+            continue
+        try:
+            signal.signal(sig, handler)
+        except (OSError, ValueError):
+            continue
+        previous[sig] = current
+    try:
+        yield
+    finally:
+        with lock:
+            closed.append(True)
+        blocked = None
+        if hasattr(signal, "pthread_sigmask"):
+            with suppress(OSError, ValueError):
+                blocked = signal.pthread_sigmask(signal.SIG_BLOCK, set(previous))
+        try:
+            sinks.restore_handlers(previous)
+        finally:
+            for timer in timers:
+                timer.cancel()
+            if blocked is not None:
+                signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+            if late:
+                again = sinks.most_severe(late)
+                late.clear()
+                if again is not None:
+                    signal.raise_signal(again)
+
+
+@dataclass
+class _Plan:
+    """What the pre-request checks decided."""
+
+    target: sinks.Target | None = None
+
+
 def _fail(message: str) -> BaseResult:
     """An error result whose message the user actually sees.
 
@@ -472,6 +795,25 @@ class _StreamProgress:
         return f"first audio {fa}, {time.monotonic() - self._start:.1f}s total"
 
 
+def _speak_result(
+    audio_file: sinks.AudioFile | None,
+    *,
+    model: str,
+    bytes_written: int,
+    played: bool = False,
+) -> SpeakResult:
+    """The 0.4.0 ``SpeakResult`` (unchanged keys, including ``played``)."""
+    path = audio_file.path if audio_file is not None else ""
+    return SpeakResult(
+        status="success",
+        message=f"Audio saved to {path}" if path else f"Played {bytes_written:,} bytes",
+        output_path=path,
+        model=model,
+        bytes_written=bytes_written,
+        played=played,
+    )
+
+
 class SpeakCommand(BaseCommand):
     """Command for generating speech from text using Deepgram TTS."""
 
@@ -491,26 +833,27 @@ class SpeakCommand(BaseCommand):
         'dg speak "Hello from Deepgram" --play',
         "dg speak --list-voices",
         'dg speak "Hello world"',
-        'dg speak "Hello world" -o hello.wav',
-        'dg speak "Hello world" -o hello.wav --play',
-        "dg speak --file message.txt -o output.wav",
+        'dg speak "Hello world" --out-file hello.wav',
+        'dg speak "Hello world" --out-file hello.wav --play',
+        "dg speak --file message.txt --out-file output.wav",
         'dg speak "Hello" | ffplay -loglevel error -nodisp -autoexit -',
         # Flux TTS streaming controls: --speed (0.85-1.15) and beta
         # --expressivity (-2..2, default 0).
-        'dg speak "A little slower, please" --speed 0.9 -o slow.wav',
-        'dg speak "So exciting!" --expressivity 2 -o lively.wav  # beta; default: 0',
+        'dg speak "A little slower, please" --speed 0.9 --out-file slow.wav',
+        'dg speak "So exciting!" --expressivity 2 --out-file lively.wav  # beta; default: 0',
         # Aura (Speak v1, batch REST) — opt in with -m aura-*; needed for
         # containerized formats like mp3.
-        'dg speak "Hello" -m aura-2-asteria-en -o hello.mp3',
-        'dg speak "Hello" -m aura-2-luna-en -o hello.wav --encoding linear16 --container wav',
-        'echo "Hello" | dg speak -o hello.mp3 -m aura-2-asteria-en',
+        'dg speak "Hello" -m aura-2-asteria-en --out-file hello.mp3',
+        'dg speak "Hello" -m aura-2-luna-en --out-file hello.wav --encoding linear16 --container wav',
+        'echo "Hello" | dg speak --out-file hello.mp3 -m aura-2-asteria-en',
         # Aura-2 Spanish voice (run `dg models` for the full list).
-        'dg speak "Hola, mundo" -m aura-2-selena-es -o hola.mp3',
+        'dg speak "Hola, mundo" -m aura-2-selena-es --out-file hola.mp3',
     ]
     agent_help = (
         "Convert text to speech using Deepgram's TTS API. "
         "Text can be provided as an argument, from a file, or piped via stdin. "
-        "Audio is written to a file (--output) or stdout for piping. "
+        "Audio is written to a file (--out-file; add --force to replace an "
+        "existing file) or stdout for piping. -o/--output FILE is deprecated. "
         "By default (flux-* models, e.g. flux-alexis-en) uses Flux TTS / Speak "
         "v2, streaming over WebSocket and emitting raw audio; linear16 output is "
         "wrapped in a WAV container so it is directly playable. Pass an aura-* "
@@ -532,9 +875,29 @@ class SpeakCommand(BaseCommand):
                 "default": None,
             },
             {
-                "names": ["--output", "-o"],
-                "help": "Output file path (required if stdout is a terminal)",
+                "names": ["--out-file"],
+                "help": (
+                    "Save the audio to FILE. An existing file isn't "
+                    "overwritten unless you add --force."
+                ),
                 "type": str,
+                "metavar": "FILE",
+                "is_option": True,
+            },
+            {
+                "names": ["--force"],
+                "help": "With --out-file, overwrite FILE if it already exists.",
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--output", "-o"],
+                "help": (
+                    "Deprecated: use --out-file. Saves the audio to FILE and "
+                    "overwrites it. In 1.0, -o will set the output format."
+                ),
+                "type": str,
+                "metavar": "FILE",
                 "is_option": True,
             },
             {
@@ -603,7 +966,8 @@ class SpeakCommand(BaseCommand):
                 "names": ["--play"],
                 "help": (
                     "Play the audio through your system player (ffplay, afplay, "
-                    "paplay, or aplay). Can be combined with -o to save and play."
+                    "paplay, or aplay). Can be combined with --out-file to save "
+                    "and play."
                 ),
                 "is_flag": True,
                 "is_option": True,
@@ -616,6 +980,124 @@ class SpeakCommand(BaseCommand):
             },
         ]
 
+    # ── Checks before the request ─────────────────────────────────────
+
+    _plan: _Plan | None = None
+
+    def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
+        """Refusals that need no request: they run
+        before authentication, so nothing is sent or billed."""
+        self._plan = None
+        planned = self._preflight(kwargs)
+        if isinstance(planned, SpeakCodedError):
+            return planned
+        self._plan = planned
+        return None
+
+    def _preflight(self, kwargs: dict[str, Any]) -> _Plan | SpeakCodedError:
+        if kwargs.get("list_voices"):
+            return _Plan()
+        out_file = kwargs.get("out_file") or None
+        legacy = kwargs.get("output") or None
+        prog = _prog()
+
+        if out_file and legacy:
+            return _coded(
+                msg.E_SPEAK_OUT_CONFLICT,
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_SPEAK_OUT_CONFLICT,
+                hint_agent=msg.H_SPEAK_OUT_CONFLICT,
+                next_step=_next_step([prog, self.name, "--help"]),
+            )
+        if legacy and legacy.lower() == "text":
+            # Not a root format either: point at --out-file instead.
+            return _coded(
+                msg.E_SPEAK_O_TEXT.format(prog=prog),
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_SPEAK_O_TEXT,
+                hint_agent=msg.H_SPEAK_O_TEXT,
+                next_step=self._o_format_next_step(prog, legacy, kwargs),
+            )
+        if legacy and legacy.lower() in _FORMAT_WORDS:
+            return _coded(
+                msg.E_SPEAK_O_FORMAT.format(prog=prog, value=legacy),
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_SPEAK_O_FORMAT.format(prog=prog, value=legacy),
+                hint_agent=msg.H_SPEAK_O_FORMAT.format(prog=prog, value=legacy),
+                next_step=self._o_format_next_step(prog, legacy, kwargs),
+            )
+        if legacy:
+            _deprecate_output()
+
+        path = out_file or legacy
+        if not path:
+            return _Plan()
+        planned = sinks.plan_target(
+            path, overwrite=bool(legacy) or bool(kwargs.get("force"))
+        )
+        if isinstance(planned, sinks.Refusal):
+            if planned.reason == "exists":
+                return _coded(
+                    msg.E_OUT_FILE_EXISTS.format(out_file=path, prog=prog),
+                    code=msg.CODE_INVALID_ARGUMENT,
+                    hint_human=msg.H_OUT_FILE_EXISTS,
+                    hint_agent=msg.H_OUT_FILE_EXISTS,
+                )
+            assert planned.error is not None
+            return _output_unwritable(planned.error, path=path)
+        if (
+            planned.kind == "stdout"
+            and get_output_format() in ("json", "yaml")
+            and format_source() == "explicit"
+        ):
+            # The audio is stdout's payload; there's no room for JSON.
+            fmt = get_output_format().upper()
+            return _coded(
+                msg.E_STDOUT_BYTES.format(
+                    prog=prog, command_path=self.name, format=fmt
+                ),
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_STDOUT_BYTES.format(format=fmt),
+                hint_agent=msg.H_STDOUT_BYTES.format(format=fmt),
+                next_step=_next_step([prog, self.name, "--help"]),
+            )
+        return _Plan(target=planned)
+
+    def _o_format_next_step(
+        self, prog: str, value: str, kwargs: dict[str, Any]
+    ) -> str | None:
+        """``{prog} {root_options} -o {value} speak {speak_args} --out-file
+        {out_file}``, or ``None`` when it can't be built safely. For
+        ``-o text``, which no command takes, the ``-o`` is dropped."""
+        text = value.lower() == "text"
+        if not text and value.lower() not in _ROOT_FORMATS:
+            return None
+        ctx = click.get_current_context(silent=True)
+        name = (ctx.info_name if ctx is not None else None) or self.name
+        split = _split_argv(_argv(), name)
+        if split is None:
+            return None
+        root, args = split
+        model = kwargs.get("model") or _DEFAULT_MODEL
+        out_file = _proposed_out_file(
+            is_flux=model.lower().startswith("flux-"),
+            encoding=kwargs.get("encoding"),
+            container=kwargs.get("container"),
+        )
+        return _next_step(
+            [
+                prog,
+                *_drop_output(root),
+                *(() if text else ("-o", value)),
+                name,
+                *_drop_output(args),
+                "--out-file",
+                out_file,
+            ]
+        )
+
+    # ── Run ───────────────────────────────────────────────────────────
+
     def handle(
         self,
         config: Config,
@@ -623,8 +1105,12 @@ class SpeakCommand(BaseCommand):
         client: DeepgramClient,
         **kwargs: Any,
     ) -> BaseResult | SpeakCodedError | None:
+        planned = self._plan if self._plan is not None else self._preflight(kwargs)
+        self._plan = None
+        if isinstance(planned, SpeakCodedError):
+            return planned
+
         text = kwargs.get("text")
-        output_path = kwargs.get("output")
         model = kwargs.get("model") or _DEFAULT_MODEL
         encoding = kwargs.get("encoding")
         container = kwargs.get("container")
@@ -634,6 +1120,7 @@ class SpeakCommand(BaseCommand):
         file_path = kwargs.get("file")
         play = kwargs.get("play", False)
         list_voices = kwargs.get("list_voices", False)
+        output_path = planned.target.path if planned.target else None
 
         # --list-voices: discover voices and exit before any TTS generation.
         if list_voices:
@@ -661,17 +1148,15 @@ class SpeakCommand(BaseCommand):
             player = _find_audio_player()
             if player is None:
                 return _fail(
-                    "No audio player found — install ffmpeg, or use -o to save a file."
+                    "No audio player found. Install ffmpeg, or save the audio "
+                    "with --out-file FILE."
                 )
 
         # If stdout is a TTY and there's nowhere for the audio to go, require an
         # explicit destination. --play satisfies that requirement.
         stdout_is_tty = sys.stdout.isatty()
         if not output_path and not play and stdout_is_tty:
-            return _fail(
-                "No output specified. Use -o/--output to save to a file, "
-                "--play to hear it, or pipe stdout."
-            )
+            return _fail(msg.NO_OUTPUT_TTY)
 
         # Only the documented flux-* namespace uses speak.v2. Aura and unknown
         # model names pass through to the REST API so the service can resolve them.
@@ -711,234 +1196,362 @@ class SpeakCommand(BaseCommand):
             # Playing sends the audio to the player, not to stdout, so a
             # redirect or pipe would otherwise collect nothing and give no
             # hint why.
-            print_warning(
-                "--play sends the audio to your player, so stdout stays empty. "
-                "Add -o to save a file too.",
-                stderr=True,
-                ignore_quiet=True,
-            )
+            print_warning(msg.PLAY_STDOUT_EMPTY, stderr=True, ignore_quiet=True)
 
-        if is_flux:
-            # WebSocket streaming path. Streaming output is raw audio, so
-            # default to linear16 @ 24kHz and wrap it in WAV for playback.
-            # These paths raise (rather than returning an error result) so a
-            # failure exits non-zero and is visible in every output format —
-            # a returned error is only printed in structured output and still
-            # exits 0.
-            eff_encoding = encoding or "linear16"
-            if eff_encoding not in ("linear16", "mulaw", "alaw"):
-                raise click.ClickException(
-                    f"Encoding '{eff_encoding}' is not supported for Flux "
-                    "(Speak v2) streaming, which emits raw audio. Use "
-                    "linear16 (default), mulaw, or alaw."
-                )
-            eff_sample_rate = sample_rate or 24000.0
-
-            # A live spinner + byte counter + time-to-first-audio on stderr, so
-            # the stream is visibly arriving rather than a single static line.
-            prog = _StreamProgress(model)
-            stream = prog.track(
-                client.speak_text_stream(
-                    text=text,
-                    model=model,
-                    encoding=eff_encoding,
-                    sample_rate=eff_sample_rate,
-                    speed=speed,
-                    expressivity=expressivity,
-                )
-            )
-
-            # Flux linear16 into a stdin-reading player: stream it. The
-            # player gets the streaming WAV header before the first frame and
-            # then every frame as Flux emits it, so sound starts at
-            # first-audio latency instead of after the whole utterance — the
-            # same framing `dg speak | ffplay -` relies on.
-            if (
-                player is not None
-                and player in _STDIN_PLAYER_ARGV
-                and eff_encoding == "linear16"
+        audio_file = sinks.AudioFile(planned.target) if planned.target else None
+        if audio_file is not None and audio_file.is_stdout:
+            # stdout carries audio, so a failure is reported on stderr
+            # only, never as JSON after the audio.
+            self.stdout_is_protocol = True
+        try:
+            with _terminate_cleanly(
+                audio_file.abort if audio_file is not None else lambda: None
             ):
-                console.print(f"[blue]Playing audio ({player})...[/blue]")
-                pcm = bytearray()
-                saved_bytes = 0
-                player_gone = False
                 try:
-                    with _player_stdin(player) as sink:
-                        wrote_header = False
-                        for chunk in stream:
-                            if not chunk:
-                                continue
-                            if output_path:
-                                pcm.extend(chunk)
-                            if player_gone:
-                                continue
-                            try:
-                                if not wrote_header:
-                                    sink.write(
-                                        _streaming_wav_header(
-                                            sample_rate=int(eff_sample_rate)
-                                        )
-                                    )
-                                    wrote_header = True
-                                sink.write(chunk)
-                                sink.flush()
-                            except BrokenPipeError:
-                                # The player exited first (ffplay's "q", for
-                                # instance). That is the user stopping
-                                # playback, not a failure. With -o, keep
-                                # draining so the file is still complete;
-                                # otherwise stop and close the stream.
-                                player_gone = True
-                                if not output_path:
-                                    break
-
-                        if output_path and pcm:
-                            # Save before waiting on the player (that wait
-                            # happens on leaving this block), so stopping
-                            # playback still leaves the file behind. The file
-                            # gets a real, exact-length header rather than the
-                            # streaming placeholder the player was handed.
-                            audio_bytes = _pcm_to_wav(
-                                bytes(pcm), sample_rate=int(eff_sample_rate)
-                            )
-                            Path(output_path).write_bytes(audio_bytes)
-                            saved_bytes = len(audio_bytes)
-                except click.ClickException:
+                    result = self._speak(
+                        client,
+                        is_flux=is_flux,
+                        text=text,
+                        model=model,
+                        encoding=encoding,
+                        container=container,
+                        sample_rate=sample_rate,
+                        speed=speed,
+                        expressivity=expressivity,
+                        player=player,
+                        audio_file=audio_file,
+                    )
+                except BaseException:
+                    # Clean up while the guard is still installed, so a
+                    # second signal can't cut the removal short.
+                    if audio_file is not None:
+                        audio_file.abort()
                     raise
-                except Exception as e:
-                    raise click.ClickException(f"Flux streaming failed: {e}")
-                finally:
-                    _close(stream)
-
-                if prog.total == 0:
-                    raise click.ClickException(
-                        "Flux (Speak v2) streaming returned no audio."
-                    )
-
-                if output_path:
-                    console.print(
-                        f"[green]Audio saved to {output_path}[/green] "
-                        f"({saved_bytes:,} bytes — {prog.timing()})"
-                    )
-                else:
-                    console.print(
-                        f"[green]✓ Played {prog.total:,} bytes[/green] "
-                        f"({prog.timing()})"
-                    )
-                return SpeakResult(
-                    status="success",
-                    message=(
-                        f"Audio saved to {output_path}"
-                        if output_path
-                        else f"Played {prog.total:,} bytes"
-                    ),
-                    output_path=output_path or "",
-                    model=model,
-                    bytes_written=saved_bytes or prog.total,
-                    played=True,
-                )
-
-            if output_path or player:
-                # Saving, or playing through afplay (which has no stdin mode),
-                # needs the full utterance: a WAV file must declare its data
-                # length in the header (known only once the stream ends), and
-                # afplay is handed a complete file. So buffer, then wrap once
-                # and reuse for both sinks.
-                pcm = bytearray()
-                try:
-                    for chunk in stream:
-                        pcm.extend(chunk)
-                except click.ClickException:
-                    raise
-                except Exception as e:
-                    raise click.ClickException(f"Flux streaming failed: {e}")
-
-                if not pcm:
-                    # No audio means the stream errored upstream or returned
-                    # nothing. Wrapping empty PCM yields a valid header-only
-                    # WAV, so guard rather than report success on a silent file.
-                    raise click.ClickException(
-                        "Flux (Speak v2) streaming returned no audio."
-                    )
-
-                if eff_encoding == "linear16":
-                    audio_bytes = _pcm_to_wav(
-                        bytes(pcm), sample_rate=int(eff_sample_rate)
-                    )
-                else:
-                    audio_bytes = bytes(pcm)
-
-                total_bytes = len(audio_bytes)
-                if output_path:
-                    Path(output_path).write_bytes(audio_bytes)
-                    console.print(
-                        f"[green]Audio saved to {output_path}[/green] "
-                        f"({total_bytes:,} bytes — {prog.timing()})"
-                    )
-
-                if player:
-                    suffix = _play_suffix(
-                        is_flux=True, encoding=eff_encoding, container=None
-                    )
-                    console.print(f"[blue]Playing audio ({player})...[/blue]")
-                    _play_audio(player, audio_bytes, suffix=suffix)
-
-                return SpeakResult(
-                    status="success",
-                    message=(
-                        f"Audio saved to {output_path}"
-                        if output_path
-                        else f"Played {total_bytes:,} bytes"
-                    ),
-                    output_path=output_path or "",
-                    model=model,
-                    bytes_written=total_bytes,
-                    played=bool(player),
-                )
-
-            # Pipe path — write each chunk to stdout as it arrives so a
-            # downstream player starts on the first frame (the point of
-            # "streaming by default"). For linear16 we emit a streaming WAV
-            # header before the first frame so `| ffplay -` plays with no
-            # extra flags; raw mulaw/alaw stream as-is.
-            header = (
-                _streaming_wav_header(sample_rate=int(eff_sample_rate))
-                if eff_encoding == "linear16"
-                else b""
+        except _Terminated as exc:
+            # The partial file or temp file is gone (an old file is kept);
+            # end by the signal itself.
+            _end_by_signal(exc.signum)
+            raise
+        except sinks.Exists:
+            # O_EXCL lost a race with another writer: nothing of ours exists.
+            return _coded(
+                msg.E_OUT_FILE_EXISTS.format(out_file=output_path, prog=_prog()),
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_OUT_FILE_EXISTS,
+                hint_agent=msg.H_OUT_FILE_EXISTS,
             )
-            try:
-                _, outcome = self._stream_to_stdout(stream, header=header)
-            except click.ClickException:
-                raise
-            except Exception as e:
-                raise click.ClickException(f"Flux streaming failed: {e}")
-            finally:
-                _close(stream)
-            if outcome is not True:
-                # The reader went away (quiet, exit 0) or stdout failed.
-                return outcome or None
-
-            if prog.total == 0:
-                # Guard before anything is written: the header is only emitted
-                # on the first frame, so a no-audio stream writes nothing.
-                raise click.ClickException(
-                    "Flux (Speak v2) streaming returned no audio."
-                )
-
-            console.print(
-                f"[green]✓ Streamed {prog.total:,} bytes to stdout[/green] "
-                f"({prog.timing()})"
-            )
-            # Return None so the framework skips output_result: in agentic/CI
-            # (or --output json) mode it would serialize the result to the
-            # stdout console — i.e. append JSON to the audio we just streamed,
-            # corrupting a `> out.wav` redirect. The summary above already went
-            # to the stderr console.
+        except sinks.WriteFailed as exc:
+            if audio_file is not None:
+                audio_file.abort()
+            if exc.stdout:
+                return _stdout_unwritable(exc.error)
+            assert audio_file is not None
+            return _output_unwritable(exc.error, path=audio_file.path)
+        except sinks.ReaderGone:
+            # Whoever read the pipe went away: stop quietly, like stdout.
+            if audio_file is not None and audio_file.is_stdout:
+                _silence_stdout()
             return None
+        finally:
+            if audio_file is not None:
+                audio_file.abort()  # a no-op once the file was committed
 
-        # REST path (Speak v1, including Aura and unknown-model pass-through).
-        # Each chunk goes on as the SDK yields it: to stdout (flushed), or to
-        # a stdin-reading player, so neither waits for the whole utterance.
+        if (
+            audio_file is not None
+            and audio_file.is_stdout
+            and isinstance(result, SpeakResult)
+            and result.status == "success"
+        ):
+            # The audio was stdout's payload, so the summary goes to
+            # stderr and no document follows it.
+            n = audio_file.bytes_written
+            if _agentic:
+                console.print(f"OK: Wrote {n:,} bytes to stdout", markup=False)
+            else:
+                console.print(f"[green]✓ Wrote {n:,} bytes to stdout[/green]")
+            return None
+        return result
+
+    def _speak(
+        self,
+        client: DeepgramClient,
+        *,
+        is_flux: bool,
+        text: str,
+        model: str,
+        encoding: str | None,
+        container: str | None,
+        sample_rate: float | None,
+        speed: float | None,
+        expressivity: int | None,
+        player: str | None,
+        audio_file: sinks.AudioFile | None,
+    ) -> BaseResult | SpeakCodedError | None:
+        if is_flux:
+            return self._speak_flux(
+                client,
+                text=text,
+                model=model,
+                encoding=encoding,
+                sample_rate=sample_rate,
+                speed=speed,
+                expressivity=expressivity,
+                player=player,
+                audio_file=audio_file,
+            )
+        return self._speak_v1(
+            client,
+            text=text,
+            model=model,
+            encoding=encoding,
+            container=container,
+            sample_rate=sample_rate,
+            player=player,
+            audio_file=audio_file,
+        )
+
+    # ── Flux (Speak v2, WebSocket streaming) ──────────────────────────
+
+    def _speak_flux(
+        self,
+        client: DeepgramClient,
+        *,
+        text: str,
+        model: str,
+        encoding: str | None,
+        sample_rate: float | None,
+        speed: float | None,
+        expressivity: int | None,
+        player: str | None,
+        audio_file: sinks.AudioFile | None,
+    ) -> BaseResult | SpeakCodedError | None:
+        # Streaming output is raw audio, so default to linear16 @ 24kHz and
+        # wrap it in WAV for playback. These paths raise (rather than
+        # returning an error result) so a failure exits non-zero and is
+        # visible in every output format.
+        eff_encoding = encoding or "linear16"
+        if eff_encoding not in ("linear16", "mulaw", "alaw"):
+            raise click.ClickException(
+                f"Flux voices stream raw audio, so --encoding {eff_encoding} "
+                "isn't available. Use linear16 (the default), mulaw or alaw."
+            )
+        rate = int(sample_rate or 24000.0)
+
+        # A live byte counter + time-to-first-audio on stderr, so the stream
+        # is visibly arriving rather than a single static line.
+        prog = _StreamProgress(model)
+        raw = client.speak_text_stream(
+            text=text,
+            model=model,
+            encoding=eff_encoding,
+            sample_rate=float(rate),
+            speed=speed,
+            expressivity=expressivity,
+        )
+        stream = prog.track(raw)
+        try:
+            if player in _STDIN_PLAYER_ARGV and eff_encoding == "linear16":
+                assert player is not None
+                return self._flux_play_streaming(
+                    stream,
+                    prog,
+                    player=player,
+                    rate=rate,
+                    audio_file=audio_file,
+                    model=model,
+                )
+            if audio_file is not None or player:
+                return self._flux_buffered(
+                    stream,
+                    prog,
+                    player=player,
+                    rate=rate,
+                    encoding=eff_encoding,
+                    audio_file=audio_file,
+                    model=model,
+                )
+            return self._flux_to_stdout(
+                stream,
+                prog,
+                header=(
+                    _streaming_wav_header(sample_rate=rate)
+                    if eff_encoding == "linear16"
+                    else b""
+                ),
+            )
+        except click.ClickException:
+            raise
+        except _SINK_ERRORS:
+            raise
+        except Exception as e:
+            raise click.ClickException(f"Flux streaming failed: {e}")
+        finally:
+            _close(stream, raw)
+
+    def _flux_play_streaming(
+        self,
+        stream: Iterator[bytes],
+        prog: _StreamProgress,
+        *,
+        player: str,
+        rate: int,
+        audio_file: sinks.AudioFile | None,
+        model: str,
+    ) -> BaseResult:
+        """Flux linear16 into a stdin-reading player, frame by frame.
+
+        The player gets the streaming WAV header before the first frame and
+        then every frame as Flux emits it, so sound starts at first-audio
+        latency — the same framing `dg speak | ffplay -` relies on. A file
+        gets the exact-length WAV once the stream ends; it is created on
+        the first frame.
+        """
+        console.print(f"[blue]Playing audio ({player})...[/blue]")
+        pcm = bytearray()
+        header = _streaming_wav_header(sample_rate=rate)
+        player_gone = False
+        with _player_stdin(player) as sink:
+            for chunk in stream:
+                if not chunk:
+                    continue
+                if audio_file is not None:
+                    audio_file.open()
+                    pcm.extend(chunk)
+                if player_gone:
+                    continue
+                try:
+                    if header:
+                        sink.write(header)
+                        header = b""
+                    sink.write(chunk)
+                    sink.flush()
+                except BrokenPipeError:
+                    # The player exited first (ffplay's "q"): the user
+                    # stopped playback, not a failure. With a file, keep
+                    # draining so it is complete; otherwise stop.
+                    player_gone = True
+                    if audio_file is None:
+                        break
+
+            if audio_file is not None and pcm:
+                # Save before waiting on the player (on leaving this block),
+                # so stopping playback still leaves the file behind.
+                audio_file.write(_pcm_to_wav(bytes(pcm), sample_rate=rate))
+                audio_file.commit()
+
+        if prog.total == 0:
+            raise click.ClickException(
+                "Deepgram returned no audio. Try again, or try another --model."
+            )
+
+        if audio_file is not None:
+            self._saved(audio_file, f"{prog.timing()}")
+        else:
+            console.print(
+                f"[green]✓ Played {prog.total:,} bytes[/green] ({prog.timing()})"
+            )
+        return _speak_result(
+            audio_file,
+            model=model,
+            bytes_written=(audio_file.bytes_written if audio_file else 0) or prog.total,
+            played=True,
+        )
+
+    def _flux_buffered(
+        self,
+        stream: Iterator[bytes],
+        prog: _StreamProgress,
+        *,
+        player: str | None,
+        rate: int,
+        encoding: str,
+        audio_file: sinks.AudioFile | None,
+        model: str,
+    ) -> BaseResult:
+        """Flux into a file and/or afplay: both need the whole utterance.
+
+        A WAV file declares its data length in the header, known only once
+        the stream ends, and afplay is handed a complete file. The file is
+        still created when the first frame arrives.
+        """
+        pcm = bytearray()
+        for chunk in stream:
+            if chunk and audio_file is not None:
+                audio_file.open()
+            pcm.extend(chunk)
+
+        if not pcm:
+            # Wrapping empty PCM yields a valid header-only WAV, so guard
+            # rather than report success on a silent file.
+            raise click.ClickException(
+                "Deepgram returned no audio. Try again, or try another --model."
+            )
+
+        if encoding == "linear16":
+            audio_bytes = _pcm_to_wav(bytes(pcm), sample_rate=rate)
+        else:
+            audio_bytes = bytes(pcm)
+
+        if audio_file is not None:
+            audio_file.write(audio_bytes)
+            audio_file.commit()
+            self._saved(audio_file, prog.timing())
+
+        if player:
+            suffix = _play_suffix(is_flux=True, encoding=encoding, container=None)
+            console.print(f"[blue]Playing audio ({player})...[/blue]")
+            _play_audio(player, audio_bytes, suffix=suffix)
+
+        return _speak_result(
+            audio_file, model=model, bytes_written=len(audio_bytes), played=bool(player)
+        )
+
+    def _flux_to_stdout(
+        self, stream: Iterator[bytes], prog: _StreamProgress, *, header: bytes
+    ) -> SpeakCodedError | None:
+        """Pipe path: each frame goes to stdout as it arrives, after the
+        streaming WAV header for linear16 (so `| ffplay -` plays with no
+        extra flags); raw mulaw/alaw stream as-is."""
+        _, outcome = self._stream_to_stdout(stream, header=header)
+        if outcome is not True:
+            # The reader went away (quiet, exit 0) or stdout failed.
+            return outcome or None
+
+        if prog.total == 0:
+            # The header is only emitted on the first frame, so a no-audio
+            # stream wrote nothing.
+            raise click.ClickException(
+                "Deepgram returned no audio. Try again, or try another --model."
+            )
+
+        console.print(
+            f"[green]✓ Streamed {prog.total:,} bytes to stdout[/green] "
+            f"({prog.timing()})"
+        )
+        # Return None so the framework skips output_result: in agentic/CI
+        # (or --output json) mode it would serialize the result to the
+        # stdout console — i.e. append JSON to the audio we just streamed,
+        # corrupting a `> out.wav` redirect.
+        return None
+
+    # ── Speak v1 (REST) ───────────────────────────────────────────────
+
+    def _speak_v1(
+        self,
+        client: DeepgramClient,
+        *,
+        text: str,
+        model: str,
+        encoding: str | None,
+        container: str | None,
+        sample_rate: float | None,
+        player: str | None,
+        audio_file: sinks.AudioFile | None,
+    ) -> BaseResult | SpeakCodedError | None:
+        """Speak v1, including Aura and unknown-model pass-through. Each
+        chunk goes on as the SDK yields it: to stdout (flushed), to a
+        stdin-reading player, and to the file, so none of them waits for
+        the whole utterance."""
         console.print(f"[blue]Generating speech with {model}...[/blue]")
         try:
             audio_iter = client.speak_text(
@@ -953,34 +1566,30 @@ class SpeakCommand(BaseCommand):
 
         try:
             if player in _STDIN_PLAYER_ARGV:
+                assert player is not None
                 return self._v1_play_streaming(
-                    audio_iter, player=player, output_path=output_path, model=model
+                    audio_iter, player=player, audio_file=audio_file, model=model
                 )
             if player:
                 return self._v1_play_buffered(
                     audio_iter,
                     player=player,
-                    output_path=output_path,
+                    audio_file=audio_file,
                     model=model,
                     encoding=encoding,
                     container=container,
                 )
-            if output_path:
-                total_bytes = 0
-                with open(Path(output_path), "wb") as f:
-                    for chunk in audio_iter:
-                        f.write(chunk)
-                        total_bytes += len(chunk)
-
-                console.print(
-                    f"[green]Audio saved to {output_path}[/green] ({total_bytes:,} bytes)"
-                )
-                return SpeakResult(
-                    status="success",
-                    message=f"Audio saved to {output_path}",
-                    output_path=output_path,
-                    model=model,
-                    bytes_written=total_bytes,
+            if audio_file is not None:
+                for chunk in audio_iter:
+                    audio_file.write(chunk)
+                if not audio_file.bytes_written:
+                    return _fail(
+                        "Deepgram returned no audio. Try again, or try another --model."
+                    )
+                audio_file.commit()
+                self._saved(audio_file)
+                return _speak_result(
+                    audio_file, model=model, bytes_written=audio_file.bytes_written
                 )
 
             total_bytes, outcome = self._stream_to_stdout(audio_iter)
@@ -990,11 +1599,12 @@ class SpeakCommand(BaseCommand):
             console.print(f"[green]✓ Wrote {total_bytes:,} bytes to stdout[/green]")
             # Return None so the framework skips output_result — otherwise
             # agentic/CI (or --output json) mode serializes JSON onto the
-            # same stdout as the audio, corrupting a `> out` redirect. The
-            # summary above went to the stderr console.
+            # same stdout as the audio, corrupting a `> out` redirect.
             return None
 
         except click.ClickException:
+            raise
+        except _SINK_ERRORS:
             raise
         except Exception as e:
             # Raise (not return an error result) so the failure exits non-zero
@@ -1044,109 +1654,101 @@ class SpeakCommand(BaseCommand):
         audio_iter: Iterator[bytes],
         *,
         player: str,
-        output_path: str | None,
+        audio_file: sinks.AudioFile | None,
         model: str,
     ) -> BaseResult:
         """Speak v1 into a stdin-reading player, chunk by chunk.
 
         The player is started before the request, so sound starts as the
-        first chunk arrives. With -o, every chunk also goes to the file.
+        first chunk arrives. With a file, every chunk also goes there.
         """
         console.print(f"[blue]Playing audio ({player})...[/blue]")
         total = 0
         player_gone = False
         try:
-            with (
-                _player_stdin(player) as sink,
-                open(Path(output_path), "wb")
-                if output_path
-                else nullcontext() as saved,
-            ):
+            with _player_stdin(player) as sink:
                 for chunk in audio_iter:
                     if not chunk:
                         continue
                     total += len(chunk)
-                    if saved is not None:
-                        saved.write(chunk)
+                    if audio_file is not None:
+                        audio_file.write(chunk)
                     if player_gone:
                         continue
                     try:
                         sink.write(chunk)
                         sink.flush()
                     except BrokenPipeError:
-                        # The user stopped playback (ffplay's "q"). With -o,
-                        # keep draining so the file is complete; otherwise
+                        # The user stopped playback (ffplay's "q"). With a
+                        # file, keep draining so it is complete; otherwise
                         # stop and close the response.
                         player_gone = True
-                        if saved is None:
+                        if audio_file is None:
                             break
                 if not total:
                     # Kill the player rather than hand it an empty stream.
                     raise _NoAudio
+                if audio_file is not None:
+                    # Before waiting on the player, so stopping playback
+                    # still leaves the file behind.
+                    audio_file.commit()
         except _NoAudio:
-            return _fail("TTS returned no audio.")
-
-        if output_path:
-            console.print(
-                f"[green]Audio saved to {output_path}[/green] ({total:,} bytes)"
+            return _fail(
+                "Deepgram returned no audio. Try again, or try another --model."
             )
-        return SpeakResult(
-            status="success",
-            message=(
-                f"Audio saved to {output_path}"
-                if output_path
-                else f"Played {total:,} bytes"
-            ),
-            output_path=output_path or "",
-            model=model,
-            bytes_written=total,
-            played=True,
-        )
+
+        if audio_file is not None:
+            self._saved(audio_file)
+        return _speak_result(audio_file, model=model, bytes_written=total, played=True)
 
     def _v1_play_buffered(
         self,
         audio_iter: Iterator[bytes],
         *,
         player: str,
-        output_path: str | None,
+        audio_file: sinks.AudioFile | None,
         model: str,
         encoding: str | None,
         container: str | None,
     ) -> BaseResult:
         """Speak v1 into a player that has no stdin mode (afplay).
 
-        It is handed a complete temp file, so the utterance is buffered.
+        It is handed a complete temp file, so the utterance is buffered; a
+        file still gets each chunk as it arrives.
         """
         audio = bytearray()
         for chunk in audio_iter:
+            if audio_file is not None:
+                audio_file.write(chunk)
             audio.extend(chunk)
         audio_bytes = bytes(audio)
-        total_bytes = len(audio_bytes)
 
         if not audio_bytes:
-            return _fail("TTS returned no audio.")
-
-        if output_path:
-            Path(output_path).write_bytes(audio_bytes)
-            console.print(
-                f"[green]Audio saved to {output_path}[/green] ({total_bytes:,} bytes)"
+            return _fail(
+                "Deepgram returned no audio. Try again, or try another --model."
             )
+
+        if audio_file is not None:
+            audio_file.commit()
+            self._saved(audio_file)
 
         suffix = _play_suffix(is_flux=False, encoding=encoding, container=container)
         console.print(f"[blue]Playing audio ({player})...[/blue]")
         _play_audio(player, audio_bytes, suffix=suffix)
 
-        return SpeakResult(
-            status="success",
-            message=(
-                f"Audio saved to {output_path}"
-                if output_path
-                else f"Played {total_bytes:,} bytes"
-            ),
-            output_path=output_path or "",
-            model=model,
-            bytes_written=total_bytes,
-            played=True,
+        return _speak_result(
+            audio_file, model=model, bytes_written=len(audio_bytes), played=True
+        )
+
+    @staticmethod
+    def _saved(audio_file: sinks.AudioFile, timing: str = "") -> None:
+        """The stderr summary for a saved file (none for stdout)."""
+        if audio_file.is_stdout:
+            return
+        extra = f" — {timing}" if timing else ""
+        console.print(
+            f"[green]Audio saved to {escape(audio_file.path)}[/green] "
+            f"({audio_file.bytes_written:,} bytes{extra})"
         )
 
     # ── Result on stdout ──────────────────────────────────────────────
