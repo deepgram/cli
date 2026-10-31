@@ -602,7 +602,10 @@ class TestFiniteCredentialFlow:
     def _make_auth(self, mock_config):
         with patch("deepctl_core.auth.httpx.Client"):
             with patch("deepctl_core.auth.keyring"):
-                return AuthManager(mock_config)
+                auth = AuthManager(mock_config)
+                # The client is built on first use; build it under the patch.
+                _ = auth.client
+                return auth
 
     # ------------------------------------------------------------------
     # _store_token — finite direct credential path

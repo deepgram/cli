@@ -552,16 +552,18 @@ class TestWhoamiKeySource:
         return WhoamiCommand()
 
     def _run(self, whoami_command, mock_config, mock_client, env, profile_key):
-        auth_manager = Mock(spec=AuthManager)
-        auth_manager.get_project_id.return_value = "proj-1"
-        auth_manager.has_profile_credentials.return_value = (bool(profile_key), False)
-        auth_manager.is_authenticated.return_value = bool(profile_key or env)
+        # Whoami takes the key and its source from the resolver, so
+        # this runs the real AuthManager over the mocked config and keyring.
         mock_config.get_profile.return_value.api_key = profile_key
+        mock_config.get_profile.return_value.project_id = "proj-1"
         mock_config.get_profile.return_value.dg_token_expires_at = None
+        keyring = Mock()
+        keyring.get_password.return_value = None
         with (
             patch.dict("os.environ", env, clear=False),
-            patch("keyring.get_password", return_value=None),
+            patch("deepctl_core.auth.keyring", keyring, create=True),
         ):
+            auth_manager = AuthManager(mock_config)
             if "DEEPGRAM_API_KEY" not in env:
                 import os
 

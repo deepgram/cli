@@ -934,10 +934,21 @@ def test_missing_key_after_untrusted_file_key_says_so(real_home, monkeypatch, ca
         "above), and no other API key is set."
     )
     assert str(err.value) == expected
-    captured = capsys.readouterr()
-    text = (captured.out + captured.err).replace("\n", " ")
-    assert f"ERROR: {expected}" in text
-    assert f"HINT: {FILE_HINT}" in text
+    # guard() raises the coded auth_required (E-KEY-UNTRUSTED);
+    # BaseCommand prints its two lines (test_credentials.py covers that).
+    from deepctl_core import transport
+
+    assert isinstance(err.value, transport.TransportError)
+    assert err.value.code == "auth_required"
+    output._output_config.update(agentic=True)
+    try:
+        result = transport.render(err.value, command_path="listen")
+    finally:
+        output._output_config.update(agentic=False)
+    assert result.error == expected
+    assert result.hint == FILE_HINT
+    assert result.next_step is None
+    text = f"{result.error} {result.hint}"
     assert "not set in the configuration file" not in text
     assert "deepctl login" not in text
     assert "dg login" not in text
@@ -1068,6 +1079,16 @@ def test_foreign_owned_key_file_outside_agent_mode_unchanged(real_home, monkeypa
     assert len(texts) == 1 and "set DEEPGRAM_API_KEY instead" in texts[0]
 
 
+def _render_guard_error(manager, error) -> None:
+    """The two stderr lines BaseCommand prints for guard()'s coded error."""
+    from deepctl_core import transport
+    from rich.markup import escape
+
+    result = transport.render(error, command_path="projects", auth_manager=manager)
+    output.print_error(escape(result.error))
+    output.print_hint(escape(result.hint))
+
+
 def _run_projects_guard(capsys):
     """Config load + notices + guard, as a `dg projects` run renders them."""
     from deepctl_core.auth import AuthenticationError, AuthManager
@@ -1076,8 +1097,10 @@ def _run_projects_guard(capsys):
     try:
         config = Config()
         config_module.flush_config_notices()
-        with pytest.raises(AuthenticationError):
-            AuthManager(config).guard()
+        manager = AuthManager(config)
+        with pytest.raises(AuthenticationError) as raised:
+            manager.guard()
+        _render_guard_error(manager, raised.value)
     finally:
         output._output_config.update(agentic=False)
     return capsys.readouterr().err
@@ -1120,8 +1143,10 @@ def test_untrusted_hint_follows_the_error_when_nothing_warned(real_home, monkeyp
     plant_with_key(real_home, 0o666)
     output._output_config.update(agentic=True)
     try:
-        with pytest.raises(AuthenticationError):
-            AuthManager(Config()).guard()
+        manager = AuthManager(Config())
+        with pytest.raises(AuthenticationError) as raised:
+            manager.guard()
+        _render_guard_error(manager, raised.value)
     finally:
         output._output_config.update(agentic=False)
     lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]

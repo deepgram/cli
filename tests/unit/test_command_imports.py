@@ -91,19 +91,7 @@ def _is_group(path: str) -> bool:
 @pytest.mark.parametrize(
     "path",
     [
-        pytest.param(
-            p.split(" "),
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "a subcommand group's help takes the full path, where the "
-                    "parent group's callback builds an API client (httpx, ssl, "
-                    "keyring) before the subcommand parses --help"
-                ),
-            )
-            if _is_group(p)
-            else (),
-        )
+        p.split(" ")
         for p in sorted(_manifest.commands())
         if " " in p
     ],

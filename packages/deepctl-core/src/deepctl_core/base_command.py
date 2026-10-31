@@ -6,6 +6,7 @@ from typing import Any, ClassVar, TextIO
 
 import click
 
+from . import credentials
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config, flush_config_notices
@@ -153,6 +154,7 @@ class BaseCommand(ABC):
         with TimingContext(f"command_{self.name}_total"):
             # Output mode is set up by now; print queued config notices.
             flush_config_notices()
+            credentials.flush_warnings()
             with TimingContext("command_setup"):
                 # Get configuration from context
                 config = ctx.obj.get("config")
@@ -172,7 +174,7 @@ class BaseCommand(ABC):
                 )
 
                 # Create Deepgram client
-                client = DeepgramClient(config, auth_manager)
+                client = self._make_client(config, auth_manager)
 
             # Refusals that need no credentials come before the auth check,
             # so a refused command sends nothing at all.
@@ -189,39 +191,12 @@ class BaseCommand(ABC):
                 with TimingContext("authentication_check"):
                     try:
                         auth_manager.guard()
-
-                        # Log credential source and project ID for transparency
-                        if not config.get("output.quiet", False):
-                            source = auth_manager.get_credential_source()
-                            project_id = auth_manager.get_project_id()
-
-                            # Only log if not using a profile (i.e., using env vars or flags)
-                            if source in [
-                                "explicit flags",
-                                "environment variables",
-                            ]:
-                                # Diagnostics, not the result. print_info /
-                                # print_warning still write to stdout outside
-                                # agentic mode, so with an explicit `-o json`
-                                # these three lines landed in front of the
-                                # payload and broke `| jq` (#104, success
-                                # path). Route them straight to stderr; the
-                                # prefixes mirror output.py so the rendering
-                                # is unchanged in both modes.
-                                info = "INFO:" if _agentic else "[blue]ℹ[/blue]"
-                                stderr_console.print(
-                                    f"{info} Using credentials from {source}"
-                                )
-                                if project_id:
-                                    stderr_console.print(
-                                        f"{info} Affecting project: {project_id}"
-                                    )
-                                else:
-                                    warn = "WARN:" if _agentic else "[yellow]⚠[/yellow]"
-                                    stderr_console.print(
-                                        f"{warn} No project ID specified"
-                                    )
-
+                        self._print_credential_source(config, auth_manager)
+                    except TransportError as e:
+                        # auth_required: the coded result on stdout and two
+                        # stderr lines, like any other coded error.
+                        self._report_transport_error(e, ctx, config, auth_manager)
+                        raise SystemExit(1) from None
                     except Exception as auth_error:
                         # guard() already wrote the human-readable diagnosis to
                         # stderr, so don't duplicate it -- but stdout must still
@@ -309,6 +284,37 @@ class BaseCommand(ABC):
             exit_code = self.exit_code_for(result)
             if exit_code:
                 raise SystemExit(exit_code)
+
+    def _make_client(self, config: Config, auth_manager: AuthManager) -> Any:
+        """The Deepgram client handed to ``handle``."""
+        return DeepgramClient(config, auth_manager)
+
+    def _print_credential_source(
+        self, config: Config, auth_manager: AuthManager
+    ) -> None:
+        """Say where the credentials came from when no profile supplied them.
+
+        Diagnostics, not the result: straight to stderr, so `-o json`
+        output stays parseable (#104). The source is the resolver's, so a
+        key from DEEPGRAM_API_KEY is reported as the environment's even
+        though Config merges it into the profile.
+        "No project ID specified" only for commands that need one.
+        """
+        if config.get("output.quiet", False):
+            return
+        source = auth_manager.get_credential_source()
+        if source not in ("explicit flags", "environment variables"):
+            return
+        project_id = auth_manager.get_project_id()
+        info = "INFO:" if _agentic else "[blue]ℹ[/blue]"
+        stderr_console.print(f"{info} Using credentials from {source}")
+        if project_id:
+            from rich.markup import escape
+
+            stderr_console.print(f"{info} Affecting project: {escape(project_id)}")
+        elif self.requires_project:
+            warn = "WARN:" if _agentic else "[yellow]⚠[/yellow]"
+            stderr_console.print(f"{warn} No project ID specified")
 
     def _run_handler(
         self,

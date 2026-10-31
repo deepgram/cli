@@ -826,6 +826,12 @@ def cli(
         # came from the command line, so it is never saved and gets
         # credentials only if the host is trusted.
         ctx.ensure_object(dict)
+        # An unexpanded ${...} in a DEEPGRAM_* variable counts as unset
+        # (W-ENV-PLACEHOLDER, printed once the output mode is known).
+        from deepctl_core.credentials import drop_env_placeholders
+
+        drop_env_placeholders()
+
         from deepctl_core import Config
 
         # Help from a spec runs no command: only the files' checks and
