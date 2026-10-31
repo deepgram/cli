@@ -6,7 +6,7 @@ import sys
 import wave
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import click
 import pytest
@@ -905,9 +905,13 @@ class TestSpeakCommand:
 
         assert result is None
 
-        mock_stdout_buffer.write.assert_any_call(b"chunk1")
-        mock_stdout_buffer.write.assert_any_call(b"chunk2")
-        mock_stdout_buffer.flush.assert_called_once()
+        # Each chunk is flushed as it arrives, not once at the end.
+        assert mock_stdout_buffer.mock_calls == [
+            call.write(b"chunk1"),
+            call.flush(),
+            call.write(b"chunk2"),
+            call.flush(),
+        ]
 
     # ── --list-voices ────────────────────────────────────────────────
 
