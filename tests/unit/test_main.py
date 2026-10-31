@@ -15,6 +15,16 @@ with patch("deepctl_core.PluginManager") as mock_pm_class:
     mock_pm.load_plugins = MagicMock()
     from deepctl.main import cli, load_commands
 
+# The Click CLI and run() live in deepctl._cli; deepctl.main is the light entry
+# point that imports it on the full path. Patch names there.
+import deepctl._cli as _cli_mod
+
+
+@pytest.fixture
+def reload_commands(monkeypatch):
+    """load_commands() runs once per process; let a test run it again."""
+    monkeypatch.setattr(_cli_mod, "_commands_loaded", False)
+
 
 class TestMainCLI:
     """Test suite for main CLI functionality."""
@@ -63,7 +73,7 @@ class TestMainCLI:
         assert "Invalid value" in result.output
 
     @patch("deepctl_core.PluginManager")
-    def test_load_commands_success(self, mock_plugin_manager_class):
+    def test_load_commands_success(self, mock_plugin_manager_class, reload_commands):
         """Test successful command loading from entry points."""
         # Mock the plugin manager instance
         mock_plugin_manager = Mock()
@@ -78,7 +88,9 @@ class TestMainCLI:
 
     @patch("deepctl_core.plugin_manager.console")
     @patch("deepctl_core.plugin_manager.metadata.entry_points")
-    def test_load_commands_error_handling(self, mock_entry_points, mock_console):
+    def test_load_commands_error_handling(
+        self, mock_entry_points, mock_console, reload_commands
+    ):
         """Test error handling during command loading."""
         # Mock entry point that raises error
         mock_entry_point = Mock()
@@ -117,13 +129,11 @@ class TestMainCLI:
         """Test main() handles KeyboardInterrupt."""
         from deepctl.main import main
 
-        # Patch the module-global `cli` that main() calls, going through
-        # sys.modules because deepctl/__init__ re-exports the `main` function
-        # as `deepctl.main`, shadowing the submodule attribute. (Patching the
-        # instance's __call__ is inert: dunder lookup bypasses instance
-        # attributes, so the old patch.object(cli, "__call__", ...) form
-        # exercised the bare-`dg` help path instead.)
-        main_mod = sys.modules["deepctl.main"]
+        # Patch the module-global `cli` that run() calls, in deepctl._cli.
+        # (Patching the instance's __call__ is inert: dunder lookup bypasses
+        # instance attributes, so the old patch.object(cli, "__call__", ...)
+        # form exercised the bare-`dg` help path instead.)
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(main_mod, "cli", side_effect=KeyboardInterrupt()):
                 with pytest.raises(SystemExit) as exc_info:
@@ -144,7 +154,7 @@ class TestMainCLI:
 
         from deepctl.main import main
 
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(
                 main_mod, "cli", side_effect=click.exceptions.Abort()
@@ -158,7 +168,7 @@ class TestMainCLI:
         """Test main() handles general exceptions."""
         from deepctl.main import main
 
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(main_mod, "cli", side_effect=Exception("Test error")):
                 with pytest.raises(SystemExit) as exc_info:
@@ -215,7 +225,7 @@ class TestMainCLI:
 
         from deepctl.main import main
 
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(
                 main_mod, "cli", side_effect=click.exceptions.Abort()
@@ -247,9 +257,7 @@ class TestSafeConsolePrint:
     )
     def test_swallows_closed_stream(self, error):
         """A broken console does not raise out of _safe_console_print."""
-        # deepctl/__init__ re-exports the `main` function as `deepctl.main`,
-        # shadowing the submodule attribute — fetch the real module directly.
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
 
         with patch.object(main_mod.console, "print", side_effect=error):
             # Must not raise.
@@ -261,7 +269,9 @@ class TestSafeConsolePrint:
         main() must still exit(1) cleanly rather than let rich's ValueError
         escape to the excepthook.
         """
-        main_mod = sys.modules["deepctl.main"]
+        from deepctl.main import main
+
+        main_mod = _cli_mod
 
         with (
             patch("sys.argv", ["deepctl"]),
@@ -273,7 +283,7 @@ class TestSafeConsolePrint:
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
-            main_mod.main()
+            main()
 
         assert exc_info.value.code == 1
 
@@ -339,10 +349,16 @@ class TestGlobalOptionHint:
 
 
 class TestRichTraceback:
-    """The rich excepthook installed at import doesn't render frame locals."""
+    """An uncaught exception gets a rich traceback, without frame locals.
 
-    def test_excepthook_does_not_render_locals(self, capsys):
-        assert sys.excepthook.__module__ == "rich.traceback"
+    main() installs a stdlib excepthook on the full path; rich loads only
+    when an exception reaches it, and it never renders locals.
+    """
+
+    def test_excepthook_does_not_render_locals(self, capsys, monkeypatch):
+        from deepctl.main import _rich_excepthook
+
+        monkeypatch.setattr(sys, "excepthook", _rich_excepthook)
         # Built at runtime so the source-context lines rich prints can't
         # contain it; only a rendered local variable could.
         sentinel = "-".join(["LOCALS", "SENTINEL", "KEY"])
@@ -358,7 +374,10 @@ class TestRichTraceback:
 
         captured = capsys.readouterr()
         assert "RuntimeError" in captured.err
+        assert "Traceback" in captured.err
         assert sentinel not in captured.err
+        # Rich's hook replaced the lazy one, so later errors skip the import.
+        assert sys.excepthook.__module__ == "rich.traceback"
 
 
 class TestHyphenatedCommands:
