@@ -696,6 +696,25 @@ def test_small_pending_interval_is_raised_to_the_floor(env):
     assert result.details["retry_after"] == 6
 
 
+def test_network_error_on_complete_is_coded(env, monkeypatch):
+    import httpx
+    from deepctl_core.transport import TransportError
+
+    run(env)
+
+    def unreachable(self, device_code, identity_url=None):
+        request = httpx.Request("POST", f"{IDENTITY}/oauth/token")
+        raise httpx.ConnectError("[Errno 111] Connection refused", request=request)
+
+    monkeypatch.setattr(AuthManager, "poll_device_token", unreachable)
+    with pytest.raises(TransportError) as err:
+        run(env, complete=True)
+    assert err.value.code == "network_unavailable"
+    assert err.value.error == "Couldn't reach id.dx.deepgram.com: connection refused."
+    assert "device-secret-1" not in err.value.error
+    assert pending_path(env).exists()
+
+
 def test_complete_with_another_profile_is_a_usage_error(env):
     import click
 

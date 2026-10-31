@@ -1100,6 +1100,7 @@ class LoginCommand(BaseCommand):
         """``dg login --complete``: poll once (or, with --wait, until done)
         for the saved device code, and save the key once it is approved."""
         import httpx
+        from deepctl_core import transport
 
         stop = _preflight(config)
         if stop is not None:
@@ -1145,6 +1146,10 @@ class LoginCommand(BaseCommand):
             try:
                 poll = auth_manager.poll_device_token(pending.device_code, identity_url)
             except httpx.RequestError as e:
+                # The coded network error every other request gets.
+                mapped = transport.map_exception(e, (pending.device_code,))
+                if mapped is not None:
+                    raise mapped from e
                 text = f"Network error while completing the login: {e}"
                 print_error(escape(text))
                 return LoginResult(

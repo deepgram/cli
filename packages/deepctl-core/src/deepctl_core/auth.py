@@ -579,12 +579,13 @@ class AuthManager:
             )
 
     def guard(self) -> None:
-        """Guard function to ensure a valid API key is available.
+        """Check that an API key is available, without sending it anywhere.
 
-        Only validates that the API key works. Project ID validation
-        is handled separately by requires_project on BaseCommand.
-        Refuses first, before reading or sending any key, when the base URL
-        isn't trusted with credentials.
+        Refuses first, before reading any key, when the base URL isn't
+        trusted with credentials. The key itself is checked by the command's
+        own request: a 401 or 403 there becomes ``auth_invalid`` or
+        ``auth_forbidden`` (see ``deepctl_core.transport``). Project ID
+        validation is handled separately by requires_project on BaseCommand.
         """
         self.check_base_url()
         api_key = self.get_api_key()
@@ -612,20 +613,6 @@ class AuthManager:
                 "account.[/yellow]\n"
             )
             raise AuthenticationError("DEEPGRAM_API_KEY is not set")
-
-        # Verify the API key is valid (does NOT require project_id)
-        success, message, error_type = self.verify_api_key(api_key)
-        if not success:
-            console.print(f"[red]Error:[/red] {message}")
-
-            if error_type == "auth":
-                console.print(
-                    "[yellow]Your API key may have expired or been "
-                    "revoked.[/yellow]\n"
-                    "[yellow]Run[/yellow] [bold]deepctl login[/bold] "
-                    "[yellow]to re-authenticate.[/yellow]"
-                )
-            raise AuthenticationError(message)
 
     def login_with_api_key(
         self, api_key: str, project_id: str | None = None, _force_write: bool = False

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlencode
 
+from . import transport
 from .hosts import DEFAULT_BASE_URL
 from .output import stderr_console
 
@@ -91,6 +92,8 @@ class DeepgramClient:
         self._project_id: str | None = None
         # The REST base the SDK client was given (for redirect errors).
         self._rest_base: str = DEFAULT_BASE_URL
+        # Kept out of error text.
+        self._secrets: tuple[str, ...] = ()
 
     @property
     def client(self) -> DGClient:
@@ -124,7 +127,11 @@ class DeepgramClient:
         base_url = self.auth_manager.check_base_url()
 
         try:
-            kwargs: dict[str, Any] = {"api_key": api_key}
+            # One connection pool per process; requests reuse its connection.
+            kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "httpx_client": transport.shared_client(),
+            }
 
             if base_url and base_url != DEFAULT_BASE_URL:
                 # Derive both the REST and WebSocket endpoints from the
@@ -149,6 +156,7 @@ class DeepgramClient:
 
             client = DGClient(**kwargs)
             self._project_id = project_id
+            self._secrets = (api_key,)
             return client
 
         except Exception as e:
@@ -174,13 +182,15 @@ class DeepgramClient:
             )
         return ApiError(body=f"{what}: {e}")
 
-    def _refuse_redirects_in(self, chunks: Iterator[bytes]) -> Iterator[bytes]:
-        """Iterate ``chunks``, turning a 3xx answer into the refusal."""
+    def _mapped(self, chunks: Iterator[bytes]) -> Iterator[bytes]:
+        """Yield ``chunks``; a request failure while reading them is mapped,
+        and a 3xx answer becomes the redirect refusal."""
         from .websocket import RedirectRefused
 
         try:
             yield from chunks
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             refused = self._failed("", e)
             if isinstance(refused, RedirectRefused):
                 raise refused from e
@@ -216,6 +226,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Transcription failed", e)
 
     def transcribe_url(
@@ -237,6 +248,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Transcription failed", e)
 
     # ── Text-to-Speech ─────────────────────────────────────────────
@@ -263,9 +275,10 @@ class DeepgramClient:
                 "Iterator[bytes]", self.client.speak.v1.audio.generate(**kwargs)
             )
             # The request runs when the caller starts iterating.
-            return self._refuse_redirects_in(audio)
+            return self._mapped(audio)
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Text-to-speech failed", e)
 
     def speak_text_stream(
@@ -326,6 +339,7 @@ class DeepgramClient:
                     if isinstance(message, bytes):
                         yield message
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Text-to-speech streaming failed", e)
 
     def ws_base_url(self) -> str:
@@ -368,6 +382,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Text analysis failed", e)
 
     # ── Models ─────────────────────────────────────────────────────
@@ -383,6 +398,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to list models", e)
 
     def get_model(self, model_id: str) -> dict[str, Any]:
@@ -392,6 +408,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get model", e)
 
     # ── Projects ───────────────────────────────────────────────────
@@ -403,6 +420,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get projects", e)
 
     def get_project(self, project_id: str | None = None) -> dict[str, Any]:
@@ -413,6 +431,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get project", e)
 
     def create_project(self, name: str, company: str | None = None) -> dict[str, Any]:
@@ -426,6 +445,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to create project", e)
 
     # ── Usage ──────────────────────────────────────────────────────
@@ -451,6 +471,7 @@ class DeepgramClient:
             return result
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get usage", e)
 
     # ── API Keys ───────────────────────────────────────────────────
@@ -471,6 +492,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to list keys", e)
 
     def create_key(
@@ -502,6 +524,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to create key", e)
 
     def get_key(self, key_id: str, project_id: str | None = None) -> dict[str, Any]:
@@ -512,6 +535,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get key", e)
 
     def delete_key(self, key_id: str, project_id: str | None = None) -> dict[str, Any]:
@@ -522,6 +546,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to delete key", e)
 
     # ── Requests ───────────────────────────────────────────────────
@@ -560,6 +585,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to list requests", e)
 
     def get_request(
@@ -572,6 +598,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get request", e)
 
     # ── Billing ────────────────────────────────────────────────────
@@ -600,6 +627,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get billing breakdown", e)
 
     def get_balances(self, project_id: str | None = None) -> dict[str, Any]:
@@ -610,6 +638,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to get balances", e)
 
     # ── Members ────────────────────────────────────────────────────
@@ -622,6 +651,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to list members", e)
 
     def remove_member(
@@ -634,6 +664,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to remove member", e)
 
     def list_member_scopes(
@@ -648,6 +679,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to list member scopes", e)
 
     def update_member_scopes(
@@ -662,6 +694,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to update member scopes", e)
 
     # ── Invites ────────────────────────────────────────────────────
@@ -674,6 +707,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to list invites", e)
 
     def create_invite(
@@ -688,6 +722,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to create invite", e)
 
     def delete_invite(
@@ -700,6 +735,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
+            transport.raise_for(e, self._secrets)
             raise self._failed("Failed to delete invite", e)
 
     # ── Utilities ──────────────────────────────────────────────────

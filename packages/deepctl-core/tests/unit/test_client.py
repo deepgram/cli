@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
+from deepctl_core import transport
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
@@ -128,6 +129,7 @@ class TestDeepgramClient:
         # Verify DGClient was created with environment kwarg
         mock_dg_client.assert_called_once_with(
             api_key="sk-test",
+            httpx_client=transport.shared_client(),
             environment=mock_env.return_value,
             follow_redirects=False,
         )
