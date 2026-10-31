@@ -9,12 +9,18 @@ from typing import Any
 
 import click
 from deepctl_core import AuthenticationError, AuthManager, BaseGroupCommand, Config
+
+# Already loaded with BaseGroupCommand (deepctl_core.base_command imports it).
+from deepctl_core.hosts import DEFAULT_BASE_URL
 from rich.console import Console
 
 from .fetcher import get_cached_manifest, get_or_fetch_script, refresh_manifest
 from .models import ToolkitScript
 
 console = Console()
+
+# The streaming endpoint the examples point at, built from the one default.
+_LISTEN_WS_URL = DEFAULT_BASE_URL.replace("https://", "wss://", 1) + "/v1/listen"
 
 
 class ToolkitCommand(BaseGroupCommand):
@@ -35,8 +41,8 @@ class ToolkitCommand(BaseGroupCommand):
 
     examples = [
         "dg debug toolkit refresh",
-        "dg debug toolkit latency wss://api.deepgram.com/v1/listen",
-        "dg debug toolkit latency wss://api.deepgram.com/v1/listen --duration=60",
+        f"dg debug toolkit latency {_LISTEN_WS_URL}",
+        f"dg debug toolkit latency {_LISTEN_WS_URL} --duration=60",
     ]
 
     def setup_commands(self) -> list[click.Command]:
