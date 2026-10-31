@@ -1,7 +1,8 @@
 """Base command class for deepctl commands."""
 
+import sys
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TextIO
 
 import click
 
@@ -12,6 +13,7 @@ from .hosts import CredentialHostError
 from .models import CodedErrorResult, ErrorResult
 from .output import (
     _agentic,
+    _output_config,
     print_error,
     print_error_hint,
     print_hint,
@@ -26,6 +28,69 @@ from .transport import TransportError
 # Shared instance rather than a bare Console() so it honours the agentic
 # no-color/highlight settings; diagnostics use stderr_console instead.
 console = stdout_console
+
+
+# Mode A stderr grammar: every line starts with one of
+# these. Lines that start with "Error"/"Warning" are 0.4.0 error text a
+# command printed itself, kept until a later release codes them.
+_MODE_A_PREFIXES = (
+    "ERROR: ",
+    "WARN: ",
+    "INFO: ",
+    "HINT: ",
+    "OK: ",
+    "DEPRECATED: ",
+    "Error",
+    "Warning",
+)
+
+# Built-in commands whose requests go through DeepgramClient and the shared
+# Transport. In mode A their handlers run without status chrome on
+# stderr. Other commands print things the caller needs there (login's device
+# code, dg api's response errors, debug-probe's proxy address), so they keep
+# it. Built-in names can't be taken by plugins.
+_CHROME_FREE_COMMANDS = frozenset(
+    {
+        "billing",
+        "keys",
+        "listen",
+        "members",
+        "models",
+        "projects",
+        "read",
+        "requests",
+        "speak",
+        "transcribe",
+        "usage",
+    }
+)
+
+
+class _ModeAStderr:
+    """``sys.stderr`` for a command's handler in mode A: drops status chrome.
+
+    Each write that starts a line is kept or dropped as a whole, so one
+    ``print`` that wraps over several lines stays together.
+    """
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+        self._keep = True
+        self._line_start = True
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        if self._line_start:
+            first = text.lstrip("\n").split("\n", 1)[0]
+            self._keep = bool(first.strip()) and first.startswith(_MODE_A_PREFIXES)
+        if self._keep:
+            self._stream.write(text)
+        self._line_start = text.endswith("\n")
+        return len(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
 
 
 class UnexpectedCommandError(click.ClickException):
@@ -196,7 +261,7 @@ class BaseCommand(ABC):
             # Execute the command
             try:
                 with TimingContext(f"command_{self.name}_handler"):
-                    result = self.handle(config, auth_manager, client, **kwargs)
+                    result = self._run_handler(config, auth_manager, client, **kwargs)
 
                 # Handle command result
                 if result is not None:
@@ -244,6 +309,27 @@ class BaseCommand(ABC):
             exit_code = self.exit_code_for(result)
             if exit_code:
                 raise SystemExit(exit_code)
+
+    def _run_handler(
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
+        **kwargs: Any,
+    ) -> Any:
+        """Run ``handle``; in mode A, without status chrome on stderr."""
+        if (
+            not _output_config["agentic"]
+            or _output_config["verbose"]
+            or self.name not in _CHROME_FREE_COMMANDS
+        ):
+            return self.handle(config, auth_manager, client, **kwargs)
+        real = sys.stderr
+        sys.stderr = _ModeAStderr(real)
+        try:
+            return self.handle(config, auth_manager, client, **kwargs)
+        finally:
+            sys.stderr = real
 
     def _report_transport_error(
         self,

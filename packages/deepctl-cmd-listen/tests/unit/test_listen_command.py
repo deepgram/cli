@@ -229,12 +229,14 @@ class TestListenCommand:
             assert call_kwargs["encoding"] == "linear16"
             assert result.source == "stdin"
 
+    @patch("deepctl_cmd_listen.command.print_warning")
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_warns_diarize_ignored_on_flux(
         self,
         mock_sys,
         mock_status,
+        mock_warning,
         command,
         mock_config,
         mock_auth_manager,
@@ -261,20 +263,57 @@ class TestListenCommand:
                 diarize=True,
             )
 
-        printed = " ".join(
-            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
-        )
-        assert "not supported by Flux STT" in printed
+        # The note is a warning (WARN: in agent mode), not status chrome.
+        calls = mock_status.print.call_args_list + mock_warning.call_args_list
+        printed = " ".join(str(c.args[0]) for c in calls if c.args)
+        assert "Flux models don't support --diarize" in printed
         assert "Speaker labels enabled" not in printed
         assert mock_ws.call_args.kwargs["diarize"] is False
         assert result.diarized is False
 
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
+    def test_diarize_warning_prints_under_quiet(
+        self,
+        mock_sys,
+        mock_status,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        monkeypatch,
+        capsys,
+    ):
+        """`dg -q listen ... --diarize`: --quiet hides INFO/OK lines, not this
+        WARN."""
+        from deepctl_core import output
+
+        monkeypatch.setitem(output._output_config, "quiet", True)
+        monkeypatch.setitem(output._output_config, "agentic", True)
+        mock_sys.stdin.isatty.return_value = True
+
+        async def fake_ws_mic(_client, **kwargs):
+            return ListenResult(status="success", source="mic", mode="live")
+
+        with patch.object(command, "_ws_mic", side_effect=fake_ws_mic):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                mic=True,
+                model="flux-general-en",
+                diarize=True,
+            )
+        assert "WARN: Flux models don't support --diarize, so it was ignored." in capsys.readouterr().err
+
+    @patch("deepctl_cmd_listen.command.print_warning")
+    @patch("deepctl_cmd_listen.command.status")
+    @patch("deepctl_cmd_listen.command.sys")
     def test_handle_no_diarize_warning_on_v1(
         self,
         mock_sys,
         mock_status,
+        mock_warning,
         command,
         mock_config,
         mock_auth_manager,
@@ -294,10 +333,10 @@ class TestListenCommand:
                 diarize=True,
             )
 
-        printed = " ".join(
-            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
-        )
-        assert "not supported by Flux STT" not in printed
+        # The note is a warning (WARN: in agent mode), not status chrome.
+        calls = mock_status.print.call_args_list + mock_warning.call_args_list
+        printed = " ".join(str(c.args[0]) for c in calls if c.args)
+        assert "don't support --diarize" not in printed
 
     @pytest.mark.parametrize("source", ["call.wav", "https://example.com/call.wav"])
     def test_click_flux_prerecorded_source_errors(self, source, command, mock_config):

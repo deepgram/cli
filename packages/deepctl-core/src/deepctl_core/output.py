@@ -522,9 +522,16 @@ def print_error_hint(error: BaseException) -> None:
         print_hint(str(hint))
 
 
-def print_warning(message: str, *, stderr: bool = False) -> None:
-    """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too."""
-    if not _output_config["quiet"]:
+def print_warning(
+    message: str, *, stderr: bool = False, ignore_quiet: bool = False
+) -> None:
+    """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too.
+
+    ``ignore_quiet=True`` prints it under ``--quiet`` as well, for warnings
+    the caller needs to read the result (``--quiet`` hides only
+    INFO and OK lines).
+    """
+    if ignore_quiet or not _output_config["quiet"]:
         if _output_config["agentic"]:
             stderr_console.print(f"WARN: {message}", soft_wrap=True)
         else:

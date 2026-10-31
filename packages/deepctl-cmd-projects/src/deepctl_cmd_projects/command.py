@@ -11,8 +11,10 @@ from deepctl_core import (
     get_output_format,
     get_status_console,
 )
+from deepctl_core.output import print_error, print_warning
 from deepctl_core.transport import TransportError
 from rich.console import Console
+from rich.markup import escape
 
 from .models import ProjectInfo, ProjectsResult
 
@@ -184,13 +186,15 @@ class ProjectsCommand(BaseCommand):
             )
 
         except Exception as e:
-            status_console.print(f"[red]Failed to list projects:[/red] {e}")
+            print_error(f"Failed to list projects: {escape(str(e))}")
             return BaseResult(status="error", message=str(e))
 
     def _create_project(
         self, client: DeepgramClient, name: str, company: str | None
     ) -> ProjectsResult | BaseResult:
         """Create a new project."""
+        from deepctl_core.transport import prog
+
         status_console.print(f"[blue]Creating project:[/blue] {name}")
 
         if company:
@@ -221,8 +225,12 @@ class ProjectsCommand(BaseCommand):
                     count=1,
                 )
             else:
-                status_console.print(
-                    "[yellow]Project creation response missing project_id[/yellow]"
+                print_warning(
+                    escape(
+                        "Deepgram created the project but didn't return its "
+                        f"ID. Run {prog() or 'dg'} projects --list to find it."
+                    ),
+                    stderr=True,
                 )
                 return ProjectsResult(
                     status="warning",
@@ -232,7 +240,7 @@ class ProjectsCommand(BaseCommand):
                 )
 
         except Exception as e:
-            status_console.print(f"[red]Failed to create project:[/red] {e}")
+            print_error(f"Failed to create project: {escape(str(e))}")
             return BaseResult(status="error", message=str(e))
 
     def _show_project(
@@ -287,7 +295,7 @@ class ProjectsCommand(BaseCommand):
                 )
 
         except Exception as e:
-            status_console.print(f"[red]Failed to get project details:[/red] {e}")
+            print_error(f"Failed to get project details: {escape(str(e))}")
             return BaseResult(status="error", message=str(e))
 
     def _show_current_project(
@@ -349,7 +357,7 @@ class ProjectsCommand(BaseCommand):
             )
 
         except Exception as e:
-            status_console.print(f"[red]Failed to set default project:[/red] {e}")
+            print_error(f"Failed to set default project: {escape(str(e))}")
             from deepctl_core.output import print_error_hint
 
             print_error_hint(e)

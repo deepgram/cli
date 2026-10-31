@@ -24,6 +24,7 @@ from deepctl_core import (
     get_output_format,
     get_status_console,
 )
+from deepctl_core.output import print_warning
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
@@ -600,9 +601,11 @@ class SpeakCommand(BaseCommand):
             # Playing sends the audio to the player, not to stdout, so a
             # redirect or pipe would otherwise collect nothing and give no
             # hint why.
-            console.print(
-                "[yellow]Note:[/yellow] --play sends the audio to your player, "
-                "so stdout stays empty. Add -o to save a file too."
+            print_warning(
+                "--play sends the audio to your player, so stdout stays empty. "
+                "Add -o to save a file too.",
+                stderr=True,
+                ignore_quiet=True,
             )
 
         if is_flux:
