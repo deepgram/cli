@@ -294,6 +294,19 @@ def _os_error_text(exc: OSError) -> str:
 _CLOSE_TIMEOUT_S = 2.0
 
 
+def _failed(what: str, exc: BaseException) -> click.ClickException:
+    """``{what}: {cause}`` for an error no coded message covers.
+
+    The cause is the underlying error's own message, never the SDK error's
+    field dump; the whole exception goes to --verbose output only.
+    """
+    from deepctl_core.output import print_debug
+    from deepctl_core.transport import plain_detail
+
+    print_debug(escape(f"{what}: {exc!r}"))
+    return click.ClickException(f"{what}: {plain_detail(exc)}")
+
+
 def _close(*streams: object, timeout: float = _CLOSE_TIMEOUT_S) -> None:
     """Close audio iterators (and the responses behind them), quietly and in
     order, and wait at most ``timeout`` seconds for all of them together."""
@@ -1431,7 +1444,7 @@ class SpeakCommand(BaseCommand):
         except _SINK_ERRORS:
             raise
         except Exception as e:
-            raise click.ClickException(f"Flux streaming failed: {e}")
+            raise _failed("Flux streaming failed", e) from e
         finally:
             _close(stream, raw)
 
@@ -1609,7 +1622,7 @@ class SpeakCommand(BaseCommand):
                 sample_rate=sample_rate,
             )
         except Exception as e:
-            raise click.ClickException(f"Error generating speech: {e}")
+            raise _failed("Error generating speech", e) from e
 
         try:
             if player in _STDIN_PLAYER_ARGV:
@@ -1658,7 +1671,7 @@ class SpeakCommand(BaseCommand):
             # in every output mode — a returned BaseResult is only printed and
             # still exits 0. Reachable now that unknown models (e.g. a bare
             # "flux" typo) route here instead of the raising v2 path.
-            raise click.ClickException(f"Error generating speech: {e}")
+            raise _failed("Error generating speech", e) from e
         finally:
             _close(audio_iter)
 

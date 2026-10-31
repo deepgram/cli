@@ -803,6 +803,47 @@ class TestSpeakCommand:
             )
 
     @patch("deepctl_cmd_speak.command.sys")
+    def test_flux_failure_shows_the_cause_not_the_sdk_fields(
+        self,
+        mock_sys,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        tmp_path,
+    ):
+        """The client's ApiError wrapper shows as its cause's own words."""
+        from deepgram.core.api_error import ApiError
+
+        mock_sys.stdin.isatty.return_value = True
+        mock_sys.stdout.isatty.return_value = True
+
+        def _boom():
+            try:
+                raise RuntimeError("socket closed")
+            except RuntimeError as e:
+                raise ApiError(body=f"Text-to-speech streaming failed: {e}")
+            yield  # pragma: no cover — make this a generator
+
+        mock_client.speak_text_stream.return_value = _boom()
+
+        with pytest.raises(click.ClickException) as err:
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                text="Hello from Flux",
+                output=str(tmp_path / "x.wav"),
+                model="flux-alexis-en",
+                encoding=None,
+                container=None,
+                sample_rate=None,
+                file=None,
+            )
+        assert err.value.message == "Flux streaming failed: socket closed"
+        assert "status_code" not in err.value.message
+
+    @patch("deepctl_cmd_speak.command.sys")
     def test_handle_flux_streams_to_stdout_incrementally(
         self, mock_sys, command, mock_config, mock_auth_manager, mock_client
     ):

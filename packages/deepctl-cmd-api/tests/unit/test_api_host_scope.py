@@ -62,15 +62,17 @@ def sent(monkeypatch):
             stream=httpx.ByteStream(b'{"ok": true}'),
         )
 
-    real_client = httpx.Client
+    class Shared(httpx.Client):
+        """The shared client; `dg api` must ask for no redirects per request."""
 
-    def client(**kwargs):
-        if "follow_redirects" not in kwargs:  # not the `dg api` client
-            return real_client(**kwargs)
-        assert kwargs["follow_redirects"] is False
-        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+        def request(self, *args, **kwargs):
+            assert kwargs["follow_redirects"] is False
+            return super().request(*args, **kwargs)
 
-    monkeypatch.setattr(api_module.httpx, "Client", client)
+    from deepctl_core import transport
+
+    monkeypatch.setattr(transport, "_client", None)
+    transport._set_client(Shared(transport=httpx.MockTransport(handler)))
     return seen
 
 
