@@ -85,7 +85,8 @@ _TIMEOUT_TYPE = click.FloatRange(min=1)
 
 
 def _is_url(s: str) -> bool:
-    return s.startswith(("http://", "https://"))
+    # Schemes are case-insensitive: HTTPS://... is a URL, not a file path.
+    return s[:8].lower().startswith(("http://", "https://"))
 
 
 def _ws_base(client: DeepgramClient) -> str:
@@ -366,6 +367,16 @@ class ListenCommand(BaseCommand):
                 "is_option": True,
             },
             {
+                "names": ["--check-url"],
+                "help": (
+                    "Check that the URL responds before transcribing: a HEAD "
+                    "request, then a 1-byte GET if needed. Sends no Deepgram "
+                    "API key."
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
                 "names": ["--timeout"],
                 "help": (
                     "Seconds to wait at each step (connecting, sending, the "
@@ -511,6 +522,11 @@ class ListenCommand(BaseCommand):
         save_to = kwargs.get("save_to")
         probe = kwargs.get("probe", False)
         no_validate = kwargs.get("no_validate", False)
+        check_url = kwargs.get("check_url", False)
+        if check_url and mode != "prerecorded_url":
+            raise click.UsageError("--check-url works only with a URL source.")
+        if check_url and no_validate:
+            raise click.UsageError("--check-url can't be used with --no-validate.")
         timeout: float | None = kwargs.get("timeout")
         if timeout is not None and mode in ("stream_mic", "stream_stdin"):
             raise click.UsageError(
@@ -612,6 +628,7 @@ class ListenCommand(BaseCommand):
                 caption_format=caption_format,
                 config=config,
                 timeout_s=timeout or _PRERECORDED_TIMEOUT_S,
+                check_url=check_url,
             )
         elif mode == "stream_mic":
             return self._stream_mic(
@@ -721,15 +738,27 @@ class ListenCommand(BaseCommand):
         caption_format: str | None,
         config: Config,
         timeout_s: float = _PRERECORDED_TIMEOUT_S,
+        check_url: bool = False,
     ) -> BaseResult | CodedErrorResult:
         from deepctl_shared_utils import (
             probe_file,
             require_ffprobe,
-            validate_audio_file,
-            validate_url,
+        )
+        from deepctl_shared_utils.validation import (
+            audio_file_problem,
+            display_url,
+            output_url,
+            scrub_url_text,
+            url_problem,
         )
 
         source_kind = "url" if is_url else "file"
+        # A presigned URL carries its token in the query string, and some
+        # hosts put one in the path: never show it, nor one passed where a
+        # file path was expected. Status lines and errors show the host and
+        # the last path segment; the result's source_path keeps the path.
+        url_like = is_url or "://" in source
+        shown = display_url(source) if url_like else source
 
         # The file validated (and probed) must be the file uploaded: its
         # identity now, compared again once the upload opens it.
@@ -745,21 +774,18 @@ class ListenCommand(BaseCommand):
 
         # ── Validation ─────────────────────────────────────────────────
         if not no_validate:
+            # One line per failure, worded here; warnings as WARN lines.
             if is_url:
-                if not validate_url(source, check_accessibility=True):
-                    return BaseResult(
-                        status="error", message=f"URL is not accessible: {source}"
-                    )
+                # The format only, unless --check-url asks for a HEAD request.
+                problem, warnings = url_problem(source, check_accessibility=check_url)
+            elif not Path(source).exists():
+                problem, warnings = f"File not found: {shown}", []
             else:
-                if not Path(source).exists():
-                    return BaseResult(
-                        status="error", message=f"File not found: {source}"
-                    )
-                if not validate_audio_file(source):
-                    return BaseResult(
-                        status="error",
-                        message=f"File does not appear to be audio: {source}",
-                    )
+                problem, warnings = audio_file_problem(source)
+            for warning in warnings:
+                print_warning(escape(warning), stderr=True)
+            if problem is not None:
+                return BaseResult(status="error", message=problem)
 
         # ── Optional ffprobe analysis ──────────────────────────────────
         probe_info: dict[str, Any] | None = None
@@ -804,7 +830,7 @@ class ListenCommand(BaseCommand):
             options["numerals"] = "true"
 
         # ── Call API ───────────────────────────────────────────────────
-        status.print(f"[dim]Transcribing[/dim] {source}")
+        status.print(f"[dim]Transcribing[/dim] {escape(shown)}")
         status.print(f"[dim]Model:[/dim] {model}  [dim]Language:[/dim] {language}")
 
         from deepctl_core.upload import UploadFileError, coded_result
@@ -820,11 +846,14 @@ class ListenCommand(BaseCommand):
                 )
         except UploadFileError as e:
             return coded_result(e)
+        except FileNotFoundError:  # --no-validate and no such file
+            raise click.ClickException(f"File not found: {shown}") from None
         except Exception as e:
             # Raise (not return an error result) so an API rejection — e.g. a
             # --redact value the v1 endpoint refuses — exits non-zero and is
             # visible, rather than printing nothing and exiting 0.
-            raise click.ClickException(f"Transcription failed: {e}")
+            detail = scrub_url_text(e, source) if url_like else e
+            raise click.ClickException(f"Transcription failed: {detail}")
 
         # ── Format transcript ──────────────────────────────────────────
         if diarize:
@@ -860,7 +889,7 @@ class ListenCommand(BaseCommand):
         return ListenResult(
             status="success",
             source=source_kind,
-            source_path=source,
+            source_path=output_url(source) if url_like else source,
             mode="prerecorded",
             model=model,
             language=language,
@@ -1827,7 +1856,12 @@ class ListenCommand(BaseCommand):
         table.add_column("Key", style="dim")
         table.add_column("Value")
 
-        table.add_row("Source", result.source_path)
+        source_shown = result.source_path
+        if result.source == "url":
+            from deepctl_shared_utils.validation import display_url
+
+            source_shown = display_url(source_shown)
+        table.add_row("Source", source_shown)
         table.add_row("Model", model_name or result.model)
         if model_version:
             table.add_row("Version", model_version)

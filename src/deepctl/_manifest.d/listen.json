@@ -86,6 +86,27 @@
       },
       {
         "class": "option",
+        "name": "check_url",
+        "opts": [
+          "--check-url"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Check that the URL responds before transcribing: a HEAD request, then a 1-byte GET if needed. Sends no Deepgram API key."
+      },
+      {
+        "class": "option",
         "name": "no_validate",
         "opts": [
           "--no-validate"
