@@ -897,7 +897,7 @@ wheels = [
 
 [[package]]
 name = "deepctl"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1081,10 +1081,11 @@ testing = [
 
 [[package]]
 name = "deepctl-cmd-api"
-version = "0.0.2"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-api" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -1094,6 +1095,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1102,10 +1104,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-billing"
-version = "0.1.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-billing" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1114,6 +1117,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1121,10 +1125,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-completion"
-version = "0.0.3"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-completion" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1133,6 +1138,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1140,10 +1146,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-debug"
-version = "0.1.13"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-debug" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1152,6 +1159,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1159,10 +1167,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-debug-audio"
-version = "0.1.14"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-debug-audio" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "ffmpeg-python" },
     { name = "httpx" },
@@ -1173,6 +1182,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "httpx", specifier = ">=0.24.0" },
@@ -1182,11 +1192,12 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-debug-browser"
-version = "0.1.12"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-debug-browser" }
 dependencies = [
     { name = "aiohttp" },
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -1203,6 +1214,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1214,10 +1226,11 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-cmd-debug-network"
-version = "0.1.12"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-debug-network" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -1228,6 +1241,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1237,11 +1251,12 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-debug-probe"
-version = "0.0.2"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-debug-probe" }
 dependencies = [
     { name = "aiohttp" },
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "deepctl-shared-utils" },
     { name = "pydantic" },
@@ -1252,6 +1267,7 @@ dependencies = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11.0" },
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1260,10 +1276,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-debug-toolkit"
-version = "0.2.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-debug-toolkit" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "httpx" },
     { name = "platformdirs" },
@@ -1282,6 +1299,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1.7" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
@@ -1296,10 +1314,11 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-cmd-ffprobe"
-version = "0.0.3"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-ffprobe" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "deepctl-shared-utils" },
     { name = "pydantic" },
@@ -1309,6 +1328,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1317,10 +1337,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-init"
-version = "0.1.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-init" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -1330,6 +1351,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1338,10 +1360,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-keys"
-version = "0.1.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-keys" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1350,6 +1373,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1357,10 +1381,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-listen"
-version = "0.0.14"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-listen" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "deepctl-shared-utils" },
     { name = "deepgram-captions" },
@@ -1377,6 +1402,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "deepgram-captions", specifier = ">=2.0.0" },
@@ -1389,10 +1415,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-login"
-version = "0.2.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-login" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "deepgram-sdk" },
     { name = "pydantic" },
@@ -1402,6 +1429,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1410,10 +1438,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-mcp"
-version = "0.1.15"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-mcp" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "mcp" },
     { name = "pydantic" },
@@ -1433,6 +1462,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1.7" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "mcp", specifier = ">=1.22.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
@@ -1448,10 +1478,11 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-cmd-members"
-version = "0.1.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-members" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1460,6 +1491,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1467,10 +1499,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-models"
-version = "0.1.1"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-models" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1479,6 +1512,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1486,9 +1520,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-plugin"
-version = "0.1.14"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-plugin" }
 dependencies = [
+    { name = "deepctl" },
+    { name = "deepctl-cmd-update" },
     { name = "deepctl-core" },
     { name = "packaging" },
     { name = "toml" },
@@ -1496,6 +1532,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "deepctl", editable = "." },
+    { name = "deepctl-cmd-update", editable = "packages/deepctl-cmd-update" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "packaging", specifier = ">=21.0" },
     { name = "toml", specifier = ">=0.10.2" },
@@ -1503,10 +1541,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-projects"
-version = "0.2.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-projects" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "deepgram-sdk" },
     { name = "pydantic" },
@@ -1516,6 +1555,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1524,10 +1564,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-read"
-version = "0.1.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-read" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1536,6 +1577,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1543,10 +1585,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-requests"
-version = "0.1.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-requests" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1555,6 +1598,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1562,10 +1606,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-skills"
-version = "0.0.9"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-skills" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "rich" },
 ]
@@ -1573,16 +1618,18 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "rich", specifier = ">=13.0.0" },
 ]
 
 [[package]]
 name = "deepctl-cmd-speak"
-version = "0.0.5"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-speak" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1591,6 +1638,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1598,25 +1646,28 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-cmd-transcribe"
-version = "0.1.12"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-transcribe" }
 dependencies = [
+    { name = "deepctl" },
     { name = "deepctl-cmd-listen" },
     { name = "deepctl-core" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "deepctl", editable = "." },
     { name = "deepctl-cmd-listen", editable = "packages/deepctl-cmd-listen" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
 ]
 
 [[package]]
 name = "deepctl-cmd-update"
-version = "0.2.7"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-update" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "httpx" },
     { name = "packaging" },
@@ -1635,6 +1686,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "packaging", specifier = ">=21.0" },
@@ -1649,10 +1701,11 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-cmd-usage"
-version = "0.2.1"
+version = "0.4.1"
 source = { editable = "packages/deepctl-cmd-usage" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "deepctl-shared-utils" },
     { name = "deepgram-sdk" },
@@ -1663,6 +1716,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
@@ -1672,10 +1726,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-core"
-version = "0.3.0"
+version = "0.4.1"
 source = { editable = "packages/deepctl-core" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepgram-sdk" },
     { name = "httpx" },
     { name = "keyring" },
@@ -1698,6 +1753,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "keyring", specifier = ">=24.0.0" },
@@ -1733,10 +1789,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-shared-utils"
-version = "0.1.13"
+version = "0.4.1"
 source = { editable = "packages/deepctl-shared-utils" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1745,6 +1802,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -1752,10 +1810,11 @@ requires-dist = [
 
 [[package]]
 name = "deepctl-telemetry"
-version = "0.0.7"
+version = "0.4.1"
 source = { editable = "packages/deepctl-telemetry" }
 dependencies = [
     { name = "click" },
+    { name = "deepctl" },
     { name = "deepctl-core" },
     { name = "rich" },
     { name = "sentry-sdk" },
@@ -1764,6 +1823,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
+    { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "sentry-sdk", specifier = ">=2.35.0,<3" },
