@@ -923,23 +923,19 @@ class ListenCommand(BaseCommand):
         v2_state = self._new_v2_state() if api_version >= 2 else None
 
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=live.QUEUE_MAX)
         closing = threading.Event()
+        buffer = live.DropOldestBuffer(loop, queue, closing)
         stream: Any = None
 
         def callback(indata: Any, frames: int, t: Any, s: Any) -> None:
-            if closing.is_set():
-                return
-            if s:
+            if s and not closing.is_set():
                 print_warning(
                     f"Audio warning: {escape(str(s))}",
                     stderr=True,
                     ignore_quiet=True,
                 )
-            try:
-                loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
-            except RuntimeError:
-                pass  # the event loop already closed
+            buffer.offer_threadsafe(bytes(indata))
 
         def start_mic() -> None:
             nonlocal stream
@@ -948,7 +944,8 @@ class ListenCommand(BaseCommand):
                 channels=channels,
                 dtype=np.int16,
                 callback=callback,
-                blocksize=int(sample_rate * 0.1),
+                blocksize=live.frame_bytes("linear16", sample_rate, channels)
+                // (2 * channels),
             )
             stream.start()
 
@@ -970,6 +967,7 @@ class ListenCommand(BaseCommand):
                 queue=queue,
                 closing=closing,
                 start_source=start_mic,
+                keepalive=api_version < 2,
                 byte_rate=live.bytes_per_second("linear16", sample_rate, channels),
                 stop=early.bind(loop) if early is not None else None,
             )
@@ -984,6 +982,14 @@ class ListenCommand(BaseCommand):
                 except Exception:
                     pass
 
+        if buffer.dropped_buffers:
+            rate = live.bytes_per_second("linear16", sample_rate, channels)
+            print_warning(
+                msg.W_MIC_DROPPED.format(
+                    seconds=f"{buffer.dropped_bytes / rate if rate else 0.0:.1f}"
+                ),
+                stderr=True,
+            )
         return self._finish_live(
             outcome,
             source="mic",
@@ -1115,13 +1121,13 @@ class ListenCommand(BaseCommand):
         v2_state = self._new_v2_state() if api_version >= 2 else None
 
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=live.QUEUE_MAX)
         closing = threading.Event()
         reader = live.StdinReader(
             loop,
             queue,
             closing,
-            read_size=live.DEFAULT_READ_BYTES,
+            read_size=live.frame_bytes(encoding, sample_rate, channels),
             fd=_stdin_fd(),
         )
 
@@ -1142,6 +1148,7 @@ class ListenCommand(BaseCommand):
             queue=queue,
             closing=closing,
             start_source=reader.start,
+            keepalive=api_version < 2,
             byte_rate=live.bytes_per_second(encoding, sample_rate, channels),
         )
         return self._finish_live(
