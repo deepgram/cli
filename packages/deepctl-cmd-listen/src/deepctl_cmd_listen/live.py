@@ -1,6 +1,6 @@
 """Live streaming engine for ``dg listen`` (stdin and microphone).
 
-One WebSocket session: audio goes up from a queue, transcripts come
+One WebSocket session: audio goes up from a bounded queue, transcripts come
 down to a callback, and the session ends one of four ways:
 
 - the server closes the stream (exit 0, or 1 if it reported an error);
@@ -15,7 +15,8 @@ down to a callback, and the session ends one of four ways:
 - the connection fails (exit 1).
 
 Stdin is read with ``os.read(0, cap)`` in a daemon thread that hands each
-buffer to the event loop and waits until the queue accepts it. The thread is
+buffer to the event loop and waits until the bounded queue accepts it, so a
+slow uplink holds back the producer instead of filling memory. The thread is
 never joined. Before every read and every hand-off it checks ``closing``,
 which shutdown sets before it cancels any task; anything raised in the thread
 (including a cancelled hand-off while the loop shuts down) ends the thread
@@ -45,14 +46,23 @@ if TYPE_CHECKING:
 
 # ── Tunables ────────────────────────────────────────────────────────────────
 
-#: Largest single read from stdin.
+#: Each read takes at most this much audio. The plan allows 20-100 ms; 50 ms
+#: keeps frames small for latency while a regular file still goes up in a
+#: reasonable number of messages. A pipe read returns whatever is there, so
+#: paced input goes up at the writer's own pace whatever this is.
+FRAME_MS = 50
+#: Read size when the encoding gives no byte rate (opus, flac, containers).
 DEFAULT_READ_BYTES = 4096
+#: Audio buffers waiting to be sent. With FRAME_MS that is 1.6 s of audio.
+QUEUE_MAX = 32
 #: Ctrl-C: how long to wait for the server's last results after CloseStream.
 STOP_DRAIN_S = 1.0
 #: End of input: give up when the server has sent nothing for this long.
 EOF_IDLE_S = 10.0
 #: End of input: the absolute cap is max(EOF_CAP_MIN_S, 2 x the work left).
 EOF_CAP_MIN_S = 30.0
+#: Send a KeepAlive after this long without audio (listen v1 only).
+KEEPALIVE_AFTER_S = 5.0
 #: Bound on the WebSocket closing handshake once the outcome is known.
 CLOSE_TIMEOUT_S = 1.0
 
@@ -60,6 +70,7 @@ CLOSE_TIMEOUT_S = 1.0
 _PCM_WIDTH = {"linear16": 2, "linear32": 4, "mulaw": 1, "alaw": 1}
 
 CLOSE_STREAM = json.dumps({"type": "CloseStream"})
+KEEP_ALIVE = json.dumps({"type": "KeepAlive"})
 
 
 def bytes_per_second(encoding: str | None, sample_rate: int, channels: int) -> int:
@@ -70,11 +81,24 @@ def bytes_per_second(encoding: str | None, sample_rate: int, channels: int) -> i
     return width * sample_rate * channels
 
 
+def frame_bytes(encoding: str | None, sample_rate: int, channels: int) -> int:
+    """Largest read for one frame: FRAME_MS of audio, or a fixed size.
+
+    Rounded down to whole sample frames so a read never splits a sample.
+    """
+    rate = bytes_per_second(encoding, sample_rate, channels)
+    if not rate:
+        return DEFAULT_READ_BYTES
+    width = _PCM_WIDTH[(encoding or "").lower()] * channels
+    size = rate * FRAME_MS // 1000
+    return max(width, size - size % width)
+
+
 # ── Audio sources ───────────────────────────────────────────────────────────
 
 
 class StdinReader:
-    """Reads a file descriptor in a daemon thread into a queue.
+    """Reads a file descriptor in a daemon thread into a bounded queue.
 
     Puts ``bytes`` for audio, ``b""`` once at end of input, or the
     ``OSError`` a read raised. Never joined: a read blocked on an idle pipe
@@ -152,6 +176,45 @@ def _wait_readable(fd: int) -> None:
         select.select([fd], [], [], 0.2)
     except (OSError, ValueError):
         time.sleep(0.2)
+
+
+class DropOldestBuffer:
+    """Microphone hand-off: the audio callback can't block, so when the queue
+    is full the oldest buffer goes. Counts what it dropped."""
+
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[Any],
+        closing: threading.Event,
+    ) -> None:
+        self._loop = loop
+        self._queue = queue
+        self._closing = closing
+        self.dropped_buffers = 0
+        self.dropped_bytes = 0
+
+    def offer(self, data: bytes) -> None:
+        """Call on the event loop: enqueue ``data``, dropping the oldest."""
+        if self._queue.full():
+            try:
+                old = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            else:
+                self.dropped_buffers += 1
+                if isinstance(old, (bytes, bytearray)):
+                    self.dropped_bytes += len(old)
+        self._queue.put_nowait(data)
+
+    def offer_threadsafe(self, data: bytes) -> None:
+        """Call from the audio thread; never raises, never blocks."""
+        if self._closing.is_set():
+            return
+        try:
+            self._loop.call_soon_threadsafe(self.offer, data)
+        except BaseException:
+            pass
 
 
 # ── Session ─────────────────────────────────────────────────────────────────
@@ -444,6 +507,7 @@ async def run_session(
     queue: asyncio.Queue[Any],
     closing: threading.Event,
     start_source: Callable[[], None],
+    keepalive: bool,
     byte_rate: int,
     stop: asyncio.Event | None = None,
 ) -> LiveOutcome:
@@ -528,6 +592,15 @@ async def run_session(
         await ws.send(CLOSE_STREAM)
         return "eof"
 
+    async def keep_alive() -> None:
+        last = now()
+        while True:
+            await asyncio.sleep(0.5)
+            t = now()
+            if t - max(clock.last_audio, last) >= KEEPALIVE_AFTER_S:
+                await ws.send(KEEP_ALIVE)
+                last = t
+
     def eof_cap() -> float:
         if byte_rate:
             behind = clock.bytes_sent / byte_rate - clock.last_final_end
@@ -539,7 +612,7 @@ async def run_session(
     async def finish_on_stop(deadline: float) -> LiveOutcome:
         """Ctrl-C: stop sending, CloseStream, wait for the server until deadline."""
         closing.set()
-        await _cancel_all(tasks.get("send"))
+        await _cancel_all(tasks.get("send"), tasks.get("keepalive"))
         recv = tasks["recv"]
         assert recv is not None
         if clock.eof_at is None and not recv.done():
@@ -563,7 +636,7 @@ async def run_session(
         stop_wait = asyncio.ensure_future(stop.wait())
         tasks["stop"] = stop_wait
         connect = asyncio.ensure_future(
-            _open(url, headers, close_timeout=CLOSE_TIMEOUT_S)
+            _open(url, headers, compression=None, close_timeout=CLOSE_TIMEOUT_S)
         )
         tasks["connect"] = connect
         await asyncio.wait({connect, stop_wait}, return_when=asyncio.FIRST_COMPLETED)
@@ -578,6 +651,8 @@ async def run_session(
         recv = asyncio.ensure_future(receive())
         send = asyncio.ensure_future(send_audio())
         tasks.update(recv=recv, send=send)
+        if keepalive:
+            tasks["keepalive"] = asyncio.ensure_future(keep_alive())
 
         # ── Streaming ─────────────────────────────────────────────────
         await asyncio.wait({recv, send, stop_wait}, return_when=asyncio.FIRST_COMPLETED)
@@ -611,6 +686,7 @@ async def run_session(
             )
 
         # ── End of input: drain ───────────────────────────────────────
+        await _cancel_all(tasks.get("keepalive"))
         assert clock.eof_at is not None
         cap = eof_cap()
         cap_at = clock.eof_at + cap
