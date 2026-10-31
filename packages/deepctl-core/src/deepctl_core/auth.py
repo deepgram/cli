@@ -167,6 +167,7 @@ def _insecure_mounts() -> "dict[str, httpx.BaseTransport]":
     httpx builds from HTTPS_PROXY/ALL_PROXY/NO_PROXY, so every other host
     keeps both certificate verification and the proxy settings.
     """
+    _load_modules("httpx")
     unverified = httpx.HTTPTransport(verify=False)
     return {
         f"all://{'[::1]' if host == '::1' else host}": unverified
@@ -514,7 +515,7 @@ class AuthManager:
 
         try:
             headers = {
-                "Authorization": f"Token {api_key}",
+                **transport.request_headers(api_key),
                 "Content-Type": "application/json",
             }
 
@@ -587,7 +588,7 @@ class AuthManager:
         # Make API request to verify both credentials
         try:
             headers = {
-                "Authorization": f"Token {api_key}",
+                **transport.request_headers(api_key),
                 "Content-Type": "application/json",
             }
 

@@ -74,7 +74,7 @@ def facade(handler) -> tuple[DeepgramClient, list[httpx.Request]]:
         seen.append(request)
         return handler(request)
 
-    # Same redirect setting as transport.shared_client().
+    # _set_client applies shared_client()'s settings (no redirects, no cookies).
     transport._set_client(
         httpx.Client(transport=httpx.MockTransport(record), follow_redirects=False)
     )
@@ -228,9 +228,110 @@ def test_network_rows(factory, reason):
         assert err.error == (
             "The connection to api.deepgram.com dropped before the response finished."
         )
+    elif reason in ("connection reset", "connection closed"):
+        # Post-connect: the request had started.
+        assert err.messages == transport.NETWORK_DROPPED
+        assert err.error == (
+            "The connection to api.deepgram.com dropped before the response "
+            f"was complete ({reason})."
+        )
     else:
         assert err.messages == transport.CODES["network_unavailable"]
         assert err.error == f"Couldn't reach api.deepgram.com: {reason}."
+
+
+@pytest.mark.parametrize(
+    ("factory", "reason", "messages"),
+    [
+        # A reset or close while connecting is still "couldn't reach".
+        (
+            _chained(
+                httpx.ConnectError, ConnectionResetError(54, "Connection reset by peer")
+            ),
+            "connection reset",
+            "E-NETWORK",
+        ),
+        (
+            lambda r: httpx.ConnectError("Connection reset by peer", request=r),
+            "connection reset",
+            "E-NETWORK",
+        ),
+        # TLS failing on a read is a TLS failure, not a drop.
+        (
+            _chained(httpx.ReadError, ssl.SSLError(1, "[SSL] record layer failure")),
+            "TLS handshake failed",
+            "E-NETWORK",
+        ),
+        # After connect: the upload was being written, or the response read.
+        (
+            _chained(httpx.WriteError, BrokenPipeError(32, "Broken pipe")),
+            "connection reset",
+            "E-NETWORK-DROPPED",
+        ),
+        (
+            _chained(
+                httpx.WriteError, ConnectionResetError(104, "Connection reset by peer")
+            ),
+            "connection reset",
+            "E-NETWORK-DROPPED",
+        ),
+        (
+            lambda r: httpx.ReadError("", request=r),
+            "connection reset",
+            "E-NETWORK-DROPPED",
+        ),
+    ],
+)
+def test_dropped_only_after_connect(factory, reason, messages):
+    err = mapped(raising(factory))
+    assert err.code == "network_unavailable"
+    assert err.details == {"host": "api.deepgram.com", "reason": reason}
+    assert err.messages[0] == messages
+
+
+def _reset_after_full_body() -> tuple[int, threading.Thread]:
+    """A loopback server that reads the whole request, then resets."""
+    import struct
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def serve() -> None:
+        conn, _ = listener.accept()
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += conn.recv(65536)
+        head, _, body = data.partition(b"\r\n\r\n")
+        length = next(
+            int(line.split(b":", 1)[1])
+            for line in head.split(b"\r\n")
+            if line.lower().startswith(b"content-length:")
+        )
+        while len(body) < length:
+            body += conn.recv(65536)
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        conn.close()
+        listener.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return listener.getsockname()[1], thread
+
+
+def test_reset_after_the_full_body_is_dropped_not_unreachable():
+    """The whole upload arrived, then the server reset. That isn't
+    "couldn't reach": the request had started (E-NETWORK-DROPPED)."""
+    port, thread = _reset_after_full_body()
+    with httpx.Client() as client, pytest.raises(httpx.TransportError) as raised:
+        client.post(f"http://127.0.0.1:{port}/v1/listen", content=b"x" * 3145729)
+    thread.join(5)
+    err = transport.map_exception(raised.value)
+    assert err is not None and err.code == "network_unavailable"
+    # macOS raises ReadError (reset); Linux may see EOF (closed) instead.
+    assert err.details["reason"] in ("connection reset", "connection closed")
+    assert err.messages == transport.NETWORK_DROPPED
+    assert err.error.startswith("The connection to 127.0.0.1 dropped before")
 
 
 def test_unreadable_2xx_hint_names_host_and_prog(monkeypatch):
@@ -308,12 +409,68 @@ def test_non_transport_errors_keep_legacy_text():
 def test_every_code_is_catalogued():
     for code, ids in [
         *transport.CODES.items(),
+        ("dropped", transport.NETWORK_DROPPED),
         ("cut", transport.NETWORK_CUT),
         ("unreadable", transport.NETWORK_UNREADABLE),
+        ("redirect", transport.NETWORK_REDIRECT),
     ]:
         for message_id in ids:
             if message_id:
                 assert message_id in transport.STRINGS, (code, message_id)
+
+
+# What dg prints for a refused redirect: 0.4.1's text, origins only.
+_REDIRECT_CASES = [
+    (
+        {"command": "dg listen"},
+        "https://api.deepgram.com answered with a redirect to "
+        "https://evil.example. dg listen doesn't follow redirects, so nothing "
+        "was sent there.",
+    ),
+    (
+        {"command": "dg listen", "payload": "audio"},
+        "https://api.deepgram.com answered with a redirect to "
+        "https://evil.example. dg listen doesn't follow redirects, so no audio "
+        "was sent.",
+    ),
+    (
+        {"command": "dg speak", "payload": "text"},
+        "https://api.deepgram.com answered with a redirect to "
+        "https://evil.example. dg speak doesn't follow redirects, so no text "
+        "was sent.",
+    ),
+]
+
+
+def _refused(**kwargs: Any) -> RedirectRefused:
+    return transport.redirect_refused(
+        "https://api.deepgram.com/v1/listen?model=nova-3",
+        "https://evil.example/steal?k=1",
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(("kwargs", "printed"), _REDIRECT_CASES)
+def test_redirect_refusal_prints_e_network_redirect(kwargs, printed):
+    """The printed refusal is E-NETWORK-REDIRECT filled in, so the catalogue
+    entry that holds that string is the text users see."""
+    err = _refused(**kwargs)
+    assert err.message == err.error == printed
+    assert err.messages[0] == "E-NETWORK-REDIRECT"
+    assert transport.STRINGS["E-NETWORK-REDIRECT"].format(**err.values) == printed
+
+
+@pytest.mark.skipif(
+    not os.environ.get("DG_ERROR_CODES_JSON"),
+    reason="DG_ERROR_CODES_JSON names no error catalogue file",
+)
+@pytest.mark.parametrize(("kwargs", "printed"), _REDIRECT_CASES)
+def test_catalogue_redirect_text_is_what_dg_prints(kwargs, printed):
+    catalogue = json.loads(Path(os.environ["DG_ERROR_CODES_JSON"]).read_text())
+    template = catalogue["strings"]["E-NETWORK-REDIRECT"]
+    for name in ("origin", "location_origin", "command", "sent"):
+        assert "{%s}" % name in catalogue["placeholders"], name
+    assert template.format(**_refused(**kwargs).values) == printed
 
 
 @pytest.mark.skipif(
@@ -343,13 +500,26 @@ def test_strings_match_catalogue():
         assert message.get("hint_automation") == automation
     entry = catalogue["codes"]["network_unavailable"]
     for extra, reason in (
+        (transport.NETWORK_DROPPED, transport.REASON_RESET),
+        (transport.NETWORK_DROPPED, transport.REASON_CLOSED),
         (transport.NETWORK_CUT, "response cut off"),
         (transport.NETWORK_UNREADABLE, "unreadable response"),
+        (transport.NETWORK_REDIRECT, transport.REASON_REDIRECT),
     ):
         message = next(m for m in entry["messages"] if m["id"] == extra[0])
         assert (message["hint_human"], message["hint_agent"]) == extra[1:3]
         assert "hint_automation" not in message
-        assert entry["details_values"][extra[0]] == {"reason": [reason]}
+        assert reason in entry["details_values"][extra[0]]["reason"]
+    # A 3xx with credentials isn't followed, and has its own message.
+    assert transport.REASON_REDIRECT not in (
+        entry["details_values"]["E-NETWORK-UNREADABLE"]["reason"]
+    )
+    assert catalogue["transport_mapping"][0][0].split("|")[-1] == "3xx"
+    for message_id in ("W-ENV-PLACEHOLDER", "W-KEYRING-TIMEOUT"):
+        from deepctl_core import credentials
+
+        text = getattr(credentials, message_id.replace("-", "_"))
+        assert catalogue["strings"][message_id] == text
     env = catalogue["codes"]["auth_invalid"]["env_key_variant"]
     assert env == {
         "hint_agent": "A-AUTH-INVALID-ENV",
@@ -734,10 +904,11 @@ def test_redirect_to_another_origin_is_not_followed():
         return httpx.Response(200, json={"models": []})
 
     client, _ = facade(handler)
-    with pytest.raises(RedirectRefused):
+    with pytest.raises(TransportError) as err:
         client.list_models()
     assert [r.url.host for r in seen] == ["api.deepgram.com"]
     assert seen[0].headers["Authorization"] == f"Token {KEY}"
+    assert err.value.details["reason"] == "unexpected redirect"
 
 
 def test_shared_client_is_lazy_and_single():
@@ -758,3 +929,321 @@ def test_print_warning_ignore_quiet(ignore_quiet, monkeypatch, capsys):
     monkeypatch.setitem(output._output_config, "agentic", True)
     output.print_warning("needed", stderr=True, ignore_quiet=ignore_quiet)
     assert ("WARN: needed" in capsys.readouterr().err) is ignore_quiet
+
+
+# ── One Transport ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("base", "rest", "ws"),
+    [
+        (
+            "https://api.deepgram.com",
+            "https://api.deepgram.com",
+            "wss://api.deepgram.com",
+        ),
+        ("http://127.0.0.1:8080", "http://127.0.0.1:8080", "ws://127.0.0.1:8080"),
+        ("ws://127.0.0.1:8080/x", "http://127.0.0.1:8080/x", "ws://127.0.0.1:8080/x"),
+        ("wss://h.example:9", "https://h.example:9", "wss://h.example:9"),
+        ("h.example", "https://h.example", "wss://h.example"),
+    ],
+)
+def test_base_derivation(base, rest, ws):
+    assert transport.rest_url(base) == rest
+    assert transport.ws_url(base) == ws
+    assert transport.ws_url(transport.rest_url(base)) == ws
+
+
+def test_transport_bases_come_from_the_host_check(monkeypatch):
+    monkeypatch.setenv("DEEPGRAM_BASE_URL", "http://127.0.0.1:8080/")
+    t = transport.Transport(Config(config_path=str(Path.cwd() / "none.yaml")))
+    assert t.rest_base() == "http://127.0.0.1:8080"
+    assert t.ws_base() == "ws://127.0.0.1:8080"
+    assert t.auth_headers(KEY) == transport.request_headers(KEY)
+    assert t.auth_headers(KEY)["Authorization"] == f"Token {KEY}"
+    assert t.client is transport.shared_client()
+
+
+def test_request_headers_are_the_sdk_clients_headers(monkeypatch):
+    """dg's own requests and the SDK's carry the same User-Agent, X-Fern
+    headers, session ID and Authorization: one run, one session ID."""
+    monkeypatch.setenv("DEEPGRAM_BASE_URL", "http://127.0.0.1:8080/")
+    t = transport.Transport(Config(config_path=str(Path.cwd() / "none.yaml")))
+    sdk = t.sdk_client(KEY)
+    assert sdk._client_wrapper.get_headers() == t.auth_headers(KEY)
+    sid = t.auth_headers(KEY)[transport.SESSION_HEADER]
+    assert sid == transport.session_id() == sdk.session_id
+    assert len(sid) == 36
+    assert t.auth_headers("sk-other")[transport.SESSION_HEADER] == sid
+
+
+def test_no_header_for_a_refused_host(monkeypatch):
+    monkeypatch.setattr(output, "is_ai_agent", lambda: True)
+    monkeypatch.setenv("DEEPGRAM_BASE_URL", "http://127.0.0.1:8080")
+    t = transport.Transport(Config(config_path=str(Path.cwd() / "none.yaml")))
+    with pytest.raises(hosts.CredentialHostError):
+        t.auth_headers(KEY)
+    with pytest.raises(hosts.CredentialHostError):
+        t.sdk_client(KEY)
+
+
+def test_default_host_is_hosts_constant():
+    assert transport.default_host() == "api.deepgram.com"
+    assert f"https://{transport.default_host()}" == hosts.DEFAULT_BASE_URL
+
+
+def test_backend_seam(monkeypatch):
+    calls = []
+
+    class Fake:
+        name = "fake"
+
+        def sdk_client(self, api_key, rest_base, ws_base):
+            calls.append((api_key, rest_base, ws_base))
+            return "sdk"
+
+    monkeypatch.setenv("DEEPGRAM_BASE_URL", "http://127.0.0.1:8080")
+    config = Config(config_path=str(Path.cwd() / "none.yaml"))
+    client = DeepgramClient(config, AuthManager(config))
+    assert isinstance(client.transport.backend, transport.RestBackend)
+    client.transport.backend = Fake()
+    assert client.client == "sdk"
+    assert calls == [(KEY, "http://127.0.0.1:8080", "ws://127.0.0.1:8080")]
+
+
+@pytest.mark.parametrize("code", [301, 302, 303, 307, 308])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda c: c.list_models(),
+        lambda c: c.get_projects(),
+    ],
+)
+def test_redirects_are_not_followed(code, call):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            code, headers={"location": "https://sink.example/v1/projects"}
+        )
+
+    client, seen = facade(handler)
+    with pytest.raises(TransportError) as err:
+        call(client)
+    assert [r.url.host for r in seen] == ["api.deepgram.com"]
+    assert err.value.code == "network_unavailable"
+    assert err.value.messages == transport.NETWORK_REDIRECT
+    assert err.value.details == {
+        "host": "api.deepgram.com",
+        "reason": "unexpected redirect",
+    }
+    assert err.value.error == (
+        "https://api.deepgram.com answered with a redirect to "
+        "https://sink.example. dg doesn't follow redirects, so nothing was "
+        "sent there."
+    )
+
+
+@pytest.mark.parametrize(
+    ("agentic", "hard", "hint"),
+    [
+        (
+            False,
+            False,
+            "A network sign-in page or proxy may be redirecting requests. If "
+            "api.deepgram.com is your own server, use the address it redirects to.",
+        ),
+        (
+            True,
+            True,
+            "Tell the user api.deepgram.com redirected the request. Don't retry "
+            "until they have checked the network or the configured URL.",
+        ),
+    ],
+)
+def test_redirect_hints(monkeypatch, agentic, hard, hint):
+    err = mapped(status(302, headers={"location": "https://sink.example/"}))
+    payload = _render(err, monkeypatch, agentic=agentic, hard=hard)
+    assert payload["hint"] == hint
+    assert payload["next_step"] is None
+
+
+def test_redirect_on_upload_sends_the_body_once(tmp_path):
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"RIFF" + b"\0" * 64)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(307, headers={"location": "https://sink.example/x"})
+
+    client, seen = facade(handler)
+    with pytest.raises(TransportError) as err:
+        client.transcribe_file(audio)
+    assert len(seen) == 1 and seen[0].url.path == "/v1/listen"
+    assert err.value.details["reason"] == "unexpected redirect"
+
+
+def test_shared_client_follows_no_redirects(monkeypatch):
+    created = {}
+
+    class Recorder(httpx.Client):
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(httpx, "Client", Recorder)
+    monkeypatch.delenv("DEEPGRAM_CLI_INSECURE", raising=False)
+    client = transport.shared_client()
+    assert created["follow_redirects"] is False
+    assert created.get("verify", True) is True
+    assert "mounts" not in created
+    assert client.follow_redirects is False
+
+
+@pytest.mark.parametrize(("agent", "loopback_mounts"), [(False, True), (True, False)])
+def test_insecure_flag_only_for_a_person(monkeypatch, capsys, agent, loopback_mounts):
+    created = {}
+
+    class Recorder(httpx.Client):
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(httpx, "Client", Recorder)
+    monkeypatch.setenv("DEEPGRAM_CLI_INSECURE", "1")
+    monkeypatch.setattr(output, "is_ai_agent", lambda: agent)
+    transport.shared_client()
+    # Verification stays on; a person gets unverified loopback mounts only
+    # (test_auth_insecure.py checks hosts and dg api's verified client).
+    assert created.get("verify", True) is True
+    assert ("mounts" in created) is loopback_mounts
+    err = capsys.readouterr().err
+    assert ("Ignoring DEEPGRAM_CLI_INSECURE" in err) is agent
+
+
+def test_cookies_are_never_sent_back():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"models": []} if "models" in request.url.path else {"projects": []},
+            headers={"set-cookie": "sid=s3cr3t; Path=/; Domain=api.deepgram.com"},
+        )
+
+    client, seen = facade(handler)
+    client.list_models()
+    client.get_projects()
+    client.list_models()
+    assert len(seen) == 3
+    assert all("cookie" not in r.headers for r in seen)
+    assert len(transport.shared_client().cookies.jar) == 0
+
+
+def test_no_code_sets_cookies_on_the_shared_client():
+    """httpx copies the client's jar into each request, so a
+    cookie set in code would be sent anyway. Nothing may set one."""
+    import re
+
+    root = Path(__file__).resolve().parents[3]  # packages/
+    offenders = []
+    files = list(root.glob("*/src/**/*.py"))
+    assert len(files) > 50
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), 1):
+            if re.search(r"\.cookies\.set\(|\bcookies\s*=", line):
+                offenders.append(f"{path.relative_to(root)}:{number}: {line.strip()}")
+    assert offenders == []
+
+
+# ── WebSocket handshake mapping ──────────────────────────────────────
+
+
+def _ws_refused(code: int, headers: dict | None = None) -> BaseException:
+    from websockets.datastructures import Headers
+    from websockets.exceptions import InvalidStatus
+    from websockets.http11 import Response
+
+    return InvalidStatus(Response(code, "x", Headers(headers or {}), b"{}"))
+
+
+@pytest.mark.parametrize(
+    ("code", "want"),
+    [
+        (401, "auth_invalid"),
+        (403, "auth_forbidden"),
+        (429, "rate_limited"),
+        (400, "invalid_argument"),
+        (500, "server_error"),
+        (503, "server_error"),
+        (302, "network_unavailable"),
+    ],
+)
+def test_ws_refused_upgrade_maps_by_status(code, want):
+    exc = _ws_refused(code, {"retry-after": "7", "dg-request-id": "r-1"})
+    mapped = transport.map_exception(exc)
+    assert mapped is not None and mapped.code == want
+    assert transport.map_ws_open(exc, host="api.deepgram.com").code == want
+    if code == 429:
+        assert mapped.details["retry_after"] == 7
+    if code == 302:
+        assert mapped.details["reason"] == "unexpected redirect"
+        assert mapped.messages == transport.NETWORK_REDIRECT
+
+
+def test_ws_legacy_invalid_status_code():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from websockets.datastructures import Headers
+        from websockets.exceptions import InvalidStatusCode
+
+        exc = InvalidStatusCode(401, Headers())
+    assert transport.map_exception(exc).code == "auth_invalid"
+
+
+@pytest.mark.parametrize(
+    ("inner", "code", "reason"),
+    [
+        (
+            socket.gaierror(-2, "Name or service not known"),
+            "network_unavailable",
+            "name resolution failed",
+        ),
+        (
+            ConnectionRefusedError(111, "refused"),
+            "network_unavailable",
+            "connection refused",
+        ),
+        (
+            ssl.SSLError(1, "CERTIFICATE_VERIFY_FAILED"),
+            "network_unavailable",
+            "TLS handshake failed",
+        ),
+        (TimeoutError(), "timeout", None),
+    ],
+)
+def test_ws_open_failures(inner, code, reason):
+    try:
+        try:
+            raise inner
+        except BaseException as cause:
+            raise RuntimeError("open failed") from cause
+    except RuntimeError as exc:
+        mapped = transport.map_ws_open(exc, host="api.deepgram.com")
+    assert mapped.code == code
+    assert mapped.details["host"] == "api.deepgram.com"
+    if reason:
+        assert mapped.details["reason"] == reason
+    else:
+        assert mapped.details["timeout_s"] == transport._seconds(
+            transport.WS_OPEN_TIMEOUT_S
+        )
+
+
+def test_unrelated_errors_are_not_ws_errors():
+    assert transport.map_exception(ValueError("x")) is None
+    assert transport.map_ws_open(ValueError("x"), host="h") is None
+
+
+def test_module_aliases_kept_for_w24_w25():
+    assert callable(transport.shared_client)
+    assert callable(transport.map_exception)
+    assert callable(transport.raise_for)

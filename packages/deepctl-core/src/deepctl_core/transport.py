@@ -1,19 +1,27 @@
-"""One HTTP client per process, and the map from transport failures to codes.
+"""Where API requests go, what they carry, and what their failures mean.
 
-Every REST call the SDK facade makes goes through :func:`shared_client`: one
-``httpx.Client`` (one connection pool) per process, created on first use so
-``--version`` and ``--help`` never import httpx. The client carries no
-credentials and no base URL. The key and the host still come from
-``DeepgramClient``, which takes the base URL from
-:func:`deepctl_core.hosts.check_credential_host` before any request carries
-the key; this module never decides where a credential may go.
+:class:`Transport` owns the REST and WebSocket base URLs, which come only
+from :func:`deepctl_core.hosts.check_credential_host` (``http`` -> ``ws``,
+``https`` -> ``wss``), and attaches ``Authorization`` only after that check
+has passed for the exact origin. Requests go through :func:`shared_client`:
+one ``httpx.Client`` (one connection pool) per process, created on first use
+so ``--version`` and ``--help`` never import httpx. It follows no redirects
+(a 3xx with credentials is an error, never a second request), keeps no
+cookies, and verifies TLS. A person's ``DEEPGRAM_CLI_INSECURE=1`` (or
+``true``) skips verification for localhost, 127.0.0.1 and [::1] only, and
+never under an AI agent (``auth._insecure_allowed`` and
+``auth._insecure_mounts``, as in 0.4.2). :func:`verified_client` is the
+always-verified client for ``dg api``; WebSocket streams always verify.
+The SDK facade builds its client through :attr:`Transport.backend`, a seam
+for other backends (#142's SageMaker), with the REST backend as the default.
 
 :func:`raise_for` turns a failed request into a :class:`TransportError` with a
 catalogue code (``transport_mapping`` in ``error_codes.json``, in
-order): DNS, connect, TLS, reset or a truncated 2xx body ->
+order): DNS, connect, TLS, reset, a truncated 2xx body or a 3xx ->
 ``network_unavailable``; timeout -> ``timeout``; 401 -> ``auth_invalid``;
 403 -> ``auth_forbidden``; 404 -> ``not_found``; 429 -> ``rate_limited``;
 400, 422 and any other 4xx -> ``invalid_argument``; 5xx -> ``server_error``.
+A WebSocket upgrade refused with an HTTP status maps through the same table.
 ``BaseCommand.execute`` renders it: a coded result on stdout under a machine
 format, and two stderr lines.
 """
@@ -31,15 +39,22 @@ from typing import TYPE_CHECKING, Any
 from . import credentials
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import httpx
 
     from .auth import AuthManager
+    from .config import Config
 
 # The SDK's own default for a client it builds itself.
 DEFAULT_TIMEOUT_S = 60.0
 
 _lock = threading.Lock()
 _client: httpx.Client | None = None
+# True when _client has DEEPGRAM_CLI_INSECURE's unverified loopback mounts.
+_client_insecure = False
+# The always-verified client for dg api, when _client isn't one.
+_verified: httpx.Client | None = None
 # Where the most recent request went, for the error text: method, host and
 # path only (never the query string, which can carry values from argv).
 _last_request: dict[str, str] = {}
@@ -48,12 +63,18 @@ _last_request: dict[str, str] = {}
 def _record_request(request: httpx.Request) -> None:
     _last_request.clear()
     _last_request.update(
-        method=request.method, host=request.url.host, path=request.url.path
+        method=request.method,
+        host=request.url.host,
+        path=request.url.path,
+        origin=f"{request.url.scheme}://{request.url.netloc.decode('ascii')}",
     )
 
 
 def _install(client: httpx.Client) -> httpx.Client:
     _no_cookies(client)
+    # A redirect could take the key, or a request body, to another origin
+    # a 3xx is an error (see map_exception), never followed.
+    client.follow_redirects = False
     hooks = client.event_hooks
     hooks.setdefault("request", [])
     if _record_request not in hooks["request"]:
@@ -62,21 +83,56 @@ def _install(client: httpx.Client) -> httpx.Client:
     return client
 
 
+def _new_client(*, insecure_loopback: bool) -> httpx.Client:
+    import httpx
+
+    from .auth import _insecure_mounts, _warn_if_verified
+
+    if insecure_loopback:
+        # As AuthManager.client (0.4.2): verification stays on, and only the
+        # loopback hosts get unverified transports.
+        return httpx.Client(
+            timeout=DEFAULT_TIMEOUT_S,
+            follow_redirects=False,
+            verify=True,
+            mounts=_insecure_mounts(),
+            event_hooks={"request": [_warn_if_verified]},
+        )
+    return httpx.Client(timeout=DEFAULT_TIMEOUT_S, follow_redirects=False)
+
+
 def shared_client() -> httpx.Client:
     """The process's one ``httpx.Client``, created on first use.
 
-    It follows no redirects: a 3xx could take the key, or a request body,
-    to another host (see ``DeepgramClient._failed``).
+    It follows no redirects, keeps no cookies and verifies TLS. A person's
+    ``DEEPGRAM_CLI_INSECURE=1`` (or ``true``) skips verification for
+    localhost, 127.0.0.1 and [::1] only; never under an AI agent
+    (``auth._insecure_allowed``, ``auth._insecure_mounts``).
     """
-    global _client
+    global _client, _client_insecure
     with _lock:
         if _client is None:
-            import httpx
+            from .auth import _insecure_allowed
 
-            _client = _install(
-                httpx.Client(timeout=DEFAULT_TIMEOUT_S, follow_redirects=False)
-            )
+            _client_insecure = _insecure_allowed()
+            _client = _install(_new_client(insecure_loopback=_client_insecure))
         return _client
+
+
+def verified_client() -> httpx.Client:
+    """A client that verifies TLS for every host (``dg api``, as in 0.4.1).
+
+    The shared client itself, unless ``DEEPGRAM_CLI_INSECURE`` gave it
+    unverified loopback transports; then a second client that has none.
+    """
+    global _verified
+    client = shared_client()
+    with _lock:
+        if not _client_insecure:
+            return client
+        if _verified is None:
+            _verified = _install(_new_client(insecure_loopback=False))
+        return _verified
 
 
 def _no_cookies(client: httpx.Client) -> None:
@@ -88,10 +144,186 @@ def _no_cookies(client: httpx.Client) -> None:
 
 def _set_client(client: httpx.Client | None) -> None:
     """Replace the shared client (tests pass one with an ``httpx.MockTransport``)."""
-    global _client
+    global _client, _client_insecure, _verified
     with _lock:
         _client = _install(client) if client is not None else None
+        _client_insecure = False
+        _verified = None
         _last_request.clear()
+
+
+# ── Base URLs and credentials ────────────────────────────────────────
+
+
+def ws_url(base_url: str) -> str:
+    """The WebSocket form of a REST base URL: ``http`` -> ``ws``,
+    ``https`` (or none) -> ``wss``; host, port and path unchanged."""
+    scheme, sep, rest = base_url.partition("://")
+    if not sep:
+        return f"wss://{base_url}"
+    scheme = scheme.lower()
+    if scheme in ("http", "ws"):
+        return f"ws://{rest}"
+    return f"wss://{rest}"
+
+
+def rest_url(base_url: str) -> str:
+    """The REST form of a base URL: ``ws`` -> ``http``, ``wss`` (or none) ->
+    ``https``."""
+    scheme, sep, rest = base_url.partition("://")
+    if not sep:
+        return f"https://{base_url}"
+    scheme = scheme.lower()
+    if scheme in ("http", "ws"):
+        return f"http://{rest}"
+    return f"https://{rest}"
+
+
+def default_host() -> str:
+    """The Deepgram API host requests go to by default (``hosts.DEFAULT_BASE_URL``)."""
+    from urllib.parse import urlsplit
+
+    from .hosts import DEFAULT_BASE_URL
+
+    return urlsplit(DEFAULT_BASE_URL).hostname or DEFAULT_BASE_URL
+
+
+# One random ID per run, sent as x-deepgram-session-id with every request
+# that carries the key, so Deepgram can group a run's requests. It says
+# nothing about the user or the machine.
+_session_id: str | None = None
+
+SESSION_HEADER = "x-deepgram-session-id"
+
+
+def session_id() -> str:
+    """This run's ``x-deepgram-session-id``, the same on every request."""
+    import uuid
+
+    global _session_id
+    if _session_id is None:
+        _session_id = str(uuid.uuid4())
+    return _session_id
+
+
+def request_headers(api_key: str) -> dict[str, str]:
+    """The headers every Deepgram API request and WebSocket open carries.
+
+    The SDK's identification (``User-Agent: deepgram-sdk/<version>`` and its
+    ``X-Fern-*`` headers, built as its ``get_headers`` builds them), this
+    run's session ID, and ``Authorization``. The SDK client gets the same
+    session ID (:class:`RestBackend`), so requests dg sends itself and
+    requests the SDK sends identify the run alike. Callers check the host
+    first; :meth:`Transport.auth_headers` does.
+    """
+    import platform
+    from importlib import metadata
+
+    headers: dict[str, str] = {}
+    try:
+        version = metadata.version("deepgram-sdk")
+    except metadata.PackageNotFoundError:
+        pass
+    else:
+        headers = {
+            "User-Agent": "deepgram-sdk/" + version,
+            "X-Fern-Language": "Python",
+            "X-Fern-Runtime": f"python/{platform.python_version()}",
+            "X-Fern-Platform": f"{platform.system().lower()}/{platform.release()}",
+            "X-Fern-SDK-Name": "deepgram-sdk",
+            "X-Fern-SDK-Version": version,
+        }
+    headers[SESSION_HEADER] = session_id()
+    headers["Authorization"] = f"Token {api_key}"
+    return headers
+
+
+class RestBackend:
+    """The default backend: the Deepgram SDK over the shared ``httpx.Client``.
+
+    A backend turns a checked base URL and a key into the SDK client the
+    facade uses. #142's SageMaker backend plugs in here (R-16).
+    """
+
+    name = "rest"
+
+    def sdk_client(self, api_key: str, rest_base: str, ws_base: str) -> Any:
+        # Through the facade module's lazily bound names (tests patch them).
+        from . import client as facade
+        from .hosts import DEFAULT_BASE_URL
+
+        facade._sdk()
+        sdk: dict[str, Any] = vars(facade)
+
+        kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            # One connection pool per process; requests reuse its connection.
+            "httpx_client": shared_client(),
+            # The run's ID, so SDK requests match request_headers().
+            "session_id": session_id(),
+        }
+        if rest_base != DEFAULT_BASE_URL:
+            # Both the REST and the WebSocket endpoints come from the checked
+            # base URL, so a custom base works for batch REST and streaming.
+            # agent_rest is required by the SDK environment.
+            kwargs["environment"] = sdk["DeepgramClientEnvironment"](
+                base=rest_base,
+                production=ws_base,
+                agent=ws_base,
+                agent_rest=rest_base,
+            )
+        return sdk["DGClient"](**kwargs)
+
+
+class Transport:
+    """Where this run's API requests go and what they carry.
+
+    Base URLs come from :func:`deepctl_core.hosts.check_credential_host`
+    only; it raises ``CredentialHostError`` (already reported) when the host
+    isn't trusted with credentials, before anything carries the key.
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        backend: Any = None,
+        *,
+        check_host: Callable[[], str] | None = None,
+    ) -> None:
+        """``check_host`` is ``AuthManager.check_base_url`` when there is one
+        (the same ``check_credential_host`` call on the same config)."""
+        self.config = config
+        self.backend = backend if backend is not None else RestBackend()
+        self._check_host = check_host
+
+    def rest_base(self) -> str:
+        """The checked REST base URL (scheme, host, port and path)."""
+        if self._check_host is not None:
+            return rest_url(self._check_host())
+        from .hosts import check_credential_host
+
+        return rest_url(check_credential_host(self.config))
+
+    def ws_base(self) -> str:
+        """The checked WebSocket base URL (``http`` -> ``ws``, ``https`` -> ``wss``)."""
+        return ws_url(self.rest_base())
+
+    def auth_headers(self, api_key: str) -> dict[str, str]:
+        """:func:`request_headers` for ``api_key`` (identification, session
+        ID and ``Authorization``), once the host check has passed."""
+        self.rest_base()
+        return request_headers(api_key)
+
+    @property
+    def client(self) -> httpx.Client:
+        """The process's shared ``httpx.Client``."""
+        return shared_client()
+
+    def sdk_client(self, api_key: str) -> Any:
+        """The SDK client for ``api_key``, built by the backend once the host
+        check has passed."""
+        rest = self.rest_base()
+        return self.backend.sdk_client(api_key, rest, ws_url(rest))
 
 
 # ── Catalogue text (error_codes.json "strings") ──────────────────────
@@ -162,6 +394,9 @@ STRINGS: dict[str, str] = {
         "Retry once. If it fails again, tell the user the connection to Deepgram "
         "keeps dropping."
     ),
+    "E-NETWORK-DROPPED": (
+        "The connection to {host} dropped before the response was complete ({reason})."
+    ),
     "E-NETWORK-UNREADABLE": "Got a response from {host} that {prog} couldn't read.",
     "H-NETWORK-UNREADABLE": (
         "A proxy, captive portal or firewall may be answering in Deepgram's "
@@ -171,6 +406,20 @@ STRINGS: dict[str, str] = {
         "Retry once. If it fails again, tell the user that something on this "
         "network (a proxy, captive portal or firewall) is answering in "
         "Deepgram's place."
+    ),
+    # 0.4.1's redirect refusal (origins only); {sent} is "nothing was sent
+    # there" for REST and "no audio was sent" (or text) for a WebSocket.
+    "E-NETWORK-REDIRECT": (
+        "{origin} answered with a redirect to {location_origin}. {command} "
+        "doesn't follow redirects, so {sent}."
+    ),
+    "H-NETWORK-REDIRECT": (
+        "A network sign-in page or proxy may be redirecting requests. If {host} "
+        "is your own server, use the address it redirects to."
+    ),
+    "A-NETWORK-REDIRECT": (
+        "Tell the user {host} redirected the request. Don't retry until they "
+        "have checked the network or the configured URL."
     ),
     "E-TIMEOUT": "{host} didn't respond within {timeout_s} s.",
     "H-TIMEOUT": "Try again. Large files take longer to upload on slow connections.",
@@ -245,13 +494,26 @@ CODES: dict[str, Messages] = {
     "server_error": ("E-SERVER", "H-SERVER", "A-SERVER", None),
 }
 
-# network_unavailable's other messages: the response was cut off, or it
-# arrived complete but isn't Deepgram's (a proxy or captive portal page).
+# network_unavailable's other messages: the connection dropped after the
+# request started, the response was cut off, it arrived complete but isn't
+# Deepgram's (a proxy or captive portal page), or it was a redirect.
+NETWORK_DROPPED: Messages = (
+    "E-NETWORK-DROPPED",
+    "H-NETWORK-CUT",
+    "A-NETWORK-CUT",
+    None,
+)
 NETWORK_CUT: Messages = ("E-NETWORK-CUT", "H-NETWORK-CUT", "A-NETWORK-CUT", None)
 NETWORK_UNREADABLE: Messages = (
     "E-NETWORK-UNREADABLE",
     "H-NETWORK-UNREADABLE",
     "A-NETWORK-UNREADABLE",
+    None,
+)
+NETWORK_REDIRECT: Messages = (
+    "E-NETWORK-REDIRECT",
+    "H-NETWORK-REDIRECT",
+    "A-NETWORK-REDIRECT",
     None,
 )
 
@@ -274,6 +536,7 @@ REASON_CLOSED = "connection closed"
 REASON_TRUNCATED = "response cut off"
 REASON_UNREADABLE = "unreadable response"
 REASON_PROXY = "the proxy refused the connection"
+REASON_REDIRECT = "unexpected redirect"
 REASON_OTHER = "connection failed"
 
 KEY_SOURCE_ENV = credentials.KEY_SOURCE_ENV
@@ -307,6 +570,66 @@ class TransportError(BaseException):
     @property
     def error(self) -> str:
         return STRINGS[self.messages[0]].format(**self.values)
+
+
+class RedirectRefused(TransportError):
+    """A request was answered with a redirect, which is never followed.
+
+    REST and WebSocket alike: the key and the request's audio or text go
+    only to the host that passed the host check. ``message`` and
+    ``exit_code`` read as on the ``click.ClickException`` it was in 0.4.1.
+    """
+
+    exit_code = 1
+
+    @property
+    def message(self) -> str:
+        return self.error
+
+
+def redirect_refused(
+    url: str,
+    location: str | None,
+    *,
+    command: str = "dg",
+    payload: str | None = None,
+) -> RedirectRefused:
+    """The error for a redirect from ``url`` to ``location``.
+
+    Only origins are shown, never paths or queries, and anything a server
+    put in the Location header is made safe to print first. ``payload``
+    names what a WebSocket would have sent ("audio", "text"); ``None`` for
+    REST, where the request reached ``url`` and nothing went further.
+    """
+    from urllib.parse import urljoin
+
+    from .hosts import parse_origin
+    from .messages import display
+
+    here = parse_origin(url)
+    there = None
+    if location:
+        # Header bytes outside ASCII arrive as surrogates; show them as "?".
+        location = location.encode("ascii", "replace").decode("ascii")
+        try:
+            there = parse_origin(urljoin(url, location))
+        except ValueError:  # e.g. an unbalanced "[" in the host
+            there = None
+    host = _clean(here.host if here else url)
+    sent = "nothing was sent there" if payload is None else f"no {payload} was sent"
+    return RedirectRefused(
+        "network_unavailable",
+        {
+            "origin": display(here.origin if here else "?"),
+            "location_origin": display(there.origin if there else "?"),
+            "command": command,
+            "sent": sent,
+            "host": host,
+            "prog": prog() or "dg",
+        },
+        {"host": host, "reason": REASON_REDIRECT},
+        NETWORK_REDIRECT,
+    )
 
 
 # ── Mapping ──────────────────────────────────────────────────────────
@@ -441,13 +764,26 @@ def map_exception(
         if isinstance(exc, (httpx.NetworkError, httpx.RemoteProtocolError)):
             host = _host(exc)
             reason = _network_reason(exc)
-            cut = reason == REASON_TRUNCATED
+            messages: Messages | None = None
+            if reason == REASON_TRUNCATED:
+                messages = NETWORK_CUT
+            elif reason in (REASON_RESET, REASON_CLOSED) and isinstance(
+                exc, (httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError)
+            ):
+                # The connection was open and the request had started, so
+                # "couldn't reach" would be wrong. A reset while connecting
+                # (ConnectError) stays E-NETWORK.
+                messages = NETWORK_DROPPED
             return TransportError(
                 "network_unavailable",
                 {"host": host, "reason": reason},
                 {"host": host, "reason": reason},
-                NETWORK_CUT if cut else None,
+                messages,
             )
+
+    ws = _map_websocket(exc, secrets)
+    if ws is not None:
+        return ws
 
     status = getattr(exc, "status_code", None)
     if not isinstance(status, int) or "deepgram" not in sys.modules:
@@ -456,7 +792,6 @@ def map_exception(
 
     if not isinstance(exc, ApiError):
         return None
-    headers = exc.headers
     if 200 <= status < 300:
         # The SDK got a complete success response it couldn't parse: most
         # often not Deepgram's at all (a proxy's or captive portal's page).
@@ -468,14 +803,37 @@ def map_exception(
             {"host": host, "reason": REASON_UNREADABLE},
             NETWORK_UNREADABLE,
         )
+    return for_status(status, exc.headers, exc.body, secrets)
+
+
+def for_status(
+    status: int,
+    headers: object = None,
+    body: object = None,
+    secrets: tuple[str, ...] = (),
+    *,
+    host: str | None = None,
+    path: str | None = None,
+) -> TransportError | None:
+    """The coded error for an HTTP error status, REST or WebSocket upgrade.
+
+    ``host`` and ``path`` name the request when it didn't go through the
+    shared client (a WebSocket upgrade); else the last request's are used.
+    """
+    if 300 <= status < 400:
+        # Credentialed requests don't follow redirects.
+        origin = host or _last_request.get("origin") or _host()
+        return redirect_refused(
+            origin, _header(headers, "location"), command=_running_command()
+        )
     if status == 401:
         return TransportError("auth_invalid", {}, {"http_status": 401})
     if status == 403:
         return TransportError("auth_forbidden", {}, {"http_status": 403})
     if status == 404:
-        path = _clean(_last_request.get("path") or "this request")
+        where = _clean(path or _last_request.get("path") or "this request")
         return TransportError(
-            "not_found", {"path": path}, {"http_status": 404, "path": path}
+            "not_found", {"path": where}, {"http_status": 404, "path": where}
         )
     if status == 429:
         details: dict[str, Any] = {"http_status": 429}
@@ -488,7 +846,7 @@ def map_exception(
             "invalid_argument",
             {
                 "http_status": status,
-                "api_message": _api_message(exc.body, status, secrets),
+                "api_message": _api_message(body, status, secrets),
             },
             {"http_status": status},
         )
@@ -501,8 +859,136 @@ def map_exception(
     return None
 
 
+# Seconds a WebSocket handshake may take before it maps to ``timeout``.
+WS_OPEN_TIMEOUT_S = 10.0
+
+
+def _ws_status(exc: BaseException) -> tuple[int, object, object] | None:
+    """(status, headers, body) of a refused WebSocket upgrade, if ``exc`` is one."""
+    if "websockets" in sys.modules:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int) and type(exc).__module__.startswith("websockets"):
+            headers = getattr(response, "headers", None)
+            body = getattr(response, "body", None)
+            if isinstance(body, bytes):
+                body = body.decode("utf-8", "replace")
+            return status, dict(headers or {}), body
+        status = getattr(exc, "status_code", None)  # legacy InvalidStatusCode
+        if isinstance(status, int) and type(exc).__module__.startswith("websockets"):
+            return status, dict(getattr(exc, "headers", None) or {}), None
+    return None
+
+
+def _timeout_types() -> tuple[type[BaseException], ...]:
+    types: list[type[BaseException]] = [TimeoutError]
+    if "asyncio" in sys.modules:
+        import asyncio
+
+        types.append(asyncio.TimeoutError)  # a separate class before 3.11
+    return tuple(types)
+
+
+def _map_websocket(
+    exc: BaseException,
+    secrets: tuple[str, ...],
+    *,
+    host: str | None = None,
+    path: str | None = None,
+    opening: bool = False,
+) -> TransportError | None:
+    """A WebSocket open that failed: refused upgrade, network or timeout."""
+    refused = _ws_status(exc)
+    if refused is not None:
+        status, headers, body = refused
+        return for_status(status, headers, body, secrets, host=host, path=path)
+    if not opening and "websockets" in sys.modules:
+        opening = type(exc).__module__.startswith("websockets")
+    if not opening:
+        return None
+    where = _clean(host) if host else _host(exc)
+    if any(isinstance(item, _timeout_types()) for item in _chain(exc)):
+        return TransportError(
+            "timeout",
+            {"host": where, "timeout_s": _seconds(WS_OPEN_TIMEOUT_S)},
+            {"host": where, "timeout_s": _seconds(WS_OPEN_TIMEOUT_S)},
+        )
+    if any(isinstance(item, OSError) for item in _chain(exc)):
+        reason = _network_reason(exc)
+        return TransportError(
+            "network_unavailable",
+            {"host": where, "reason": reason},
+            {"host": where, "reason": reason},
+        )
+    if "websockets" in sys.modules:
+        from websockets.exceptions import InvalidHandshake
+
+        # The server answered the upgrade with something that isn't a valid
+        # HTTP response (a proxy, HTTP/1.0, a cut-off reply).
+        if any(isinstance(item, InvalidHandshake) for item in _chain(exc)):
+            return TransportError(
+                "network_unavailable",
+                {"host": where, "reason": REASON_UNREADABLE, "prog": prog() or "dg"},
+                {"host": where, "reason": REASON_UNREADABLE},
+                NETWORK_UNREADABLE,
+            )
+    return None
+
+
+def map_ws_open(
+    exc: BaseException,
+    secrets: tuple[str, ...] = (),
+    *,
+    host: str | None = None,
+    path: str | None = None,
+) -> TransportError | None:
+    """The coded error for a WebSocket open to ``host`` that raised ``exc``.
+
+    A refused upgrade maps by its HTTP status through the REST table; DNS,
+    connect and TLS failures map to ``network_unavailable``; an open that
+    timed out maps to ``timeout``.
+    """
+    if isinstance(exc, TransportError):
+        return exc
+    return _map_websocket(exc, secrets, host=host, path=path, opening=True)
+
+
 def _seconds(value: float) -> int | float:
     return int(value) if float(value).is_integer() else value
+
+
+def plain_detail(exc: BaseException) -> str:
+    """What went wrong, in the words of the error that caused it.
+
+    The client wraps failures it can't map in the SDK's ``ApiError``,
+    whose text is a dump of its fields (``headers: None, status_code:
+    None, body: ...``). For one with no status, this is the message of
+    the error it was raised from; anything else is its own message.
+    """
+    for item in _chain(exc):
+        if (
+            type(item).__name__ == "ApiError"
+            and getattr(item, "status_code", 1) is None
+        ):
+            continue
+        text = str(item).strip()
+        if text:
+            return text
+        return type(item).__name__
+    body = getattr(exc, "body", None)
+    return str(body) if body else type(exc).__name__
+
+
+def _running_command() -> str:
+    """The command being run, as typed (``dg listen``), for messages that
+    name it; ``dg`` outside a command."""
+    if "click" in sys.modules:
+        import click
+
+        ctx = click.get_current_context(silent=True)
+        if ctx is not None and ctx.command_path:
+            return ctx.command_path
+    return "dg"
 
 
 def raise_for(

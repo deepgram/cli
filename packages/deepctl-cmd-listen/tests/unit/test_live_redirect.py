@@ -14,9 +14,9 @@ import types
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
-import click
 import pytest
 from deepctl_cmd_listen.command import ListenCommand
+from deepctl_core.websocket import RedirectRefused
 
 FAKE_KEY = "fa1ce0000000000000000000000000000000000d"
 
@@ -157,7 +157,7 @@ def test_cross_origin_redirect_is_refused(mode, no_audio_devices):
     assert f"Token {FAKE_KEY}".encode() in servers.origin.requests[0]
     # Nothing at all reached the redirect target.
     assert servers.target.requests == []
-    assert isinstance(err, click.ClickException)
+    assert isinstance(err, RedirectRefused)
     assert err.exit_code != 0
     target = f"ws://127.0.0.1:{servers.target.port}"
     assert err.message == (
@@ -174,7 +174,7 @@ def test_same_origin_redirect_is_refused(mode, no_audio_devices):
     # The redirect back to the same host is not followed either.
     assert len(servers.origin.requests) == 1
     assert servers.target.requests == []
-    assert isinstance(err, click.ClickException)
+    assert isinstance(err, RedirectRefused)
     assert err.exit_code != 0
     assert "doesn't follow redirects" in err.message
 
@@ -185,7 +185,7 @@ def test_relative_location_names_the_same_origin(no_audio_devices):
 
     origin = f"ws://127.0.0.1:{servers.origin.port}"
     assert len(servers.origin.requests) == 1
-    assert isinstance(err, click.ClickException)
+    assert isinstance(err, RedirectRefused)
     assert err.message.startswith(f"{origin} answered with a redirect to {origin}.")
 
 
@@ -194,7 +194,7 @@ def test_control_bytes_in_location_are_not_echoed(no_audio_devices):
     with _Servers("ws://evil\x9b31m.example/x") as servers:
         err = _run("stdin", servers.origin.origin)
 
-    assert isinstance(err, click.ClickException)
+    assert isinstance(err, RedirectRefused)
     assert err.message.isascii()
     assert all(c.isprintable() for c in err.message)
     assert "redirect to ws://evil. " in err.message
@@ -210,8 +210,22 @@ def test_unbalanced_bracket_in_location_gives_the_redirect_message(
         err = _run(mode, servers.origin.origin)
 
     assert servers.target.requests == []
-    assert isinstance(err, click.ClickException)
+    assert isinstance(err, RedirectRefused)
     assert err.message == (
         f"ws://127.0.0.1:{servers.origin.port} answered with a redirect to ?. "
         "dg listen doesn't follow redirects, so no audio was sent."
     )
+
+
+@pytest.mark.parametrize("mode", ["mic", "stdin"])
+def test_upgrade_carries_the_request_headers(mode, no_audio_devices):
+    """The live upgrade identifies the run as every other API request does:
+    the SDK's User-Agent, the session ID and the key."""
+    from deepctl_core import transport
+
+    with _Servers(CROSS) as servers:
+        _run(mode, servers.origin.origin)
+
+    request = servers.origin.requests[0].decode("latin-1").lower()
+    for name, value in transport.request_headers(FAKE_KEY).items():
+        assert f"\r\n{name.lower()}: {value.lower()}\r\n" in request, name

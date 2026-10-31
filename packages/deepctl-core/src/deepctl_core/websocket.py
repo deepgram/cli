@@ -8,63 +8,25 @@ else. Depending on the websockets version, a 3xx on the upgrade is either
 followed with the same headers (14 and 15, the key included), followed
 without the key (16 and later, the data still goes), or raised. These
 helpers turn every 3xx into :class:`RedirectRefused` before a second
-connection is opened. REST calls through the SDK don't follow redirects
-either (``follow_redirects=False`` in the client); :func:`redirect_refused`
-words that error too, with no ``payload``.
+connection is opened. REST calls through the shared client don't follow
+redirects either; :func:`deepctl_core.transport.for_status` maps their 3xx
+to the same :class:`RedirectRefused`.
 """
 
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
 
-import click
+from .transport import RedirectRefused, redirect_refused
 
-from .hosts import parse_origin
-from .messages import display
-
-E_WS_REDIRECT = (
-    "{origin} answered with a redirect to {location_origin}. {command} "
-    "doesn't follow redirects, so no {payload} was sent."
-)
-# REST: the request already reached the host that was checked; nothing
-# goes to the new location.
-E_HTTP_REDIRECT = (
-    "{origin} answered with a redirect to {location_origin}. {command} "
-    "doesn't follow redirects, so nothing was sent there."
-)
-
-
-class RedirectRefused(click.ClickException):
-    """A request was answered with a redirect, which isn't followed."""
-
-
-def redirect_refused(
-    url: str, location: str | None, *, command: str, payload: str | None
-) -> RedirectRefused:
-    """The error for a redirect from ``url`` to ``location``.
-
-    Only origins are shown, never paths or queries, and anything a server
-    put in the Location header is made safe to print first.
-    """
-    here = parse_origin(url)
-    there = None
-    if location:
-        # Header bytes outside ASCII arrive as surrogates; show them as "?".
-        location = location.encode("ascii", "replace").decode("ascii")
-        try:
-            there = parse_origin(urljoin(url, location))
-        except ValueError:  # e.g. an unbalanced "[" in the host
-            there = None
-    text = E_HTTP_REDIRECT if payload is None else E_WS_REDIRECT
-    return RedirectRefused(
-        text.format(
-            origin=display(here.origin if here else "?"),
-            location_origin=display(there.origin if there else "?"),
-            command=command,
-            payload=payload,
-        )
-    )
+# The error and its wording live in transport (one redirect refusal for
+# REST and WebSocket); re-exported here for the connect helpers' callers.
+__all__ = [
+    "RedirectRefused",
+    "connect_async",
+    "connect_sync",
+    "redirect_refused",
+]
 
 
 def _as_refusal(

@@ -9,6 +9,7 @@ import keyring.errors
 import pytest
 from deepctl_core.auth import AuthenticationError, AuthManager
 from deepctl_core.config import Config
+from deepctl_core.transport import request_headers
 
 
 @pytest.fixture
@@ -70,7 +71,7 @@ class TestAuthManager:
         auth_manager.client.get.assert_called_once_with(
             "https://api.deepgram.com/v1/projects/test-project",
             headers={
-                "Authorization": "Token sk-test-key",
+                **request_headers("sk-test-key"),
                 "Content-Type": "application/json",
             },
         )
@@ -160,7 +161,7 @@ class TestAuthManager:
             auth_manager.client.get.assert_called_once_with(
                 "https://api.deepgram.com/v1/projects",
                 headers={
-                    "Authorization": "Token sk-test-key",
+                    **request_headers("sk-test-key"),
                     "Content-Type": "application/json",
                 },
             )
@@ -205,7 +206,7 @@ class TestAuthManager:
             auth_manager.client.get.assert_called_once_with(
                 "https://api.deepgram.com/v1/projects/stored-project",
                 headers={
-                    "Authorization": "Token sk-stored-key",
+                    **request_headers("sk-stored-key"),
                     "Content-Type": "application/json",
                 },
             )
@@ -237,7 +238,7 @@ class TestAuthManager:
         auth_manager.client.get.assert_called_once_with(
             "https://api.deepgram.com/v1/projects/env-project",
             headers={
-                "Authorization": "Token sk-env-key",
+                **request_headers("sk-env-key"),
                 "Content-Type": "application/json",
             },
         )
