@@ -54,7 +54,9 @@ const posixOnly = { skip: process.platform === 'win32' && 'POSIX shell scripts' 
 // directory does not have (the release writes it). `requirements: null`
 // leaves the file out.
 function packageCopy(requirements = 'deepctl==0.0.0 \\\n    --hash=sha256:0000\n') {
-  const dir = tmpdir();
+  // Real path: Node resolves the launcher's __dirname, so on macOS the
+  // package lives under /private/var/..., not the /var/... tmpdir() gives.
+  const dir = fs.realpathSync(tmpdir());
   for (const sub of ['bin', 'lib']) fs.cpSync(path.join(PKG_DIR, sub), path.join(dir, sub), { recursive: true });
   fs.copyFileSync(path.join(PKG_DIR, 'package.json'), path.join(dir, 'package.json'));
   const version = launcher.packageVersion(PKG_DIR);
@@ -773,6 +775,16 @@ describe('no trusted cache root: a one-run venv instead', () => {
       assert.throws(() => launcher.oneRunBase(undefined, { ...win, lstat: lstatWith(linked) }), /link or junction/);
     }
     assert.deepEqual(launcher.oneRunBase(undefined, { ...win, lstat: lstatWith(null) }), { base: `${top}\\venvs`, prefix: '', prune: true });
+    // An 8.3 short name (C:\\Users\\RUNNER~1, as on GitHub's runners) is a
+    // plain directory like any other: only links and junctions are refused,
+    // and no short and long spellings are ever compared.
+    const short = { ...win, env: { LOCALAPPDATA: 'C:\\Users\\RUNNER~1\\AppData\\Local' }, home: 'C:\\Users\\RUNNER~1' };
+    assert.deepEqual(launcher.oneRunBase(undefined, { ...short, lstat: lstatWith(null), realpath: () => 'C:\\Users\\runneradmin\\AppData\\Local' }), {
+      base: 'C:\\Users\\RUNNER~1\\AppData\\Local\\deepgram-cli\\venvs',
+      prefix: '',
+      prune: true,
+    });
+    assert.equal(launcher.ownedDir('C:\\Users\\RUNNER~1\\AppData\\Local\\deepgram-cli\\uv-cache', { platform: 'win32', lstat: lstatWith(null), mkdir: () => {} }), 'C:\\Users\\RUNNER~1\\AppData\\Local\\deepgram-cli\\uv-cache');
     let spawned = false;
     await assert.rejects(
       launcher.resolveRunner([], {
@@ -1064,7 +1076,8 @@ describe('resolveRunner', () => {
     await assert.rejects(launcher.resolveRunner([], { env: { DEEPCTL_NPM_RUNNER: 'pipx' }, version: '1.0.0' }), /must be one of/);
   });
 
-  test('with no venv cached, uv builds one from the hash-locked requirements file', async () => {
+  // POSIX semantics on the real filesystem (platform: 'linux').
+  test('with no venv cached, uv builds one from the hash-locked requirements file', posixOnly, async () => {
     const home = tmpdir();
     const cache = path.join(home, 'c');
     const requirementsFile = path.join(home, 'requirements-1.2.3.txt');
@@ -1158,7 +1171,7 @@ describe('resolveRunner', () => {
     assert.match(lines.join(''), new RegExp(`${uvCache.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} isn't one\\.\\nHINT: Remove `));
   });
 
-  test('a UV_CACHE_DIR the user set is left to uv', async () => {
+  test('a UV_CACHE_DIR the user set is left to uv', posixOnly, async () => {
     const home = tmpdir();
     const requirementsFile = path.join(home, 'requirements-1.2.3.txt');
     fs.writeFileSync(requirementsFile, '');
