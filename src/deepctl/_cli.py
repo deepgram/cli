@@ -147,9 +147,13 @@ class _Listed(click.Command):
     importing it. Only the attributes ``format_commands`` reads are set."""
 
     def __init__(self, name: str, entry: dict[str, Any]) -> None:
+        short_help = entry.get("summary")
+        if short_help and entry.get("summary_more"):
+            # A cached plugin row: its paragraphs, as Click keeps them.
+            short_help = "\n\n".join([short_help, *entry["summary_more"]])
         super().__init__(
             name,
-            short_help=entry.get("summary"),
+            short_help=short_help,
             help=entry.get("help"),
             hidden=bool(entry.get("hidden", False)),
             deprecated=entry.get("deprecated", False),
@@ -177,6 +181,31 @@ class _MissingCommand(click.Command):
         raise self.error
 
 
+def _nothing_to_discover() -> bool:
+    """True when no plugin can be installed: every ``deepctl.commands`` entry
+    point is a built-in's own, there is no ``deepctl.plugins`` entry point
+    and no ``plugins.json`` for a plugin venv. Then discovery has nothing to
+    load, and ``deepctl_core`` needn't be imported to find that out."""
+    from importlib import metadata
+
+    from deepctl import _cache
+
+    builtins = _manifest.builtin_command_modules()
+    entry_points = metadata.entry_points()
+    for entry_point in entry_points.select(group="deepctl.commands"):
+        if (
+            builtins.get(entry_point.name)
+            != entry_point.value.partition(":")[0].strip()
+        ):
+            return False
+    if any(True for _ in entry_points.select(group="deepctl.plugins")):
+        return False
+    return not any(
+        path.endswith("plugins.json") and os.path.lexists(path)
+        for path in _cache.plugin_state_paths()
+    )
+
+
 class LazyGroup(click.Group):
     """The root group: built-in commands come from the manifest and load on
     first use; plugins are discovered only when needed.
@@ -195,6 +224,10 @@ class LazyGroup(click.Group):
         self.eager = False
         self._manager: PluginManager | None = None
         self._discovered = False
+        # Plugin commands from the discovery cache: listed, not loaded.
+        self._cached_plugins: dict[str, dict[str, Any]] = {}
+        # Root help as rendered, and the program name it used (help cache).
+        self.rendered_help: tuple[str, str] | None = None
 
     def _plugin_manager(self) -> PluginManager:
         if self._manager is None:
@@ -288,8 +321,64 @@ class LazyGroup(click.Group):
             return super().list_commands(ctx)
         if ctx.resilient_parsing:
             # Shell completion offers plugin commands too, as 0.4.x did.
-            self.discover()
-        return sorted(set(self.commands) | set(_manifest.top_level()))
+            self._discover_for_listing()
+        return sorted(
+            set(self.commands) | set(_manifest.top_level()) | set(self._cached_plugins)
+        )
+
+    def _discover_for_listing(self) -> None:
+        """Discovery for root ``--help``, through the discovery cache.
+
+        A cache hit lists the plugins without importing them (or
+        ``deepctl_core``). On a miss, a quick entry point scan skips the
+        full discovery when no plugin is installed at all.
+        """
+        if self._discovered:
+            return
+        from deepctl import _cache
+
+        reserved = frozenset(_manifest.top_level()) | frozenset(_manifest.aliases())
+        try:
+            stamp: str | None = _cache.plugin_stamp()
+        except Exception:
+            stamp = None
+        if stamp is not None:
+            cached = _cache.read_discovery(stamp, reserved)
+            if cached is not None:
+                self._cached_plugins = {c["name"]: c for c in cached}
+                return
+        before = dict(self.commands)
+        watch = _cache.StderrWatch(sys.stderr)
+        sys.stderr = watch
+        try:
+            if _nothing_to_discover():
+                self._discovered = True
+            else:
+                self.discover()
+        finally:
+            if sys.stderr is watch:
+                sys.stderr = watch.stream
+        added = {
+            name: command
+            for name, command in self.commands.items()
+            if before.get(name) is not command
+        }
+        replaces_builtin = any(name in _manifest.top_level() for name in added)
+        if stamp is not None and not watch.written and not replaces_builtin:
+            rows = []
+            for name, command in sorted(added.items()):
+                row = _cache.listing_row(name, command)
+                if row is None:
+                    break  # one row the cache can't reproduce: keep nothing
+                rows.append(row)
+            else:
+                _cache.write_discovery(stamp, rows, reserved)
+
+    def get_help(self, ctx: click.Context) -> str:
+        text = super().get_help(ctx)
+        if ctx.parent is None:
+            self.rendered_help = (text, ctx.info_name or "dg")
+        return text
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]
@@ -340,8 +429,9 @@ class LazyGroup(click.Group):
         if self.eager:
             super().format_commands(ctx, formatter)
             return
-        self.discover()
-        listed = _manifest.top_level()
+        self._discover_for_listing()
+        # Built-ins always win over anything the discovery cache holds.
+        listed = {**self._cached_plugins, **_manifest.top_level()}
         rows: list[tuple[str, click.Command]] = []
         for name in self.list_commands(ctx):
             command = self.commands.get(name) or _Listed(name, listed[name])
@@ -795,6 +885,42 @@ def _best_effort(notice: Callable[..., object], **kwargs: Any) -> None:
         pass
 
 
+def _help_cache_requested() -> bool:
+    """``DEEPCTL_HELP_CACHE=1`` from the launcher (``deepctl.main`` removes
+    it from the environment at startup), and not an AI agent session."""
+    main_module = sys.modules.get("deepctl.main")
+    requested = bool(getattr(main_module, "HELP_CACHE", False))
+    if not requested:
+        return False
+    from deepctl_core.output import is_ai_agent
+
+    return not is_ai_agent()
+
+
+def _save_root_help(before: dict[str, Any] | None) -> None:
+    """Write the help cache entry for the root help this run printed."""
+    if cli.rendered_help is None:
+        return
+    import codecs
+
+    try:
+        encoding = codecs.lookup(getattr(sys.stdout, "encoding", "") or "").name
+    except LookupError:
+        return
+    if encoding != "utf-8":
+        return
+    from deepctl import _cache
+
+    text, prog = cli.rendered_help
+    try:
+        tty = sys.stdout.isatty()
+    except (OSError, ValueError):
+        return
+    # As click.echo wrote it: styles kept only on a terminal.
+    shown = text if tty else click.unstyle(text)
+    _cache.write_help(shown + "\n", prog, _cache.help_width(), tty, before)
+
+
 def _start_checks(quiet: bool) -> list[Callable[[], object]]:
     """Start the background update, plugin-update and AI-CLI checks; return
     the functions that print what they found."""
@@ -920,6 +1046,20 @@ def run(
         # which makes no network connection and prints only the help.
         pending = [] if _is_help_run(args) else _start_checks(quiet_requested)
 
+        # Root `dg --help` is saved for the native launcher when it asks
+        # (DEEPCTL_HELP_CACHE=1), outside an AI agent, unless the run writes
+        # anything to stderr.
+        stderr_watch = None
+        key_before: dict[str, Any] | None = None
+        if args == ["--help"] and not cli.eager and _help_cache_requested():
+            from deepctl._cache import StderrWatch, key_inputs
+
+            # The key's inputs before rendering: if any changes while the
+            # help is rendered, no entry is written.
+            key_before = key_inputs()
+            stderr_watch = StderrWatch(sys.stderr)
+            sys.stderr = stderr_watch
+
         with TimingContext("total_execution"):
             exit_code = 0
             with TimingContext("cli_execution"):
@@ -937,6 +1077,12 @@ def run(
                     # `if dg -o json keys; then ...` in scripts and CI. Carry it
                     # and re-raise at the end instead.
                     exit_code = exc.code if isinstance(exc.code, int) else 0
+
+        if stderr_watch is not None:
+            if sys.stderr is stderr_watch:
+                sys.stderr = stderr_watch.stream
+            if not exit_code and not stderr_watch.written:
+                _save_root_help(key_before)
 
         # Print update notifications if available (before timing summary)
         for print_pending in pending:

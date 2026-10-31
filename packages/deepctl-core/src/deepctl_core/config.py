@@ -17,7 +17,6 @@ import hashlib
 import io
 import os
 import re
-import secrets
 import stat
 import sys
 import threading
@@ -2212,6 +2211,8 @@ class Config:
         return data
 
     def _replace_or_rewrite(self, target: Path, text: str) -> None:
+        import secrets
+
         tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY, 0o600)

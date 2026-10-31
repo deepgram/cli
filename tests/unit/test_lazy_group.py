@@ -72,8 +72,16 @@ def _imported(args: list[str], tmp_path: Path) -> list[str]:
 
 
 @pytest.fixture
-def fresh_cli(monkeypatch: pytest.MonkeyPatch) -> _cli.LazyGroup:
-    """``cli`` as a new process sees it: nothing resolved or discovered."""
+def fresh_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _cli.LazyGroup:
+    """``cli`` as a new process sees it: nothing resolved or discovered, and
+    an empty cache (never the user's own) for the discovery and help caches."""
+    from deepctl import _cache
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
+    monkeypatch.setattr(_cache, "_real_home", lambda: str(home))
     group = _cli.cli
     monkeypatch.setattr(group, "commands", {})
     monkeypatch.setattr(group, "eager", False)
