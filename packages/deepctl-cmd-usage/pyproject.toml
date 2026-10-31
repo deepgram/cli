@@ -24,10 +24,10 @@ dependencies = [
     "deepctl==0.4.1", # x-release-please-version
     "deepctl-core==0.4.1", # x-release-please-version
     "deepctl-shared-utils==0.4.1", # x-release-please-version
-    "click>=8.0.0",
-    "rich>=13.0.0",
+    "click>=8.2.0,<9",
+    "rich>=13.0.0,<16",
     "deepgram-sdk>=7.7.0,<8",
-    "pydantic>=2.0.0",
+    "pydantic>=2.0.0,<3",
 ]
 
 [project.scripts]

@@ -246,15 +246,6 @@ wheels = [
 ]
 
 [[package]]
-name = "annotated-doc"
-version = "0.0.5"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5a/8e/38aa427ed5402449e226975b649c5dc73ccadfefeb95e6aecb8f8ea4b6b6/annotated_doc-0.0.5.tar.gz", hash = "sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb", size = 10758, upload-time = "2026-07-28T13:50:58.129Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl", hash = "sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101", size = 5302, upload-time = "2026-07-28T13:50:57.239Z" },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -939,7 +930,6 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
     { name = "rich" },
-    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -993,7 +983,7 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=0.10.0" },
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl-cmd-api", editable = "packages/deepctl-cmd-api" },
     { name = "deepctl-cmd-billing", editable = "packages/deepctl-cmd-billing" },
     { name = "deepctl-cmd-completion", editable = "packages/deepctl-cmd-completion" },
@@ -1024,13 +1014,13 @@ requires-dist = [
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "deepctl-telemetry", editable = "packages/deepctl-telemetry" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "keyring", specifier = ">=24.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "keyring", specifier = ">=24.0.0,<26" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "packaging", marker = "extra == 'dev'", specifier = ">=23.0" },
-    { name = "platformdirs", specifier = ">=3.0.0" },
+    { name = "platformdirs", specifier = ">=3.0.0,<5" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
     { name = "pyjwt", specifier = ">=2.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
@@ -1040,10 +1030,9 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "requests", specifier = ">=2.31,<3.0" },
     { name = "responses", marker = "extra == 'dev'", specifier = ">=0.23.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=7.0.0" },
-    { name = "typer", specifier = ">=0.9.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.31.0" },
 ]
@@ -1094,12 +1083,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1116,11 +1105,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1137,11 +1126,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1158,11 +1147,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1181,13 +1170,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1213,14 +1202,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 provides-extras = ["dev"]
 
@@ -1240,13 +1229,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
     { name = "requests", specifier = ">=2.31,<3.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1266,12 +1255,12 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11.0" },
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1298,16 +1287,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.1.7" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
-    { name = "platformdirs", specifier = ">=4.0.0" },
-    { name = "pydantic", specifier = ">=2.10.1" },
+    { name = "platformdirs", specifier = ">=4.0.0,<5" },
+    { name = "pydantic", specifier = ">=2.10.1,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.3" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
-    { name = "rich", specifier = ">=13.9.4" },
+    { name = "rich", specifier = ">=13.9.4,<16" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.1" },
 ]
 provides-extras = ["dev"]
@@ -1327,12 +1316,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1350,12 +1339,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1372,11 +1361,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1401,16 +1390,16 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "deepgram-captions", specifier = ">=2.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
     { name = "sounddevice", specifier = ">=0.4.6" },
-    { name = "websockets", specifier = ">=13.1" },
+    { name = "websockets", specifier = ">=13.1,<18" },
 ]
 
 [[package]]
@@ -1428,12 +1417,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1461,17 +1450,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.1.7" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "mcp", specifier = ">=1.22.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
-    { name = "pydantic", specifier = ">=2.10.1" },
+    { name = "pydantic", specifier = ">=2.10.1,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
-    { name = "rich", specifier = ">=13.9.4" },
+    { name = "rich", specifier = ">=13.9.4,<16" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.1" },
 ]
 provides-extras = ["dev"]
@@ -1490,11 +1479,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1511,11 +1500,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1554,12 +1543,12 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1576,11 +1565,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1597,11 +1586,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1617,10 +1606,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1637,11 +1626,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1685,17 +1674,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "httpx", specifier = ">=0.24.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
     { name = "packaging", specifier = ">=21.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.10.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 provides-extras = ["dev"]
 
@@ -1715,13 +1704,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1752,21 +1741,21 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepgram-sdk", specifier = ">=7.7.0,<8" },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "keyring", specifier = ">=24.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "keyring", specifier = ">=24.0.0,<26" },
     { name = "packaging", specifier = ">=21.0" },
-    { name = "platformdirs", specifier = ">=3.0.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "platformdirs", specifier = ">=3.0.0,<5" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
     { name = "pyjwt", specifier = ">=2.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.10.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 provides-extras = ["dev"]
 
@@ -1801,11 +1790,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
-    { name = "httpx", specifier = ">=0.24.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "httpx", specifier = ">=0.24.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0,<3" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
 ]
 
 [[package]]
@@ -1822,10 +1811,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0.0" },
+    { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "rich", specifier = ">=13.0.0" },
+    { name = "rich", specifier = ">=13.0.0,<16" },
     { name = "sentry-sdk", specifier = ">=2.35.0,<3" },
 ]
 
@@ -3899,15 +3888,6 @@ wheels = [
 ]
 
 [[package]]
-name = "shellingham"
-version = "1.5.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
-]
-
-[[package]]
 name = "sounddevice"
 version = "0.5.6"
 source = { registry = "https://pypi.org/simple" }
@@ -4030,21 +4010,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/92/3c/58f808a359700f39a967dffede33efeac809262c03303fa3eec6afff8f49/twine-7.0.0.tar.gz", hash = "sha256:85cdb29c518efef867360ae4acd4b0dfd61c8654a22fca08e6f8539f05022177", size = 215032, upload-time = "2026-07-27T15:59:00.825Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/08/ddcdc06225eaad6de0e48e1002b06d919dbde20582d0662c7af51308e5d6/twine-7.0.0-py3-none-any.whl", hash = "sha256:b854164df26db268af05f49aa5c0344b10e27a494343ff05b1e0bad3b135f5a7", size = 43204, upload-time = "2026-07-27T15:58:59.26Z" },
-]
-
-[[package]]
-name = "typer"
-version = "0.27.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "rich" },
-    { name = "shellingham" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/40/4a3db7990d1f62a53182aa96eaef57aeb2886a27f90a195bc66713565d31/typer-0.27.1.tar.gz", hash = "sha256:a79bef8469a79c45498e7b814ecf8d603cc7644e9acbd9e19cac0334240b18df", size = 203994, upload-time = "2026-08-03T14:41:03.438Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/89/9518bc0c3929bee36b3a4a8e3daddd6e03f92f9961c66d4983b837160543/typer-0.27.1-py3-none-any.whl", hash = "sha256:53150287edd11baeb4e4722c8e394fcdf8181c0ae89485cba8d25c778d5edd56", size = 122874, upload-time = "2026-08-03T14:41:04.391Z" },
 ]
 
 [[package]]
