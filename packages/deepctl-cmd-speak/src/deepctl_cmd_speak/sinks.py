@@ -106,6 +106,22 @@ def stdout_stat() -> os.stat_result | None:
         return None
 
 
+def stdout_takes_audio() -> bool:
+    """True when stdout is a terminal, a regular file or the null device:
+    the destinations where agent mode still writes audio."""
+    out = stdout_stat()
+    if out is None:
+        return False
+    if stat.S_ISREG(out.st_mode):
+        return True
+    try:
+        if os.path.samestat(out, os.stat(os.devnull)):
+            return True
+        return os.isatty(sys.stdout.fileno())
+    except Exception:
+        return False
+
+
 def _oserror(code: int, path: str) -> OSError:
     return OSError(code, os.strerror(code), path)
 

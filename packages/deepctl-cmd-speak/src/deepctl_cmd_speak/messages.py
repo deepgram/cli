@@ -34,6 +34,23 @@ H_STDOUT_BYTES = (
     "Give --out-file a different file from stdout, or don't ask for {format} output."
 )
 
+# invalid_argument: a hard agent signal and audio bound for a pipe.
+E_SPEAK_NO_OUTPUT = "{prog} speak won't write audio into this pipe in agent mode."
+H_SPEAK_NO_OUTPUT = "Pass --out-file FILE to save the audio."
+A_SPEAK_NO_OUTPUT = "next_step saves the audio to {out_file}. Give the user that path."
+# next_step is null: the text came from stdin, or the command line can't be
+# repeated (it holds a key or a URL with credentials, or can't be quoted).
+A_SPEAK_NO_OUTPUT_NULL = (
+    "Run the same command again with --out-file {out_file} added. If the text "
+    "came from stdin, send it again the same way."
+)
+
+# invalid_argument: a hard agent signal and no text argument.
+E_SPEAK_NO_TEXT = (
+    "{prog} speak needs the text as an argument, or - to read it from stdin."
+)
+H_SPEAK_NO_TEXT = "Pass the text in quotes. To read it from stdin, pass - explicitly."
+
 # invalid_argument: --out-file names an existing file and --force is absent.
 E_OUT_FILE_EXISTS = "{out_file} already exists; {prog} won't overwrite it."
 H_OUT_FILE_EXISTS = "Choose a new file name, or pass --force to overwrite."

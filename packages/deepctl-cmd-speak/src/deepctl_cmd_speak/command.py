@@ -845,14 +845,17 @@ class SpeakCommand(BaseCommand):
         # containerized formats like mp3.
         'dg speak "Hello" -m aura-2-asteria-en --out-file hello.mp3',
         'dg speak "Hello" -m aura-2-luna-en --out-file hello.wav --encoding linear16 --container wav',
-        'echo "Hello" | dg speak --out-file hello.mp3 -m aura-2-asteria-en',
+        'echo "Hello" | dg speak - --out-file hello.mp3 -m aura-2-asteria-en',
         # Aura-2 Spanish voice (run `dg models` for the full list).
         'dg speak "Hola, mundo" -m aura-2-selena-es --out-file hola.mp3',
     ]
     agent_help = (
         "Convert text to speech using Deepgram's TTS API. "
-        "Text can be provided as an argument, from a file, or piped via stdin. "
-        "Audio is written to a file (--out-file; add --force to replace an "
+        "Text can be provided as an argument, from a file (--file), or from "
+        "stdin with - as the text (in agent mode, - is the only way to read "
+        "stdin). In agent mode, audio isn't written into a pipe: use "
+        "--out-file, --play, or redirect stdout to a file. "
+        "Audio is written to a file (--out-file; add --force to overwrite an "
         "existing file) or stdout for piping. -o/--output FILE is deprecated. "
         "By default (flux-* models, e.g. flux-alexis-en) uses Flux TTS / Speak "
         "v2, streaming over WebSocket and emitting raw audio; linear16 output is "
@@ -870,7 +873,7 @@ class SpeakCommand(BaseCommand):
         return [
             {
                 "name": "text",
-                "help": "Text to convert to speech",
+                "help": "Text to convert to speech, or - to read it from stdin",
                 "required": False,
                 "default": None,
             },
@@ -1026,11 +1029,24 @@ class SpeakCommand(BaseCommand):
                 hint_agent=msg.H_SPEAK_O_FORMAT.format(prog=prog, value=legacy),
                 next_step=self._o_format_next_step(prog, legacy, kwargs),
             )
+        agent = is_ai_agent()
+        text = kwargs.get("text")
+        if agent and not text and not kwargs.get("file"):
+            # Never block on a stdin that may never close; "-" opts in.
+            return _coded(
+                msg.E_SPEAK_NO_TEXT.format(prog=prog),
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_SPEAK_NO_TEXT,
+                hint_agent=msg.H_SPEAK_NO_TEXT,
+                next_step=_next_step([prog, self.name, "--help"]),
+            )
         if legacy:
             _deprecate_output()
 
         path = out_file or legacy
         if not path:
+            if agent and not kwargs.get("play") and not sinks.stdout_takes_audio():
+                return self._no_output(prog, kwargs)
             return _Plan()
         planned = sinks.plan_target(
             path, overwrite=bool(legacy) or bool(kwargs.get("force"))
@@ -1062,6 +1078,34 @@ class SpeakCommand(BaseCommand):
                 next_step=_next_step([prog, self.name, "--help"]),
             )
         return _Plan(target=planned)
+
+    def _no_output(self, prog: str, kwargs: dict[str, Any]) -> SpeakCodedError:
+        """Under a hard agent signal, audio bound for a pipe is refused;
+        ``next_step`` reruns the command with a new ``--out-file``."""
+        model = kwargs.get("model") or _DEFAULT_MODEL
+        out_file = _proposed_out_file(
+            is_flux=model.lower().startswith("flux-"),
+            encoding=kwargs.get("encoding"),
+            container=kwargs.get("container"),
+        )
+        # Text read from stdin can't be sent again by a rerun.
+        next_step = (
+            None
+            if kwargs.get("text") == "-"
+            else _next_step([prog, *_argv(), "--out-file", out_file])
+        )
+        hint = (
+            msg.A_SPEAK_NO_OUTPUT.format(out_file=out_file)
+            if next_step is not None
+            else msg.A_SPEAK_NO_OUTPUT_NULL.format(out_file=out_file)
+        )
+        return _coded(
+            msg.E_SPEAK_NO_OUTPUT.format(prog=prog),
+            code=msg.CODE_INVALID_ARGUMENT,
+            hint_human=msg.H_SPEAK_NO_OUTPUT,
+            hint_agent=hint,
+            next_step=next_step,
+        )
 
     def _o_format_next_step(
         self, prog: str, value: str, kwargs: dict[str, Any]
@@ -1126,8 +1170,11 @@ class SpeakCommand(BaseCommand):
         if list_voices:
             return self._list_voices(client)
 
-        # Resolve text input: arg > --file > stdin
-        if not text and file_path:
+        # Resolve text input: arg > --file > stdin. "-" reads stdin in every
+        # mode (and is the only way to under a hard agent signal).
+        if text == "-":
+            text = sys.stdin.read().strip()
+        elif not text and file_path:
             path = Path(file_path)
             if not path.exists():
                 return _fail(f"File not found: {file_path}")
