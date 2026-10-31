@@ -1,0 +1,83 @@
+{
+  "_doc": [
+    "Benchmark gates. Each gate names a results row for a subject and a published target (T1-T27); target_text quotes the target.",
+    "Sizes in KB are 1024 bytes; MCP sizes are the raw tools/list response bytes.",
+    "A gate is active when its 'since' version is at or below the version under test; inactive gates are still measured and reported as 'pending'.",
+    "kind 'timing' gates are report-only until 'blocking' is set to true, per row, after the A/A rule clears (see regression.aa).",
+    "Every other kind (deterministic, size, count, resource) blocks as soon as it is active.",
+    "Subjects other than 'dg' (dg-native, dg-npm, dg@<os>) name channels that do not exist yet; their rows report n/a until the harness can build them."
+  ],
+  "subject": "dg",
+  "planned_subjects": ["dg-native", "dg-npm", "dg@macos", "dg@windows"],
+  "regression": {
+    "rule": "fail when median(head - base) over paired rounds > max(pct% of base median, mad_k * MAD(head - base), floor_ms), after one automatic re-run",
+    "pct": 10,
+    "mad_k": 3,
+    "rows": {
+      "version_warm": {"floor_ms": 2, "blocking": false},
+      "help_warm": {"floor_ms": 2, "blocking": false},
+      "subhelp_warm": {"floor_ms": 2, "blocking": false},
+      "mcp_init": {"floor_ms": 2, "blocking": false}
+    },
+    "native_floor_ms": 0.25,
+    "aa": {"runs_required": 30, "max_red": 1, "injected_case_ms": 50}
+  },
+  "imports": {
+    "first_party_prefixes": ["deepctl"],
+    "allowlist": {
+      "paths": ["version", "mcp"],
+      "first_party": ["deepctl", "deepctl.main", "deepctl.mcp", "deepctl.mcp._fast"],
+      "stdlib_exclude": ["asyncio", "ssl", "socket", "concurrent", "threading", "http", "urllib", "email", "logging"],
+      "dotted_exclude": ["importlib.metadata"],
+      "extra": ["__main__", "_distutils_hack", "_virtualenv", "sitecustomize", "usercustomize"]
+    },
+    "forbidden": {
+      "version": ["deepgram", "httpx", "keyring", "pydantic", "rich.traceback", "asyncio"],
+      "help": ["deepgram", "httpx", "keyring", "pydantic", "rich.traceback", "asyncio"],
+      "subhelp": ["deepgram", "httpx", "keyring", "rich.traceback", "asyncio", "ssl"]
+    }
+  },
+  "gates": [
+    {"id": "T1.python", "target": "T1", "subject": "dg", "row": "version_warm", "op": "<=", "value": 30, "unit": "ms", "kind": "timing", "since": "0.5.0", "vs": "all", "target_text": "Python path ≤ 30 ms"},
+    {"id": "T1.native", "target": "T1", "subject": "dg-native", "row": "version_warm", "op": "<=", "value": 1.5, "unit": "ms", "kind": "timing", "since": "0.5.1", "vs": "all", "target_text": "Native ≤ 1.5 ms"},
+    {"id": "T2.python", "target": "T2", "subject": "dg", "row": "help_warm", "op": "<=", "value": 60, "unit": "ms", "kind": "timing", "since": "0.5.0", "vs": "all", "target_text": "Python path (≤ 60 ms)"},
+    {"id": "T2.native", "target": "T2", "subject": "dg-native", "row": "help_warm", "op": "<=", "value": 1.5, "unit": "ms", "kind": "timing", "since": "0.5.1", "vs": "all", "target_text": "Native ≤ 1.5 ms"},
+    {"id": "T3", "target": "T3", "subject": "dg", "row": "subhelp_warm", "op": "<=", "value": 95, "unit": "ms", "kind": "timing", "since": "0.5.0", "vs": "all", "peer_row": "help_warm", "target_text": "≤ 95 ms"},
+    {"id": "T4.version", "target": "T4", "subject": "dg", "row": "egress_version", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "0 `connect()` calls"},
+    {"id": "T4.help", "target": "T4", "subject": "dg", "row": "egress_help", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "0 `connect()` calls"},
+    {"id": "T4.subhelp", "target": "T4", "subject": "dg", "row": "egress_subhelp", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "0 `connect()` calls"},
+    {"id": "T4.mcp", "target": "T4", "subject": "dg", "row": "egress_mcp", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "0 `connect()` calls"},
+    {"id": "T4.backstop", "target": "T4", "subject": "dg", "row": "egress_version_delta_ms", "op": "<=", "value": 25, "unit": "ms", "kind": "timing", "since": "0.5.0", "limit_field": "limit", "target_text": "timing backstop ≤ +25 ms"},
+    {"id": "T5", "target": "T5", "subject": "dg", "row": "help_cold", "op": "<=", "value": 150, "unit": "ms", "kind": "timing", "since": "0.5.0", "vs": "voice", "target_text": "≤ 150 ms"},
+    {"id": "T6.0.5", "target": "T6", "subject": "dg", "row": "install_mb", "op": "<=", "value": 95, "unit": "MB", "kind": "size", "since": "0.5.0", "vs": "voice", "target_text": "≤ 95 MB at 0.5.0"},
+    {"id": "T6.1.0", "target": "T6", "subject": "dg", "row": "install_mb", "op": "<=", "value": 75, "unit": "MB", "kind": "size", "since": "1.0.0", "vs": "voice", "target_text": "≤ 75 MB at 1.0"},
+    {"id": "T7", "target": "T7", "subject": "dg-native", "row": "download_mb", "op": "<=", "value": 30, "unit": "MB", "kind": "size", "since": "1.0.0", "target_text": "≤ 30 MB"},
+    {"id": "T7.checkpoint", "target": "T7", "subject": "dg-native", "row": "download_mb", "op": "<=", "value": 45, "unit": "MB", "kind": "size", "since": "0.5.1", "target_text": "checkpoint ≤ 45 MB"},
+    {"id": "T8.pypi", "target": "T8", "subject": "dg", "row": "mcp_init", "op": "<=", "value": 20, "unit": "ms", "kind": "timing", "since": "0.5.0", "vs": "mcp", "target_text": "Linux PyPI/native/GHCR ≤ 20 ms"},
+    {"id": "T8.npm", "target": "T8", "subject": "dg-npm", "row": "mcp_init", "op": "<=", "value": 40, "unit": "ms", "kind": "timing", "since": "1.0.0", "target_text": "npm ≤ 40 ms"},
+    {"id": "T8.macos", "target": "T8", "subject": "dg@macos", "row": "mcp_init_ratio_vs_flyctl", "op": "<=", "value": 0.9, "unit": "ratio", "kind": "timing", "since": "0.6.0", "target_text": "≤ 0.9 × fly's on the same runner"},
+    {"id": "T8.windows", "target": "T8", "subject": "dg@windows", "row": "mcp_init_ratio_vs_flyctl", "op": "<=", "value": 0.9, "unit": "ratio", "kind": "timing", "since": "0.6.0", "target_text": "≤ 0.9 × fly's on the same runner"},
+    {"id": "T9.default", "target": "T9", "subject": "dg", "row": "mcp_tools", "op": "==", "value": 10, "unit": "count", "kind": "count", "since": "0.6.0", "vs": "voice_mcp", "target_text": "Default 10"},
+    {"id": "T9.read", "target": "T9", "subject": "dg", "row": "mcp_read_tools", "op": "==", "value": 23, "unit": "count", "kind": "count", "since": "0.6.0", "vs": "voice_mcp", "target_text": "`read` toolset 23"},
+    {"id": "T10.annotations", "target": "T10", "subject": "dg", "row": "mcp_annotations_pct", "op": "==", "value": 100, "unit": "%", "kind": "deterministic", "since": "0.6.0", "target_text": "100% / 100%"},
+    {"id": "T10.outputSchema", "target": "T10", "subject": "dg", "row": "mcp_output_schema_pct", "op": "==", "value": 100, "unit": "%", "kind": "deterministic", "since": "0.6.0", "target_text": "100% / 100%"},
+    {"id": "T11.total", "target": "T11", "subject": "dg", "row": "mcp_list_kb", "op": "<=", "value": 12, "unit": "KB", "kind": "size", "since": "0.6.0", "vs": "voice_mcp", "target_text": "Default set ≤ 12 KB total and ≤ 1.2 KB/tool"},
+    {"id": "T11.per_tool", "target": "T11", "subject": "dg", "row": "mcp_kb_per_tool", "op": "<=", "value": 1.2, "unit": "KB", "kind": "size", "since": "0.6.0", "vs": "voice_mcp", "target_text": "Default set ≤ 12 KB total and ≤ 1.2 KB/tool"},
+    {"id": "T12", "target": "T12", "subject": "dg", "row": "mcp_offline_clean", "op": "==", "value": true, "unit": "bool", "kind": "deterministic", "since": "0.5.0", "target_text": "0 junk bytes"},
+    {"id": "T20", "target": "T20", "subject": "dg", "row": "rss_prerecorded_500mb", "op": "<=", "value": 60, "unit": "MB", "kind": "resource", "since": "0.5.0", "target_text": "≤ 60 MB flat"},
+    {"id": "T21.0.5", "target": "T21", "subject": "dg", "row": "json_50k_words", "op": "<=", "value": 1000, "unit": "ms", "kind": "timing", "since": "0.5.0", "target_text": "≤ 1.0 s at 0.5.0"},
+    {"id": "T21.rebaselined", "target": "T21", "subject": "dg", "row": "json_50k_words", "op": "<=", "value": 500, "unit": "ms", "kind": "timing", "since": "0.5.1", "target_text": "≤ 0.5 s"},
+    {"id": "T26", "target": "T26", "subject": "dg-npm", "row": "version_warm", "op": "<=", "value": 25, "unit": "ms", "kind": "timing", "since": "1.0.0", "target_text": "≤ 25 ms"},
+    {"id": "T27.cold", "target": "T27", "subject": "dg", "row": "mcp_call_cold", "op": "<=", "value": 400, "unit": "ms", "kind": "timing", "since": "0.6.0", "target_text": "≤ 400 ms"},
+    {"id": "T27.warm", "target": "T27", "subject": "dg", "row": "mcp_call_warm", "op": "<=", "value": 50, "unit": "ms", "kind": "timing", "since": "0.6.0", "target_text": "≤ 50 ms warm"},
+    {"id": "D.norecompile.version", "target": "deterministic", "subject": "dg", "row": "norecompile_version", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.4.0", "target_text": "no-recompile check"},
+    {"id": "D.norecompile.help", "target": "deterministic", "subject": "dg", "row": "norecompile_help", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.4.0", "target_text": "no-recompile check"},
+    {"id": "D.norecompile.mcp", "target": "deterministic", "subject": "dg", "row": "norecompile_mcp", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "no-recompile check"},
+    {"id": "D.allowlist.version", "target": "deterministic", "subject": "dg", "row": "imports_version_allowlist", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "the import allowlist"},
+    {"id": "D.allowlist.mcp", "target": "deterministic", "subject": "dg", "row": "imports_mcp_allowlist", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "the import allowlist"},
+    {"id": "D.forbidden.version", "target": "deterministic", "subject": "dg", "row": "imports_version", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "the forbidden-module lists"},
+    {"id": "D.forbidden.help", "target": "deterministic", "subject": "dg", "row": "imports_help", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "the forbidden-module lists"},
+    {"id": "D.forbidden.subhelp", "target": "deterministic", "subject": "dg", "row": "imports_subhelp", "op": "==", "value": 0, "unit": "count", "kind": "deterministic", "since": "0.5.0", "target_text": "the forbidden-module lists"},
+    {"id": "B.core_import", "target": "import-budget", "subject": "dg", "row": "floor_import_deepctl_core", "op": "<=", "value": 70, "unit": "ms", "kind": "timing", "since": "0.5.0", "target_text": "median ≤ **70 ms**"}
+  ]
+}
