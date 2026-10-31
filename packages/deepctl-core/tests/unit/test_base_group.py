@@ -240,6 +240,23 @@ class TestBaseGroupCommand:
         assert click_group.params[0].name == "verbose"
 
     @pytest.mark.unit
+    def test_group_option_metavar_is_passed_through(self):
+        class GroupWithFile(BaseGroupCommand):
+            name = "testgroup"
+            help = "Test group"
+
+            def get_arguments(self) -> list[dict[str, Any]]:
+                return [
+                    {"names": ["--out-file"], "is_option": True, "metavar": "FILE"}
+                ]
+
+            def handle_group(self, *args: Any, **kwargs: Any) -> Any:
+                return None
+
+        click_group = GroupWithFile().get_click_group()
+        assert "--out-file FILE" in click_group.get_help(click.Context(click_group))
+
+    @pytest.mark.unit
     def test_group_callback_execution(self, mock_group_command_class):
         """Test that the group callback properly executes."""
         group = mock_group_command_class()

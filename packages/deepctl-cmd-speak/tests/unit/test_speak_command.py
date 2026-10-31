@@ -588,7 +588,7 @@ class TestSpeakCommand:
         mock_sys.stdin.isatty.return_value = True
         mock_sys.stdout.isatty.return_value = True
 
-        with pytest.raises(click.ClickException, match="not supported for Flux"):
+        with pytest.raises(click.ClickException, match="Flux voices stream raw audio"):
             command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -1734,7 +1734,8 @@ class TestSpeakCommand:
 
         assert result is not None
         assert result.status == "error"
-        assert "cannot decode mp3" in result.message
+        assert "can't decode mp3" in result.message
+        assert "--out-file FILE" in result.message
         mock_client.speak_text.assert_not_called()
 
 
@@ -1819,7 +1820,8 @@ class TestAudioPlayerHelpers:
             "ffplay", is_flux=False, encoding="linear16", container="none"
         )
         assert aura_raw is not None
-        assert "no container" in aura_raw
+        assert "can't tell its format" in aura_raw
+        assert "--out-file FILE" in aura_raw
 
     def test_check_playable_aplay_rejects_every_compressed_encoding(self):
         for encoding in ("mp3", "aac", "opus", "flac"):
@@ -1827,7 +1829,7 @@ class TestAudioPlayerHelpers:
                 "aplay", is_flux=False, encoding=encoding, container=None
             )
             assert problem is not None
-            assert f"cannot decode {encoding}" in problem
+            assert f"can't decode {encoding}" in problem
             assert "linear16 (WAV)" in problem
 
     def test_check_playable_paplay_decodes_flac_and_ogg_but_not_mp3_or_aac(self):
@@ -1848,7 +1850,7 @@ class TestAudioPlayerHelpers:
                 "paplay", is_flux=False, encoding=encoding, container=None
             )
             assert problem is not None
-            assert f"'paplay' cannot decode {encoding}" in problem
+            assert f"'paplay' can't decode {encoding}" in problem
             assert "flac" in problem and "opus" in problem
 
     def test_check_playable_ffplay_and_afplay_accept_every_compressed_encoding(self):
@@ -1936,3 +1938,15 @@ class TestSpeakResult:
         assert result.output_path == ""
         assert result.model == ""
         assert result.bytes_written == 0
+
+
+def test_help_names_the_file_options_value_file():
+    """--out-file and -o/--output take a FILE, and --help says so."""
+    from deepctl_cmd_speak.command import SpeakCommand
+    from deepctl_core import PluginManager
+
+    cmd = PluginManager()._create_click_command(SpeakCommand())
+    help_text = " ".join(cmd.get_help(click.Context(cmd)).split())
+    assert "--out-file FILE Save the audio to FILE." in help_text
+    assert "-o, --output FILE Deprecated: use --out-file." in help_text
+    assert "--out-file TEXT" not in help_text

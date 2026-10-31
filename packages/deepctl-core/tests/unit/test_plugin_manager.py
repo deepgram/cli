@@ -155,6 +155,28 @@ class TestPluginManager:
         assert click_command.callback.__name__ == "test_hyphenated_command"
 
     @pytest.mark.unit
+    def test_option_metavar_is_passed_through(self, plugin_manager):
+        """An argument dict's "metavar" names the value in --help."""
+
+        class Saves(BaseCommand):
+            name = "saves"
+            help = "Saves"
+
+            def get_arguments(self) -> List[Dict[str, Any]]:
+                return [
+                    {"names": ["--out-file"], "is_option": True, "metavar": "FILE"},
+                    {"names": ["--note"], "is_option": True},
+                ]
+
+            def handle(self, *args: Any, **kwargs: Any) -> Any:
+                return None
+
+        cmd = plugin_manager._create_click_command(Saves())
+        help_text = cmd.get_help(click.Context(cmd))
+        assert "--out-file FILE" in help_text
+        assert "--note TEXT" in help_text
+
+    @pytest.mark.unit
     def test_group_function_name_conversion_for_hyphens(
         self, plugin_manager, mock_group_command_class
     ):

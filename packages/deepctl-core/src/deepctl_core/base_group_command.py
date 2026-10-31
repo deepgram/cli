@@ -166,6 +166,7 @@ class BaseGroupCommand(BaseCommand):
                         required=arg.get("required", False),
                         is_flag=arg.get("is_flag", False),
                         multiple=arg.get("multiple", False),
+                        **({"metavar": arg["metavar"]} if "metavar" in arg else {}),
                     )(group)
                 else:
                     group = click.argument(
