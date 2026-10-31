@@ -227,12 +227,14 @@ class TestUnreadableHome:
 
 class TestHttpxCliGuard:
     def test_import_httpx_skips_its_cli(self, tmp_path: Path) -> None:
-        """After main(), httpx has its stub CLI, not the click one."""
+        """After main(), httpx has its stub CLI and pygments never loaded."""
         code = textwrap.dedent(
             """
+            import importlib.util
             import inspect
             import sys
 
+            assert importlib.util.find_spec("pygments") is not None
             sys.argv = ["dg", "--help"]
             from deepctl.main import main
             try:
@@ -241,6 +243,7 @@ class TestHttpxCliGuard:
                 pass
             import httpx
             print(
+                "pygments" in sys.modules,
                 sys.modules["httpx._main"] is None,
                 inspect.isfunction(httpx.main),
                 file=sys.stderr,
@@ -249,4 +252,4 @@ class TestHttpxCliGuard:
         )
         proc = _run([sys.executable, "-c", code], tmp_path)
         assert proc.returncode == 0, proc.stderr
-        assert proc.stderr.split()[-2:] == ["True", "True"], proc.stderr
+        assert proc.stderr.split()[-3:] == ["False", "True", "True"], proc.stderr
