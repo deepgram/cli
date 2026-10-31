@@ -272,7 +272,7 @@ def get_strategy(
     if method in (InstallMethod.UVX, InstallMethod.PIPX_RUN):
         return EphemeralStrategy(method)
 
-    # HOMEBREW, SYSTEM, UNKNOWN → isolated venv
+    # HOMEBREW, SYSTEM, UNKNOWN, NPM → isolated venv
     if venv_python is None:
         raise ValueError(
             f"venv_python is required for IsolatedVenvStrategy (method={method.value})"

@@ -768,6 +768,7 @@ class TestPluginCommand:
         assert self.command._needs_isolated_venv(InstallMethod.HOMEBREW) is True
         assert self.command._needs_isolated_venv(InstallMethod.SYSTEM) is True
         assert self.command._needs_isolated_venv(InstallMethod.UNKNOWN) is True
+        assert self.command._needs_isolated_venv(InstallMethod.NPM) is True
         assert self.command._needs_isolated_venv(InstallMethod.PIP) is False
         assert self.command._needs_isolated_venv(InstallMethod.PIPX) is False
         assert self.command._needs_isolated_venv(InstallMethod.UV) is False

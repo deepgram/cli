@@ -15,6 +15,10 @@ downloads/
 eggs/
 .eggs/
 lib/
+# The npm launcher's sources, not a build output.
+!/npm/lib/
+# Written by the release (npm/scripts/write_requirements.py).
+/npm/requirements-*.txt
 lib64/
 parts/
 sdist/

@@ -40,10 +40,17 @@ jobs:
     concurrency:
       group: sync-release-pr
       cancel-in-progress: false
+    # contents: push the sync commit. statuses: report release-bump-gate on
+    # the release PR's head (see the last step).
+    permissions:
+      contents: write
+      statuses: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
         with:
           ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          # Every release tag, for the bump check below.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -65,7 +72,7 @@ jobs:
       # them; for an untouched release PR, re-run checks from the UI. If
       # releases ever need to go out unattended, switch this push to a
       # dedicated PAT or GitHub App token.
-      - name: Regenerate uv.lock and pin root floors
+      - name: Regenerate uv.lock and pin root and sibling floors
         run: |
           set -euo pipefail
           uv run python scripts/check_dependency_floors.py --fix
@@ -81,9 +88,39 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uv.lock pyproject.toml
-          git commit -m "chore: sync uv.lock and root dependency floors with release-please bumps"
+          git add uv.lock pyproject.toml packages/*/pyproject.toml
+          git commit -m "chore: sync uv.lock and dependency floors with release-please bumps"
           git push
+
+      # Is every package whose code or dependencies changed being bumped?
+      # This job runs on push to main, so failing it only reddens main; what
+      # can block the merge is a status on the release PR's own head commit.
+      # release-please and the push above both use GITHUB_TOKEN, whose
+      # commits trigger no pull_request workflows, so post that status here,
+      # on whatever HEAD this job left the branch at. Human pushes to the
+      # release PR do trigger workflows, and test.yml's release-bump-gate job
+      # reports the same context name for those commits. It only blocks the
+      # merge once `release-bump-gate` is a required check on main.
+      # Runs after the push so the lockfile sync above lands either way.
+      - name: Check every changed package is being released
+        run: |
+          set -uo pipefail
+          if uv run python scripts/check_release_bumps.py; then
+            STATE=success
+            DESCRIPTION="Every changed package is being released"
+          else
+            STATE=failure
+            DESCRIPTION="A package changed without a version bump; see the run log"
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/$(git rev-parse HEAD)" \
+            -f state="${STATE}" \
+            -f context=release-bump-gate \
+            -f description="${DESCRIPTION}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            || { echo "::error::Could not post the release-bump-gate status"; exit 1; }
+          [ "${STATE}" = success ]
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   build:
     name: Build packages
@@ -92,6 +129,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          # Every release tag, for the bump check below.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -99,7 +139,27 @@ jobs:
           python-version: "3.11"
 
       - name: Install build dependencies
-        run: pip install build twine
+        run: pip install build twine packaging
+
+      # The sync job above pins root and sibling floors on the release PR,
+      # but its push uses GITHUB_TOKEN and does not retrigger the PR's
+      # checks, so nothing proves the merged tree still satisfies them.
+      # Check again here: a stale floor would let pip pair a new package
+      # with an older published sibling that lacks the API it imports.
+      - name: Check dependency floors before publishing
+        run: python scripts/check_dependency_floors.py
+
+      # Same check as the release PR's release-bump-gate status, again here
+      # as a last line of defence: that status only blocks the merge if it
+      # is a required check, and this run stops the PyPI upload regardless.
+      # Floors are compared with workspace versions, so they only hold if
+      # every package whose code changed is actually being released. A
+      # `chore:` commit under a package moves its code without a bump, and
+      # PyPI keeps serving the old code under the same version: a clean
+      # install then pairs new siblings with an old deepctl-core that has no
+      # deepctl_core._launcher. Refuse to publish in that state.
+      - name: Check every changed package is being released
+        run: python scripts/check_release_bumps.py
 
       - name: Build all packages
         run: make build
@@ -204,12 +264,31 @@ jobs:
       # build job smoke-tests `deepctl --version`, but against the local
       # dist/ artifacts -- this is the only check against what PyPI serves,
       # and it is the last gate before three jobs advertise the release.
-      - name: Install for real and run the CLI
+      #
+      # A fresh venv with nothing but PyPI (no --find-links, no cache), so
+      # the sub-packages are the ones PyPI serves, not the ones just built.
+      # A retry covers a wheel the CDN has not finished propagating.
+      - name: Install for real from PyPI and run the CLI
         run: |
           set -euo pipefail
           VERSION="${TAG_NAME#v}"
-          /tmp/verify/bin/pip install --quiet --no-cache-dir "deepctl==${VERSION}"
-          /tmp/verify/bin/deepctl --version
+          for i in $(seq 1 5); do
+            rm -rf /tmp/real
+            python -m venv /tmp/real
+            if /tmp/real/bin/pip install --quiet --no-cache-dir "deepctl==${VERSION}"; then
+              break
+            fi
+            if [ "${i}" = 5 ]; then
+              echo "::error::pip install deepctl==${VERSION} from PyPI failed 5 times"
+              exit 1
+            fi
+            echo "Install attempt ${i}/5 failed; retrying in 30s..."
+            sleep 30
+          done
+          /tmp/real/bin/deepctl --version
+          # What the npm launcher and `dg update` rely on: a sibling released
+          # with stale code fails here with ModuleNotFoundError.
+          /tmp/real/bin/python -c "import deepctl_core._launcher, deepctl_cmd_update.installation"
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
@@ -345,3 +424,200 @@ jobs:
             --head "${BRANCH}" \
             --title "Bump deepctl to ${VERSION}" \
             --body-file "${BODY_FILE}"
+
+  publish-npm:
+    name: Publish @deepgram/cli to npm
+    needs: [release-please, verify-published]
+    # The npm package is a launcher that runs `deepctl==<its own version>`
+    # from PyPI, so it must never go out before that exact version installs.
+    # verify-published is that gate. Root tags only, same as mark-latest.
+    #
+    # Recovery: if this job fails (npm outage, trusted publisher not set up
+    # yet), fix the cause and use "Re-run failed jobs" on this workflow run.
+    # Job outputs from release-please are preserved across re-runs, and every
+    # step here is safe to repeat: an already-published version is skipped.
+    if: |
+      needs.release-please.outputs.release_created == 'true' &&
+      startsWith(needs.release-please.outputs.tag_name, 'v')
+    runs-on: ubuntu-latest
+    # Trusted publishing: npm exchanges this job's OIDC token for a one-time
+    # publish credential, so no long-lived npm token exists to leak. The
+    # trusted publisher on npmjs.com is bound to this workflow file and this
+    # environment; renaming either breaks publishing until it is updated.
+    environment: npm-publish
+    # actions: read only to look up when this run attempt started (below).
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    timeout-minutes: 30
+    env:
+      TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # No registry-url: it writes an .npmrc expecting NODE_AUTH_TOKEN, and an
+      # empty token there makes npm skip the OIDC exchange.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "22"
+
+      # Trusted publishing needs npm 11.5.1+; Node 22 bundles npm 10. Pinned
+      # exactly so a new npm release cannot change how a release publishes.
+      - name: Install an npm that supports trusted publishing
+        run: npm install -g npm@11.21.0
+
+      # release-please bumps npm/package.json through extra-files. If that
+      # ever drifts, publishing would ship a launcher pinned to a deepctl
+      # version that verify-published never checked.
+      - name: Check the package version matches the tag
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          PKG_VERSION="$(node -p 'require("./npm/package.json").version')"
+          if [ "${PKG_VERSION}" != "${VERSION}" ]; then
+            echo "::error::npm/package.json is ${PKG_VERSION} but the tag is ${TAG_NAME}"
+            exit 1
+          fi
+          if ! printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::${VERSION} is not a plain X.Y.Z version"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # This attempt's build, used only to cross-check what PyPI serves.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          version: "0.13.6"
+
+      # The launcher installs only what this file lists, checked against its
+      # hashes: deepctl's own packages with the hashes of the files PyPI
+      # serves (its JSON API), everything else from uv.lock. Not hashes of
+      # dist/: wheels aren't byte-reproducible, and a version PyPI already
+      # had (skip-existing, or an earlier attempt of this run) keeps its
+      # first files. Files PyPI received during this attempt must match
+      # dist/ exactly. Without the file in the tarball, the launcher
+      # refuses to install anything.
+      - name: Write the hash-locked requirements file
+        run: |
+          set -euo pipefail
+          STARTED="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}" --jq .run_started_at)"
+          python3 npm/scripts/write_requirements.py --dist dist/ --uploaded-since "${STARTED}"
+          (cd npm && npm pack --dry-run --json) > pack.json
+          # shellcheck disable=SC2016  # ${...} below is a JavaScript template
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync("pack.json", "utf8"))[0].files.map((f) => f.path);
+            const want = `requirements-${process.env.VERSION}.txt`;
+            if (!files.includes(want)) { console.error(`::error::${want} is not in the npm tarball`); process.exit(1); }
+          '
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+
+      # npm refuses to republish a version, so a re-run after a later step
+      # failed would otherwise fail here forever.
+      - name: Check whether this version is already on npm
+        id: existing
+        run: |
+          set -euo pipefail
+          if [ "$(npm view "@deepgram/cli@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; then
+            echo "@deepgram/cli@${VERSION} is already published; skipping publish"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      # `npm publish` moves `latest` by default. A patch for an older line
+      # (0.4.x after 0.5.0 shipped) must not drag every new install back, so
+      # it goes out under a maintenance tag instead. Fail closed: only "the
+      # package has no latest yet" (E404) may fall through to latest.
+      - name: Choose the dist-tag
+        id: tag
+        run: |
+          set -euo pipefail
+          ERR="$(mktemp)"
+          if LATEST="$(npm view @deepgram/cli dist-tags.latest 2>"${ERR}")"; then
+            :
+          elif grep -q E404 "${ERR}"; then
+            LATEST=""
+          else
+            cat "${ERR}"
+            echo "::error::could not read the current latest dist-tag; refusing to guess"
+            exit 1
+          fi
+          TAG=latest
+          if [ -n "${LATEST}" ]; then
+            ORDER="$(node -e '
+              const parse = (v) => {
+                const [core, pre] = v.split("+")[0].split("-");
+                return { n: core.split(".").map(Number), pre: pre !== undefined };
+              };
+              const a = parse(process.argv[1]);
+              const b = parse(process.argv[2]);
+              let c = 0;
+              for (let i = 0; i < 3 && c === 0; i++) c = Math.sign(a.n[i] - b.n[i]);
+              if (c === 0 && a.pre !== b.pre) c = a.pre ? -1 : 1;
+              console.log(c < 0 ? "lower" : "not-lower");
+            ' "${VERSION}" "${LATEST}")"
+            if [ "${ORDER}" = "lower" ]; then
+              TAG="v$(printf '%s' "${VERSION}" | cut -d. -f1-2)-maint"
+            fi
+          fi
+          echo "latest is ${LATEST:-unset}; publishing ${VERSION} with dist-tag ${TAG}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Publish
+        if: steps.existing.outputs.published != 'true'
+        working-directory: npm
+        run: npm publish --access public --provenance --tag "${DIST_TAG}"
+        env:
+          DIST_TAG: ${{ steps.tag.outputs.tag }}
+
+      - name: Wait until the registry serves the version
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            if [ "$(npm view "@deepgram/cli@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; then
+              echo "@deepgram/cli@${VERSION} is visible"
+              exit 0
+            fi
+            echo "Waiting for @deepgram/cli@${VERSION} (${i}/40)..."
+            sleep 15
+          done
+          echo "::error::@deepgram/cli@${VERSION} was not visible on the registry after 10 minutes"
+          exit 1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      # The end-to-end check a user would do: npx resolves the published
+      # tarball, and the launcher has uv install deepctl from PyPI, checked
+      # against the tarball's requirements file.
+      - name: Run the published package
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            if OUT="$(npx -y "@deepgram/cli@${VERSION}" --version 2>/dev/null)" && printf '%s' "${OUT}" | grep -qF "${VERSION}"; then
+              echo "${OUT}"
+              exit 0
+            fi
+            echo "npx @deepgram/cli@${VERSION} not runnable yet (${i}/10)..."
+            sleep 30
+          done
+          echo "Final attempt, with output:"
+          npx -y "@deepgram/cli@${VERSION}" --version || true
+          echo "::error::npx @deepgram/cli@${VERSION} --version did not report ${VERSION}"
+          exit 1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}

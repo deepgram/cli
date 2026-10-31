@@ -19,8 +19,13 @@ from deepctl_core import (
     print_timing_summary,
     setup_output,
 )
+from deepctl_core._launcher import capture_launcher
 from deepctl_core.output import stderr_console
 from rich.traceback import install
+
+# Read DEEPCTL_LAUNCHER (set by the @deepgram/cli npm package) once and drop it
+# from the environment, so processes deepctl starts do not inherit it.
+LAUNCHER = capture_launcher()
 
 # Install rich traceback for better error messages
 install(show_locals=True)
