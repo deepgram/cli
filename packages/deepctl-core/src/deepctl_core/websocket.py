@@ -83,40 +83,61 @@ def _as_refusal(
     return exc
 
 
+async def open_async(
+    url: str,
+    headers: dict[str, str],
+    *,
+    command: str,
+    payload: str,
+    **options: Any,
+) -> Any:
+    """Open ``url`` and return the connection, refusing any redirect.
+
+    Needs websockets 13.0 or later (its asyncio client); the sync variant
+    works with anything the Deepgram SDK accepts. ``options`` go to
+    websockets' ``connect`` (``close_timeout``, ``compression`` and so on).
+
+    ``command`` and ``payload`` name the command and what it would have
+    sent, for the error: "dg listen" and "audio", for example.
+    """
+    from websockets.asyncio.client import connect
+
+    def refuse(exc: BaseException) -> BaseException:
+        return _as_refusal(url, exc, command=command, payload=payload)
+
+    class _NoRedirect(connect):
+        # websockets 13.1 and later call this on a failed handshake and
+        # follow whatever URI it returns; 13.0 never follows.
+        def process_redirect(self, exc: Exception) -> Exception | str:
+            result = refuse(exc)
+            return result if isinstance(result, Exception) else exc
+
+    try:
+        return await _NoRedirect(url, additional_headers=headers, **options)
+    except Exception as exc:
+        refused = refuse(exc)
+        if refused is exc:
+            raise
+        raise refused from exc
+
+
 class _AsyncOpen:
-    """``async with`` wrapper around websockets' asyncio ``connect``."""
+    """``async with`` wrapper around :func:`open_async`."""
 
     def __init__(
-        self, url: str, headers: dict[str, str], command: str, payload: str
+        self,
+        url: str,
+        headers: dict[str, str],
+        command: str,
+        payload: str,
+        options: dict[str, Any],
     ) -> None:
-        from websockets.asyncio.client import connect
-
-        self._url = url
-        self._command = command
-        self._payload = payload
-        refuse = self._refuse
-
-        class _NoRedirect(connect):
-            # websockets 13.1 and later call this on a failed handshake and
-            # follow whatever URI it returns; 13.0 never follows.
-            def process_redirect(self, exc: Exception) -> Exception | str:
-                result = refuse(exc)
-                return result if isinstance(result, Exception) else exc
-
-        self._connect = _NoRedirect(url, additional_headers=headers)
+        self._args = (url, headers)
+        self._kwargs = dict(options, command=command, payload=payload)
         self._ws: Any = None
 
-    def _refuse(self, exc: BaseException) -> BaseException:
-        return _as_refusal(self._url, exc, command=self._command, payload=self._payload)
-
     async def __aenter__(self) -> Any:
-        try:
-            self._ws = await self._connect
-        except Exception as exc:
-            refused = self._refuse(exc)
-            if refused is exc:
-                raise
-            raise refused from exc
+        self._ws = await open_async(*self._args, **self._kwargs)
         return self._ws
 
     async def __aexit__(self, *exc_info: Any) -> None:
@@ -124,17 +145,15 @@ class _AsyncOpen:
 
 
 def connect_async(
-    url: str, headers: dict[str, str], *, command: str, payload: str
+    url: str,
+    headers: dict[str, str],
+    *,
+    command: str,
+    payload: str,
+    **options: Any,
 ) -> _AsyncOpen:
-    """Open ``url`` for ``async with``, refusing any redirect.
-
-    Needs websockets 13.0 or later (its asyncio client); the sync variant
-    works with anything the Deepgram SDK accepts.
-
-    ``command`` and ``payload`` name the command and what it would have
-    sent, for the error: "dg listen" and "audio", for example.
-    """
-    return _AsyncOpen(url, headers, command, payload)
+    """Open ``url`` for ``async with``, refusing any redirect (see open_async)."""
+    return _AsyncOpen(url, headers, command, payload, options)
 
 
 class _SyncOpen:

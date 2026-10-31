@@ -14,11 +14,13 @@ Handles all Deepgram STT modes from a single entry point:
 from __future__ import annotations
 
 import json
+import os
+import signal
 import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import click
 from deepctl_core import (
@@ -28,13 +30,20 @@ from deepctl_core import (
     Config,
     DeepgramClient,
 )
-from deepctl_core.output import _agentic, print_warning
-from deepctl_core.websocket import connect_async
+from deepctl_core.hosts import CredentialHostError
+from deepctl_core.output import (
+    _agentic,
+    is_ai_agent,
+    print_error,
+    print_hint,
+    print_warning,
+)
 from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from . import messages as msg
 from .captions import (
     StreamingCaptionWriter,
     captions_from_prerecorded,
@@ -48,10 +57,12 @@ from .formatters import (
     format_diarized_transcript,
     format_diarized_words,
 )
-from .models import ListenResult
+from .models import ListenCodedError, ListenResult
 
 if TYPE_CHECKING:
     import asyncio
+
+    from . import live
 
 # Status messages → stderr so stdout stays clean for transcript piping
 status = Console(stderr=True)
@@ -80,41 +91,62 @@ def _ws_base(client: DeepgramClient) -> str:
     return f"{'ws' if scheme.lower() in ('http', 'ws') else 'wss'}://{rest}"
 
 
-def _live_connect(url: str, api_key: str | None) -> Any:
-    """Open the live WebSocket for ``async with``, without redirects.
-
-    A 3xx on the upgrade, same origin or not, stops the command before a
-    second connection is opened, so the key and the audio go only to the
-    host that passed the host check.
-    """
-    return connect_async(
-        url,
-        {"Authorization": f"Token {api_key}"},
-        command="dg listen",
-        payload="audio",
-    )
-
-
 # asyncio (and with it ssl) loads only when a live stream starts, so
 # `dg listen --help` and the prerecorded path don't import it.
+# The live engine imports asyncio, so it loads lazily too.
 def __getattr__(name: str) -> Any:
     if name == "asyncio":
         import asyncio
 
         return asyncio
+    if name == "live":
+        from . import live
+
+        return live
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-async def _cancel_and_drain(*tasks: asyncio.Task[Any]) -> None:
-    """Cancel tasks and consume their terminal exceptions during teardown."""
-    for task in tasks:
-        if not task.done():
-            task.cancel()
-    for task in tasks:
-        try:
-            await task
-        except BaseException:
-            pass
+_freeze_registered = False
+
+
+def _freeze_at_exit() -> None:
+    """At interpreter exit, move every live object out of the collector's
+    reach. The final collection then takes a few ms instead of about 100,
+    so dg exits right after the server's close (plan T23). Registered with
+    atexit, so a long-lived host that runs the command is unaffected."""
+    global _freeze_registered
+    if _freeze_registered:
+        return
+    _freeze_registered = True
+    import atexit
+    import gc
+
+    atexit.register(gc.freeze)
+
+
+def _stdin_fd() -> int:
+    """The descriptor live stdin streaming reads (a seam for tests)."""
+    return 0
+
+
+def _prog() -> str:
+    """The program name to show in messages and ``next_step``.
+
+    The bare name when it resolves on PATH to the running executable;
+    otherwise ``dg``.
+    """
+    import shutil
+
+    try:
+        argv0 = sys.argv[0]
+        name = os.path.basename(argv0)
+        if name in ("dg", "deepgram", "deepctl"):
+            found = shutil.which(name)
+            if found and os.path.realpath(found) == os.path.realpath(argv0):
+                return name
+    except Exception:
+        pass
+    return "dg"
 
 
 class ListenCommand(BaseCommand):
@@ -132,6 +164,11 @@ class ListenCommand(BaseCommand):
     requires_auth = True
     requires_project = False
     ci_friendly = True
+
+    #: Host of the live socket, for network_unavailable details.
+    _ws_host: str = ""
+    #: Set after a SIGTERM drain; exit_code_for re-raises it.
+    _reraise_signal: int | None = None
 
     examples = [
         "dg listen audio.mp3",
@@ -330,7 +367,7 @@ class ListenCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult:
+    ) -> BaseResult | ListenCodedError:
         source: str | None = kwargs.get("source")
         use_mic: bool = kwargs.get("mic", False)
         guided_flow = False
@@ -747,7 +784,7 @@ class ListenCommand(BaseCommand):
             duration_seconds=duration_seconds,
         )
 
-    # ── Live mic handler ───────────────────────────────────────────────
+    # ── Live streaming (mic and stdin) ─────────────────────────────────
 
     def _stream_mic(
         self,
@@ -766,7 +803,15 @@ class ListenCommand(BaseCommand):
         channels: int,
         save_to: str | None,
         caption_format: str | None,
-    ) -> BaseResult:
+    ) -> BaseResult | ListenCodedError:
+        import asyncio
+
+        from . import live
+
+        # From here on Ctrl-C ends the mic session, even before the
+        # session's own handler is in place (imports, connecting).
+        early = live.EarlyStop()
+        early.install()
         caption_writer: StreamingCaptionWriter | None = None
 
         if caption_format:
@@ -775,9 +820,12 @@ class ListenCommand(BaseCommand):
             if diarize:
                 note += " · Speaker labels enabled"
             note += " · Ctrl+C to stop"
-            caption_writer.print_header(
-                note=note if caption_format == "webvtt" else None
-            )
+            try:
+                caption_writer.print_header(
+                    note=note if caption_format == "webvtt" else None
+                )
+            except BrokenPipeError:
+                live.silence_stdout()
         else:
             status.print(
                 f"[green]✓[/green] Listening on microphone · {model} · Ctrl+C to stop"
@@ -785,10 +833,9 @@ class ListenCommand(BaseCommand):
             if diarize:
                 status.print("[dim]Speaker labels enabled[/dim]")
 
-        import asyncio
-
         try:
-            result = asyncio.run(
+            _freeze_at_exit()
+            return asyncio.run(
                 self._ws_mic(
                     client,
                     model=model,
@@ -803,42 +850,30 @@ class ListenCommand(BaseCommand):
                     sample_rate=sample_rate,
                     channels=channels,
                     caption_writer=caption_writer,
+                    caption_format=caption_format,
+                    save_to=save_to,
+                    early=early,
                 )
             )
-        except KeyboardInterrupt:
-            status.print("\n[yellow]Stopped.[/yellow]")
-            result = ListenResult(status="success", source="mic", mode="live")
         except click.ClickException:
+            raise
+        except CredentialHostError:
             raise
         except Exception as e:
             err = str(e)
-            msg = f"Microphone error: {err}"
+            msg_text = f"Microphone error: {err}"
             if (
                 "Invalid input device" in err
                 or "PortAudio" in err
                 or "No Default Input" in err
             ):
-                msg += (
+                msg_text += (
                     "\n\nOn macOS, make sure your terminal has microphone access:"
                     "\n  System Settings → Privacy & Security → Microphone"
                 )
-            return BaseResult(status="error", message=msg)
-
-        # Save captions or transcript
-        if save_to:
-            if caption_writer and caption_writer.accumulated_words:
-                content = captions_from_words(
-                    caption_writer.accumulated_words, caption_format or "webvtt"
-                )
-            elif result.transcript:
-                content = result.transcript
-            else:
-                content = ""
-            if content:
-                self._save_transcript(content, save_to)
-                status.print(f"[green]✓[/green] Saved to {save_to}")
-
-        return result
+            return BaseResult(status="error", message=msg_text)
+        finally:
+            early.restore()
 
     async def _ws_mic(
         self,
@@ -856,11 +891,16 @@ class ListenCommand(BaseCommand):
         sample_rate: int,
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
-    ) -> ListenResult:
+        caption_format: str | None = None,
+        save_to: str | None = None,
+        early: live.EarlyStop | None = None,
+    ) -> BaseResult | ListenCodedError:
         import asyncio
 
         import numpy as np
         import sounddevice as sd
+
+        from . import live
 
         url = self._ws_url(
             client,
@@ -877,85 +917,85 @@ class ListenCommand(BaseCommand):
             sample_rate=sample_rate,
             channels=channels,
         )
+        self._ws_host = urlsplit(url).hostname or ""
         api_key = client.auth_manager.get_api_key()
         full_transcript: list[str] = []
         v2_state = self._new_v2_state() if api_version >= 2 else None
-        stop_event = threading.Event()
 
-        async with _live_connect(url, api_key) as ws:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        closing = threading.Event()
+        stream: Any = None
 
-            async def send_audio() -> None:
-                loop = asyncio.get_event_loop()
-                q: asyncio.Queue[bytes] = asyncio.Queue()
-
-                def callback(indata: Any, frames: int, t: Any, s: Any) -> None:
-                    if s:
-                        print_warning(
-                            f"Audio warning: {escape(str(s))}",
-                            stderr=True,
-                            ignore_quiet=True,
-                        )
-                    loop.call_soon_threadsafe(q.put_nowait, bytes(indata))
-
-                stream = sd.RawInputStream(
-                    samplerate=sample_rate,
-                    channels=channels,
-                    dtype=np.int16,
-                    callback=callback,
-                    blocksize=int(sample_rate * 0.1),
+        def callback(indata: Any, frames: int, t: Any, s: Any) -> None:
+            if closing.is_set():
+                return
+            if s:
+                print_warning(
+                    f"Audio warning: {escape(str(s))}",
+                    stderr=True,
+                    ignore_quiet=True,
                 )
-                stream.start()
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+            except RuntimeError:
+                pass  # the event loop already closed
+
+        def start_mic() -> None:
+            nonlocal stream
+            stream = sd.RawInputStream(
+                samplerate=sample_rate,
+                channels=channels,
+                dtype=np.int16,
+                callback=callback,
+                blocksize=int(sample_rate * 0.1),
+            )
+            stream.start()
+
+        def on_message(raw: str | bytes) -> None:
+            self._handle_ws_message(
+                raw,
+                full_transcript,
+                diarize=diarize,
+                interim=interim,
+                caption_writer=caption_writer,
+                v2_state=v2_state,
+            )
+
+        try:
+            outcome = await live.run_session(
+                url,
+                {"Authorization": f"Token {api_key}"},
+                on_message=on_message,
+                queue=queue,
+                closing=closing,
+                start_source=start_mic,
+                byte_rate=live.bytes_per_second("linear16", sample_rate, channels),
+                stop=early.bind(loop) if early is not None else None,
+            )
+            if early is not None and outcome.signal is None:
+                outcome.signal = early.signum
+        finally:
+            closing.set()
+            if stream is not None:
                 try:
-                    while not stop_event.is_set():
-                        try:
-                            data = await asyncio.wait_for(q.get(), timeout=0.5)
-                            await ws.send(data)
-                        except asyncio.TimeoutError:
-                            continue
-                finally:
                     stream.stop()
                     stream.close()
-                    await ws.send(json.dumps({"type": "CloseStream"}))
+                except Exception:
+                    pass
 
-            async def recv_transcripts() -> None:
-                async for msg in ws:
-                    self._handle_ws_message(
-                        msg,
-                        full_transcript,
-                        diarize=diarize,
-                        interim=interim,
-                        caption_writer=caption_writer,
-                        v2_state=v2_state,
-                    )
-
-            send_task = asyncio.create_task(send_audio())
-            recv_task = asyncio.create_task(recv_transcripts())
-            try:
-                await asyncio.gather(send_task, recv_task)
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                stop_event.set()
-                await _cancel_and_drain(send_task, recv_task)
-            except BaseException:
-                stop_event.set()
-                await _cancel_and_drain(send_task, recv_task)
-                raise
-
-        # Flux may close mid-turn without an EndOfTurn; emit what we have.
-        if v2_state is not None:
-            self._flush_v2(v2_state, full_transcript, caption_writer=caption_writer)
-
-        return ListenResult(
-            status="success",
+        return self._finish_live(
+            outcome,
             source="mic",
-            mode="live",
             model=model,
             language=language,
-            diarized=diarize,
-            transcript=" ".join(full_transcript),
-            caption_format=caption_writer.fmt if caption_writer else None,
+            diarize=diarize,
+            transcript_acc=full_transcript,
+            caption_writer=caption_writer,
+            caption_format=caption_format,
+            save_to=save_to,
+            v2_state=v2_state,
         )
-
-    # ── Live stdin handler ─────────────────────────────────────────────
 
     def _stream_stdin(
         self,
@@ -975,7 +1015,11 @@ class ListenCommand(BaseCommand):
         channels: int,
         save_to: str | None,
         caption_format: str | None,
-    ) -> BaseResult:
+    ) -> BaseResult | ListenCodedError:
+        import asyncio
+
+        from . import live
+
         resolved_encoding = encoding or "linear16"
         if not encoding:
             print_warning(
@@ -993,53 +1037,38 @@ class ListenCommand(BaseCommand):
             if diarize:
                 note += " · Speaker labels enabled"
             note += " · Ctrl+D to finish"
-            caption_writer.print_header(
-                note=note if caption_format == "webvtt" else None
-            )
+            try:
+                caption_writer.print_header(
+                    note=note if caption_format == "webvtt" else None
+                )
+            except BrokenPipeError:
+                live.silence_stdout()
         else:
             status.print(
                 f"[green]✓[/green] Streaming stdin · {model} · send EOF (Ctrl+D) to finish"
             )
 
-        import asyncio
-
-        try:
-            result = asyncio.run(
-                self._ws_stdin(
-                    client,
-                    model=model,
-                    language=language,
-                    api_version=api_version,
-                    diarize=diarize,
-                    smart_format=smart_format,
-                    punctuate=punctuate,
-                    interim=interim,
-                    redact=redact,
-                    numerals=numerals,
-                    encoding=resolved_encoding,
-                    sample_rate=sample_rate,
-                    channels=channels,
-                    caption_writer=caption_writer,
-                )
+        _freeze_at_exit()
+        return asyncio.run(
+            self._ws_stdin(
+                client,
+                model=model,
+                language=language,
+                api_version=api_version,
+                diarize=diarize,
+                smart_format=smart_format,
+                punctuate=punctuate,
+                interim=interim,
+                redact=redact,
+                numerals=numerals,
+                encoding=resolved_encoding,
+                sample_rate=sample_rate,
+                channels=channels,
+                caption_writer=caption_writer,
+                caption_format=caption_format,
+                save_to=save_to,
             )
-        except KeyboardInterrupt:
-            status.print("\n[yellow]Stopped.[/yellow]")
-            result = ListenResult(status="success", source="stdin", mode="live")
-
-        if save_to:
-            if caption_writer and caption_writer.accumulated_words:
-                content = captions_from_words(
-                    caption_writer.accumulated_words, caption_format or "webvtt"
-                )
-            elif result.transcript:
-                content = result.transcript
-            else:
-                content = ""
-            if content:
-                self._save_transcript(content, save_to)
-                status.print(f"[green]✓[/green] Saved to {save_to}")
-
-        return result
+        )
 
     async def _ws_stdin(
         self,
@@ -1058,8 +1087,12 @@ class ListenCommand(BaseCommand):
         sample_rate: int,
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
-    ) -> ListenResult:
+        caption_format: str | None = None,
+        save_to: str | None = None,
+    ) -> BaseResult | ListenCodedError:
         import asyncio
+
+        from . import live
 
         url = self._ws_url(
             client,
@@ -1076,95 +1109,216 @@ class ListenCommand(BaseCommand):
             sample_rate=sample_rate,
             channels=channels,
         )
+        self._ws_host = urlsplit(url).hostname or ""
         api_key = client.auth_manager.get_api_key()
         full_transcript: list[str] = []
         v2_state = self._new_v2_state() if api_version >= 2 else None
 
-        async with _live_connect(url, api_key) as ws:
-            loop = asyncio.get_running_loop()
-            audio_queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue()
-            stop_reader = threading.Event()
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        closing = threading.Event()
+        reader = live.StdinReader(
+            loop,
+            queue,
+            closing,
+            read_size=live.DEFAULT_READ_BYTES,
+            fd=_stdin_fd(),
+        )
 
-            def post_audio(item: bytes | Exception | None) -> None:
-                if stop_reader.is_set():
-                    return
-                try:
-                    loop.call_soon_threadsafe(audio_queue.put_nowait, item)
-                except RuntimeError:
-                    # The event loop already closed after a stream failure.
-                    pass
-
-            def read_stdin() -> None:
-                try:
-                    while not stop_reader.is_set():
-                        data = sys.stdin.buffer.read(4096)
-                        if stop_reader.is_set():
-                            return
-                        post_audio(data or None)
-                        if not data:
-                            return
-                except Exception as exc:
-                    post_audio(exc)
-
-            reader_thread = threading.Thread(
-                target=read_stdin,
-                name="deepctl-stdin-reader",
-                daemon=True,
+        def on_message(raw: str | bytes) -> None:
+            self._handle_ws_message(
+                raw,
+                full_transcript,
+                diarize=diarize,
+                interim=interim,
+                caption_writer=caption_writer,
+                v2_state=v2_state,
             )
 
-            async def send_audio() -> None:
-                reader_thread.start()
-                try:
-                    while True:
-                        item = await audio_queue.get()
-                        if item is None:
-                            break
-                        if isinstance(item, Exception):
-                            raise item
-                        await ws.send(item)
-                    await ws.send(json.dumps({"type": "CloseStream"}))
-                finally:
-                    stop_reader.set()
+        outcome = await live.run_session(
+            url,
+            {"Authorization": f"Token {api_key}"},
+            on_message=on_message,
+            queue=queue,
+            closing=closing,
+            start_source=reader.start,
+            byte_rate=live.bytes_per_second(encoding, sample_rate, channels),
+        )
+        return self._finish_live(
+            outcome,
+            source="stdin",
+            model=model,
+            language=language,
+            diarize=diarize,
+            transcript_acc=full_transcript,
+            caption_writer=caption_writer,
+            caption_format=caption_format,
+            save_to=save_to,
+            v2_state=v2_state,
+        )
 
-            async def recv_transcripts() -> None:
-                async for msg in ws:
-                    self._handle_ws_message(
-                        msg,
-                        full_transcript,
-                        diarize=diarize,
-                        interim=interim,
-                        caption_writer=caption_writer,
-                        v2_state=v2_state,
-                    )
-
-            send_task = asyncio.create_task(send_audio())
-            recv_task = asyncio.create_task(recv_transcripts())
-            try:
-                await asyncio.gather(send_task, recv_task)
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                # Mirror the mic path: on Ctrl-C drain the tasks but do NOT
-                # re-raise, so we fall through to _flush_v2 + the return below
-                # and the partial transcript (and --save-to) survive. Fatal
-                # errors still propagate via the BaseException clause.
-                await _cancel_and_drain(send_task, recv_task)
-            except BaseException:
-                await _cancel_and_drain(send_task, recv_task)
-                raise
+    def _finish_live(
+        self,
+        outcome: live.LiveOutcome,
+        *,
+        source: str,
+        model: str,
+        language: str,
+        diarize: bool,
+        transcript_acc: list[str],
+        caption_writer: StreamingCaptionWriter | None,
+        caption_format: str | None,
+        save_to: str | None,
+        v2_state: dict[str, Any] | None,
+    ) -> BaseResult | ListenCodedError:
+        """Turn a session outcome into the command result, after the socket
+        is closed: flush Flux turns, report, and run ``--save-to``."""
+        from . import live
 
         # Flux may close mid-turn without an EndOfTurn; emit what we have.
         if v2_state is not None:
-            self._flush_v2(v2_state, full_transcript, caption_writer=caption_writer)
+            try:
+                self._flush_v2(v2_state, transcript_acc, caption_writer=caption_writer)
+            except BrokenPipeError:
+                live.silence_stdout()
 
-        return ListenResult(
+        if outcome.status == "cancelled":
+            status.print("\n[yellow]Stopped.[/yellow]")
+            if outcome.incomplete:
+                print_warning(msg.W_LISTEN_STOP_INCOMPLETE, stderr=True)
+            if outcome.signal == getattr(signal, "SIGTERM", None):
+                # Drained like Ctrl-C; the process then ends by SIGTERM
+                # (exit_code_for), so supervisors see the status they sent.
+                self._reraise_signal = outcome.signal
+
+        transcript = " ".join(transcript_acc)
+        saved_to: str | None = None
+        if save_to:
+            if caption_writer and caption_writer.accumulated_words:
+                content = captions_from_words(
+                    caption_writer.accumulated_words, caption_format or "webvtt"
+                )
+            else:
+                content = transcript
+            if content:
+                self._save_transcript(content, save_to)
+                saved_to = save_to
+                status.print(f"[green]✓[/green] Saved to {save_to}")
+
+        def kept() -> dict[str, Any]:
+            # The finals received so far travel with a failure.
+            out: dict[str, Any] = {
+                "transcript": transcript,
+                "transcript_chars": len(transcript),
+            }
+            if saved_to:
+                out["saved_to"] = saved_to
+            return out
+
+        if outcome.status == "drain_timeout":
+            limit = round(outcome.drain_limit_s, 3)
+            template = (
+                msg.E_DRAIN_CAP
+                if outcome.drain_reason == "cap"
+                else msg.E_DRAIN_TIMEOUT
+            )
+            text = template.format(limit_s=f"{limit:g}")
+            return self._coded_failure(
+                text,
+                code=msg.CODE_STREAM_DRAIN_TIMEOUT,
+                hint_human=msg.H_DRAIN_TIMEOUT,
+                hint_agent=msg.H_DRAIN_TIMEOUT,
+                details={
+                    "reason": outcome.drain_reason or "idle",
+                    "limit_s": limit,
+                    **kept(),
+                },
+            )
+        if outcome.status == "error" and outcome.kind == "server":
+            server: dict[str, Any] = {}
+            if outcome.close_code is not None:
+                server["close_code"] = outcome.close_code
+            if outcome.request_id:
+                server["request_id"] = outcome.request_id
+            return self._coded_failure(
+                outcome.error or "",
+                code=msg.CODE_SERVER_ERROR,
+                hint_human=msg.H_SERVER,
+                hint_agent=msg.A_SERVER,
+                details={**server, **kept()},
+            )
+        if outcome.status == "error" and outcome.kind == "network":
+            return self._coded_failure(
+                outcome.error or msg.E_LISTEN_CONNECTION_LOST,
+                code=msg.CODE_NETWORK_UNAVAILABLE,
+                hint_human=msg.H_NETWORK,
+                hint_agent=msg.A_NETWORK.format(prog=_prog()),
+                details={
+                    "host": self._ws_host,
+                    "reason": "connection lost",
+                    **kept(),
+                },
+            )
+
+        if outcome.status == "error":
+            # Reading stdin failed (EISDIR, EBADF, EIO on a hang-up). The
+            # fix is the same as for a missing source: pass a file or URL.
+            return self._coded_failure(
+                outcome.error or "",
+                code=msg.CODE_INVALID_ARGUMENT,
+                hint_human=msg.H_LISTEN_STDIN_UNREADABLE,
+                hint_agent=msg.A_LISTEN_STDIN_UNREADABLE,
+                details=kept(),
+                next_step=f"{_prog()} {self.name} --help",
+            )
+
+        result = ListenResult(
             status="success",
-            source="stdin",
+            source=source,
             mode="live",
             model=model,
             language=language,
             diarized=diarize,
-            transcript=" ".join(full_transcript),
+            transcript=transcript,
             caption_format=caption_writer.fmt if caption_writer else None,
         )
+        if outcome.status == "cancelled" and not (
+            source == "mic" and outcome.signal == signal.SIGINT
+        ):
+            # Ctrl-C is how a mic session normally ends: the transcript so
+            # far is the result, exit 0. Other sources, and SIGTERM for
+            # every source, stay "cancelled". Ctrl-Break on Windows is a
+            # hard stop like SIGTERM, so it stays "cancelled" on mic too.
+            result.status = "cancelled"
+        return result
+
+    def _coded_failure(
+        self,
+        text: str,
+        *,
+        code: str,
+        hint_human: str,
+        hint_agent: str,
+        details: dict[str, Any],
+        next_step: str | None = None,
+    ) -> ListenCodedError:
+        """Report a live-stream failure on stderr and return its envelope."""
+        hint = hint_agent if (_agentic or is_ai_agent()) else hint_human
+        print_error(escape(text))
+        print_hint(escape(hint))
+        return ListenCodedError(
+            error=text, code=code, hint=hint, next_step=next_step, details=details
+        )
+
+    def exit_code_for(self, result: Any) -> int:
+        """A SIGTERM-drained stream ends by SIGTERM itself: the
+        result is already written, so flush and re-raise it here."""
+        if self._reraise_signal is not None:
+            signum, self._reraise_signal = self._reraise_signal, None
+            from . import live
+
+            live.die_by_signal(signum)
+        return super().exit_code_for(result)
 
     # ── Shared WebSocket helpers ───────────────────────────────────────
 
@@ -1256,7 +1410,9 @@ class ListenCommand(BaseCommand):
         if msg_type == "Error" and v2_state is not None:
             code = data.get("code") or "UNKNOWN_ERROR"
             description = data.get("description") or "No description provided"
-            raise click.ClickException(f"Flux STT error ({code}): {description}")
+            raise click.ClickException(
+                msg.E_LISTEN_FLUX_ERROR.format(flux_code=code, description=description)
+            )
 
         if msg_type != "Results":
             return

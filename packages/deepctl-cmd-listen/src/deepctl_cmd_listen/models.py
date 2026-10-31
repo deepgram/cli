@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from deepctl_core import BaseResult
+from deepctl_core import BaseResult, CodedErrorResult
 
 
 class ListenResult(BaseResult):
@@ -30,3 +30,20 @@ class ListenResult(BaseResult):
     full_result: dict[str, Any] | None = None  # raw Deepgram API response
     probe_info: dict[str, Any] | None = None
     duration_seconds: float = 0.0
+
+
+class ListenCodedError(CodedErrorResult):
+    """A coded error from ``dg listen``, keys in the catalogue's order.
+
+    ``details`` is left out of the payload when there are none.
+    """
+
+    next_step: str | None = None
+    schema_version: int = 1
+    details: dict[str, Any] | None = None
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        data = super().model_dump(**kwargs)
+        if data.get("details") is None:
+            data.pop("details", None)
+        return data

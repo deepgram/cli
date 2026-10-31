@@ -87,15 +87,21 @@ def live_client(monkeypatch):
 
 
 @pytest.fixture
-def feed_stdin(monkeypatch):
+def feed_stdin(monkeypatch, tmp_path, request):
     """Return a helper that pipes raw bytes into the listen command's stdin.
 
-    The stdin streaming path reads ``sys.stdin.buffer`` (via the listen
-    module's ``sys``); swap in a BytesIO-backed fake so an in-process run
-    behaves like ``… | dg listen -``.
+    The live stdin path reads a file descriptor (``_stdin_fd()``, fd 0 in
+    production); point it at a file holding the audio so an in-process run
+    behaves like ``dg listen - < audio.raw``. ``sys.stdin`` is swapped too,
+    so source auto-detection sees a non-TTY.
     """
 
     def _feed(pcm: bytes) -> None:
+        path = tmp_path / "stdin.raw"
+        path.write_bytes(pcm)
+        fd = os.open(path, os.O_RDONLY)
+        request.addfinalizer(lambda: os.close(fd))
+        monkeypatch.setattr("deepctl_cmd_listen.command._stdin_fd", lambda: fd)
         fake_stdin = types.SimpleNamespace(
             buffer=io.BytesIO(pcm),
             isatty=lambda: False,
