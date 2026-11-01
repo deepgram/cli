@@ -2012,7 +2012,8 @@ class TestAllowOverride:
 
 class TestBuiltinMapMatchesInstalledPackages:
     """The reserved-name table matches what the first-party packages in this
-    repository declare (read from packages/*/pyproject.toml)."""
+    repository declare (read from packages/*/pyproject.toml and the root
+    pyproject.toml)."""
 
     def _declared(self, group_prefix):
         try:
@@ -2027,6 +2028,8 @@ class TestBuiltinMapMatchesInstalledPackages:
         )
         if not files:
             pytest.skip("not running from a source checkout")
+        # The root distribution ships the help topics.
+        files.insert(0, parents[2].parent.parent / "pyproject.toml")
         found: dict = {}
         for path in files:
             data = tomllib.loads(path.read_text(encoding="utf-8"))

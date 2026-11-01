@@ -52,7 +52,7 @@ class TestRepoManifest:
     def test_assembles(self) -> None:
         manifest = assemble(str(FRAGMENTS))
         assert manifest["manifest_version"] == 1
-        assert len([p for p in manifest["commands"] if " " not in p]) == 24
+        assert len([p for p in manifest["commands"] if " " not in p]) == 25
 
     def test_runtime_reads_the_same_manifest(self) -> None:
         assert _manifest.load() == assemble(str(FRAGMENTS))
@@ -129,7 +129,9 @@ class TestDrift:
             import tomli as tomllib
 
         declared: dict[str, str] = {}
-        for pyproject in sorted(REPO.glob("packages/deepctl-cmd-*/pyproject.toml")):
+        pyprojects = [REPO / "pyproject.toml"]
+        pyprojects += sorted(REPO.glob("packages/deepctl-cmd-*/pyproject.toml"))
+        for pyproject in pyprojects:
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
             groups = data.get("project", {}).get("entry-points", {})
             for group, entries in groups.items():
@@ -271,9 +273,10 @@ class TestHelpSpecs:
         assert all("help" in f for f in load_fragments(str(FRAGMENTS)))
 
     def test_help_stays_out_of_the_manifest(self) -> None:
-        text = _manifest_build.dumps(assemble(str(FRAGMENTS)))
+        manifest = assemble(str(FRAGMENTS))
+        text = _manifest_build.dumps(manifest)
         assert '"params"' not in text
-        assert '"help"' not in text
+        assert all("help" not in entry for entry in manifest["commands"].values())
 
     def _check(self, directory: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
