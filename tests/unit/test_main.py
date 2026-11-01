@@ -338,6 +338,29 @@ class TestGlobalOptionHint:
         assert "Error" in captured.err
 
 
+class TestRichTraceback:
+    """The rich excepthook installed at import doesn't render frame locals."""
+
+    def test_excepthook_does_not_render_locals(self, capsys):
+        assert sys.excepthook.__module__ == "rich.traceback"
+        # Built at runtime so the source-context lines rich prints can't
+        # contain it; only a rendered local variable could.
+        sentinel = "-".join(["LOCALS", "SENTINEL", "KEY"])
+
+        def crash() -> None:
+            value = sentinel  # noqa: F841
+            raise RuntimeError("boom")
+
+        try:
+            crash()
+        except RuntimeError:
+            sys.excepthook(*sys.exc_info())
+
+        captured = capsys.readouterr()
+        assert "RuntimeError" in captured.err
+        assert sentinel not in captured.err
+
+
 class TestHyphenatedCommands:
     """`group-subcommand` is expanded only where the command name goes."""
 
