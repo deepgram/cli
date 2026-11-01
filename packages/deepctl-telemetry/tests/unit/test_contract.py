@@ -1,13 +1,16 @@
 """The telemetry runtime contract.
 
-Cross-tool opt-outs: DO_NOT_TRACK and CI. Reports go to a local sink on loopback, never further.
+Cross-tool opt-outs (DO_NOT_TRACK, CI) and the flush that only waits for a
+queued event. Reports go to a local sink on loopback, never further.
 """
 
 from __future__ import annotations
 
+import socket
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -139,3 +142,43 @@ class TestCrossToolOptOuts:
         assert _fail() is True
         sentry_sdk.get_client().close(timeout=2)
         assert len(sink.posts) == 1
+
+
+class TestFlush:
+    def test_no_flush_when_nothing_was_queued(self) -> None:
+        client.init_telemetry(_config())
+        with patch("sentry_sdk.flush") as flush:
+            try:
+                raise BrokenPipeError(32, "Broken pipe")
+            except BrokenPipeError as exc:
+                assert client.report_exception(exc) is False
+        flush.assert_not_called()
+
+    def test_refused_connection_does_not_wait_out_the_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A port nothing listens on: the one send fails at once, and the
+        # flush returns as soon as it has, not at its timeout.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        monkeypatch.setenv(client.DSN_ENV_VAR, f"http://k@127.0.0.1:{port}/1")
+        client.init_telemetry(_config())
+        started = time.monotonic()
+        assert _fail() is True
+        assert time.monotonic() - started < client.FLUSH_TIMEOUT_SECONDS
+
+    def test_unanswered_send_is_held_to_the_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Accepts the connection and never answers (blocked egress).
+        with socket.socket() as hole:
+            hole.bind(("127.0.0.1", 0))
+            hole.listen(8)
+            port = hole.getsockname()[1]
+            monkeypatch.setenv(client.DSN_ENV_VAR, f"http://k@127.0.0.1:{port}/1")
+            client.init_telemetry(_config())
+            started = time.monotonic()
+            assert _fail() is True
+            elapsed = time.monotonic() - started
+        assert elapsed < client.REPORT_BUDGET_SECONDS + 0.25
