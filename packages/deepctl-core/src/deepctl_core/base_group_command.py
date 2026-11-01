@@ -191,6 +191,17 @@ class BaseGroupCommand(BaseCommand):
         def group_callback(**kwargs: Any) -> Any:
             # Pass CLI context and arguments to the command
             ctx = click.get_current_context()
+            obj = ctx.find_root().obj
+            if (
+                ctx.invoked_subcommand is not None
+                and isinstance(obj, dict)
+                and obj.get("help_without_config")
+            ):
+                # A --help run with no readable config (an unreadable HOME):
+                # Click calls the group before its subcommand parses --help,
+                # and building a Config here would fail the help. The
+                # subcommand shows its help, or fails on its own Config.
+                return None
             return self.execute(ctx, **kwargs)
 
         # Set function name and docstring

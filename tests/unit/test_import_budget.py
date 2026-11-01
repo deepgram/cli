@@ -228,9 +228,36 @@ def test_version_imports_no_command_module(tmp_path: Path) -> None:
 
 
 def test_subcommand_help_imports(tmp_path: Path) -> None:
-    """`dg transcribe --help` (the T3 row): no network stack, no SDK."""
+    """`dg transcribe --help` (the T3 row): no network stack, no SDK, and no
+    command module (its help comes from the manifest's help spec)."""
     proc, modules = _imports(["transcribe", "--help"], tmp_path)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert _forbidden_hits(modules, GATES_IMPORTS["forbidden"]["subhelp"]) == []
-    commands = {m.split(".")[0] for m in modules if m.startswith("deepctl_cmd_")}
-    assert commands == {"deepctl_cmd_transcribe", "deepctl_cmd_listen"}
+    assert not [m for m in modules if m.startswith("deepctl_cmd_")]
+
+
+# Never on `dg listen --help` with no config files (bench row imports_subhelp).
+SUBHELP_SPEC_FORBIDDEN = [
+    "pydantic",
+    "yaml",
+    "rich",
+    "deepctl_cmd_",
+    "deepctl_core.base_command",
+]
+
+
+@pytest.mark.parametrize(
+    "path", [["listen"], ["speak"], ["api"], ["debug", "probe"]], ids=" ".join
+)
+def test_subcommand_help_from_spec_imports(path: list[str], tmp_path: Path) -> None:
+    proc, modules = _imports([*path, "--help"], tmp_path)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    hits = sorted(
+        {
+            m
+            for m in modules
+            for f in SUBHELP_SPEC_FORBIDDEN
+            if m == f or m.startswith(f if f.endswith("_") else f + ".")
+        }
+    )
+    assert hits == []

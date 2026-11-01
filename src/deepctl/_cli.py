@@ -9,6 +9,11 @@ command's module only when that command runs or shows its own help. Plugins
 are discovered only for a name that isn't built in, for root ``--help`` and
 for ``dg plugin list``. ``DEEPCTL_EAGER_LOAD=1`` (0.5.x only) loads every
 command up front, as 0.4.x did.
+
+``dg <cmd> --help`` and ``dg <group> <sub> --help`` for a built-in leaf
+render from the command's help spec (``deepctl._help_spec``) without
+importing its module, and the root callback then only scans the config
+files (``Config(scan_only=True)``): see ``LazyGroup._help_command``.
 """
 
 from __future__ import annotations
@@ -40,6 +45,10 @@ EAGER_LOAD_ENV_VAR = "DEEPCTL_EAGER_LOAD"
 # The program name shown in usage lines (the launcher and `python -m deepctl`
 # set it; `--version` ignores it).
 PROG_NAME_ENV_VAR = "DEEPCTL_PROG_NAME"
+# Set in the root context's obj when a --help run found no readable config
+# (an unreadable HOME): a group's callback then leaves its subcommand to
+# show its help.
+HELP_WITHOUT_CONFIG = "help_without_config"
 
 E_DEPENDENCY = "{prog} {command_path} needs {dependency}, which isn't installed."
 H_DEPENDENCY_REINSTALL = "Reinstall {prog} with the tool you installed it with."
@@ -206,6 +215,46 @@ def _nothing_to_discover() -> bool:
     )
 
 
+def _only_builtin_subcommands(group: str) -> bool:
+    """Whether every ``deepctl.subcommands.<group>`` and
+    ``deepctl.subplugins.<group>`` entry point is a built-in subcommand's
+    own (same name, module and class as in the manifest).
+
+    A yes is remembered for the plugin stamp (``_cache.plugin_stamp``, the
+    one the discovery cache uses): reading every distribution's entry
+    points costs far more than the rest of the help.
+    """
+    from deepctl import _cache
+
+    try:
+        stamp: str | None = _cache.plugin_stamp()
+    except Exception:
+        stamp = None
+    if stamp is not None and _cache.read_builtin_only(stamp, group):
+        return True
+    if not _scan_builtin_only(group):
+        return False
+    if stamp is not None:
+        _cache.write_builtin_only(stamp, group)
+    return True
+
+
+def _scan_builtin_only(group: str) -> bool:
+    from importlib import metadata
+
+    builtins = {
+        name: f"{entry['module']}:{entry['attr']}"
+        for name, entry in _manifest.subcommands(group).items()
+    }
+    entry_points = metadata.entry_points()
+    for kind in ("subcommands", "subplugins"):
+        for entry_point in entry_points.select(group=f"deepctl.{kind}.{group}"):
+            value = entry_point.value.replace(" ", "")
+            if kind == "subplugins" or builtins.get(entry_point.name) != value:
+                return False
+    return True
+
+
 class LazyGroup(click.Group):
     """The root group: built-in commands come from the manifest and load on
     first use; plugins are discovered only when needed.
@@ -228,6 +277,8 @@ class LazyGroup(click.Group):
         self._cached_plugins: dict[str, dict[str, Any]] = {}
         # Root help as rendered, and the program name it used (help cache).
         self.rendered_help: tuple[str, str] | None = None
+        # (name, command) when this run shows a built-in's help from its spec.
+        self.help_from_spec: tuple[str, click.Command] | None = None
 
     def _plugin_manager(self) -> PluginManager:
         if self._manager is None:
@@ -302,7 +353,53 @@ class LazyGroup(click.Group):
             except Exception as exc:
                 _load_error("subcommand", f"{name} for {group_name}", exc)
 
+    def _help_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> click.Command | None:
+        """The command to resolve when ``args`` (what follows the root
+        options) asks only for a built-in leaf's help, built from its help
+        spec without importing it; ``None`` takes the normal path.
+
+        Only for exactly ``<cmd> --help`` or ``<group> <sub> --help``, a
+        leaf with a spec, not listed (nor its group) in
+        ``plugins.allow_override``, outside ``DEEPCTL_EAGER_LOAD``. For a
+        subcommand, every entry point the group would scan must be the
+        built-in's own: the normal path imports and vets those, and a
+        plugin's would print there. Group help always takes the normal
+        path, which lists plugin subcommands.
+        """
+        if self.eager or ctx.parent is not None or ctx.resilient_parsing:
+            return None
+        if eager_load_requested() or args[-1:] != ["--help"]:
+            return None
+        path = args[:-1]
+        if len(path) not in (1, 2) or path[0] not in _manifest.top_level():
+            return None
+        if path[0] in self.commands:
+            return None
+        if len(path) == 2 and path[1] not in _manifest.subcommands(path[0]):
+            return None
+        if self._overridden(path[0]) or self._overridden(" ".join(path)):
+            return None
+        from deepctl import _help_spec
+
+        spec = _manifest.help_spec(path[0])
+        if spec is None:
+            return None
+        if len(path) == 1:
+            return None if spec.get("group") else _help_spec.from_spec(spec)
+        sub = _manifest.help_spec(" ".join(path))
+        if sub is None or sub.get("group") or not spec.get("group"):
+            return None
+        if not _only_builtin_subcommands(path[0]):
+            return None
+        group = cast("click.Group", _help_spec.from_spec(spec))
+        group.add_command(_help_spec.from_spec(sub), name=path[1])
+        return group
+
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        if self.help_from_spec is not None and self.help_from_spec[0] == cmd_name:
+            return self.help_from_spec[1]
         command = self.commands.get(cmd_name)
         if command is not None or self.eager:
             return command
@@ -383,7 +480,13 @@ class LazyGroup(click.Group):
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
+        if ctx.parent is None:
+            self.help_from_spec = None
         if args:
+            command = self._help_command(ctx, args)
+            if command is not None:
+                self.help_from_spec = (args[0], command)
+                return super().resolve_command(ctx, args)
             args = self._expand_command_word(ctx, args)
         if args[:2] == ["plugin", "list"]:
             # 0.4.x loaded (and vetted) every plugin before `plugin list`.
@@ -725,9 +828,17 @@ def cli(
         ctx.ensure_object(dict)
         from deepctl_core import Config
 
+        # Help from a spec runs no command: only the files' checks and
+        # notices are needed, not the settings (no pydantic).
+        scan_only = isinstance(ctx.command, LazyGroup) and (
+            ctx.command.help_from_spec is not None
+        )
         try:
             ctx.obj["config"] = Config(
-                config_path=config, profile=profile, base_url=base_url
+                config_path=config,
+                profile=profile,
+                base_url=base_url,
+                scan_only=scan_only,
             )
         except OSError:
             # An unreadable HOME must not block `dg <cmd> --help`.
@@ -735,6 +846,7 @@ def cli(
             if not _help_requested():
                 raise
             ctx.obj["config"] = None
+            ctx.obj[HELP_WITHOUT_CONFIG] = True
         # Global --api-key passthrough (highest-precedence explicit credential).
         ctx.obj["api_key"] = api_key
         ctx.obj["timing"] = timing or timing_detailed
