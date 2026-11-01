@@ -60,6 +60,50 @@ def check_prereqs() -> list[tuple[str, str, str]]:
     return missing
 
 
+# ── Running git ───────────────────────────────────────────────────────────────
+
+# Settings every git command dg runs gets on its command line, so that
+# configuration inside a repository can't run a program: no fsmonitor
+# daemon command, no hooks, no pager, no external diff. (The commands dg
+# runs in a repository, rev-parse, ls-files and check-ignore, apply no
+# filters and open no connection.)
+_NULL_DEVICE = "NUL" if os.name == "nt" else "/dev/null"
+GIT_SAFE_CONFIG = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    f"core.hooksPath={_NULL_DEVICE}",
+    "-c",
+    "core.pager=cat",
+    "-c",
+    "diff.external=",
+)
+
+
+def run_git(
+    *args: str, repo: Path | None = None, inherit_git_env: bool = False
+) -> subprocess.CompletedProcess[str] | None:
+    """Run ``git [-C repo] args`` with GIT_SAFE_CONFIG; None if git can't run.
+
+    Inherited GIT_* variables are dropped unless ``inherit_git_env`` (for a
+    clone, which works on no existing repository): GIT_DIR, GIT_WORK_TREE
+    or GIT_INDEX_FILE would point git at another repository. Call it with
+    ``repo`` only for a directory dg cloned itself.
+    """
+    if shutil.which("git") is None:
+        return None
+    env = None
+    if not inherit_git_env:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    argv = ["git", "--no-pager", *GIT_SAFE_CONFIG]
+    if repo is not None:
+        argv += ["-C", str(repo)]
+    try:
+        return subprocess.run([*argv, *args], capture_output=True, text=True, env=env)
+    except OSError:
+        return None
+
+
 # ── Git clone ─────────────────────────────────────────────────────────────────
 
 #: The GitHub organizations dg clones templates from.
@@ -127,13 +171,11 @@ def clone_template(github_url: str, target_dir: Path) -> None:
     if target_dir.exists():
         raise RuntimeError(f"Directory already exists: {target_dir}")
 
-    result = subprocess.run(
-        # "--" ends git's options: a server-supplied URL that starts with "-"
-        # is taken as the repository, never as a git option.
-        ["git", "clone", "--", github_url, str(target_dir)],
-        capture_output=True,
-        text=True,
-    )
+    # "--" ends git's options: a server-supplied URL that starts with "-"
+    # (say --upload-pack=...) is taken as the repository, never an option.
+    result = run_git("clone", "--", github_url, str(target_dir), inherit_git_env=True)
+    if result is None:
+        raise RuntimeError("git clone failed: git could not be run")
     if result.returncode != 0:
         raise RuntimeError(f"git clone failed:\n{result.stderr.strip()}")
 
@@ -175,27 +217,16 @@ def _restrict_to_owner(path: Path) -> None:
 
 
 def _git(target_dir: Path, *args: str) -> int | None:
-    """Exit code of ``git -C target_dir args``, or None if git can't run."""
-    if shutil.which("git") is None:
-        return None
-    try:
-        # Only this project's repository: an inherited GIT_DIR, GIT_WORK_TREE
-        # or GIT_INDEX_FILE would point git at another one.
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        result = subprocess.run(
-            ["git", "-C", str(target_dir), *args],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-    except OSError:
-        return None
-    return result.returncode
+    """Exit code of a git command in ``target_dir``, or None if git can't run."""
+    result = run_git(*args, repo=target_dir)
+    return None if result is None else result.returncode
 
 
 def _env_ignored(target_dir: Path) -> bool | None:
     """git's answer to "is .env ignored?", or None when git can't say."""
-    rc = _git(target_dir, "check-ignore", "-q", ".env")
+    # No global excludes file: one that is a FIFO would block the check.
+    # The repository's own .gitignore is what keeps .env out of a commit.
+    rc = _git(target_dir, "-c", "core.excludesFile=", "check-ignore", "-q", ".env")
     if rc in (0, 1):
         return rc == 0
     return None
