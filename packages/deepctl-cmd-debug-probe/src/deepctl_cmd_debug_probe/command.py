@@ -28,6 +28,30 @@ def _find_available_port(start: int = 3100, end: int = 3199) -> int | None:
     return None
 
 
+def _handle_sigint(loop: Any, callback: Any) -> tuple[bool, Any]:
+    """Run `callback` on the event loop for SIGINT (POSIX), so Ctrl+C never
+    lands inside a connection handler. Returns whether it was installed and
+    the handler it replaced, to put back afterwards.
+
+    SIGINT is left exactly as it is when it isn't ours to replace: ignored
+    (a background job in a script starts with SIGINT ignored, or `trap ''
+    INT`), so the proxy keeps running as before; or a handler not installed
+    from Python (`signal.getsignal` returns None), which `signal.signal`
+    couldn't restore. Where the loop can't take signals (Windows), Ctrl+C
+    raises KeyboardInterrupt instead.
+    """
+    import signal
+
+    previous = signal.getsignal(signal.SIGINT)
+    if previous is signal.SIG_IGN or previous is None:
+        return False, previous
+    try:
+        loop.add_signal_handler(signal.SIGINT, callback)
+    except (NotImplementedError, RuntimeError, ValueError):
+        return False, previous
+    return True, previous
+
+
 class ProbeCommand(BaseCommand):
     """WebSocket proxy with periodic ffprobe analysis of streaming audio."""
 
@@ -95,8 +119,7 @@ class ProbeCommand(BaseCommand):
     ) -> Any:
         """Handle debug probe command execution."""
         import asyncio
-
-        from aiohttp import web
+        import signal
 
         from .proxy import ProbeProxy
 
@@ -173,27 +196,40 @@ class ProbeCommand(BaseCommand):
 
         # Run the proxy server
         start_time = time.time()
-        app = web.Application()
-        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
+        def interrupt() -> None:
+            """First Ctrl+C: stop listening, let open connections finish and
+            print their summaries. Second: end them now."""
+            if proxy._stop.is_set():
+                proxy.abort()
+            else:
+                console.print("\n[yellow]Shutting down probe proxy...[/yellow]")
+                proxy._stop.set()
+
+        installed, previous = _handle_sigint(loop, interrupt)
+        serve_task = loop.create_task(proxy.run(port))
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            runner = web.AppRunner(app)
-            loop.run_until_complete(runner.setup())
-
-            site = web.TCPSite(runner, "127.0.0.1", port)
-            loop.run_until_complete(site.start())
-
-            # Run until Ctrl+C
-            loop.run_forever()
-
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Shutting down probe proxy...[/yellow]")
+            while True:
+                try:
+                    # Run until Ctrl+C
+                    loop.run_until_complete(serve_task)
+                    break
+                except KeyboardInterrupt:
+                    # Windows, or wherever the loop doesn't take SIGINT.
+                    if serve_task.done():  # it landed inside the task
+                        serve_task.exception()
+                        break
+                    interrupt()
         finally:
-            loop.run_until_complete(runner.cleanup())
-            loop.close()
+            try:
+                loop.run_until_complete(loop.shutdown_default_executor())
+            finally:
+                if installed:
+                    loop.remove_signal_handler(signal.SIGINT)
+                    signal.signal(signal.SIGINT, previous)
+                loop.close()
 
         duration = time.time() - start_time
 

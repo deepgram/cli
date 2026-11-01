@@ -39,7 +39,7 @@ pipx run deepctl --help
 - `rich>=13.0.0,<16`
 - `pydantic>=2.0.0,<3`
 - `httpx>=0.24.0,<1`
-- `aiohttp>=3.9.0`
+- `websockets>=13.1,<18`
 
 ## License
 

@@ -2,18 +2,14 @@
 # on any platform or Python version uv.lock covers (PEP 503 names, sorted).
 # Checked by tests/unit/test_dependency_allowlist.py. Adding a runtime
 # dependency, direct or transitive, means adding it here in the same PR.
-# numpy, ffmpeg-python and future were dropped in 0.5.0 and are refused
-# even if listed.
+# numpy, ffmpeg-python, future and aiohttp were dropped in 0.5.0 and are
+# refused even if listed.
 # Format: one name per line, optionally followed by flags. The only flag is
 # `floors-only`: the name is reached only when a dependency sits at its
 # declared floor (the lowest-direct CI job), not through uv.lock, and that
 # job checks it is really installed there. Text after "#" is a comment.
-aiohappyeyeballs
-aiohttp
-aiosignal
 annotated-types
 anyio
-async-timeout
 attrs
 backports-tarfile
 certifi
@@ -25,7 +21,6 @@ cryptography
 deepgram-captions
 deepgram-sdk
 exceptiongroup
-frozenlist
 h11
 httpcore
 httpx
@@ -43,10 +38,8 @@ markdown-it-py
 mcp
 mdurl
 more-itertools
-multidict
 packaging
 platformdirs
-propcache
 pycparser
 pydantic
 pydantic-core
@@ -75,5 +68,4 @@ typing-inspection
 urllib3
 uvicorn
 websockets
-yarl
 zipp

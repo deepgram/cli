@@ -1,13 +1,9 @@
 """Tests for debug probe command and proxy."""
 
-import asyncio
-import io
 import json
 from unittest.mock import Mock, patch
 
-import aiohttp
 import pytest
-from aiohttp import web
 from deepctl_cmd_debug_probe.command import ProbeCommand, _find_available_port
 from deepctl_cmd_debug_probe.models import (
     ProbeConnectionStats,
@@ -15,7 +11,6 @@ from deepctl_cmd_debug_probe.models import (
     ProbeSnapshot,
 )
 from deepctl_cmd_debug_probe.proxy import ProbeProxy
-from rich.console import Console
 
 
 class TestModels:
@@ -191,31 +186,24 @@ class TestFindAvailablePort:
         assert port is None
 
 
-_REAL_SESSION = aiohttp.ClientSession
-
-
-class _PlainUpstream:
-    """A real aiohttp session whose ws_connect goes over plain http to a
-    loopback stub instead of wss. It takes the same arguments as
-    ClientSession, so the proxy's trace hook is installed as usual."""
-
-    def __init__(self, *args, **kwargs):
-        self._session = _REAL_SESSION(*args, **kwargs)
-
-    async def __aenter__(self):
-        await self._session.__aenter__()
-        return self
-
-    async def __aexit__(self, *exc):
-        return await self._session.__aexit__(*exc)
-
-    def ws_connect(self, url, **kwargs):
-        return self._session.ws_connect(url.replace("wss://", "http://", 1), **kwargs)
+IMPORT_CHECK = (
+    "import sys, deepctl_core; before = set(sys.modules); "
+    "import deepctl_cmd_debug_probe.command; "
+    "bad = sorted(m for m in set(sys.modules) - before for f in "
+    "('asyncio', 'ssl', 'websockets', 'aiohttp') if m == f or m.startswith(f + '.')); "
+    "print(' '.join(bad))"
+)
 
 
 def _probe_through_redirect(location: str):
     """Proxy one client stream to an upstream that answers the upgrade with
     a redirect. Returns (origin requests, target requests, console text)."""
+    import asyncio
+    import io
+
+    from rich.console import Console
+    from websockets.asyncio.client import connect as ws_connect
+
     origin_reqs: list[bytes] = []
     target_reqs: list[bytes] = []
 
@@ -242,37 +230,33 @@ def _probe_through_redirect(location: str):
             target_reqs.append(await read_head(reader) or b"<conn>")
             writer.close()
 
+        stubs = []
         for name, handler in (("origin", origin), ("target", target)):
             srv = await asyncio.start_server(handler, "127.0.0.1", 0)
+            stubs.append(srv)
             ports[name] = srv.sockets[0].getsockname()[1]
 
-        proxy = ProbeProxy(
-            api_key="fa1ce0000000000000000000000000000000000d",
-            upstream_host=f"127.0.0.1:{ports['origin']}",
-        )
-        app = web.Application()
-        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        port = runner.addresses[0][1]
+        proxy = ProbeProxy(api_key="fa1ce0000000000000000000000000000000000d")
+        proxy._upstream_base = f"ws://127.0.0.1:{ports['origin']}"
+        server = await proxy.start(0)
+        port = next(iter(server.sockets)).getsockname()[1]
         try:
-            async with _REAL_SESSION() as client:
-                ws = await client.ws_connect(f"http://127.0.0.1:{port}/v1/listen?x=1")
-                await ws.send_bytes(b"\0\0" * 800)
-                await asyncio.wait_for(ws.receive(), 5)
-                await ws.close()
+            async with ws_connect(f"ws://127.0.0.1:{port}/v1/listen?x=1") as ws:
+                await ws.send(b"\0\0" * 800)
+                try:
+                    await asyncio.wait_for(ws.recv(), 5)
+                except Exception:
+                    pass
         finally:
-            await runner.cleanup()
+            server.close()
+            await server.wait_closed()
+            for srv in stubs:
+                srv.close()
 
     out = io.StringIO()
-    with (
-        patch("deepctl_cmd_debug_probe.proxy.aiohttp.ClientSession", _PlainUpstream),
-        patch(
-            "deepctl_cmd_debug_probe.proxy.console",
-            Console(file=out, force_terminal=False, width=300),
-        ),
+    with patch(
+        "deepctl_cmd_debug_probe.proxy.console",
+        Console(file=out, force_terminal=False, width=300),
     ):
         asyncio.run(run())
     return origin_reqs, target_reqs, out.getvalue()
@@ -281,7 +265,6 @@ def _probe_through_redirect(location: str):
 class TestProbeUpstreamRedirect:
     """The upstream connect never follows a redirect."""
 
-    # aiohttp follows http(s) Locations itself; ws:// ones it rejects.
     @pytest.mark.parametrize(
         "location", ["http://{target}/second", "ws://{target}/second", "/second"]
     )
@@ -289,6 +272,7 @@ class TestProbeUpstreamRedirect:
         origin, target, text = _probe_through_redirect(location)
         assert target == []
         assert len(origin) == 1
+        assert b"Token fa1ce0" in origin[0]
         assert "Upstream connection refused" in text
         assert "dg debug probe doesn't follow redirects, so no audio was sent." in (
             " ".join(text.split())
@@ -296,94 +280,205 @@ class TestProbeUpstreamRedirect:
         assert "fa1ce0" not in text
 
 
-class _CountingSession:
-    """Stands in for aiohttp.ClientSession; counts upstream connect attempts."""
+def test_command_module_adds_no_network_stack_on_import():
+    """`dg debug probe --help` must not pay for websockets or asyncio."""
+    import subprocess
+    import sys
 
-    connects = 0
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    def ws_connect(self, *args, **kwargs):
-        type(self).connects += 1
-        raise aiohttp.ClientError("no upstream in tests")
+    proc = subprocess.run(
+        [sys.executable, "-c", IMPORT_CHECK],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr[-1500:]
+    assert proc.stdout.strip() == ""
 
 
-def _handshake(headers: list[tuple[str, str]] | None, host: str | None = None):
-    """Start a real proxy on 127.0.0.1, send one upgrade request, return
-    (status line, response bytes, upstream connects, console text).
+def _free_port() -> int:
+    import socket
 
-    host is a format string; {port} becomes the listener's port.
-    """
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
 
-    async def run():
-        proxy = ProbeProxy(api_key="fa1ce0000000000000000000000000000000000d")
-        app = web.Application()
-        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        port = runner.addresses[0][1]
-        try:
-            reader, writer = await asyncio.open_connection("127.0.0.1", port)
-            lines = [
-                "GET /v1/listen?encoding=linear16 HTTP/1.1",
-                "Host: " + (host or "127.0.0.1:{port}").format(port=port),
-                "Upgrade: websocket",
-                "Connection: Upgrade",
-                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-                "Sec-WebSocket-Version: 13",
-            ]
-            lines += [f"{k}: {v}" for k, v in (headers or [])]
-            writer.write(("\r\n".join(lines) + "\r\n\r\n").encode())
-            await writer.drain()
-            data = await asyncio.wait_for(reader.read(4096), 5)
-            # Let an accepted handler reach the upstream connect.
-            for _ in range(50):
-                if _CountingSession.connects or not data.startswith(b"HTTP/1.1 101"):
-                    break
-                await asyncio.sleep(0.01)
-            writer.close()
-            return data
-        finally:
-            await runner.cleanup()
 
-    _CountingSession.connects = 0
-    out = io.StringIO()
+def _run_probe(**proxy_hooks):
+    """Run ProbeCommand.handle with a fake key and ffprobe check. Each hook
+    is a callable(proxy, loop, port) run when the proxy starts serving."""
+    from deepctl_cmd_debug_probe import proxy as proxymod
+
+    original = proxymod.ProbeProxy.run
+
+    async def run(self, port):
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        for hook in proxy_hooks.values():
+            hook(self, loop, port)
+        await original(self, port)
+
+    auth = Mock()
+    auth.get_api_key.return_value = "fa1ce0000000000000000000000000000000000d"
     with (
-        patch("deepctl_cmd_debug_probe.proxy.aiohttp.ClientSession", _CountingSession),
-        patch(
-            "deepctl_cmd_debug_probe.proxy.console",
-            Console(file=out, force_terminal=False, width=200),
-        ),
+        patch("deepctl_cmd_debug_probe.command.require_ffprobe", return_value=True),
+        patch.object(proxymod.ProbeProxy, "run", run),
     ):
-        data = asyncio.run(run())
-    status = data.split(b"\r\n", 1)[0].decode()
-    return status, data, _CountingSession.connects, out.getvalue()
+        return ProbeCommand().handle(Mock(), auth, Mock(), port=_free_port())
+
+
+class TestInterrupt:
+    """Ctrl+C handling in handle(): POSIX signal handler, Windows fallback."""
+
+    def test_sigint_on_the_loop_stops_and_restores_the_previous_handler(
+        self, capsys
+    ):
+        import os
+        import signal
+
+        seen = []
+
+        def custom(signum, frame):  # pragma: no cover - never called
+            seen.append(signum)
+
+        old = signal.signal(signal.SIGINT, custom)
+        try:
+            result = _run_probe(
+                kill=lambda proxy, loop, port: loop.call_later(
+                    0.3, os.kill, os.getpid(), signal.SIGINT
+                )
+            )
+            assert signal.getsignal(signal.SIGINT) is custom
+        finally:
+            signal.signal(signal.SIGINT, old)
+        assert result.status == "success"
+        assert seen == []
+        assert "Shutting down probe proxy" in capsys.readouterr().out
+
+    def test_ignored_sigint_stays_ignored(self):
+        """A background job in a script starts with SIGINT ignored: kill -INT
+        must not stop the proxy, and SIGINT stays ignored afterwards."""
+        import json
+        import subprocess
+        import sys
+
+        code = """
+import json, os, signal, sys
+sys.path[:0] = {path!r}
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+from test_probe import _run_probe
+def hooks(proxy, loop, port):
+    loop.call_later(0.3, os.kill, os.getpid(), signal.SIGINT)
+    loop.call_later(1.5, proxy._stop.set)
+result = _run_probe(hooks=hooks)
+ign = [l for l in open("/proc/self/status") if l.startswith("SigIgn")]
+print(json.dumps({{
+    "status": result.status,
+    "ignored": signal.getsignal(signal.SIGINT) is signal.SIG_IGN,
+    "sigign": ign[0].split()[1] if ign else None,
+}}))
+""".format(path=[str(__import__("pathlib").Path(__file__).parent)])
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+        )
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert out["status"] == "success"
+        assert out["ignored"] is True
+        if out["sigign"] is not None:  # Linux: the SIGINT bit is still set
+            assert int(out["sigign"], 16) & (1 << (2 - 1))
+        assert "Shutting down probe proxy" not in proc.stdout
+
+    def test_keyboard_interrupt_path_first_and_second_press(self, capsys):
+        """Where the loop can't take SIGINT (Windows), Ctrl+C raises
+        KeyboardInterrupt from the loop: the first stops listening and the
+        second aborts open connections."""
+        import time
+
+        from deepctl_cmd_debug_probe import command as cmdmod
+
+        def press(*_args):
+            raise KeyboardInterrupt
+
+        calls = []
+
+        def hooks(proxy, loop, port):
+            original = proxy.abort
+
+            def abort():
+                calls.append("abort")
+                original()
+
+            proxy.abort = abort
+            # keep a connection open so the first press can't finish at once
+            loop.create_task(_hold_connection(proxy, port))
+            loop.call_later(0.5, press)
+            loop.call_later(0.8, press)
+
+        with patch.object(
+            cmdmod, "_handle_sigint", lambda loop, cb: (False, None)
+        ):
+            t0 = time.monotonic()
+            result = _run_probe(hooks=hooks)
+        assert time.monotonic() - t0 < 10
+        assert result.status == "success"
+        assert calls == ["abort"]
+        assert "Shutting down probe proxy" in capsys.readouterr().out
+
+
+async def _hold_connection(proxy, port):
+    """Open a connection through `proxy` whose upstream never answers the
+    handshake, so shutdown waits for it until abort()."""
+    import asyncio
+
+    from websockets.asyncio.client import connect
+
+    async def never(reader, writer):
+        await reader.read()  # never answers; ends when the proxy hangs up
+        writer.close()
+
+    hang = await asyncio.start_server(never, "127.0.0.1", 0)
+    proxy._upstream_base = f"ws://127.0.0.1:{hang.sockets[0].getsockname()[1]}"
+    for _ in range(100):
+        try:
+            ws = await connect(f"ws://127.0.0.1:{port}/v1/listen")
+            break
+        except OSError:
+            await asyncio.sleep(0.02)
+    await ws.wait_closed()
+    hang.close()
 
 
 class TestProbeConnectionChecks:
-    """Only local pages and native clients may use the proxy."""
+    """0.4.2's Host and Origin cases, on the websockets proxy: checked in
+    process_request, before the handshake and any upstream connection."""
 
-    def test_foreign_origin_refused_before_upstream(self):
-        status, data, connects, text = _handshake([("Origin", "https://evil.example")])
-        assert status == "HTTP/1.1 403 Forbidden"
-        assert connects == 0
-        assert b"evil" not in data
-        assert "[conn] refused: origin not allowed" in text
-        assert "evil" not in text
+    KEY = "fa1ce0000000000000000000000000000000000d"
+
+    def _status(self, headers, port=3100):
+        from websockets.datastructures import Headers
+        from websockets.http11 import Request
+
+        class Conn:
+            local_address = ("127.0.0.1", port)
+
+            def respond(self, status, text):
+                assert text == "Forbidden.\n"
+                return status
+
+        if not any(k == "Host" for k, _ in headers):
+            headers = [("Host", f"127.0.0.1:{port}"), *headers]
+        request = Request(
+            "/v1/listen?encoding=linear16",
+            Headers([*headers, ("Upgrade", "websocket")]),
+        )
+        return ProbeProxy(api_key=self.KEY).process_request(Conn(), request)
+
+    def test_foreign_origin_refused(self):
+        assert self._status([("Origin", "https://evil.example")]) == 403
 
     def test_null_origin_refused(self):
-        status, _, connects, _ = _handshake([("Origin", "null")])
-        assert status == "HTTP/1.1 403 Forbidden"
-        assert connects == 0
+        assert self._status([("Origin", "null")]) == 403
 
     @pytest.mark.parametrize(
         "origin",
@@ -395,10 +490,7 @@ class TestProbeConnectionChecks:
         ],
     )
     def test_loopback_origin_allowed(self, origin):
-        status, _, connects, text = _handshake([("Origin", origin)])
-        assert status == "HTTP/1.1 101 Switching Protocols"
-        assert connects == 1
-        assert "refused" not in text
+        assert self._status([("Origin", origin)]) is None
 
     @pytest.mark.parametrize(
         "origin",
@@ -411,33 +503,20 @@ class TestProbeConnectionChecks:
         ],
     )
     def test_lookalike_origin_refused(self, origin):
-        status, _, connects, _ = _handshake([("Origin", origin)])
-        assert status == "HTTP/1.1 403 Forbidden"
-        assert connects == 0
+        assert self._status([("Origin", origin)]) == 403
 
     def test_two_origins_refused(self):
-        status, _, connects, _ = _handshake(
-            [("Origin", "http://localhost:5173"), ("Origin", "https://evil.example")]
-        )
-        assert status == "HTTP/1.1 403 Forbidden"
-        assert connects == 0
+        headers = [("Origin", "http://localhost:5173"), ("Origin", "https://evil.example")]
+        assert self._status(headers) == 403
 
     def test_no_origin_allowed(self):
-        status, _, connects, _ = _handshake([])
-        assert status == "HTTP/1.1 101 Switching Protocols"
-        assert connects == 1
+        assert self._status([]) is None
 
     def test_localhost_host_allowed_any_case(self):
-        status, _, connects, _ = _handshake([], host="LocalHost:{port}")
-        assert status == "HTTP/1.1 101 Switching Protocols"
-        assert connects == 1
+        assert self._status([("Host", "LocalHost:3100")]) is None
 
     @pytest.mark.parametrize(
         "host", ["evil.example:3100", "evil.example", "localhost", "127.0.0.1:1"]
     )
     def test_foreign_host_refused(self, host):
-        status, data, connects, text = _handshake([], host=host)
-        assert status == "HTTP/1.1 403 Forbidden"
-        assert connects == 0
-        assert b"evil" not in data
-        assert "[conn] refused: host not allowed" in text
+        assert self._status([("Host", host)]) == 403

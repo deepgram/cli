@@ -38,7 +38,7 @@ pipx run deepctl --help
 - `click>=8.2.0,<9`
 - `rich>=13.0.0,<16`
 - `pydantic>=2.0.0,<3`
-- `aiohttp>=3.11.0`
+- `websockets>=13.0,<18`
 
 ## License
 
