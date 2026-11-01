@@ -275,3 +275,39 @@ class TestConfig:
 
         # No project config should be loaded by default
         assert "project" not in config._config.profiles
+
+
+class TestUserConfigText:
+    """Config keeps the user file's text so nobody has to open it again."""
+
+    def test_text_is_kept(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path = tmp_path / "config.yaml"
+        path.write_text("telemetry:\n  enabled: false\n", encoding="utf-8")
+        config = Config(config_path=str(path))
+        assert config.user_config_text == "telemetry:\n  enabled: false\n"
+
+    def test_absent_file_has_no_text(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        config = Config(config_path=str(tmp_path / "absent.yaml"))
+        assert config.user_config_text is None
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
+    @pytest.mark.timeout(10)
+    def test_fifo_is_read_once(self, tmp_path, monkeypatch):
+        import threading
+
+        monkeypatch.chdir(tmp_path)
+        fifo = tmp_path / "config.fifo"
+        os.mkfifo(fifo)
+
+        def write() -> None:
+            with open(fifo, "w", encoding="utf-8") as f:
+                f.write("output:\n  format: json\n")
+
+        writer = threading.Thread(target=write)
+        writer.start()
+        config = Config(config_path=str(fifo))
+        writer.join()
+        assert config.user_config_text == "output:\n  format: json\n"
+        assert config.get("output.format") == "json"

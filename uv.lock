@@ -1768,7 +1768,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "rich", specifier = ">=13.0.0" },
-    { name = "sentry-sdk", specifier = ">=2.0.0" },
+    { name = "sentry-sdk", specifier = ">=2.35.0,<3" },
 ]
 
 [[package]]

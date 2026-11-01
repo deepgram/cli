@@ -23,6 +23,21 @@ if TYPE_CHECKING:
 console = stderr_console
 
 
+def _report_error(exc: Exception) -> None:
+    """Send a telemetry error report if telemetry is on for this run.
+
+    The proxy turns failures into an error result instead of raising, so
+    they never reach main()'s error path. Reporting writes nothing to
+    stdout, which the MCP host owns in stdio mode.
+    """
+    try:
+        from deepctl_telemetry import report_exception
+
+        report_exception(exc)
+    except Exception:
+        pass
+
+
 class McpCommand(BaseCommand):
     """MCP proxy that connects to Deepgram's developer tools."""
 
@@ -177,6 +192,7 @@ class McpCommand(BaseCommand):
                 host=host if transport != "stdio" else None,
             )
         except Exception as e:
+            _report_error(e)
             msg = str(e)
             if hasattr(e, "exceptions"):
                 for sub in e.exceptions:
