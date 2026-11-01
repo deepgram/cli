@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import deepctl_cmd_mcp.proxy as proxy
+from deepctl.mcp import _fast
 
 INIT = {
     "jsonrpc": "2.0",
@@ -115,13 +116,13 @@ def test_handshake_and_tool_list_are_local(monkeypatch: pytest.MonkeyPatch) -> N
 
     anyio.run(run)
     init, listed = [json.loads(line) for line in stdout.getvalue().splitlines()]
-    assert init["result"]["instructions"] == proxy.INSTRUCTIONS
+    assert init["result"]["instructions"] == _fast.INSTRUCTIONS
     assert init["result"]["serverInfo"]["name"] == "deepgram-mcp"
     assert [t["name"] for t in listed["result"]["tools"]] == [
         "search_deepgram_knowledge_sources"
     ]
     assert (
-        listed["result"]["tools"][0]["description"] == (proxy.TOOLS[0]["description"])
+        listed["result"]["tools"][0]["description"] == (_fast.TOOLS[0]["description"])
     )
     assert calls == []
 

@@ -8,12 +8,13 @@ data, using only ``sys``, ``os`` and ``json`` (the import allowlist in
 ``bench/gates.json``).
 
 The first ``tools/call`` after ``initialize`` goes to
-``deepctl_cmd_mcp.serve_after_handshake``, which connects to the service
-and serves the rest of the session. When that can't start (no API key, no
-network), the call gets a tool error and this loop keeps serving, so the
-host never sees the server die. Every other method, ``server/discover``
-included, gets "Method not found" here and never causes a connection; a
-``tools/call`` before ``initialize`` gets "not initialized".
+``deepctl_cmd_mcp.serve_after_handshake``, which serves the rest of the
+session and connects to the service once per tool call. When it can't
+start (no API key, unreadable config), the call gets a tool error and this
+loop keeps serving, so the host never sees the server die. Every other
+method, ``server/discover`` included, gets "Method not found" here and
+never causes a connection; a ``tools/call`` before ``initialize`` gets
+"not initialized".
 
 Contract with ``deepctl_cmd_mcp.serve_after_handshake(initialize_params,
 pending_message, stdin, stdout)``: ``stdin``/``stdout`` are the binary
@@ -40,8 +41,8 @@ LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 
 SERVER_NAME = "deepgram-mcp"
 
-# Fixed local text, never passed through from the remote service
-# (SECURITY-S6). W4.1 owns this text and the tool table below.
+# Fixed local text, never passed through from the remote service: its
+# instructions and tool descriptions are text an attacker could influence.
 INSTRUCTIONS = (
     "Deepgram developer documentation search. Call "
     "search_deepgram_knowledge_sources with a question about Deepgram's "
@@ -51,7 +52,8 @@ INSTRUCTIONS = (
 )
 
 # The tool names are the remote service's (kapa's); the descriptions and
-# schemas are ours. W4.1 keeps this table in sync with the service.
+# schemas are ours. deepctl_cmd_mcp.proxy serves this same table and
+# forwards calls only for the names in it.
 TOOLS = [
     {
         "name": "search_deepgram_knowledge_sources",
