@@ -545,7 +545,9 @@ class TestInitCommand:
 
         target = str(tmp_path / "my-app")
 
-        with patch.object(init_command, "confirm", return_value=True):
+        with patch.object(init_command, "confirm", return_value=True), patch(
+            "deepctl_cmd_init.command._person_at_terminal", return_value=True
+        ):
             result = init_command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -657,7 +659,9 @@ class TestInitCommand:
 
         target = str(tmp_path / "app")
 
-        with patch("deepctl_cmd_init.command._agentic", False):
+        with patch(
+            "deepctl_cmd_init.command._person_at_terminal", return_value=True
+        ):
             with patch.object(init_command, "confirm", return_value=False):
                 result = init_command.handle(
                     config=mock_config,
