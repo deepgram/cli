@@ -115,6 +115,17 @@ E_SAVE_NOTTY = (
 E_SAVE_NOTTY_HINT = "Run the command in an interactive terminal."
 E_SAVE_NOTTY_AGENT_HINT = "A person must run this command in an interactive terminal."
 E_SAVE_NOURL = "--save-base-url needs --base-url URL."
+# Refused only in an AI agent session (hard AI-agent signals only, never a
+# missing TTY or CI).
+E_PLUGIN_AGENT = (
+    "dg plugin {action} doesn't run in an AI agent session. Nothing was changed."
+)
+E_TOOL_PATH_AGENT = (
+    "dg ffprobe --path doesn't run in an AI agent session. Nothing was saved."
+)
+E_PERSON_ONLY_AGENT_HINT = (
+    "A person must run this command. If you are an AI agent, ask the user."
+)
 E_SAVE_CUSTOM_CONFIG = (
     "--save-base-url can't be used with --config: only the default user "
     "config ({user_config}) can approve API hosts. Run the command without "

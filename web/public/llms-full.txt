@@ -284,6 +284,8 @@ dg plugin search <term>                   # Search registry
 ```
 
 Plugins install into an isolated venv at `~/.deepctl/plugins/venv/`.
+`dg plugin install`, `update` and `remove` are refused in an AI agent session:
+a person runs them in their own terminal.
 
 ---
 
@@ -354,6 +356,21 @@ Per-command flags, which go after the command:
   parsed.
 - JSON output format by default
 - Exit codes: 0 = success, 1 = error, 2 = user interrupt
+
+**In an AI agent session:**
+An AI agent session is one an agent marked: `AI_AGENT`, `CLAUDECODE`,
+`CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`,
+`CURSOR_AGENT` or `GEMINI_CLI` set, or Aider. `CI`, TTY state and flags don't
+make one.
+- `dg plugin install`, `update` and `remove`, and `dg ffprobe --path <path>`, are
+  refused. A person runs them in their own terminal.
+- `DEEPGRAM_BASE_URL` can't send your API key to a host that isn't a Deepgram
+  API host or listed in `api.allowed_hosts`: the command is refused.
+- `DEEPGRAM_CLI_INSECURE` is ignored, so TLS verification stays on.
+- `api.allowed_hosts` and the other settings that widen trust are read only
+  from the user config at its standard path under your real home directory
+  (`HOME` and `XDG_CONFIG_HOME` don't move it). A config file you don't own,
+  or that others can write, keeps its API key unused.
 
 **`--agent-friendly` flag:**
 Available on every command. Outputs a JSON contract describing the command:

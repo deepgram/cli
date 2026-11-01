@@ -12,11 +12,19 @@ if TYPE_CHECKING:
 
 import click
 from deepctl_cmd_update.installation import InstallationDetector, InstallMethod
+from deepctl_core import messages as msg
 from deepctl_core.auth import AuthManager
 from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
-from deepctl_core.output import print_error, print_info, print_success, print_warning
+from deepctl_core.output import (
+    is_ai_agent,
+    print_error,
+    print_hint,
+    print_info,
+    print_success,
+    print_warning,
+)
 from deepctl_core.plugin_env import (
     PLUGIN_DIR,
     PLUGIN_STATE_FILE,
@@ -41,6 +49,16 @@ from .models import (
 )
 
 console = Console()
+
+
+def _refuse_in_agent_session(action: str) -> None:
+    """Installed plugins run in every later dg command: an AI agent session
+    never installs, updates or removes them. Scripts and CI without an agent
+    marker still can."""
+    if is_ai_agent():
+        print_error(msg.E_PLUGIN_AGENT.format(action=action))
+        print_hint(msg.E_PERSON_ONLY_AGENT_HINT)
+        raise SystemExit(1)
 
 
 class PluginCommand(BaseGroupCommand):
@@ -339,6 +357,7 @@ class PluginCommand(BaseGroupCommand):
         **kwargs: Any,
     ) -> None:
         """Handle install command."""
+        _refuse_in_agent_session("install")
         # Extract package argument
         package = kwargs.pop("package", "")
 
@@ -425,6 +444,7 @@ class PluginCommand(BaseGroupCommand):
         **kwargs: Any,
     ) -> None:
         """Handle update command."""
+        _refuse_in_agent_session("update")
         options = PluginInstallOptions(
             package=kwargs["package"],
             upgrade=True,
@@ -471,6 +491,7 @@ class PluginCommand(BaseGroupCommand):
         **kwargs: Any,
     ) -> None:
         """Handle remove command."""
+        _refuse_in_agent_session("remove")
         package = kwargs["package"]
         yes = kwargs.get("yes", False)
 

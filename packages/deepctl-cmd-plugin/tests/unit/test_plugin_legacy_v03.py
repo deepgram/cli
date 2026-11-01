@@ -16,6 +16,15 @@ from deepctl_core import output, skill_bundle
 from deepctl_core import skill_generator as sg
 from deepctl_core.skill_bundle import RepoSkill
 
+
+@pytest.fixture(autouse=True)
+def _person_at_terminal(monkeypatch):
+    """Tests run as a person unless they say otherwise."""
+    from deepctl_cmd_plugin import command as _plugin_command
+
+    monkeypatch.setattr(_plugin_command, "is_ai_agent", lambda: False)
+
+
 FIX = Path(__file__).parents[3] / "deepctl-core" / "tests" / "unit" / "fixtures"
 FIX = FIX / "legacy_v03"
 NAMES = ("api", "docs", "setup-mcp", "starters")

@@ -75,7 +75,10 @@ def _switch_profile(config, auth, client):
 
 
 def _ffprobe_set(config, auth, client):
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
     with (
+        patch.object(ffprobe_module, "is_ai_agent", return_value=False),
         patch("deepctl_cmd_ffprobe.command.os.access", return_value=True),
         patch("deepctl_cmd_ffprobe.command.os.path.isfile", return_value=True),
         patch("deepctl_cmd_ffprobe.command.subprocess.run", MagicMock()),

@@ -26,6 +26,14 @@ from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
 from deepctl_core.skill_bundle import RepoSkill, SkillFetchError
 
+
+@pytest.fixture(autouse=True)
+def _person_at_terminal(monkeypatch):
+    """Tests run as a person unless they say otherwise."""
+    from deepctl_cmd_plugin import command as _plugin_command
+
+    monkeypatch.setattr(_plugin_command, "is_ai_agent", lambda: False)
+
 REF = skill_bundle.DEFAULT_SKILLS_COMMIT
 RETRY = "run 'dg skills update' to try again"
 AGAIN = ", then run the command again."

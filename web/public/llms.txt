@@ -34,7 +34,7 @@
 - Auto-detects AI agent context (Claude Code, Aider, Codex) and fully non-interactive environments — disables prompts, outputs JSON, routes status to stderr
 - Multiple output formats: `dg -o json|yaml|table|csv <command>` (before the command or after a leaf command without its own output option; Speak's `-o` is an audio-file path)
 - Named credential profiles for multi-environment workflows
-- Plugin system: `dg plugin install <package>` installs community extensions in isolated venv
+- Plugin system: `dg plugin install <package>` installs community extensions in isolated venv (refused in an AI agent session: a person runs it)
 - `--dry-run` on all destructive operations (key deletion, member removal)
 - Shell completion for bash, zsh, and fish
 - MCP server mode: `dg mcp` for AI editor integration (stdio/SSE/HTTP)
