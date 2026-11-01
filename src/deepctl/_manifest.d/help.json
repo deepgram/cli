@@ -1,0 +1,23 @@
+{
+  "name": "help",
+  "module": "deepctl.help_topics",
+  "attr": "HelpCommand",
+  "dist": "deepctl",
+  "summary": "Help topics",
+  "hidden": false,
+  "group": true,
+  "requires_auth": false,
+  "help": {
+    "name": "help",
+    "help": "Explain how dg behaves, one topic at a time",
+    "short_help": "Help topics",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": true,
+    "options_metavar": "[OPTIONS]",
+    "params": [],
+    "group": true,
+    "subcommand_metavar": "COMMAND [ARGS]..."
+  }
+}

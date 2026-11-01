@@ -409,9 +409,13 @@ CI=1 dg listen recording.wav
 ```
 
 Also recognised: `--agent-friendly` (alias intended for AI coding tools — same
-effect plus JSON metadata output), and the auto-detected env vars
-`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, and Aider's
-`OR_APP_NAME` / `OR_SITE_URL`.
+effect plus JSON metadata output). dg also detects AI coding agents from the
+variables they set (`AI_AGENT`, `CLAUDECODE`, `CODEX_SANDBOX`, `GEMINI_CLI`
+and others). `dg help agent-mode` prints the full table with its sources,
+what your shell matched, and how to turn it off. `DG_AGENT=1` forces agent
+mode and `DG_AGENT=0` turns it off for output and prompts; it doesn't change
+the config file rules for agent sessions (see `dg help agent-mode`).
+`NO_COLOR` only turns color off.
 
 ## Plugins
 

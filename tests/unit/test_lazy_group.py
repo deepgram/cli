@@ -412,7 +412,7 @@ class TestHyphenatedSubcommands:
         assert debug_with_extra._expand_command_word(ctx, args) == expected
 
     def test_groups_come_from_the_manifest(self) -> None:
-        assert _manifest.groups() == {"debug", "plugin", "skills"}
+        assert _manifest.groups() == {"debug", "help", "plugin", "skills"}
 
     def test_hot_paths_never_scan_subcommand_entry_points(
         self,

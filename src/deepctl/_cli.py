@@ -1121,9 +1121,16 @@ class _HelpConfig:
 
 
 def _is_help_run(args: list[str]) -> bool:
-    """Whether ``--help`` appears among the options (before any ``--``)."""
+    """Whether this run only prints help: ``--help`` among the options
+    (before any ``--``), or the ``help`` command (``dg help <topic>``)."""
     words = args[: args.index("--")] if "--" in args else args
-    return "--help" in words
+    if "--help" in words:
+        return True
+    flag_opts = _root_flag_opts()
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] != "--":
+        i += 2 if _takes_next_token(args[i], flag_opts) else 1
+    return i < len(args) and args[i] == "help"
 
 
 def prog_name(default: str | None = None) -> str | None:
