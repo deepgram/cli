@@ -150,11 +150,11 @@ def _sdk_json() -> bool:
 def _passthrough_body(client: DeepgramClient) -> bool:
     """True when the prerecorded result is read as the server's body.
 
-    For ``-o json`` and ``-o yaml`` (asked for or implied),
+    For ``-o json``, ``-o yaml`` and ``-o text`` (asked for or implied),
     unless ``DEEPCTL_LISTEN_JSON=sdk`` asks for the SDK's shape or the
     client goes through a backend other than plain REST.
     """
-    if get_output_format() not in ("json", "yaml"):
+    if get_output_format() not in ("json", "yaml", "text"):
         return False
     backend = getattr(getattr(client, "transport", None), "backend", None)
     if getattr(backend, "name", None) != "rest":
@@ -278,6 +278,8 @@ class ListenCommand(BaseCommand):
     requires_auth = True
     requires_project = False
     ci_friendly = True
+    # -o text: the transcript alone (files, URLs and live streams).
+    extra_output_formats = ("text",)
 
     #: Live transcript lines go to stdout; False under a machine format.
     _echo: bool = True
@@ -927,7 +929,7 @@ class ListenCommand(BaseCommand):
 
         from deepctl_core.upload import UploadFileError, coded_result
 
-        # Machine output prints the server's body:
+        # Machine output prints the server's body (-o text, what's in it):
         # read it as sent instead of building the SDK's model of it.
         passthrough = _passthrough_body(client)
         body: bytes | None = None
@@ -1936,6 +1938,9 @@ class ListenCommand(BaseCommand):
             return
 
         if not isinstance(result, ListenResult) or result.status != "success":
+            if fmt == "text":
+                # Not a machine format: errors are on stderr, as by default.
+                return
             try:
                 super().output_result(result, config)
             except OSError:
@@ -1950,13 +1955,16 @@ class ListenCommand(BaseCommand):
             return
 
         # Pre-recorded: full structured output
-        if fmt in ("json", "yaml"):
+        if fmt in ("json", "yaml", "text"):
             if fmt == "json" and result._body is not None:
                 data = result._body
                 if _stdout_is_tty():
                     # A person reading a terminal: indented and highlighted.
                     out.print_json(data.decode("utf-8", "replace"))
                     return
+            elif fmt == "text":
+                text = result.transcript.strip()
+                data = (text + "\n").encode() if text else b""
             else:
                 payload = (
                     result.full_result

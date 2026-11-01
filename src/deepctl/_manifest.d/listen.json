@@ -558,7 +558,8 @@
             "json",
             "yaml",
             "table",
-            "csv"
+            "csv",
+            "text"
           ],
           "case_sensitive": false
         },

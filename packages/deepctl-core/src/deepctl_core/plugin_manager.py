@@ -878,11 +878,15 @@ class PluginManager:
         )(cmd)
 
         # Accept the global output options after the subcommand as well.
-        cmd = self._add_global_passthrough_options(cmd)
+        cmd = self._add_global_passthrough_options(
+            cmd, tuple(getattr(command_instance, "extra_output_formats", ()))
+        )
 
         return cmd
 
-    def _add_global_passthrough_options(self, cmd: click.Command) -> click.Command:
+    def _add_global_passthrough_options(
+        self, cmd: click.Command, extra_formats: tuple[str, ...] = ()
+    ) -> click.Command:
         """Let the global output options work after the subcommand too.
 
         The root group defines -o/--output, -q/--quiet and -v/--verbose, but
@@ -892,7 +896,9 @@ class PluginManager:
         These pass-through copies apply the same effect from the subcommand
         position. A copy is only added when the command does not already
         define the option name itself (for example, ``dg speak --output``
-        names an audio file and keeps its own meaning).
+        names an audio file and keeps its own meaning). ``extra_formats`` are
+        formats only this command takes after its name (``dg listen -o
+        text``); the root ``-o`` doesn't.
         """
         from .output import update_output
 
@@ -924,7 +930,8 @@ class PluginManager:
                 "--output",
                 "-o",
                 type=click.Choice(
-                    ["json", "yaml", "table", "csv"], case_sensitive=False
+                    ["json", "yaml", "table", "csv", *extra_formats],
+                    case_sensitive=False,
                 ),
                 expose_value=False,
                 callback=_apply_format,
