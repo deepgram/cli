@@ -51,6 +51,8 @@ def home(tmp_path, monkeypatch):
         monkeypatch.setattr(con, "_width", 400)
     saved = dict(output._output_config)
     output._output_config.update(agentic=True, format="default", quiet=False)
+    # The mock config has no real file: nothing for login's pre-flight to check.
+    monkeypatch.setattr(login_module, "_preflight", lambda config: None)
     yield use_home(monkeypatch, tmp_path / "home")
     output._output_config.clear()
     output._output_config.update(saved)
@@ -182,10 +184,14 @@ def mock_client():
 
 
 @pytest.fixture
-def login_command():
-    """A login command run by a person in a terminal (its prompts can show)."""
+def login_command(monkeypatch):
+    """A login command run by a person in a terminal (its prompts can show,
+    and the browser login waits), with nothing on disk to check."""
     cmd = LoginCommand()
     cmd._can_ask = lambda: True  # type: ignore[method-assign]
+    cmd._pending_mode = lambda **kw: False  # type: ignore[method-assign]
+    monkeypatch.setattr(login_module, "_preflight", lambda config: None)
+    monkeypatch.setitem(output._output_config, "agentic", False)
     return cmd
 
 

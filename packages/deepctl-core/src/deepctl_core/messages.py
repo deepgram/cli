@@ -162,6 +162,73 @@ A_CONFIRM_YES_NULL = (
 C_CONFIRM_YES_NULL = (
     "Add --yes to this command in the job if replacing the saved login is intended."
 )
+
+# Device login for agents (catalogue strings).
+CODE_AUTH_PENDING = "auth_pending"
+CODE_AUTH_EXPIRED = "auth_expired"
+CODE_AUTH_DENIED = "auth_denied"
+CODE_STATE_UNWRITABLE = "state_unwritable"
+M_LOGIN_PENDING = "Open the link and enter the code to finish logging in."
+I_LOGIN_PENDING = (
+    "To finish logging in, open {verification_uri} and enter the code {user_code}."
+)
+A_LOGIN_PENDING = (
+    "Give the user the link and code, then run {prog} login --complete after "
+    "they approve."
+)
+# The person's variant of the line above (mode H/P).
+H_LOGIN_PENDING = (
+    "After you approve the login in your browser, run {prog} login --complete."
+)
+E_AUTH_PENDING = "Login is waiting for approval in the browser."
+H_AUTH_PENDING = (
+    "Open {verification_uri}, enter the code {user_code}, then run {prog} login "
+    "--complete."
+)
+A_AUTH_PENDING = (
+    "Wait {retry_after} s for the user to approve the login at "
+    "{verification_uri} with the code {user_code}, then run {prog} login --complete."
+)
+E_AUTH_EXPIRED = "No login is waiting to be completed, or it expired."
+H_AUTH_EXPIRED = "Run {prog} login to start again."
+A_AUTH_EXPIRED = "Run {prog} login again and give the user the new link and code."
+E_AUTH_DENIED = "The login request was denied in the browser."
+H_AUTH_DENIED = "Run {prog} login to try again."
+A_AUTH_DENIED = "The user denied the login. Ask them before trying again."
+E_STATE_UNWRITABLE = "{prog} can't save a login here: {dir} isn't writable."
+H_STATE_UNWRITABLE = (
+    "Run {prog} login in a terminal where your home directory is writable."
+)
+A_STATE_UNWRITABLE = (
+    "This environment can't store credentials. Ask the user to run {prog} login "
+    "in their own terminal."
+)
+# Login and an untrusted user config: the config file (``{path}``, shown with
+# ``~``) can't be saved in this AI agent session, so login stops before
+# anything is sent. Code state_unwritable; hint W_CFG_UNTRUSTED_FILE_HINT.
+# {why} is a W_CFG_UNTRUSTED_WHY value.
+E_CFG_SAVE_UNTRUSTED = (
+    "In an AI agent session, {prog} can't save a login to {path} because the "
+    "file {why}. Nothing was sent or saved."
+)
+# A pending device-login file that fails the agent-session test;
+# it is ignored and left in place.
+W_LOGIN_PENDING_UNTRUSTED = (
+    "Ignored the pending login in {path}: in an AI agent session, {prog} "
+    "doesn't use a file that {why}."
+)
+# The identity provider's device-code answer couldn't be read (code
+# network_unavailable, details.reason "unreadable response").
+CODE_NETWORK_UNAVAILABLE = "network_unavailable"
+E_NETWORK_UNREADABLE = "Got a response from {host} that {prog} couldn't read."
+H_NETWORK_UNREADABLE = (
+    "A proxy, captive portal or firewall may be answering in Deepgram's place. "
+    "Check that this network lets {prog} reach {host}, then try again."
+)
+A_NETWORK_UNREADABLE = (
+    "Retry once. If it fails again, tell the user that something on this network "
+    "(a proxy, captive portal or firewall) is answering in Deepgram's place."
+)
 E_SAVE_CUSTOM_CONFIG = (
     "--save-base-url can't be used with --config: only the default user "
     "config ({user_config}) can approve API hosts. Run the command without "

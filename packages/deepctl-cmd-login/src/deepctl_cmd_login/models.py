@@ -37,6 +37,17 @@ class LoginResult(BaseResult):
     config_path: str | None = None
 
 
+class LoginPendingResult(BaseResult):
+    """``dg login`` handed the device login to a person; exit 0."""
+
+    status: str = "pending"
+    verification_uri: str
+    user_code: str
+    expires_in: int
+    next_step: str | None = None
+    schema_version: int = 1
+
+
 class LogoutResult(BaseResult):
     """Return structure for logout command."""
 
