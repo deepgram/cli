@@ -1,11 +1,12 @@
 """The telemetry runtime contract.
 
-Cross-tool opt-outs (DO_NOT_TRACK, CI) and the flush that only waits for a
-queued event. Reports go to a local sink on loopback, never further.
+Cross-tool opt-outs (DO_NOT_TRACK, CI), the DEEPCTL_TELEMETRY=log mode, the
+flush that only waits for a queued event. Reports go to a local sink on loopback, never further.
 """
 
 from __future__ import annotations
 
+import json
 import socket
 import sys
 import tempfile
@@ -29,6 +30,7 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         client.DISABLE_ENV_VAR,
         client.DO_NOT_TRACK_ENV_VAR,
         client.CI_ENV_VAR,
+        client.MODE_ENV_VAR,
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(client, "_state", client._fresh_state())
@@ -125,6 +127,13 @@ class TestCrossToolOptOuts:
         client.init_telemetry(_config())
         assert client._state["opt_out"] == "env"
 
+    def test_log_mode_does_not_turn_an_opt_out_back_on(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DO_NOT_TRACK", "1")
+        monkeypatch.setenv("DEEPCTL_TELEMETRY", "log")
+        assert client.init_telemetry(_config()) is False
+
     @pytest.mark.parametrize("name", ["DO_NOT_TRACK", "CI"])
     def test_forced_error_sends_nothing(
         self, monkeypatch: pytest.MonkeyPatch, sink: _Sink, name: str
@@ -138,6 +147,66 @@ class TestCrossToolOptOuts:
 
     def test_sink_receives_a_report_without_them(self, sink: _Sink) -> None:
         # Control: the same failure with no opt-out reaches the sink.
+        client.init_telemetry(_config())
+        assert _fail() is True
+        sentry_sdk.get_client().close(timeout=2)
+        assert len(sink.posts) == 1
+
+
+class TestLogMode:
+    def test_prints_the_event_and_sends_nothing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        sink: _Sink,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("DEEPCTL_TELEMETRY", "LOG")
+        client.init_telemetry(_config())
+        with patch("sentry_sdk.flush") as flush:
+            assert _fail() is True
+        flush.assert_not_called()
+        sentry_sdk.get_client().close(timeout=2)
+        lines = [ln for ln in capsys.readouterr().err.splitlines() if ln.strip()]
+        assert len(lines) == 1, lines
+        event = json.loads(lines[0])
+        assert event["exception"]["values"][0]["type"] == "RuntimeError"
+        assert "forced" not in lines[0]
+        assert sink.posts == []
+
+    def test_no_destination_is_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DEEPCTL_TELEMETRY", "log")
+        client.init_telemetry(_config())
+        with patch("sentry_sdk.init", wraps=sentry_sdk.init) as init:
+            _fail()
+        assert init.call_args.kwargs["dsn"] is None
+        transport = sentry_sdk.get_client().transport
+        assert type(transport).__name__ == "StderrTransport"
+
+    @pytest.mark.parametrize("value", ["off", "0", "false", "No", " disabled "])
+    def test_off_values_turn_it_off(
+        self, monkeypatch: pytest.MonkeyPatch, sink: _Sink, value: str
+    ) -> None:
+        monkeypatch.setenv("DEEPCTL_TELEMETRY", value)
+        assert client.init_telemetry(_config()) is False
+        assert client._state["opt_out"] == "env"
+        with patch("sentry_sdk.init") as init:
+            assert _fail() is False
+        init.assert_not_called()
+        assert sink.posts == []
+
+    @pytest.mark.parametrize("value", ["on", "1", "true", "yes", "print"])
+    def test_other_values_keep_the_default(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv("DEEPCTL_TELEMETRY", value)
+        assert client.init_telemetry(_config()) is True
+
+    def test_other_values_send_as_usual(
+        self, monkeypatch: pytest.MonkeyPatch, sink: _Sink
+    ) -> None:
+        monkeypatch.setenv("DEEPCTL_TELEMETRY", "print")
         client.init_telemetry(_config())
         assert _fail() is True
         sentry_sdk.get_client().close(timeout=2)
