@@ -15,6 +15,8 @@ import click
 import jsonschema
 import pytest
 
+from deepctl_core.agents import HARD_ENV_VARS
+
 from deepctl import _cache, _cli, _manifest
 
 if TYPE_CHECKING:
@@ -22,17 +24,7 @@ if TYPE_CHECKING:
 
 REPO = Path(__file__).resolve().parents[2]
 KEY_SCHEMA = REPO / "docs" / "contracts" / "help-cache-key.schema.json"
-AGENT_VARS = (
-    "AI_AGENT",
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CODEX_SANDBOX",
-    "CODEX_SANDBOX_NETWORK_DISABLED",
-    "CURSOR_AGENT",
-    "GEMINI_CLI",
-    "OR_APP_NAME",
-    "OR_SITE_URL",
-)
+AGENT_VARS = (*HARD_ENV_VARS, "DG_AGENT")
 
 
 class Homes:
@@ -132,8 +124,8 @@ class TestHelpCache:
         del schema["properties"]["files"]["maxItems"]
         jsonschema.validate(recorded, schema)
         assert recorded["prog"] == "dg" and recorded["isatty"] is False
-        assert not any("deepgram.yaml" in f["path"] for f in recorded["files"])
-        assert not any("cwd_relative" in f for f in recorded["files"])
+        project = [f for f in recorded["files"] if f.get("cwd_relative")]
+        assert project == [{"path": "deepgram.yaml", "absent": True, "cwd_relative": True}]
         for name in (
             "DEEPCTL_TELEMETRY_DISABLED",
             "DEEPCTL_TELEMETRY",
@@ -279,7 +271,10 @@ class TestHelpCache:
         key = _cache.help_key("dg", 80, False, b"")
         assert len(key["files"]) <= _cache.MAX_KEY_FILES == 32
         assert _cache.MAX_KEY_ENV == 64
-        assert len(key["env"]) == 21
+        assert len(key["env"]) == len(
+            set(_cache.HELP_ENV_VARS) | set(AGENT_VARS) | {"PATH"}
+        )
+        assert len(key["env"]) <= _cache.MAX_KEY_ENV
 
 
 def _poison(stamp: str, commands: list[dict[str, Any]]) -> None:
@@ -604,6 +599,103 @@ class TestRoundThree:
         assert _cache.help_entry_name("0.5.0", "dgé٣ x", 80, True) == (
             "0.5.0-dg___x-80-tty.txt"
         )
+
+
+def _key_files() -> dict[str, dict[str, Any]]:
+    return {f["path"]: f for f in _cache.key_inputs()["files"]}
+
+
+class TestKeyTrustAndAgentState:
+    """The key changes with every input that changes the help output or
+    the trust and agent decisions behind it."""
+
+    def test_plugin_dir_mode_and_owner_are_keyed(
+        self, homes: Homes, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        plugins = homes.home / ".deepctl" / "plugins"
+        plugins.mkdir(parents=True, mode=0o700)
+        before = _cache.key_inputs()
+        for path in (homes.home / ".deepctl", plugins):
+            item = _key_files()[str(path)]
+            assert item["mode"] == path.stat().st_mode
+            assert item["uid"] == os.getuid()
+        mtime = plugins.stat().st_mtime_ns
+        os.chmod(plugins, 0o777)
+        os.utime(plugins, ns=(mtime, mtime))
+        assert _cache.key_inputs() != before
+        assert stat.S_IMODE(_key_files()[str(plugins)]["mode"]) == 0o777
+
+    def test_config_mode_is_keyed(
+        self, homes: Homes, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = Path(_cache._default_config_file())
+        config.parent.mkdir(parents=True)
+        config.write_text("output: json\n")
+        os.chmod(config, 0o600)
+        before = _cache.key_inputs()
+        mtime = config.stat().st_mtime_ns
+        os.chmod(config, 0o666)
+        os.utime(config, ns=(mtime, mtime))
+        assert _cache.key_inputs() != before
+        assert stat.S_IMODE(_key_files()[str(config)]["mode"]) == 0o666
+
+    def test_project_file_in_the_working_directory_is_keyed(
+        self, homes: Homes, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        work = tmp_path / "proj"
+        work.mkdir()
+        monkeypatch.chdir(work)
+        before = _key_files()["deepgram.yaml"]
+        assert before == {"path": "deepgram.yaml", "absent": True, "cwd_relative": True}
+        (work / "deepgram.yaml").write_text("api:\n  base_url: x\n")
+        after = _key_files()["deepgram.yaml"]
+        assert after["cwd_relative"] is True and "absent" not in after
+        assert after["size"] == (work / "deepgram.yaml").stat().st_size
+
+    def test_dangling_symlink_is_not_recorded_as_absent(
+        self, homes: Homes, tmp_path: Path
+    ) -> None:
+        link = tmp_path / "link"
+        link.symlink_to(tmp_path / "missing")
+        item = _cache.file_state(str(link))
+        assert "absent" not in item
+        assert stat.S_ISLNK(item["mode"])
+
+    def test_every_agent_signal_input_is_keyed(
+        self, homes: Homes, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from deepctl_core import agents
+
+        marker = tmp_path / "devin-marker"
+        monkeypatch.setattr(agents, "DEVIN_MARKER", str(marker))
+        names, files = agents.hard_inputs()
+        assert "PATH" in names and set(HARD_ENV_VARS) <= set(names)
+        assert files == ((str(marker),) if os.name == "posix" else ())
+        inputs = _cache.key_inputs()
+        assert set(names) | {"DG_AGENT"} <= set(inputs["env"])
+        assert inputs["env"]["PATH"] == os.environ.get("PATH")
+        if os.name == "posix":
+            assert _key_files()[str(marker)] == {"path": str(marker), "absent": True}
+            marker.write_text("")
+            assert _cache.key_inputs() != inputs
+
+    def test_pi_path_changes_the_key(
+        self, homes: Homes, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        before = _cache.key_inputs()
+        monkeypatch.setenv("PATH", "/home/x/.pi/agent:/usr/bin:/bin")
+        assert _cache.key_inputs()["env"] != before["env"]
+
+    def test_key_validates_against_the_schema(
+        self, homes: Homes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "deepgram.yaml").write_text("x: 1\n")
+        key = _cache.help_key("dg", 80, False, b"")
+        schema = json.loads(KEY_SCHEMA.read_text())
+        del schema["properties"]["files"]["maxItems"]
+        jsonschema.validate(key, schema)
 
 
 class TestRoundFour:

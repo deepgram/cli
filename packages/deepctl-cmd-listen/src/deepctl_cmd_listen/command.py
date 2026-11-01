@@ -34,9 +34,9 @@ from deepctl_core import (
 from deepctl_core.hosts import CredentialHostError
 from deepctl_core.output import (
     _agentic,
+    agent_mode,
     format_source,
     get_output_format,
-    is_ai_agent,
     print_error,
     print_hint,
     print_info,
@@ -547,7 +547,7 @@ class ListenCommand(BaseCommand):
         """
         if kwargs.get("source") is not None or kwargs.get("mic"):
             return None
-        if not is_ai_agent():
+        if not agent_mode():
             return None
         prog = _prog()
         text = msg.E_LISTEN_NO_SOURCE.format(prog=prog)
@@ -1606,7 +1606,7 @@ class ListenCommand(BaseCommand):
         next_step: str | None = None,
     ) -> ListenCodedError:
         """Report a live-stream failure on stderr and return its envelope."""
-        hint = hint_agent if (_agentic or is_ai_agent()) else hint_human
+        hint = hint_agent if (_agentic or agent_mode()) else hint_human
         print_error(escape(text))
         print_hint(escape(hint))
         return ListenCodedError(
@@ -2038,16 +2038,16 @@ class ListenCommand(BaseCommand):
         self._print_prerecorded_result(result)
 
     def _may_compact(self) -> bool:
-        """Compaction's conditions other than size: a hard AI
-        agent signal, a format chosen by detection rather than asked for,
-        no --full-output, and stdout neither a regular file nor the null
-        device."""
+        """Compaction's conditions other than size: agent mode (a hard AI
+        agent signal, or DG_AGENT=1), a format chosen by detection rather
+        than asked for, no --full-output, and stdout neither a regular file
+        nor the null device."""
         from deepctl_core.result_store import stdout_is_file_or_null
 
         return (
             get_output_format() == "json"
             and format_source() not in ("explicit", "default")
-            and is_ai_agent()
+            and agent_mode()
             and not self._full_output
             and not stdout_is_file_or_null()
         )

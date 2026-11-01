@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 import yaml
 from deepctl_core.output import (
+    AI_AGENT_ENV_MARKERS,
     OutputFormatter,
     get_console,
     is_agentic,
@@ -27,16 +28,7 @@ class TestIsAgentic:
         monkeypatch.setattr("sys.argv", ["dg", "listen", "foo.wav"])
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-        for var in (
-            "CI",
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "CODEX_SANDBOX",
-            "CODEX_SANDBOX_NETWORK_DISABLED",
-            "OR_APP_NAME",
-            "OR_SITE_URL",
-            "NO_COLOR",
-        ):
+        for var in (*AI_AGENT_ENV_MARKERS, "CI", "NO_COLOR", "DG_AGENT"):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("TERM", "xterm-256color")
 
@@ -66,14 +58,14 @@ class TestIsAgentic:
         monkeypatch.setattr("sys.argv", argv)
         assert is_agentic() is True
 
-    @pytest.mark.parametrize("ci_value", ["1", "true"])
+    @pytest.mark.parametrize("ci_value", ["1", "true", "TRUE", " True "])
     def test_ci_env_var_is_hard_signal(self, baseline, monkeypatch, ci_value):
         monkeypatch.setenv("CI", ci_value)
         assert is_agentic() is True
 
     @pytest.mark.parametrize(
         "ci_value",
-        ["false", "0", "", "yes", "TRUE"],
+        ["false", "0", "", "yes"],
     )
     def test_other_ci_values_do_not_count(self, baseline, monkeypatch, ci_value):
         monkeypatch.setenv("CI", ci_value)
@@ -109,11 +101,13 @@ class TestIsAgentic:
         monkeypatch.setattr("sys.stdout.isatty", lambda: False)
         assert is_agentic() is False
 
-    def test_three_soft_signals_trip_threshold(self, baseline, monkeypatch):
+    def test_no_color_is_not_a_soft_signal(self, baseline, monkeypatch):
+        # NO_COLOR asks for no colour, nothing more: it never adds to the
+        # score that switches output to JSON.
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         monkeypatch.setattr("sys.stdout.isatty", lambda: False)
         monkeypatch.setenv("NO_COLOR", "1")
-        assert is_agentic() is True
+        assert is_agentic() is False
 
     def test_dumb_term_counts_as_soft_signal(self, baseline, monkeypatch):
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -491,3 +485,51 @@ class TestLazyQuiet:
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout == ""
+
+
+class TestProgAndColour:
+    def test_invoked_prog_prefers_prog_name_env(self, monkeypatch):
+        from deepctl_core.output import invoked_prog
+
+        monkeypatch.setenv("DEEPCTL_PROG_NAME", "deepgram")
+        assert invoked_prog() == "deepgram"
+
+    def test_invoked_prog_falls_back_to_dg(self, monkeypatch):
+        from deepctl_core.output import invoked_prog
+
+        monkeypatch.delenv("DEEPCTL_PROG_NAME", raising=False)
+        monkeypatch.setattr("sys.argv", ["/opt/python3", "-c"])
+        assert invoked_prog() == "dg"
+
+    @pytest.mark.parametrize(
+        "value", ["/tmp/x;rm -rf ~", "dg\x1b[2J", "a/b", "dg name", "$(id)", "-h"]
+    )
+    def test_invoked_prog_ignores_a_name_that_isnt_plain(self, monkeypatch, value):
+        from deepctl_core.output import invoked_prog
+
+        monkeypatch.setenv("DEEPCTL_PROG_NAME", value)
+        monkeypatch.setattr("sys.argv", ["/opt/python3", "-c"])
+        assert invoked_prog() == "dg"
+
+    @pytest.mark.parametrize(
+        ("agentic", "tty", "env", "expected"),
+        [
+            (False, True, {}, True),
+            (False, True, {"NO_COLOR": "1"}, False),
+            (False, True, {"TERM": "dumb"}, False),
+            (False, False, {}, False),
+            (False, False, {"FORCE_COLOR": "1"}, True),
+            (True, True, {}, False),
+        ],
+    )
+    def test_stderr_color(self, monkeypatch, agentic, tty, env, expected):
+        from deepctl_core import output
+
+        monkeypatch.setitem(output._output_config, "agentic", agentic)
+        for name in ("NO_COLOR", "FORCE_COLOR"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("TERM", "xterm")
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr("sys.stderr.isatty", lambda: tty, raising=False)
+        assert output.stderr_color() is expected

@@ -26,7 +26,7 @@ An entry is named `<version>-<prog>-<width>-<tty>.txt`.
 
 - **`<version>`:** the deepctl version, for example `0.5.0`.
 - **`<prog>`:** the program name in the usage line, with every character outside ASCII `[A-Za-z0-9._-]` replaced by `_`. Python derives the name in this order:
-  1. `DEEPCTL_PROG_NAME`, with surrounding whitespace removed, when that leaves it non-empty.
+  1. `DEEPCTL_PROG_NAME`, with surrounding whitespace removed, when that leaves a plain program name: an ASCII letter or digit, then ASCII letters, digits, `.`, `_` or `-`, at most 64 characters. Any other value is ignored, as if unset.
   2. Otherwise `dg` under `python -m deepctl`.
   3. Otherwise Click's name: the basename of `argv[0]` (on Windows, pip's launcher has already dropped `.exe`).
 
@@ -68,16 +68,19 @@ The launcher serves an entry only when every one of the following holds. Anythin
    - `prog` equals the program name the launcher will show, **before** the file-name sanitizing above, with surrounding whitespace stripped. That is the `DEEPCTL_PROG_NAME` value it sets.
    - `width` and `isatty` equal the values computed above.
 2. **`executable`** is exactly equal, as a string, to the bundle interpreter's `sys.executable`. It isn't resolved through symlinks, so `…/python3` and `…/python3.12` don't match.
-3. **Each item in `files`** is checked with `stat()` on its `path`, following symlinks:
-   - **`absent: true`** matches only when the path doesn't exist. Any `stat` error counts as not existing.
-   - **Any other item** matches only when `mtime_ns`, `size` and `inode` all equal the current values. `mtime_ns` is in nanoseconds; directories are included, and their `size` is whatever `stat` reports (0 on Windows).
+3. **Each item in `files`** is checked on its `path`:
+   - **`cwd_relative: true`** means `path` is relative: resolve it against the launcher's own working directory. Python writes one such item, `deepgram.yaml`. Any other item's `path` is absolute.
+   - **`absent: true`** matches only when nothing is there, not even a dangling symlink: `lstat()` fails.
+   - **Any other item** is checked with `stat()`, following symlinks, and matches only when `mtime_ns`, `size`, `inode`, `mode` and `uid` all equal the current values. A `stat` error is a mismatch. `mtime_ns` is in nanoseconds; directories are included, and their `size` is whatever `stat` reports (0 on Windows). `mode` is the whole `st_mode` (type and permission bits) and `uid` is `st_uid`: chmod and chown change neither mtime nor size, and the trust checks read both.
    - **On Windows, `mtime_ns`** is Python's conversion of the last-write FILETIME: `(filetime - 116444736000000000) * 100`, where `filetime` counts 100 ns intervals since 1601-01-01 UTC.
    - **On Windows, `inode`** is Python's `st_ino`, the file ID from `GetFileInformationByHandle(Ex)`. It can be wider than 64 bits on ReFS (Python 3.12 and later), so compare it as an arbitrary-precision integer.
-   - **`cwd_relative`** is reserved and never written. A reader that finds it treats the key as a miss.
+   - **On Windows, `mode` and `uid`** are Python's `st_mode`, which it builds from the file attributes and the file name's extension (CPython's `attributes_to_mode`), and `st_uid`, which is always 0.
 4. **Each name in `env`** has the same value in the launcher's environment, and `null` means the variable must be unset. On Windows, look the names up case-insensitively, as the OS does. A variable that isn't listed doesn't matter. `DEEPCTL_PROG_NAME` and `DEEPCTL_HELP_CACHE` are never listed: the launcher sets them, and `prog` already records the name.
 5. **`text_sha256`** (lowercase hex) equals the SHA-256 of the entry bytes the launcher read. This binds the text to its key: Python writes the text first and the key second, so text from another run under this key is a miss and is never served.
 
-A bundle install (`-I`, no user site, `HOME` is the real home) lists about 10 files and 21 environment variables. Python writes no key over the limits (32 files, 64 variables), so an install with a long `sys.path` (an editable install, say) gets no entry and always takes the Python path.
+**Agent state.** `files` and `env` together hold every input of the agent detection table (`deepctl_core.agents`): each variable a row reads, `PATH` (the pi row) and `DG_AGENT` in `env`, and the Devin marker file `/opt/.devin` (POSIX only) in `files`. Python never writes an entry in an agent session, so a launcher that checks the key as above never serves one there and needs no copy of the table.
+
+A bundle install (`-I`, no user site, `HOME` is the real home) lists about 14 files and 34 environment variables. Python writes no key over the limits (32 files, 64 variables), so an install with a long `sys.path` (an editable install, say) gets no entry and always takes the Python path.
 
 **Paths and values that aren't valid Unicode.**
 - **Unix:** a path or environment value with bytes that don't decode under the filesystem encoding reaches Python as a lone surrogate (`\udcXX`).
@@ -107,4 +110,4 @@ Writes are atomic. The data goes to a `mkstemp` file (`.<random>.tmp`, mode 0600
 
 If the entry and key on disk are already byte-equal to the new ones, nothing is written. Entries for other versions are pruned, as are `.tmp` files older than an hour.
 
-Root `--help` reads no project file (`deepgram.yaml`), so no project-file warning is ever part of it.
+The key records `deepgram.yaml` in the working directory (`cwd_relative`), so an entry written in one project is never served in a directory whose project file differs.

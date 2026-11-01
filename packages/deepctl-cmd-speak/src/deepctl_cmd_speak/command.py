@@ -39,8 +39,8 @@ from deepctl_core import (
 )
 from deepctl_core.output import (
     _agentic,
+    agent_mode,
     format_source,
-    is_ai_agent,
     print_error,
     print_hint,
     print_warning,
@@ -334,7 +334,7 @@ def _coded(
     details: dict[str, Any] | None = None,
 ) -> SpeakCodedError:
     """Report a coded failure on stderr (two lines) and return its envelope."""
-    hint = hint_agent if (_agentic or is_ai_agent()) else hint_human
+    hint = hint_agent if (_agentic or agent_mode()) else hint_human
     print_error(escape(text))
     print_hint(escape(hint))
     return SpeakCodedError(
@@ -1042,7 +1042,7 @@ class SpeakCommand(BaseCommand):
                 hint_agent=msg.H_SPEAK_O_FORMAT.format(prog=prog, value=legacy),
                 next_step=self._o_format_next_step(prog, legacy, kwargs),
             )
-        agent = is_ai_agent()
+        agent = agent_mode()
         text = kwargs.get("text")
         if agent and not text and not kwargs.get("file"):
             # Never block on a stdin that may never close; "-" opts in.

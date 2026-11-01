@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "agent": null,
+    "captured": false,
+    "sanitising": "Not captured: written from the variables this terminal is documented or known to set (source below), values \"x\" unless the value matters. Replace with a sanitised capture when one is available.",
+    "source": "JetBrains terminal sets TERMINAL_EMULATOR=JetBrains-JediTerm",
+    "terminal": "JetBrains IDE terminal"
+  },
+  "env": {
+    "COLORTERM": "truecolor",
+    "LANG": "en_US.UTF-8",
+    "LOGIN_SHELL": "1",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "SHELL": "/bin/zsh",
+    "SHLVL": "1",
+    "TERM": "xterm-256color",
+    "TERMINAL_EMULATOR": "JetBrains-JediTerm",
+    "__INTELLIJ_COMMAND_HISTFILE__": "x"
+  }
+}

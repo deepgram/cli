@@ -242,7 +242,7 @@ class RestBackend:
     """The default backend: the Deepgram SDK over the shared ``httpx.Client``.
 
     A backend turns a checked base URL and a key into the SDK client the
-    facade uses. #142's SageMaker backend plugs in here (R-16).
+    facade uses. #142's SageMaker backend plugs in here.
     """
 
     name = "rest"
@@ -1084,7 +1084,7 @@ def render(
     from . import output
 
     agentic = bool(output._output_config["agentic"])
-    hard = output.is_ai_agent()
+    hard = output.agent_mode()
     soft_only = agentic and not hard
     _, human, agent, automation = err.messages
     program = prog()
