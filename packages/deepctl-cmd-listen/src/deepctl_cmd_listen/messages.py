@@ -98,3 +98,10 @@ A_OUTPUT_UNWRITABLE = (
     "user {prog} couldn't write its output ({reason}), and don't retry until "
     "it's fixed."
 )
+
+# ── Prerecorded output (0.5.0) ─────────────────────────────────────────────
+
+# DEEPCTL_LISTEN_JSON set to anything but "sdk": ignored, once per run.
+W_LISTEN_JSON_UNKNOWN = (
+    "Ignoring DEEPCTL_LISTEN_JSON={value}: the only value it takes is sdk."
+)

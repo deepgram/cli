@@ -230,6 +230,70 @@ class DeepgramClient:
             transport.raise_for(e, self._secrets, timeout_s=timeout_s)
             raise ApiError(body=f"Transcription failed: {e}")
 
+    def transcribe_body(
+        self,
+        source: str | Path,
+        options: dict[str, Any] | None = None,
+        *,
+        is_url: bool = False,
+        timeout_s: float | None = None,
+        file_id: tuple[int, int] | None = None,
+    ) -> bytes:
+        """Transcribe a file or URL and return the response body as sent.
+
+        The server's JSON, decoded (gzip, deflate, zstd where this Python
+        can decode it) but never parsed or rebuilt, so ``-o json`` prints
+        exactly what Deepgram returned. The request goes through the
+        Transport's shared client, with the same retries the SDK makes
+        before any response byte is read. The body is returned only when it
+        was read completely with a 2xx status: a cut-off body or an error
+        status raises the coded ``TransportError``.
+        """
+        from . import rawhttp
+
+        self.auth_manager.guard()
+        api_key = self.auth_manager.get_api_key()
+        if not api_key:
+            raise ApiError(body="No API key available")
+        # Checks the host before the key goes into any header.
+        headers = self.transport.auth_headers(api_key)
+        self._secrets = (api_key,)
+        url = self.transport.rest_base().rstrip("/") + "/v1/listen"
+        params = rawhttp.query_params(
+            {"model": "nova-3", "smart_format": True, "language": "en-US"},
+            options or {},
+        )
+        if is_url:
+            return rawhttp.post_for_body(
+                self.transport.client,
+                url,
+                params=params,
+                headers=headers,
+                json_body={"url": str(source)},
+                timeout_s=timeout_s,
+                secrets=self._secrets,
+            )
+
+        from .upload import FileBody
+
+        path = Path(source)
+        if not path.exists():
+            raise FileNotFoundError(f"Audio file not found: {path}")
+        with FileBody(path, file_id=file_id) as body:
+            return rawhttp.post_for_body(
+                self.transport.client,
+                url,
+                params=params,
+                headers={
+                    **headers,
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": str(len(body)),
+                },
+                content=body,
+                timeout_s=timeout_s,
+                secrets=self._secrets,
+            )
+
     # ── Text-to-Speech ─────────────────────────────────────────────
 
     def speak_text(

@@ -124,6 +124,90 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+# DEEPCTL_LISTEN_JSON=sdk: prerecorded -o json prints the SDK's model of
+# the response (0.4.0's shape) instead of the server's body. Through 0.6.x.
+_LISTEN_JSON_ENV = "DEEPCTL_LISTEN_JSON"
+_listen_json_warned = False
+
+
+def _sdk_json() -> bool:
+    """True when ``DEEPCTL_LISTEN_JSON=sdk`` asks for 0.4.0's JSON shape.
+    Any other non-empty value is ignored with one warning."""
+    global _listen_json_warned
+    value = os.environ.get(_LISTEN_JSON_ENV, "")
+    if value.strip().lower() == "sdk":
+        return True
+    if value and not _listen_json_warned:
+        _listen_json_warned = True
+        print_warning(
+            msg.W_LISTEN_JSON_UNKNOWN.format(value=escape(value)),
+            stderr=True,
+            ignore_quiet=True,
+        )
+    return False
+
+
+def _passthrough_body(client: DeepgramClient) -> bool:
+    """True when the prerecorded result is read as the server's body.
+
+    For ``-o json`` and ``-o yaml`` (asked for or implied),
+    unless ``DEEPCTL_LISTEN_JSON=sdk`` asks for the SDK's shape or the
+    client goes through a backend other than plain REST.
+    """
+    if get_output_format() not in ("json", "yaml"):
+        return False
+    backend = getattr(getattr(client, "transport", None), "backend", None)
+    if getattr(backend, "name", None) != "rest":
+        return False
+    return not _sdk_json()
+
+
+def _live_engine() -> Any:
+    """The live engine module, imported on first use (it loads asyncio)."""
+    from . import live
+
+    return live
+
+
+def _yaml_text(payload: Any) -> str:
+    import yaml
+
+    return str(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
+
+
+def _silence_stdout() -> None:
+    """Point fd 1 at the null device after a failed write, so the flush
+    at exit doesn't fail again (as ``live.silence_stdout``, without
+    importing the live engine)."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        os.close(devnull)
+    except OSError:
+        pass
+
+
+def _stdout_is_tty() -> bool:
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _parse_body(body: bytes) -> dict[str, Any]:
+    """The response body as a dict; one that isn't a JSON object is a
+    response dg can't read (``network_unavailable``)."""
+    from deepctl_core import transport
+
+    try:
+        data = json.loads(body)
+    except ValueError:
+        raise transport.unreadable_body() from None
+    if not isinstance(data, dict):
+        raise transport.unreadable_body()
+    return data
+
+
 def _machine_format() -> bool:
     """True when live transcript lines stay off stdout: a machine format
     that was asked for (``-o json``/``-o yaml``) or chosen because of a hard
@@ -843,8 +927,21 @@ class ListenCommand(BaseCommand):
 
         from deepctl_core.upload import UploadFileError, coded_result
 
+        # Machine output prints the server's body:
+        # read it as sent instead of building the SDK's model of it.
+        passthrough = _passthrough_body(client)
+        body: bytes | None = None
+        result_dict: dict[str, Any] = {}
         try:
-            if is_url:
+            if passthrough:
+                body = client.transcribe_body(
+                    source,
+                    options,
+                    is_url=is_url,
+                    timeout_s=timeout_s,
+                    file_id=file_id,
+                )
+            elif is_url:
                 result_dict = client.transcribe_url(
                     source, options, timeout_s=timeout_s
                 )
@@ -871,6 +968,13 @@ class ListenCommand(BaseCommand):
                 escape(scrub_url_text(repr(e), source) if url_like else repr(e))
             )
             raise click.ClickException(f"Transcription failed: {detail}")
+
+        # Parsed every time: a 2xx body that isn't a whole JSON object (a
+        # portal's HTML page, a stream cut short that the decoder didn't
+        # notice) is an error, never output. -o json still prints the
+        # bytes as read.
+        if body is not None:
+            result_dict = _parse_body(body)
 
         # ── Format transcript ──────────────────────────────────────────
         if diarize:
@@ -903,7 +1007,7 @@ class ListenCommand(BaseCommand):
         raw_duration = metadata.get("duration", 0.0)
         duration_seconds = float(raw_duration) if raw_duration else 0.0
 
-        return ListenResult(
+        result = ListenResult(
             status="success",
             source=source_kind,
             source_path=output_url(source) if url_like else source,
@@ -915,10 +1019,12 @@ class ListenCommand(BaseCommand):
             captions=captions,
             caption_format=caption_format,
             saved_to=save_to,
-            full_result=result_dict,
+            full_result=result_dict or None,
             probe_info=probe_info,
             duration_seconds=duration_seconds,
         )
+        result._body = body
+        return result
 
     # ── Live streaming (mic and stdin) ─────────────────────────────────
 
@@ -1782,8 +1888,6 @@ class ListenCommand(BaseCommand):
         import json as _json
         from datetime import date, datetime
 
-        from . import live
-
         def _default(obj: Any) -> str:
             if isinstance(obj, (datetime, date)):
                 return obj.isoformat()
@@ -1797,6 +1901,7 @@ class ListenCommand(BaseCommand):
         if isinstance(result, ListenResult) and result.mode == "live":
             if fmt not in ("json", "yaml"):
                 return
+            engine = _live_engine()
             payload = result.model_dump(exclude_none=True)
             try:
                 if fmt == "json":
@@ -1816,12 +1921,12 @@ class ListenCommand(BaseCommand):
                     sys.stdout.flush()
             except BrokenPipeError:
                 # The reader went away (`| true`): end quietly, exit as is.
-                live.silence_stdout()
+                engine.silence_stdout()
             except OSError as exc:
                 # stdout can't take the result (ENOSPC, EIO): output_unwritable
                 # on stderr, exit 1.
-                live.silence_stdout()
-                reason = live.output_failed(exc).os_error or ""
+                engine.silence_stdout()
+                reason = engine.output_failed(exc).os_error or ""
                 kept = self._live_kept or {
                     "transcript": result.transcript,
                     "transcript_chars": len(result.transcript),
@@ -1836,7 +1941,7 @@ class ListenCommand(BaseCommand):
             except OSError:
                 # Already reported on stderr; keep the exit flush from
                 # failing again on a full or broken stdout.
-                live.silence_stdout()
+                _live_engine().silence_stdout()
             return
 
         # Caption mode: print captions to stdout regardless of output format
@@ -1845,17 +1950,57 @@ class ListenCommand(BaseCommand):
             return
 
         # Pre-recorded: full structured output
-        if fmt == "json":
-            payload = (
-                result.full_result
-                if result.full_result
-                else result.model_dump(exclude_none=True)
-            )
-            out.print_json(_json.dumps(payload, indent=2, default=_default))
+        if fmt in ("json", "yaml"):
+            if fmt == "json" and result._body is not None:
+                data = result._body
+                if _stdout_is_tty():
+                    # A person reading a terminal: indented and highlighted.
+                    out.print_json(data.decode("utf-8", "replace"))
+                    return
+            else:
+                payload = (
+                    result.full_result
+                    if result.full_result
+                    else result.model_dump(exclude_none=True)
+                )
+                if fmt == "yaml":
+                    data = _yaml_text(payload).encode()
+                elif _stdout_is_tty():
+                    out.print_json(_json.dumps(payload, indent=2, default=_default))
+                    return
+                else:
+                    data = _json.dumps(
+                        payload, indent=2, ensure_ascii=False, default=_default
+                    ).encode()
+            self._write_stdout(data + b"\n" if fmt == "json" else data)
             return
 
         # Table / default: metadata + transcript
         self._print_prerecorded_result(result)
+
+    def _write_stdout(self, data: bytes) -> None:
+        """Write the prerecorded payload to stdout in one write.
+
+        A reader that went away ends the run quietly; any other write
+        failure (ENOSPC, EIO) is ``output_unwritable``, exit 1.
+        """
+        if not data:
+            return
+        try:
+            sys.stdout.flush()
+            stream = getattr(sys.stdout, "buffer", None)
+            if stream is None:
+                sys.stdout.write(data.decode("utf-8", "replace"))
+            else:
+                stream.write(data)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            _silence_stdout()
+        except OSError as exc:
+            _silence_stdout()
+            reason = " ".join(str(exc.strerror or exc).split())[:200]
+            self._output_unwritable(reason or exc.__class__.__name__, {})
+            self._output_failed = True
 
     def _print_prerecorded_result(self, result: ListenResult) -> None:
         """Print metadata table followed by transcript (and optionally summary/topics)."""
