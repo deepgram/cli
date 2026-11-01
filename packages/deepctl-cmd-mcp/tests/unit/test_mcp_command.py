@@ -17,7 +17,7 @@ class TestMcpCommand:
         """Test command metadata."""
         command = McpCommand()
         assert command.name == "mcp"
-        assert command.requires_auth is True
+        assert command.requires_auth is False
         assert command.requires_project is False
         assert command.ci_friendly is True
         assert hasattr(command, "_shutdown_requested")
@@ -54,21 +54,84 @@ class TestMcpCommand:
         mock_asyncio_run.assert_not_called()
         auth_manager.get_api_key.assert_not_called()
 
-    def test_handle_no_api_key(self):
-        """Test handling missing API key (guard runs before handle, but assert catches it)."""
-        command = McpCommand()
-        config = MagicMock()
+    def test_handle_no_api_key_still_serves(self):
+        """No key: the server starts anyway; the key is read per tool call."""
         auth_manager = MagicMock()
         auth_manager.get_api_key.return_value = None
-        client = MagicMock()
-
-        with pytest.raises(AssertionError):
-            command.handle(
-                config,
-                auth_manager,
-                client,
-                transport="stdio",
+        config = MagicMock()
+        config.api_key_untrusted = False
+        seen = {}
+        with (
+            patch("deepctl_cmd_mcp.command.run_proxy", lambda **kw: seen.update(kw)),
+            patch("deepctl_cmd_mcp.command.asyncio.run"),
+            patch("signal.signal"),
+        ):
+            result = McpCommand().handle(
+                config, auth_manager, MagicMock(), transport="stdio"
             )
+        assert result is None
+        auth_manager.get_api_key.assert_not_called()
+        with pytest.raises(RuntimeError, match="No API key is set"):
+            seen["api_key"]()
+
+    def test_key_is_read_on_each_call(self):
+        auth_manager = MagicMock()
+        auth_manager.get_api_key.side_effect = ["k1", "k2"]
+        seen = {}
+        with (
+            patch("deepctl_cmd_mcp.command.run_proxy", lambda **kw: seen.update(kw)),
+            patch("deepctl_cmd_mcp.command.asyncio.run"),
+            patch("signal.signal"),
+        ):
+            McpCommand().handle(MagicMock(), auth_manager, MagicMock())
+        assert [seen["api_key"](), seen["api_key"]()] == ["k1", "k2"]
+
+    def test_untrusted_config_key_sends_an_agent_to_a_person(self):
+        """The W-PERM-AGENT rule: never tell an agent to run dg login."""
+        from deepctl_core import messages as msg
+
+        from deepctl_cmd_mcp.command import key_or_error
+
+        config = MagicMock()
+        config.api_key_untrusted = True
+        config.config_path = "/x/config.yaml"
+        auth_manager = MagicMock()
+        auth_manager.get_api_key.return_value = None
+        with pytest.raises(RuntimeError) as exc:
+            key_or_error(config, auth_manager)
+        text = str(exc.value)
+        assert text.endswith(msg.W_CFG_UNTRUSTED_FILE_HINT)
+        assert "dg login" not in text
+
+    def test_key_lookup_failure_is_a_start_error(self):
+        from deepctl_cmd_mcp.command import key_or_error
+
+        auth_manager = MagicMock()
+        auth_manager.get_api_key.side_effect = OSError("keyring locked\nmore")
+        with pytest.raises(RuntimeError) as exc:
+            key_or_error(MagicMock(), auth_manager)
+        assert str(exc.value) == (
+            "dg mcp can't start the documentation search: keyring locked"
+        )
+
+    def test_result_never_reaches_stdout(self, capsys):
+        """stdout belongs to the MCP client, even for a failure result."""
+        McpCommand().output_result(
+            MCPServerResult(status="error", message="x"), MagicMock()
+        )
+        assert capsys.readouterr().out == ""
+
+    def test_proxy_gets_the_isolated_protocol_stream(self):
+        stream = object()
+        seen = {}
+        with (
+            patch("deepctl_cmd_mcp.command.isolate_stdout", return_value=stream),
+            patch("deepctl_cmd_mcp.command.run_proxy", lambda **kw: seen.update(kw)),
+            patch("deepctl_cmd_mcp.command.asyncio.run"),
+            patch("signal.signal"),
+        ):
+            McpCommand().handle(MagicMock(), MagicMock(), MagicMock())
+        assert seen["stdout"] is stream
 
     @patch("deepctl_cmd_mcp.command.asyncio.run")
     @patch("signal.signal")
@@ -163,8 +226,13 @@ class TestMcpCommand:
                 port=8080,
                 host="0.0.0.0",
             )
-        assert run_proxy.call_args.kwargs["transport"] == "stdio"
-        assert run_proxy.call_args.kwargs["host"] == "127.0.0.1"
+        # The proxy only knows stdio: no transport, host or port reach it.
+        assert set(run_proxy.call_args.kwargs) == {
+            "base_url",
+            "api_key",
+            "debug",
+            "stdout",
+        }
 
     def test_sse_not_in_examples_or_help(self):
         command = McpCommand()
@@ -260,9 +328,7 @@ class TestMcpCommand:
         self, mock_signal, mock_asyncio_run
     ):
         mock_asyncio_run.side_effect = RuntimeError("proxy crashed")
-        with patch(
-            "deepctl_telemetry.report_exception", side_effect=RuntimeError("x")
-        ):
+        with patch("deepctl_telemetry.report_exception", side_effect=RuntimeError("x")):
             result = McpCommand().handle(
                 MagicMock(),
                 MagicMock(),
@@ -295,3 +361,4 @@ class TestMcpCommand:
 
         assert result is None
         mock_run.assert_called_once()
+        auth_manager.get_api_key.assert_not_called()  # read per tool call

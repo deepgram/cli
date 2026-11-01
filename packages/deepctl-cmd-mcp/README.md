@@ -2,7 +2,7 @@
 
 > Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-MCP proxy command for deepctl — connects to Deepgram's developer API
+MCP server for deepctl: Deepgram documentation search over stdio
 
 ## Installation
 
@@ -33,8 +33,8 @@ pipx run deepctl --help
 
 ## MCP Server Setup
 
-The `deepctl mcp` command runs an MCP (Model Context Protocol) proxy that
-connects to Deepgram's developer API and exposes tools to AI code editors.
+The `deepctl mcp` command runs an MCP (Model Context Protocol) server over
+stdio that gives AI code editors one tool: search of Deepgram's documentation.
 
 ### Prerequisites
 
@@ -62,7 +62,8 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-Or with an explicit API key:
+Or pass `DEEPGRAM_API_KEY` through the editor's `env` block, which forwards it
+from your shell (a key saved by `deepctl login` takes precedence):
 
 ```json
 {
@@ -70,11 +71,14 @@ Or with an explicit API key:
     "deepgram": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["deepctl", "--api-key", "YOUR_KEY", "mcp"]
+      "args": ["deepctl", "mcp"],
+      "env": { "DEEPGRAM_API_KEY": "${DEEPGRAM_API_KEY}" }
     }
   }
 }
 ```
+
+Don't write the key itself into `.mcp.json` or any other file you commit.
 
 ### Cursor
 
@@ -137,8 +141,7 @@ from your MCP config.
 
 ## Dependencies
 
-- `deepgram-mcp>=0.1.0`
-- `mcp>=1.0.0,<2.0.0`
+- `mcp>=1.22.0,<2.0.0`
 - `rich>=13.9.4`
 - `click>=8.1.7`
 - `pydantic>=2.10.1`

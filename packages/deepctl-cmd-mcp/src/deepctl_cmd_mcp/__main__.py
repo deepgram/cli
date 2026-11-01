@@ -1,4 +1,4 @@
-"""Main entry point for running MCP proxy directly via deepctl-cmd-mcp."""
+"""Main entry point for running the MCP server directly via deepctl-cmd-mcp."""
 
 from __future__ import annotations
 
@@ -12,18 +12,18 @@ from typing import Any
 
 def signal_handler(signum: int, frame: Any) -> None:
     """Handle signals by exiting immediately."""
-    print("\nMCP proxy stopped by user", file=sys.stderr)
+    print("\nMCP server stopped by user", file=sys.stderr)
     os._exit(0)
 
 
 def main() -> None:
-    """Run MCP proxy with command line arguments."""
+    """Run the MCP server with command line arguments."""
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     # No abbreviations: --base-url must be recognised as the flag it is.
     parser = argparse.ArgumentParser(
-        description="Run Deepgram MCP proxy", allow_abbrev=False
+        description="Run the Deepgram MCP server", allow_abbrev=False
     )
     parser.add_argument(
         "--transport",
@@ -114,21 +114,19 @@ def main() -> None:
         if source == SOURCE_ENV and not is_allowlisted(approved, allowed):
             warn_env_host(approved, "DEEPGRAM_DX_URL")
 
-    from deepgram_mcp import run_proxy
+    from .proxy import run_proxy
 
+    api_key: str = args.api_key
     try:
         asyncio.run(
             run_proxy(
-                transport="stdio",
-                host=args.host,
-                port=args.port,
-                api_key=args.api_key,
                 base_url=canonical_url(base_url),
+                api_key=lambda: api_key,
                 debug=args.debug,
             )
         )
     except KeyboardInterrupt:
-        print("\nMCP proxy stopped by user", file=sys.stderr)
+        print("\nMCP server stopped by user", file=sys.stderr)
         sys.exit(0)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
