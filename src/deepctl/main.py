@@ -17,8 +17,8 @@ from deepctl_core import (
 from deepctl_core.output import stderr_console
 from rich.traceback import install
 
-# Install rich traceback for better error messages
-install(show_locals=True)
+# Install rich traceback for better error messages, without frame locals.
+install(show_locals=False)
 
 # Diagnostics go to stderr so stdout carries only the requested payload -- a
 # crash or usage error must not corrupt `dg -o json ...` for a script piping
