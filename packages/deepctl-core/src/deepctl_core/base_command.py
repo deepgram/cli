@@ -7,7 +7,7 @@ import click
 
 from .auth import AuthManager
 from .client import DeepgramClient
-from .config import Config
+from .config import Config, flush_config_notices
 from .models import ErrorResult
 from .output import _agentic, print_error, stderr_console
 from .output import console as stdout_console
@@ -75,6 +75,8 @@ class BaseCommand(ABC):
             **kwargs: Command arguments and options
         """
         with TimingContext(f"command_{self.name}_total"):
+            # Output mode is set up by now; print queued config notices.
+            flush_config_notices()
             with TimingContext("command_setup"):
                 # Get configuration from context
                 config = ctx.obj.get("config")

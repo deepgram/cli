@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 import platform
 import re
-import stat
 import sys
 import threading
 import time
@@ -99,62 +98,44 @@ def _default_config_path() -> Path:
     return Path(platformdirs.user_config_dir("deepctl", "deepgram")) / "config.yaml"
 
 
-def _parse_user_config(text: str) -> tuple[Any, bool]:
-    """Parse config text; also report whether a telemetry key repeats."""
-    import yaml
-
-    class _Loader(yaml.SafeLoader):
-        repeated_telemetry_key = False
-
-        def construct_mapping(
-            self, node: yaml.MappingNode, deep: bool = False
-        ) -> dict[Any, Any]:
-            seen: set[str] = set()
-            for key_node, _ in node.value:
-                if isinstance(key_node, yaml.ScalarNode):
-                    key = key_node.value
-                    if key in _TELEMETRY_KEYS and key in seen:
-                        self.repeated_telemetry_key = True
-                    seen.add(key)
-            return super().construct_mapping(node, deep=deep)
-
-    loader = _Loader(text)
-    try:
-        data = loader.get_single_data()
-    finally:
-        loader.dispose()
-    return data, loader.repeated_telemetry_key
+_REFUSED = object()
 
 
-def _file_opts_out(config_file: Path, text: str | None = None) -> bool:
+def _file_opts_out(config_file: Path, text: object = None) -> bool:
     """Whether one user config file turns telemetry off.
 
-    `text` is the file's content as Config already read it; the file is
-    opened here only when that isn't available, and only if it is a regular
-    file (a FIFO or a pipe can be read once, and opening a FIFO again would
-    wait forever). Anything else that exists counts as opted out.
+    `text` is the file's content as Config read it, or _REFUSED when Config
+    didn't use the file. Without it, the file is read here through core's
+    config reader (read_user_config_text), with the same limits and
+    refusals as a config load, and never at all when Config refused it.
+    Telemetry never parses config YAML itself: core's load_config_text
+    does, with every load limit.
 
     Telemetry stays on when the file is absent or empty, or has no
-    `telemetry` setting, or sets `enabled` to the boolean `true`. A file that
-    can't be read or parsed, repeats a telemetry key, has a `telemetry`
-    section that isn't a mapping, or holds any other `enabled` value turns
-    it off. A top-level `telemetry.enabled` key counts too.
+    `telemetry` setting, or sets `enabled` to the boolean `true`. A file
+    that a load would refuse (not a regular file, too large, a bomb, a
+    parse error, an in-place rewrite that didn't finish, untrusted in an AI
+    agent session) turns it off, as does one that repeats a telemetry key,
+    has a `telemetry` section that isn't a mapping, or holds any other
+    `enabled` value. A top-level `telemetry.enabled` key counts too.
     """
-    if text is None:
+    if text is _REFUSED:
+        return True
+    try:
+        from deepctl_core.config import load_config_text, read_user_config_text
+    except ImportError:  # an older deepctl-core: no capped reader to use
+        return True
+    if not isinstance(text, str):
         try:
-            mode = os.stat(config_file).st_mode
+            text = read_user_config_text(config_file)
         except FileNotFoundError:
             return False
-        except OSError:
-            return True
-        if not stat.S_ISREG(mode):
-            return True
-        try:
-            text = config_file.read_text(encoding="utf-8")
         except Exception:
             return True
+        if text is None:
+            return True
     try:
-        data, repeated = _parse_user_config(text)
+        data, repeated = load_config_text(text, _TELEMETRY_KEYS)
     except Exception:
         return True
     if repeated:
@@ -180,14 +161,18 @@ def _user_config_opts_out(config: Config) -> bool:
 
     Both the default config file and, with `--config`, the named file count;
     telemetry is off if either turns it off. The file Config loaded is
-    parsed from the text Config kept. The merged Config is not used,
-    because it also holds the project's `deepgram.yaml`.
+    parsed from the text Config kept, and counts as opted out when Config
+    refused it. The merged Config is not used, because it also holds the
+    project's `deepgram.yaml`.
     """
-    files: dict[str, str | None] = {}
+    files: dict[str, object] = {}
     explicit = getattr(config, "config_path", None)
     if explicit is not None:
         text = getattr(config, "user_config_text", None)
-        files[str(explicit)] = text if isinstance(text, str) else None
+        if getattr(config, "user_config_refused", False) is True:
+            files[str(explicit)] = _REFUSED
+        else:
+            files[str(explicit)] = text if isinstance(text, str) else None
     try:
         files.setdefault(str(_default_config_path()), None)
     except Exception:

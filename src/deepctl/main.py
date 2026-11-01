@@ -37,7 +37,13 @@ def _record_install_method_cb(
     try:
         config = Config()
         config._set_config_value("update.installation_method", value)
-        config.save()
+        config.save(implicit=True)
+    except OSError as exc:
+        # A failed write must not look like success to the install script.
+        console.print(f"[red]Error:[/red] could not save the config file: {exc}")
+        # sys.exit, not ctx.exit: main() runs Click with standalone_mode=False,
+        # where ctx.exit(1) would only become an ignored return value.
+        sys.exit(1)
     except Exception:
         pass
     ctx.exit()

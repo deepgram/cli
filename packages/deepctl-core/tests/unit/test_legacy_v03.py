@@ -2,6 +2,7 @@
 
 import contextlib
 import csv
+import gc
 import hashlib
 import importlib.util
 import json
@@ -939,6 +940,7 @@ def kept(folder):
 
 
 def open_fds():
+    gc.collect()  # fds other tests left to the collector
     return len(
         os.listdir("/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd")
     )
