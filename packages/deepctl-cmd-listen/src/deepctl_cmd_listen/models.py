@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from deepctl_core import BaseResult, CodedErrorResult
+from pydantic import PrivateAttr
 
 
 class ListenResult(BaseResult):
@@ -30,6 +31,10 @@ class ListenResult(BaseResult):
     full_result: dict[str, Any] | None = None  # raw Deepgram API response
     probe_info: dict[str, Any] | None = None
     duration_seconds: float = 0.0
+
+    # The server's response body, as read, when it is printed as-is
+    # (``-o json``). Not part of the model's fields or its dump.
+    _body: bytes | None = PrivateAttr(default=None)
 
 
 class ListenCodedError(CodedErrorResult):

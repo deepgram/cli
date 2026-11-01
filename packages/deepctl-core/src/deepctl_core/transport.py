@@ -811,14 +811,20 @@ def map_exception(
         # The SDK got a complete success response it couldn't parse: most
         # often not Deepgram's at all (a proxy's or captive portal's page).
         # A body cut short raises RemoteProtocolError above instead.
-        host = _host()
-        return TransportError(
-            "network_unavailable",
-            {"host": host, "reason": REASON_UNREADABLE, "prog": prog() or "dg"},
-            {"host": host, "reason": REASON_UNREADABLE},
-            NETWORK_UNREADABLE,
-        )
+        return unreadable_body()
     return for_status(status, exc.headers, exc.body, secrets)
+
+
+def unreadable_body() -> TransportError:
+    """``network_unavailable`` for a complete response that can't be read
+    (an error status with no meaning here, or a body that can't be decoded)."""
+    host = _host()
+    return TransportError(
+        "network_unavailable",
+        {"host": host, "reason": REASON_UNREADABLE, "prog": prog() or "dg"},
+        {"host": host, "reason": REASON_UNREADABLE},
+        NETWORK_UNREADABLE,
+    )
 
 
 def for_status(
