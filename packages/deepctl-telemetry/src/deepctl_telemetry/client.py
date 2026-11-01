@@ -319,7 +319,8 @@ def report_exception(exc: BaseException | None) -> bool:
     DEEPCTL_TELEMETRY_DSN. Imports and initializes the SDK only here. At
     most one report per process. The flush waits at most
     FLUSH_TIMEOUT_SECONDS after init, and the whole call is held to
-    REPORT_BUDGET_SECONDS (but the flush always gets FLUSH_FLOOR_SECONDS).
+    REPORT_BUDGET_SECONDS (but the flush always gets FLUSH_FLOOR_SECONDS);
+    there is no flush when no event was queued.
     Never raises an Exception; a KeyboardInterrupt during the flush
     propagates to the caller. Returns whether an event was handed to the
     SDK.
@@ -345,7 +346,10 @@ def report_exception(exc: BaseException | None) -> bool:
             cli_version = "unknown"
 
         sentry_sdk.init(**_sdk_options(dsn, cli_version))
-        sentry_sdk.capture_exception(target)
+        if sentry_sdk.capture_exception(target) is None:
+            # Dropped before it was queued (a closed-stream error, or no
+            # field left to send): there is nothing to wait for.
+            return False
         left = REPORT_BUDGET_SECONDS - (time.monotonic() - started)
         timeout = max(FLUSH_FLOOR_SECONDS, min(FLUSH_TIMEOUT_SECONDS, left))
         sentry_sdk.flush(timeout=timeout)
