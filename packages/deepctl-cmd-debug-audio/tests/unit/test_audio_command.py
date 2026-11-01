@@ -1,6 +1,7 @@
 """Tests for audio debug command."""
 
 import json
+import os
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -11,7 +12,18 @@ from deepctl_cmd_debug_audio.models import (
     AudioInfo,
     AudioStream,
 )
+from deepctl_cmd_debug_audio import command as command_module
 from deepctl_core import AuthManager, Config, DeepgramClient
+
+
+@pytest.fixture(autouse=True)
+def _ffprobe_lookup_via_which(monkeypatch):
+    """Drive the ffprobe lookup through shutil.which, which tests patch."""
+    import shutil
+
+    monkeypatch.setattr(
+        command_module, "resolve_tool", lambda config, name, key: shutil.which(name)
+    )
 
 
 class TestAudioCommand:
@@ -96,9 +108,10 @@ class TestAudioCommand:
         mock_which.return_value = None
         assert command.check_ffmpeg_installed() is False
 
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
     @patch("ffmpeg.probe")
     def test_run_ffprobe_standard(
-        self, mock_probe, command, sample_probe_data
+        self, mock_probe, mock_which, command, sample_probe_data
     ):
         """Test running ffprobe without custom arguments."""
         mock_probe.return_value = sample_probe_data
@@ -106,11 +119,12 @@ class TestAudioCommand:
         result = command.run_ffprobe("test.mp3")
 
         assert result == sample_probe_data
-        mock_probe.assert_called_once_with("test.mp3")
+        mock_probe.assert_called_once_with("test.mp3", cmd="/usr/bin/ffprobe")
 
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
     @patch("subprocess.run")
     def test_run_ffprobe_custom_args(
-        self, mock_run, command, sample_probe_data
+        self, mock_run, mock_which, command, sample_probe_data
     ):
         """Test running ffprobe with custom arguments."""
         mock_result = Mock()
@@ -122,7 +136,7 @@ class TestAudioCommand:
 
         assert result == sample_probe_data
         expected_cmd = [
-            "ffprobe",
+            "/usr/bin/ffprobe",
             "-v",
             "quiet",
             "-print_format",
@@ -346,3 +360,19 @@ class TestOutputChannels:
 
         assert "Audio File Analysis Complete" in captured.out
         assert "Deepgram Compatibility Check" in captured.out
+
+
+def test_ffprobe_never_from_current_directory(tmp_path, monkeypatch):
+    """A repository's ./ffprobe is not run, even with "." on PATH."""
+    from deepctl_core import tools
+
+    tool = tmp_path / "ffprobe"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(tmp_path)]))
+    monkeypatch.setattr(command_module, "resolve_tool", tools.resolve_tool)
+    command = AudioCommand()
+    assert command.check_ffmpeg_installed() is False
+    with pytest.raises(Exception, match="ffprobe not found"):
+        command.run_ffprobe("a.wav")

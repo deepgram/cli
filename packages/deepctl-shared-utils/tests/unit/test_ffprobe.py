@@ -1,6 +1,7 @@
 """Tests for shared ffprobe wrapper."""
 
 import json
+import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -87,19 +88,19 @@ class TestModels:
 class TestGetFfprobePath:
     """Test get_ffprobe_path function."""
 
-    @patch("deepctl_shared_utils.ffprobe.shutil.which")
+    @patch("deepctl_shared_utils.ffprobe._find_on_path")
     def test_auto_detect(self, mock_which):
         mock_which.return_value = "/usr/bin/ffprobe"
         assert get_ffprobe_path() == "/usr/bin/ffprobe"
 
-    @patch("deepctl_shared_utils.ffprobe.shutil.which")
+    @patch("deepctl_shared_utils.ffprobe._find_on_path")
     def test_not_found(self, mock_which):
         mock_which.return_value = None
         assert get_ffprobe_path() is None
 
     @patch("deepctl_shared_utils.ffprobe.os.access")
     @patch("deepctl_shared_utils.ffprobe.os.path.isfile")
-    @patch("deepctl_shared_utils.ffprobe.shutil.which")
+    @patch("deepctl_shared_utils.ffprobe._find_on_path")
     def test_config_path_used(self, mock_which, mock_isfile, mock_access):
         mock_isfile.return_value = True
         mock_access.return_value = True
@@ -114,7 +115,7 @@ class TestGetFfprobePath:
 
     @patch("deepctl_shared_utils.ffprobe.os.access")
     @patch("deepctl_shared_utils.ffprobe.os.path.isfile")
-    @patch("deepctl_shared_utils.ffprobe.shutil.which")
+    @patch("deepctl_shared_utils.ffprobe._find_on_path")
     def test_config_path_invalid_falls_back(
         self, mock_which, mock_isfile, mock_access
     ):
@@ -127,6 +128,57 @@ class TestGetFfprobePath:
 
         assert get_ffprobe_path(config) == "/usr/bin/ffprobe"
 
+
+    def test_relative_config_path_never_used(self, tmp_path, monkeypatch):
+        """A relative stored path would resolve inside the current directory."""
+        tool = tmp_path / "tools" / "ffprobe"
+        tool.parent.mkdir()
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PATH", "")
+
+        config = Mock()
+        config.get.return_value = "./tools/ffprobe"
+
+        assert get_ffprobe_path(config) is None
+
+    def test_absolute_config_path_used(self, tmp_path):
+        tool = tmp_path / "ffprobe"
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+
+        config = Mock()
+        config.get.return_value = str(tool)
+
+        assert get_ffprobe_path(config) == str(tool)
+
+    def test_path_lookup_skips_relative_entries(self, tmp_path, monkeypatch):
+        tool = tmp_path / "ffprobe"
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PATH", os.pathsep.join([".", "", "tools"]))
+
+        assert get_ffprobe_path() is None
+
+    def test_path_lookup_skips_current_directory(self, tmp_path, monkeypatch):
+        tool = tmp_path / "ffprobe"
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PATH", str(tmp_path))
+
+        assert get_ffprobe_path() is None
+
+    def test_path_lookup_finds_absolute_entries(self, tmp_path, monkeypatch):
+        tool = tmp_path / "bin" / "ffprobe"
+        tool.parent.mkdir()
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+        monkeypatch.setenv("PATH", str(tool.parent))
+
+        assert get_ffprobe_path() == str(tool)
 
 class TestCheckFfprobe:
     """Test check_ffprobe function."""
