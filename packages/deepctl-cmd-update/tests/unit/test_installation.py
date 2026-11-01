@@ -53,7 +53,7 @@ class TestGetUpdateCommand:
     def test_returns_list_for_homebrew(self, detector):
         cmd = detector.get_update_command(InstallMethod.HOMEBREW)
         assert isinstance(cmd, list)
-        assert cmd == ["brew", "upgrade", "deepctl"]
+        assert cmd == ["brew", "upgrade", "deepgram"]
 
     def test_returns_list_for_uv_tool(self, detector):
         cmd = detector.get_update_command(InstallMethod.UV_TOOL)
@@ -234,7 +234,27 @@ class TestGetUpdateInstructions:
             python_executable="/opt/homebrew/bin/python3",
         )
         instructions = detector.get_update_instructions(info)
-        assert "brew upgrade deepctl" in instructions
+        assert instructions == (
+            "Please update using Homebrew: brew update && brew upgrade deepgram"
+        )
+
+    @patch("deepctl_cmd_update.installation.sys")
+    def test_system_install_on_macos_names_brew_formula(self, mock_sys, detector):
+        from deepctl_cmd_update.installation import InstallationInfo
+
+        mock_sys.platform = "darwin"
+        info = InstallationInfo(
+            method=InstallMethod.SYSTEM,
+            path="/usr/local/lib/python3.12/site-packages",
+            virtual_env=False,
+            editable=False,
+            python_executable="/usr/local/bin/python3",
+        )
+        instructions = detector.get_update_instructions(info)
+        # The Homebrew formula is `deepgram`; `deepctl` is not a formula.
+        assert instructions == (
+            "Please update using Homebrew: brew update && brew upgrade deepgram"
+        )
 
     def test_uvx_instructions(self, detector):
         from deepctl_cmd_update.installation import InstallationInfo

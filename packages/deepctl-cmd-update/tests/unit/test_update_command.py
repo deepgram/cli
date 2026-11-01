@@ -235,7 +235,7 @@ class TestUpdateCommand:
         )
         mock_detector.detect.return_value = mock_install_info
         mock_detector.get_update_command.return_value = [
-            "brew", "upgrade", "deepctl",
+            "brew", "upgrade", "deepgram",
         ]
 
         mock_process = MagicMock()
