@@ -170,3 +170,66 @@ def test_rewrite_lock_that_stays_taken_is_opted_out(
         os.close(fd)
     assert is_enabled(Config(config_path=str(path))) is True
 
+
+linux_only = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="XDG layout (Linux)"
+)
+
+
+@pytest.fixture
+def real_home_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An AI agent session whose default config is the real-home one."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(config_module, "_real_home", lambda: str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(output, "is_ai_agent", lambda: True)
+    directory = home / ".config" / "deepctl"
+    directory.mkdir(parents=True)
+    directory.chmod(0o700)
+    default = directory / "config.yaml"
+    monkeypatch.setattr(client, "_default_config_path", lambda: default)
+    return default
+
+
+@linux_only
+@pytest.mark.parametrize("mode", [0o600, 0o666])
+def test_agent_default_file_opt_out_follows_trust(
+    tmp_path: Path, real_home_config: Path, mode: int
+) -> None:
+    """An untrusted default file (others can change it) plus a separate
+    --config counts as opted out; a trusted one without an opt-out doesn't."""
+    real_home_config.write_text(NO_OPT_OUT, encoding="utf-8")
+    real_home_config.chmod(mode)
+    path = _custom(tmp_path, NO_OPT_OUT)
+    assert is_enabled(Config(config_path=str(path))) is (mode == 0o600)
+
+
+@linux_only
+@pytest.mark.parametrize("mode", [0o600, 0o666])
+def test_agent_loaded_default_file_opt_out_follows_trust(
+    real_home_config: Path, mode: int
+) -> None:
+    real_home_config.write_text(NO_OPT_OUT, encoding="utf-8")
+    real_home_config.chmod(mode)
+    config = Config()
+    assert config.user_config_refused is (mode != 0o600)
+    assert is_enabled(config) is (mode == 0o600)
+
+
+@linux_only
+def test_agent_default_file_away_from_real_home_is_opted_out(
+    tmp_path: Path, real_home_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """XDG_CONFIG_HOME pointing elsewhere: that default file isn't trusted."""
+    xdg = tmp_path / "repo" / ".dg"
+    (xdg / "deepctl").mkdir(parents=True)
+    (xdg / "deepctl" / "config.yaml").write_text(NO_OPT_OUT, encoding="utf-8")
+    (xdg / "deepctl" / "config.yaml").chmod(0o600)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.setattr(
+        client, "_default_config_path", lambda: xdg / "deepctl" / "config.yaml"
+    )
+    path = _custom(tmp_path, NO_OPT_OUT)
+    assert is_enabled(Config(config_path=str(path))) is False
