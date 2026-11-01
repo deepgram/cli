@@ -9,6 +9,12 @@ from deepctl_telemetry import init_telemetry, is_enabled, render_notice
 from deepctl_telemetry.client import DISABLE_ENV_VAR
 
 
+@pytest.fixture(autouse=True)
+def _telemetry_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo the root conftest's opt-out so these tests see the real default."""
+    monkeypatch.delenv(DISABLE_ENV_VAR, raising=False)
+
+
 def _config(value: bool | None = True) -> Mock:
     config = Mock()
     config.get.return_value = value
