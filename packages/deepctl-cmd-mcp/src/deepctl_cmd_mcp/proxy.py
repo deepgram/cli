@@ -4,8 +4,8 @@ Vendored from deepgram-mcp 0.1.1 (MIT, Deepgram) and reworked so a broken
 remote can never break the local session:
 
 - ``initialize`` and ``tools/list`` are answered from fixed local text
-  (``INSTRUCTIONS`` and ``TOOLS`` below). The remote's instructions and
-  tool descriptions are never passed through.
+  (``deepctl.mcp._fast.INSTRUCTIONS`` and ``TOOLS``). The remote's
+  instructions and tool descriptions are never passed through.
 - Nothing connects until a ``tools/call``. Each call opens its own session
   to ``{base_url}/kapa/mcp``, so a remote that is down, refuses the key or
   restarted is an ``isError`` result for that call, and the next call tries
@@ -13,7 +13,8 @@ remote can never break the local session:
 - The remote's ``CallToolResult`` is returned whole: ``content``,
   ``isError``, ``structuredContent`` and ``_meta``.
 - The HTTP client follows no redirects, keeps no cookies and verifies
-  TLS: a 3xx is a tool error, so the key never goes to another origin.
+  TLS, like the rest of deepctl: a 3xx is a tool error, so the key never
+  goes to another origin.
 
 Callers decide which hosts may receive the key before they get here.
 """
@@ -34,42 +35,6 @@ if TYPE_CHECKING:
 
 DEFAULT_BASE_URL = DEFAULT_DX_URL
 REMOTE_PATH = "/kapa/mcp"
-
-SERVER_NAME = "deepgram-mcp"
-
-# Fixed local text, never passed through from the remote service: its
-# instructions and tool descriptions are text an attacker could influence.
-INSTRUCTIONS = (
-    "Deepgram developer documentation search. Call "
-    "search_deepgram_knowledge_sources with a question about Deepgram's "
-    "speech-to-text, text-to-speech, Voice Agent or audio intelligence APIs, "
-    "SDKs or CLI. Results are passages from Deepgram's documentation, each "
-    "with its source URL; cite the URL when you use a passage."
-)
-
-# The tool names are the remote service's; the descriptions and schemas are
-# ours. Calls are forwarded only for the names in this table.
-TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "search_deepgram_knowledge_sources",
-        "title": "Search Deepgram documentation",
-        "description": (
-            "Search Deepgram's documentation, API reference and guides. "
-            "Returns the most relevant passages, each with its source URL."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "A question or search terms, in natural language.",
-                }
-            },
-            "required": ["query"],
-        },
-        "annotations": {"readOnlyHint": True, "openWorldHint": True},
-    }
-]
 
 # Opening the remote session (HTTP connect plus MCP initialize) and one call.
 CONNECT_TIMEOUT_S = 15.0
@@ -185,16 +150,15 @@ def http_client(
     timeout: Any = None,
     auth: Any = None,
 ) -> Any:
-    """The MCP SDK's ``httpx_client_factory``: no redirects, no cookies.
+    """The MCP SDK's ``httpx_client_factory``: deepctl's client settings.
 
-    A 3xx could take the key to another origin. The SDK's own factory
-    follows every redirect before mcp 1.30, and 1.30 follows same-origin
-    ones itself up to ``max_redirects``, so that is 0 too: any 3xx is an
-    ``HTTPStatusError`` and a tool error. TLS is verified.
+    No redirects (a 3xx could take the key to another origin), no cookies,
+    TLS verified. The SDK's own factory follows every redirect before mcp
+    1.30, and 1.30 follows same-origin ones itself up to ``max_redirects``,
+    so that is 0 too: any 3xx is an ``HTTPStatusError`` and a tool error.
     """
-    from http.cookiejar import DefaultCookiePolicy
-
     import httpx
+    from deepctl_core.transport import _no_cookies
 
     client = httpx.AsyncClient(
         headers=headers,
@@ -204,26 +168,16 @@ def http_client(
         max_redirects=0,
         verify=True,
     )
-    client.cookies.jar.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+    _no_cookies(client)  # type: ignore[arg-type]
     return client
 
 
 def local_tools() -> list[types.Tool]:
     """The fixed local tool table, as the MCP SDK's models."""
     import mcp.types as types
+    from deepctl.mcp._fast import TOOLS
 
     return [types.Tool.model_validate(tool) for tool in TOOLS]
-
-
-def _version() -> str:
-    from importlib.metadata import PackageNotFoundError, version
-
-    for dist in ("deepctl", "deepctl-cmd-mcp"):
-        try:
-            return version(dist)
-        except PackageNotFoundError:
-            continue
-    return "0"
 
 
 async def call_remote(
@@ -282,6 +236,8 @@ def build_server(
     the complete text for the client. It runs on each call, so a key set
     up after the server started (``dg login``) is picked up.
     """
+    from deepctl import __version__
+    from deepctl.mcp._fast import INSTRUCTIONS, SERVER_NAME
     from mcp.server.lowlevel import NotificationOptions, Server
     from mcp.server.models import InitializationOptions
 
@@ -311,7 +267,7 @@ def build_server(
 
     options = InitializationOptions(
         server_name=SERVER_NAME,
-        server_version=_version(),
+        server_version=__version__,
         capabilities=server.get_capabilities(
             notification_options=NotificationOptions(),
             experimental_capabilities={},
@@ -322,12 +278,27 @@ def build_server(
 
 
 class LineWriter:
-    """The protocol stream for the MCP SDK's stdio server: UTF-8 lines."""
+    """The protocol stream for the MCP SDK's stdio server: UTF-8 lines.
 
-    def __init__(self, stdout: BinaryIO) -> None:
+    Optionally drops the server's reply to one request id (a replayed
+    ``initialize`` that the client already got an answer to).
+    """
+
+    def __init__(self, stdout: BinaryIO, drop_id: object = None) -> None:
         self._stdout = stdout
+        self._drop_id = drop_id
 
     async def write(self, data: str) -> None:
+        if self._drop_id is not None:
+            import json
+
+            try:
+                reply_id = json.loads(data).get("id")
+            except (ValueError, AttributeError):
+                reply_id = None
+            if reply_id == self._drop_id:
+                self._drop_id = None
+                return
         self._stdout.write(data.encode("utf-8"))
 
     async def flush(self) -> None:
@@ -366,10 +337,7 @@ async def serve(
     api_key: Callable[[], str],
     debug: bool = False,
 ) -> None:
-    """Serve one MCP session over the given async line streams.
-
-    ``stdin`` of ``None`` is the process's own stdin.
-    """
+    """Serve one MCP session over the given async line streams."""
     import mcp.server.stdio as stdio
 
     server, options = build_server(base_url=base_url, api_key=api_key, debug=debug)
