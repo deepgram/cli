@@ -287,22 +287,3 @@ def test_http_client_follows_no_redirects_and_keeps_no_cookies() -> None:
         assert not client.cookies.jar._policy.allowed_domains()
     finally:
         asyncio.run(client.aclose())
-
-
-def test_isolate_stdout_moves_fd1_to_stderr(tmp_path: Any) -> None:
-    """In a child process: stray stdout writes land on stderr."""
-    import subprocess
-    import sys
-
-    code = (
-        "import sys\n"
-        "from deepctl_cmd_mcp.proxy import isolate_stdout\n"
-        "out = isolate_stdout()\n"
-        "print('stray')\n"
-        "sys.stdout.flush()\n"
-        "out.write(b'protocol\\n'); out.flush()\n"
-    )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=60)
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout == b"protocol\n"
-    assert b"stray" in proc.stderr

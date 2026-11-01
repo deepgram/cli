@@ -531,3 +531,43 @@ class TestHiddenAliases:
 
     def test_preprocessor_is_gone(self):
         assert not hasattr(_cli_mod, "preprocess_hyphenated_commands")
+
+
+class TestMcpServerRun:
+    """Which argv runs `dg mcp` as a server (stdout isolated first)."""
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["mcp"], True),
+            (["mcp", "--base-url", "https://x.example"], True),
+            (["mcp", "--debug"], True),
+            (["--profile", "staging", "mcp"], True),
+            (["-p", "mcp", "mcp"], True),
+            (["-o", "json", "--quiet", "mcp", "--transport", "sse"], True),
+            (["--profile=mcp", "mcp"], True),
+            (["mcp", "--help"], False),
+            (["mcp", "-h"], False),
+            (["mcp", "--agent-friendly"], False),
+            (["--help", "mcp"], False),
+            (["--profile", "mcp"], False),
+            (["models", "mcp"], False),
+            ([], False),
+        ],
+    )
+    def test_detection(self, argv, expected):
+        from deepctl import main as main_module
+
+        assert main_module._is_mcp_server_run(argv) is expected
+
+    def test_root_value_options_match_the_cli(self):
+        from deepctl import main as main_module
+        from deepctl._cli import cli
+
+        takes_value = {
+            opt
+            for param in cli.params
+            if isinstance(param, click.Option) and not param.is_flag
+            for opt in param.opts
+        }
+        assert takes_value == main_module._ROOT_VALUE_OPTIONS

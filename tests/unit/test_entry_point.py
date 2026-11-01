@@ -142,7 +142,9 @@ class TestLauncher:
                  "import os; print(os.environ.get('DEEPCTL_LAUNCHER'))"],
                 capture_output=True, text=True,
             ).stdout.strip()
-            print(json.dumps({"launcher": m.LAUNCHER, "child": child}))
+            # stderr: `dg mcp` points fd 1 at stderr for the rest of the run.
+            print(json.dumps({"launcher": m.LAUNCHER, "child": child}),
+                  file=sys.stderr)
             """
         )
         for args in (["--version"], ["--quiet", "--version"], ["mcp"]):
@@ -152,7 +154,7 @@ class TestLauncher:
                 DEEPCTL_LAUNCHER="npm",
             )
             assert proc.returncode == 0, proc.stderr
-            result = json.loads(proc.stdout.strip().splitlines()[-1])
+            result = json.loads(proc.stderr.strip().splitlines()[-1])
             assert result == {"launcher": "npm", "child": "None"}, args
 
     def test_capture_is_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
