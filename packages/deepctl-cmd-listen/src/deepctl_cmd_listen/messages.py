@@ -105,3 +105,35 @@ A_OUTPUT_UNWRITABLE = (
 W_LISTEN_JSON_UNKNOWN = (
     "Ignoring DEEPCTL_LISTEN_JSON={value}: the only value it takes is sdk."
 )
+
+# Agent-mode compaction. N-COMPACT is printed after "INFO: ".
+CODE_STATE_UNWRITABLE = "state_unwritable"
+N_COMPACT = (
+    "The result is {full_result_bytes_human} so it was saved to "
+    "{full_result_path}; stdout has a summary. Pass --full-output to print "
+    "all of it."
+)
+A_COMPACT = (
+    "The full result is in full_result_path and the plain transcript in "
+    "transcript_path. Read those files in parts instead of printing them "
+    "whole. For jq pipelines, pass -o json."
+)
+E_COMPACT_UNWRITABLE = (
+    "The result is {full_result_bytes_human}, too large to print here, and "
+    "{prog} couldn't save it to {dir} or the temp directory."
+)
+H_COMPACT_UNWRITABLE = (
+    "Pass -o json and redirect stdout to a file, or pass --full-output to "
+    "print it all. Either one transcribes (and bills) the audio again."
+)
+A_COMPACT_UNWRITABLE = (
+    "Ask the user for a writable directory. Rerunning with -o json "
+    "redirected to a file there transcribes (and bills) the audio again. "
+    "Don't pass --full-output: the result is too large to read whole."
+)
+# The shared temp directory for results was another user's or a symlink;
+# a fresh private directory is used for this run instead.
+W_COMPACT_TEMP_REFUSED = (
+    "Not using {path} for saved results: it isn't a private directory owned "
+    "by you. Using a new temporary directory instead."
+)

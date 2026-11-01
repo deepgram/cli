@@ -60,6 +60,27 @@
       },
       {
         "class": "option",
+        "name": "full_output",
+        "opts": [
+          "--full-output"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "In an AI agent session, print a large result in full instead of saving it to a file and printing a summary."
+      },
+      {
+        "class": "option",
         "name": "timeout",
         "opts": [
           "--timeout"

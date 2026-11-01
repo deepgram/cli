@@ -162,6 +162,28 @@ def _passthrough_body(client: DeepgramClient) -> bool:
     return not _sdk_json()
 
 
+# Agent-mode compaction: a result over 64 KiB is saved to a
+# file and stdout gets a summary with a preview of at most 2 KiB.
+COMPACT_THRESHOLD = 65536
+COMPACT_PREVIEW_BYTES = 2048
+
+
+def _human_bytes(n: int) -> str:
+    """``{full_result_bytes_human}``: decimal units, one decimal."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f} MB"
+    return f"{n / 1000:.1f} KB"
+
+
+def _root_full_output() -> bool:
+    """The root ``dg --full-output``, which the root group keeps in
+    ``ctx.meta``."""
+    from deepctl_core.result_store import FULL_OUTPUT_META
+
+    ctx = click.get_current_context(silent=True)
+    return bool(ctx is not None and ctx.meta.get(FULL_OUTPUT_META))
+
+
 def _live_engine() -> Any:
     """The live engine module, imported on first use (it loads asyncio)."""
     from . import live
@@ -293,6 +315,8 @@ class ListenCommand(BaseCommand):
     _live_kept: dict[str, Any] | None = None
     #: Writing the final result to stdout failed; the run exits 1.
     _output_failed: bool = False
+    #: --full-output (here or on the root): never compact the result.
+    _full_output: bool = False
 
     examples = [
         "dg listen audio.mp3",
@@ -480,6 +504,15 @@ class ListenCommand(BaseCommand):
                 "type": _TIMEOUT_TYPE,
                 "is_option": True,
             },
+            {
+                "names": ["--full-output"],
+                "help": (
+                    "In an AI agent session, print a large result in full "
+                    "instead of saving it to a file and printing a summary."
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
             # ── Caption output ────────────────────────────────────────
             {
                 "names": ["--webvtt"],
@@ -537,6 +570,7 @@ class ListenCommand(BaseCommand):
         source: str | None = kwargs.get("source")
         use_mic: bool = kwargs.get("mic", False)
         guided_flow = False
+        self._full_output = bool(kwargs.get("full_output")) or _root_full_output()
         self._verbose = config.get("output.verbose", False) is True
 
         # ── Resolve mode ───────────────────────────────────────────────
@@ -1956,6 +1990,23 @@ class ListenCommand(BaseCommand):
 
         # Pre-recorded: full structured output
         if fmt in ("json", "yaml", "text"):
+            if fmt == "json" and self._may_compact():
+                full = (
+                    result._body + b"\n"
+                    if result._body is not None
+                    else (
+                        _json.dumps(
+                            result.full_result or result.model_dump(exclude_none=True),
+                            indent=2,
+                            ensure_ascii=False,
+                            default=_default,
+                        )
+                        + "\n"
+                    ).encode()
+                )
+                if len(full) > COMPACT_THRESHOLD:
+                    self._write_stdout(self._compact(result, full))
+                    return
             if fmt == "json" and result._body is not None:
                 data = result._body
                 if _stdout_is_tty():
@@ -1985,6 +2036,92 @@ class ListenCommand(BaseCommand):
 
         # Table / default: metadata + transcript
         self._print_prerecorded_result(result)
+
+    def _may_compact(self) -> bool:
+        """Compaction's conditions other than size: a hard AI
+        agent signal, a format chosen by detection rather than asked for,
+        no --full-output, and stdout neither a regular file nor the null
+        device."""
+        from deepctl_core.result_store import stdout_is_file_or_null
+
+        return (
+            get_output_format() == "json"
+            and format_source() not in ("explicit", "default")
+            and is_ai_agent()
+            and not self._full_output
+            and not stdout_is_file_or_null()
+        )
+
+    def _compact(self, result: ListenResult, full: bytes) -> bytes:
+        """Save ``full`` and the transcript to files and return the
+        summary for stdout, or, when no directory takes them, the
+        ``state_unwritable`` envelope (and the run exits 1)."""
+        from deepctl_core import result_store
+        from deepctl_core.login_state import state_dir
+        from deepctl_core.messages import display_path
+
+        text = result.transcript.strip()
+        text_bytes = (text + "\n").encode() if text else b""
+        size = _human_bytes(len(full))
+        prog = _prog()
+
+        def refused(path: str) -> None:
+            print_warning(
+                msg.W_COMPACT_TEMP_REFUSED.format(path=escape(path)),
+                stderr=True,
+                ignore_quiet=True,
+            )
+
+        state = state_dir()
+        try:
+            saved = result_store.save(full, text_bytes, state=state, warn=refused)
+        except result_store.ResultStoreError:
+            failure = self._coded_failure(
+                msg.E_COMPACT_UNWRITABLE.format(
+                    full_result_bytes_human=size,
+                    prog=prog,
+                    dir=display_path(state),
+                ),
+                code=msg.CODE_STATE_UNWRITABLE,
+                hint_human=msg.H_COMPACT_UNWRITABLE,
+                hint_agent=msg.A_COMPACT_UNWRITABLE,
+                details={"dir": str(state)},
+            )
+            self._output_failed = True
+            return (
+                json.dumps(failure.model_dump(), indent=2, ensure_ascii=False) + "\n"
+            ).encode()
+
+        sys.stderr.write(
+            "INFO: "
+            + msg.N_COMPACT.format(
+                full_result_bytes_human=size,
+                full_result_path=saved.full_result_path,
+            )
+            + "\n"
+        )
+        sys.stderr.flush()
+        metadata = (result.full_result or {}).get("metadata") or {}
+        compact: dict[str, Any] = {
+            "schema_version": 1,
+            "status": "success",
+            "truncated": True,
+            "full_result_path": str(saved.full_result_path),
+            "full_result_bytes": len(full),
+            "transcript_path": str(saved.transcript_path),
+            "transcript_chars": len(text),
+            "transcript_preview": text.encode()[:COMPACT_PREVIEW_BYTES].decode(
+                "utf-8", "ignore"
+            ),
+        }
+        if isinstance(metadata.get("request_id"), str):
+            compact["request_id"] = metadata["request_id"]
+        duration = metadata.get("duration")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+            compact["duration_s"] = duration
+        compact["hint"] = msg.A_COMPACT
+        compact["next_step"] = None
+        return (json.dumps(compact, indent=2, ensure_ascii=False) + "\n").encode()
 
     def _write_stdout(self, data: bytes) -> None:
         """Write the prerecorded payload to stdout in one write.
