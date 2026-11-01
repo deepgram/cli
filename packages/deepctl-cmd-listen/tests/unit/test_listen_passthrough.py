@@ -1,5 +1,5 @@
-"""Prerecorded ``listen`` output (0.5.0): the server's body for ``-o json``
-and ``-o yaml``, and ``DEEPCTL_LISTEN_JSON=sdk``."""
+"""Prerecorded ``listen`` output (0.5.0): the server's body for ``-o json``,
+``-o yaml`` and ``-o text``, and ``DEEPCTL_LISTEN_JSON=sdk``."""
 
 from __future__ import annotations
 
@@ -162,6 +162,18 @@ def test_yaml_is_the_body_as_yaml(monkeypatch, capsysbinary):
     out = capsysbinary.readouterr().out
     assert yaml.safe_load(out) == json.loads(SPARSE)
     assert out.startswith(b"metadata:\n")
+
+
+def test_text_is_only_the_transcript(monkeypatch, capsysbinary):
+    fmt(monkeypatch, "text")
+    run(rest_client())
+    assert capsysbinary.readouterr().out == b"hello world\n"
+
+
+def test_text_with_diarize_labels_speakers(monkeypatch, capsysbinary):
+    fmt(monkeypatch, "text")
+    run(rest_client(), diarize=True)
+    assert capsysbinary.readouterr().out.startswith(b"[Speaker 0]")
 
 
 def test_captions_still_print_under_json(capsys):
