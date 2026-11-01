@@ -538,6 +538,8 @@ class TestInitCommand:
     ):
         mock_api.get_template.return_value = sample_detail
         mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.directory_in_use.return_value = False
+        mock_lifecycle.head_commit.return_value = None
         mock_lifecycle.clone_template.return_value = None
         mock_lifecycle.run_lifecycle_step.return_value = True
 
@@ -580,6 +582,8 @@ class TestInitCommand:
     ):
         mock_api.get_template.return_value = sample_detail
         mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.directory_in_use.return_value = False
+        mock_lifecycle.head_commit.return_value = None
         mock_lifecycle.clone_template.return_value = None
         mock_auth_manager.get_api_key.side_effect = AuthenticationError(
             "Your Deepgram credential has expired. Run `dg login` again."
@@ -646,6 +650,8 @@ class TestInitCommand:
     ):
         mock_api.get_template.return_value = sample_detail
         mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.directory_in_use.return_value = False
+        mock_lifecycle.head_commit.return_value = None
         mock_lifecycle.clone_template.return_value = None
         mock_auth_manager.get_api_key.return_value = "sk-my-key"
 
