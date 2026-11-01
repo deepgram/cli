@@ -51,9 +51,7 @@ class TestIsAgentic:
             ["dg", "listen", "foo.wav", "--non-interactive"],
         ],
     )
-    def test_non_interactive_flag_anywhere_in_argv(
-        self, baseline, monkeypatch, argv
-    ):
+    def test_non_interactive_flag_anywhere_in_argv(self, baseline, monkeypatch, argv):
         monkeypatch.setattr("sys.argv", argv)
         assert is_agentic() is True
 
@@ -64,9 +62,7 @@ class TestIsAgentic:
             ["dg", "listen", "--agent-friendly", "foo.wav"],
         ],
     )
-    def test_agent_friendly_flag_anywhere_in_argv(
-        self, baseline, monkeypatch, argv
-    ):
+    def test_agent_friendly_flag_anywhere_in_argv(self, baseline, monkeypatch, argv):
         monkeypatch.setattr("sys.argv", argv)
         assert is_agentic() is True
 
@@ -79,9 +75,7 @@ class TestIsAgentic:
         "ci_value",
         ["false", "0", "", "yes", "TRUE"],
     )
-    def test_other_ci_values_do_not_count(
-        self, baseline, monkeypatch, ci_value
-    ):
+    def test_other_ci_values_do_not_count(self, baseline, monkeypatch, ci_value):
         monkeypatch.setenv("CI", ci_value)
         assert is_agentic() is False
 
@@ -94,9 +88,7 @@ class TestIsAgentic:
             "CODEX_SANDBOX_NETWORK_DISABLED",
         ],
     )
-    def test_ai_tool_env_var_is_hard_signal(
-        self, baseline, monkeypatch, env_var
-    ):
+    def test_ai_tool_env_var_is_hard_signal(self, baseline, monkeypatch, env_var):
         monkeypatch.setenv(env_var, "1")
         assert is_agentic() is True
 
@@ -401,9 +393,7 @@ class TestPrintOutput:
         mock_console.print.assert_called_once()
 
     @patch("deepctl_core.output.console")
-    @patch(
-        "deepctl_core.output._output_config", {"quiet": True, "format": "json"}
-    )
+    @patch("deepctl_core.output._output_config", {"quiet": True, "format": "json"})
     def test_print_output_quiet(self, mock_console):
         """Test printing in quiet mode."""
         print_output({"test": "value"})
@@ -438,9 +428,7 @@ class TestPrintOutput:
         assert mock_console.print.call_count >= 1
 
     @patch("deepctl_core.output.console")
-    @patch(
-        "deepctl_core.output._output_config", {"quiet": False, "format": "csv"}
-    )
+    @patch("deepctl_core.output._output_config", {"quiet": False, "format": "csv"})
     def test_print_output_csv(self, mock_console):
         """Test printing as CSV."""
         data = [{"name": "Alice", "age": 30}]
@@ -460,3 +448,46 @@ class TestGetConsole:
         # Should return Rich Console instance
         assert console is not None
         assert hasattr(console, "print")
+
+
+class TestLazyQuiet:
+    """setup_output() records --quiet without building the rich Console, so
+    a run that prints nothing (``dg <cmd> --help``) never imports rich."""
+
+    def test_quiet_waits_for_the_console(self):
+        from deepctl_core.output import _LazyConsole
+
+        console = _LazyConsole(stderr=True)
+        console.quiet = True
+        assert object.__getattribute__(console, "_deepctl_console") is None
+        assert console.quiet is True
+        assert object.__getattribute__(console, "_deepctl_console").quiet is True
+        console.quiet = False
+        assert object.__getattribute__(console, "_deepctl_console").quiet is False
+
+    def test_unset_quiet_keeps_the_default(self):
+        from deepctl_core.output import _LazyConsole
+
+        assert _LazyConsole().quiet is False
+
+    def test_setup_output_imports_no_rich(self, tmp_path):
+        import subprocess
+        import sys
+
+        code = (
+            "import sys\n"
+            "from deepctl_core.output import console, setup_output\n"
+            "setup_output(format_type='default', quiet=True)\n"
+            "assert 'rich' not in sys.modules\n"
+            "assert console.quiet is True\n"
+            "console.print('hidden')\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == ""
