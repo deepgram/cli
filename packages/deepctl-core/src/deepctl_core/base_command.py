@@ -110,6 +110,9 @@ class BaseCommand(ABC):
     help: str = ""
     short_help: str | None = None
     hidden: bool = False  # set True to hide from dg --help (e.g. deprecated aliases)
+    # Output formats this command takes after its name, beyond the root
+    # -o's json, yaml, table and csv (``dg listen -o text``).
+    extra_output_formats: tuple[str, ...] = ()
 
     # Command requirements
     requires_auth: bool = False
