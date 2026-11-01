@@ -12,11 +12,14 @@ from deepctl_core import (
     Config,
     DeepgramClient,
 )
-from deepctl_core.output import _agentic
+from deepctl_core import messages as core_msg
+from deepctl_core.output import _agentic, print_error
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from . import lifecycle, templates_api
+from . import messages as msg
 from .models import InitResult, TemplateDetail, TemplateInfo
 
 console = Console()
@@ -173,6 +176,25 @@ class InitCommand(BaseCommand):
             if not detail:
                 return InitResult(status="cancelled", message="No template selected")
 
+        # ── Check what the template service sent ───────────────────────────────
+        # The repository and the template name come from the service; both
+        # are checked before either is used in a path, a command or output.
+        github_url = detail.links.get("github")
+        if not github_url:
+            return InitResult(status="error", message="Template has no GitHub URL")
+        if not lifecycle.is_template_repo(github_url):
+            error = msg.E_INIT_REPO_REFUSED.format(
+                template=core_msg.display(detail.name)
+            )
+            print_error(escape(error))
+            return InitResult(status="error", message=error)
+        if not lifecycle.valid_name(detail.name):
+            error = msg.E_INIT_NAME_REFUSED.format(
+                template=core_msg.display(template_slug or detail.name)
+            )
+            print_error(escape(error))
+            return InitResult(status="error", message=error)
+
         # ── Resolve target directory ───────────────────────────────────────────
         dest = Path(target_dir) if target_dir else Path(f"./{detail.name}")
         dest = dest.resolve()
@@ -186,10 +208,6 @@ class InitCommand(BaseCommand):
             return InitResult(status="cancelled", message="Clone cancelled")
 
         # ── Clone ──────────────────────────────────────────────────────────────
-        github_url = detail.links.get("github")
-        if not github_url:
-            return InitResult(status="error", message="Template has no GitHub URL")
-
         console.print()
         with console.status("[blue]Cloning repository...[/blue]"):
             try:
