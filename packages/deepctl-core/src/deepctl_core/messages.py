@@ -82,6 +82,14 @@ W_INSECURE_AGENT = (
     "are verified."
 )
 
+W_INSECURE_REMOTE = (
+    "DEEPGRAM_CLI_INSECURE applies only to localhost: TLS certificates for "
+    "{host} are verified."
+)
+W_INSECURE_REMOTE_HINT = (
+    "To test against a server with a self-signed certificate, run it on localhost."
+)
+
 SOURCE_LABELS = {
     "flag": "--base-url",
     "parent_env": "DEEPGRAM_BASE_URL",
