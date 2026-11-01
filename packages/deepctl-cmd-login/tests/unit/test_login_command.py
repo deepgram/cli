@@ -183,8 +183,10 @@ def mock_client():
 
 @pytest.fixture
 def login_command():
-    """Create a login command instance."""
-    return LoginCommand()
+    """A login command run by a person in a terminal (its prompts can show)."""
+    cmd = LoginCommand()
+    cmd._can_ask = lambda: True  # type: ignore[method-assign]
+    return cmd
 
 
 class TestLoginCommand:

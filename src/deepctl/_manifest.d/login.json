@@ -78,7 +78,29 @@
         "is_flag": true,
         "count": false,
         "hidden": false,
-        "help": "Don't prompt for confirmation when providing credentials"
+        "help": "Same as --yes"
+      },
+      {
+        "class": "option",
+        "name": "yes",
+        "opts": [
+          "--yes",
+          "-y"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Save without asking, even if DEEPGRAM_API_KEY is set or the profile already has a saved login (--save-base-url still asks)"
       },
       {
         "class": "option",

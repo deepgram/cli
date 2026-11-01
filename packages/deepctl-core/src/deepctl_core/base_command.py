@@ -479,6 +479,18 @@ class BaseCommand(ABC):
             # Fallback to JSON
             self._output_json(result)
 
+    def can_prompt(self) -> bool:
+        """Whether this run may ask a question at all.
+
+        False in an agentic or non-interactive context, for a command that
+        isn't CI-friendly, and when the command was given any input (see
+        ``is_guided``). A command that must not fall back to a default
+        answers an unanswerable prompt itself (``confirmation_required``).
+        """
+        return not (
+            _agentic or not self.ci_friendly or not getattr(self, "_guided", True)
+        )
+
     def confirm(self, message: str, default: bool = False) -> bool:
         """Ask for user confirmation.
 
@@ -487,9 +499,10 @@ class BaseCommand(ABC):
             default: Default value if user just presses Enter
 
         Returns:
-            True if confirmed, False otherwise
+            True if confirmed, False otherwise; ``default`` when
+            ``can_prompt()`` is False
         """
-        if _agentic or not self.ci_friendly or not getattr(self, "_guided", True):
+        if not self.can_prompt():
             return default
 
         try:
