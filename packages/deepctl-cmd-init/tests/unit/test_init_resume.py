@@ -193,6 +193,81 @@ class TestRecordedDirectoryReplaced:
         assert not (real / ".env").exists()
 
 
+def _swap(dest: Path, aside: Path) -> None:
+    """Put another directory, with the same contents, at ``dest``."""
+    shutil.copytree(dest, aside, symlinks=True)
+    dest.rename(aside.with_name(aside.name + "-old"))
+    aside.rename(dest)
+
+
+@needs_git
+class TestSwappedWhileRunning:
+    """The directory is checked again right before the API key is written
+    and before each setup or start command: one swapped in after the
+    earlier checks is refused, and nothing more is done in it."""
+
+    def _assert_changed(self, run: Any, result: Any) -> None:
+        assert result.code == "invalid_argument"
+        assert result.error.endswith(
+            "changed while dg init was running, so nothing more was done there."
+        )
+        assert result.next_step == "dg init --help"
+
+    def test_swapped_after_the_clone(
+        self, run: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_save = clones.save
+
+        def save_then_swap(record: Any) -> None:
+            real_save(record)
+            _swap(run.dest, tmp_path / "other")
+
+        monkeypatch.setattr(clones, "save", save_then_swap)
+        run.makefile = True
+        result = run(api_key=KEY, install=True, no_start=True)
+        self._assert_changed(run, result)
+        assert not (run.dest / ".env").exists()
+        assert not (tmp_path / "other-old" / ".env").exists()
+        assert run.setup_runs == []
+
+    def test_swapped_before_setup_on_a_resume(
+        self, run: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run.makefile = True
+        assert run(no_install=True).status == "success"
+        real_inject = lifecycle.inject_env
+
+        def inject_then_swap(dest: Path, api_key: str) -> None:
+            real_inject(dest, api_key)
+            _swap(dest, tmp_path / "other")
+
+        monkeypatch.setattr(lifecycle, "inject_env", inject_then_swap)
+        result = run(api_key=KEY, install=True, no_start=True)
+        self._assert_changed(run, result)
+        assert run.setup_runs == []
+        assert run.record().phases == ["clone"]
+
+    def test_swapped_before_start(
+        self,
+        run: Any,
+        tmp_path: Path,
+        make_detail: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run.detail = make_detail(install="npm install", start="npm start")
+
+        def make_then_swap(step: Any, dest: Path) -> bool:
+            run.setup_runs.append(step.command)
+            _swap(dest, tmp_path / "other")
+            return True
+
+        monkeypatch.setattr(lifecycle, "run_lifecycle_step", make_then_swap)
+        result = run(api_key=KEY, yes=True, start=True)
+        self._assert_changed(run, result)
+        assert run.setup_runs == ["npm install"]
+        assert run.start_runs == []
+
+
 class TestDirectoryNotFromInit:
     def test_non_empty_directory_without_record(self, run: Any) -> None:
         run.dest.mkdir()
