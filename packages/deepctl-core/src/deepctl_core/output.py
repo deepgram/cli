@@ -451,6 +451,23 @@ def print_output(data: Any, format_type: str | None = None) -> None:
     formatter = OutputFormatter(format_type)
 
     if format_type == "json":
+        if not console.is_terminal:
+            # A pipe or file: plain JSON in one write, as rich would print
+            # it but without its renderer's cost on a large result.
+            stream = console.file
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    stream.write(data + "\n")
+                    stream.flush()
+                    return
+            stream.write(
+                json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n"
+            )
+            stream.flush()
+            return
+
         from rich.json import JSON
 
         # Use Rich's JSON formatter for better display
