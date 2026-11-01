@@ -458,6 +458,15 @@ STRINGS: dict[str, str] = {
         "Retry once after a few seconds. If it fails again, tell the user and "
         "include details.request_id."
     ),
+    # dg update: the package index didn't answer.
+    "E-UPDATE-CHECK": "Couldn't check for updates: couldn't reach {host}.",
+    "H-UPDATE-CHECK": (
+        "Check your network connection, or update {prog} through the tool you "
+        "installed it with."
+    ),
+    "A-UPDATE-CHECK": (
+        "The update check needs network access. Tell the user; don't retry in a loop."
+    ),
 }
 
 # code -> (error message ID, human hint, agent hint, automation hint or None)
@@ -492,6 +501,12 @@ CODES: dict[str, Messages] = {
         None,
     ),
     "server_error": ("E-SERVER", "H-SERVER", "A-SERVER", None),
+    "update_check_failed": (
+        "E-UPDATE-CHECK",
+        "H-UPDATE-CHECK",
+        "A-UPDATE-CHECK",
+        None,
+    ),
 }
 
 # network_unavailable's other messages: the connection dropped after the

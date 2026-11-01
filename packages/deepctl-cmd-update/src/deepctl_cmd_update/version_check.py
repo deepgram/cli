@@ -16,6 +16,16 @@ from pydantic import BaseModel, Field
 
 from . import check_cache
 
+PYPI_HOST = "pypi.org"
+
+
+class UpdateCheckError(Exception):
+    """No version source answered; ``host`` is the last one tried."""
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+        super().__init__(f"couldn't reach {host}")
+
 
 class VersionInfo(BaseModel):
     """Version information from PyPI."""
@@ -83,6 +93,10 @@ class VersionChecker:
 
         Returns:
             Version information including update availability
+
+        Raises:
+            UpdateCheckError: no source answered (PyPI is the last one
+                tried). Never reported as "up to date".
         """
         # Check if we should skip based on cache
         if not force and not self.should_check():
@@ -102,16 +116,11 @@ class VersionChecker:
             self._cache_info(version_info)
             return version_info
 
-        check_cache.write(
-            check_cache.UPDATE_FILE, ok=False, latest=None, source=self._source
-        )
-
-        # On error, return current version with no update
-        return VersionInfo(
-            current_version=self.current_version,
-            latest_version=self.current_version,
-            update_available=False,
-        )
+        if check_cache.usable():
+            check_cache.write(
+                check_cache.UPDATE_FILE, ok=False, latest=None, source=self._source
+            )
+        raise UpdateCheckError(PYPI_HOST)
 
     async def _check_pypi(self) -> VersionInfo | None:
         """Fetch latest version from PyPI.
