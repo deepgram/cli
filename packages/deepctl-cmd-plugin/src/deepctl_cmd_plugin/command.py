@@ -8,11 +8,14 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from rich.text import Text
+
     from .strategies import PluginInstallStrategy
 
 import click
 from deepctl_cmd_update.installation import InstallationDetector, InstallMethod
 from deepctl_core import messages as msg
+from deepctl_core._plugin_trust import real_home_plugin_venv
 from deepctl_core.auth import AuthManager
 from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
@@ -26,15 +29,16 @@ from deepctl_core.output import (
     print_warning,
 )
 from deepctl_core.plugin_env import (
-    PLUGIN_DIR,
-    PLUGIN_STATE_FILE,
-    PLUGIN_VENV,
     find_system_python,
     get_plugin_state,
     get_venv_python,
     is_frozen,
+    plugin_paths,
+    read_plugin_state_file,
     save_plugin_state,
+    skipped_plugin_venvs,
 )
+from deepctl_core.safe_text import literal
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
@@ -49,6 +53,21 @@ from .models import (
 )
 
 console = Console()
+
+E_PLUGIN_ENV_UNAVAILABLE = (
+    "Can't use the plugin environment: when an AI agent runs dg, plugins load "
+    "only from your account's home directory, not through a symlink or from "
+    "inside the working directory."
+)
+A_PLUGIN_ENV_UNAVAILABLE = (
+    "A person must run this command in their own terminal. If you are an AI "
+    "agent, ask the user."
+)
+
+
+def _print_env_unavailable_hint() -> None:
+    """The agent hint after E-PLUGIN-ENV-UNAVAILABLE."""
+    print_hint(A_PLUGIN_ENV_UNAVAILABLE)
 
 
 def _refuse_in_agent_session(action: str) -> None:
@@ -68,7 +87,7 @@ class PluginCommand(BaseGroupCommand):
     help = "Manage deepctl plugins"
 
     examples = [
-        "dg plugin search transcribe",
+        "dg plugin search example",
         "dg plugin install deepctl-plugin-example",
         "dg plugin list",
         "dg plugin update deepctl-plugin-example",
@@ -86,10 +105,13 @@ class PluginCommand(BaseGroupCommand):
         self.detector = InstallationDetector()
         self._python_executable = sys.executable
 
-        # Use shared plugin environment paths
-        self._plugin_dir = PLUGIN_DIR
-        self._plugin_venv = PLUGIN_VENV
-        self._plugin_state_file = PLUGIN_STATE_FILE
+        # Shared plugin environment paths. None when this run must not use
+        # the plugin environment (see plugin_env.plugin_paths).
+        paths = plugin_paths()
+        self._plugin_paths = paths
+        self._plugin_dir = paths.dir if paths else None
+        self._plugin_venv = paths.venv if paths else None
+        self._plugin_state_file = paths.state_file if paths else None
 
     def execute(self, ctx: click.Context, **kwargs: Any) -> None:
         """Execute plugin group command.
@@ -179,6 +201,9 @@ class PluginCommand(BaseGroupCommand):
         Returns:
             Tuple of (success, python_executable_path)
         """
+        if self._plugin_dir is None or self._plugin_venv is None:
+            return False, ""
+
         # Create plugin directory if it doesn't exist
         self._plugin_dir.mkdir(parents=True, exist_ok=True)
 
@@ -210,7 +235,7 @@ class PluginCommand(BaseGroupCommand):
                 )
 
                 # Get the python executable in the venv
-                venv_python = get_venv_python()
+                venv_python = get_venv_python(self._plugin_venv)
                 if venv_python is None:
                     if sys.platform == "win32":
                         venv_python_path = self._plugin_venv / "Scripts" / "python.exe"
@@ -237,7 +262,7 @@ class PluginCommand(BaseGroupCommand):
                 return False, ""
 
         # Venv exists — return its python executable
-        venv_python = get_venv_python()
+        venv_python = get_venv_python(self._plugin_venv)
         if venv_python is None:
             if sys.platform == "win32":
                 venv_python = str(self._plugin_venv / "Scripts" / "python.exe")
@@ -281,7 +306,9 @@ class PluginCommand(BaseGroupCommand):
         Returns:
             Plugin state dictionary
         """
-        return get_plugin_state()
+        if self._plugin_state_file is None:
+            return {"plugins": {}}
+        return get_plugin_state(self._plugin_state_file)
 
     def _save_plugin_state(self, state: dict[str, Any]) -> None:
         """Save plugin state to file.
@@ -289,7 +316,9 @@ class PluginCommand(BaseGroupCommand):
         Args:
             state: Plugin state to save
         """
-        save_plugin_state(state)
+        if self._plugin_paths is None:
+            raise RuntimeError(E_PLUGIN_ENV_UNAVAILABLE)
+        save_plugin_state(state, self._plugin_paths)
 
     def _create_install_command(self, context_wrapper: Any) -> click.Command:
         """Create the install subcommand."""
@@ -388,6 +417,8 @@ class PluginCommand(BaseGroupCommand):
             self._maybe_update_skills()
         else:
             print_error(result.error or result.message)
+            if result.error == E_PLUGIN_ENV_UNAVAILABLE:
+                _print_env_unavailable_hint()
             raise click.ClickException(result.error or result.message)
 
     def _create_list_command(self, context_wrapper: Any) -> click.Command:
@@ -457,6 +488,8 @@ class PluginCommand(BaseGroupCommand):
             self._maybe_update_skills()
         else:
             print_error(result.error or result.message)
+            if result.error == E_PLUGIN_ENV_UNAVAILABLE:
+                _print_env_unavailable_hint()
             raise click.ClickException(result.error or result.message)
 
     def _create_remove_command(self, context_wrapper: Any) -> click.Command:
@@ -514,6 +547,8 @@ class PluginCommand(BaseGroupCommand):
             self._maybe_update_skills()
         else:
             print_error(result.error or result.message)
+            if result.error == E_PLUGIN_ENV_UNAVAILABLE:
+                _print_env_unavailable_hint()
             raise click.ClickException(result.error or result.message)
 
     def _create_search_command(self, context_wrapper: Any) -> click.Command:
@@ -616,18 +651,16 @@ class PluginCommand(BaseGroupCommand):
         table = Table(title="Available Plugins")
         table.add_column("Name", style="cyan", no_wrap=True)
         table.add_column("Description", style="white")
-        table.add_column("Version", style="green")
         table.add_column("Status", style="yellow")
 
         for result in search_results:
-            status = "Installed" if result.installed else "Available"
+            status: str | Text = "Installed" if result.installed else "Available"
             if result.installed and result.installed_version:
-                status = f"Installed ({result.installed_version})"
+                status = literal(f"Installed ({result.installed_version})")
 
             table.add_row(
                 result.plugin.name,
                 result.plugin.description,
-                result.plugin.version,
                 status,
             )
 
@@ -636,81 +669,22 @@ class PluginCommand(BaseGroupCommand):
         # Show install hint
         available_count = sum(1 for r in search_results if not r.installed)
         if available_count > 0:
-            print_info("\nTo install a plugin, use: deepctl plugin install <name>")
+            print_info("To install one, run: dg plugin install <name>", stderr=True)
 
     def _get_plugin_registry(self) -> list[PluginRegistryEntry]:
-        """Get the plugin registry.
-
-        For now, this returns a hardcoded list. In the future, this will
-        fetch from a .well-known URL or plugin registry service.
+        """Plugins Deepgram publishes, from a static list in this package.
 
         Returns:
             List of available plugins
         """
-        # TODO: Fetch from https://deepgram.com/.well-known/deepctl-plugins.json
         return [
             PluginRegistryEntry(
                 name="deepctl-plugin-example",
                 description="Example plugin demonstrating the plugin system",
-                version="0.1.8",
-                author="Deepgram DevRel",
-                url="https://github.com/deepgram/deepctl",
+                author="Deepgram",
+                url="https://github.com/deepgram/cli/tree/main/packages/deepctl-plugin-example",
                 keywords=["example", "demo", "plugin"],
                 install_name="deepctl-plugin-example",
-            ),
-            PluginRegistryEntry(
-                name="deepctl-plugin-tts",
-                description="Text-to-speech functionality for Deepgram",
-                version="0.2.0",
-                author="Deepgram",
-                url="https://github.com/deepgram/deepctl-plugin-tts",
-                keywords=["tts", "text-to-speech", "audio", "synthesis"],
-                install_name="deepctl-plugin-tts",
-            ),
-            PluginRegistryEntry(
-                name="deepctl-plugin-analyze",
-                description="Advanced audio analysis tools",
-                version="0.1.0",
-                author="Deepgram",
-                url="https://github.com/deepgram/deepctl-plugin-analyze",
-                keywords=["analyze", "audio", "analysis", "metrics"],
-                install_name="deepctl-plugin-analyze",
-            ),
-            PluginRegistryEntry(
-                name="deepctl-plugin-batch",
-                description="Batch processing utilities for large-scale transcription",
-                version="0.3.1",
-                author="Deepgram",
-                url="https://github.com/deepgram/deepctl-plugin-batch",
-                keywords=["batch", "bulk", "processing", "scale"],
-                install_name="deepctl-plugin-batch",
-            ),
-            PluginRegistryEntry(
-                name="deepctl-plugin-export",
-                description="Export transcriptions to various formats (SRT, VTT, JSON, etc.)",
-                version="0.2.5",
-                author="Deepgram Community",
-                url="https://github.com/deepgram-community/deepctl-plugin-export",
-                keywords=["export", "srt", "vtt", "subtitle", "captions"],
-                install_name="deepctl-plugin-export",
-            ),
-            PluginRegistryEntry(
-                name="deepctl-plugin-realtime",
-                description="Enhanced real-time transcription with WebSocket support",
-                version="0.4.0",
-                author="Deepgram",
-                url="https://github.com/deepgram/deepctl-plugin-realtime",
-                keywords=["realtime", "websocket", "streaming", "live"],
-                install_name="deepctl-plugin-realtime",
-            ),
-            PluginRegistryEntry(
-                name="deepctl-plugin-translate",
-                description="Translation capabilities for transcribed text",
-                version="0.1.2",
-                author="Deepgram Labs",
-                url="https://github.com/deepgram-labs/deepctl-plugin-translate",
-                keywords=["translate", "translation", "language", "i18n"],
-                install_name="deepctl-plugin-translate",
             ),
         ]
 
@@ -733,6 +707,8 @@ class PluginCommand(BaseGroupCommand):
         from .strategies import get_strategy
 
         if self._needs_isolated_venv(method):
+            if self._plugin_paths is None:
+                raise RuntimeError(E_PLUGIN_ENV_UNAVAILABLE)
             print_info(
                 f"{method.value.title()} installation detected, "
                 "using isolated plugin environment..."
@@ -792,7 +768,9 @@ class PluginCommand(BaseGroupCommand):
 
         # Get installed version
         target_python = (
-            get_venv_python() if using_plugin_env else self._python_executable
+            get_venv_python(self._plugin_venv)
+            if using_plugin_env
+            else self._python_executable
         )
         installed_version = self._get_package_version(options.package, target_python)
 
@@ -830,8 +808,9 @@ class PluginCommand(BaseGroupCommand):
         """
         # Get all installed packages that provide deepctl plugins
         plugins = self._discover_plugins()
+        skipped = self._skipped_plugins()
 
-        if not plugins:
+        if not plugins and not skipped:
             print_info("No plugins installed")
             return
 
@@ -847,10 +826,10 @@ class PluginCommand(BaseGroupCommand):
             table.add_column("Environment", style="blue")
 
         for plugin in plugins:
-            row = [
-                plugin.name,
-                plugin.version or "Unknown",
-                plugin.entry_point or "N/A",
+            row: list[str | Text] = [
+                literal(plugin.name),
+                literal(plugin.version or "Unknown"),
+                literal(plugin.entry_point or "N/A"),
             ]
 
             if verbose:
@@ -865,9 +844,15 @@ class PluginCommand(BaseGroupCommand):
                     else "Main Env"
                 )
 
-                row.extend([plugin_type, commands, env])
+                row.extend([plugin_type, literal(commands), env])
 
             table.add_row(*row)
+
+        for name, version in skipped:
+            skipped_row: list[str | Text] = [literal(name), literal(version), "Skipped"]
+            if verbose:
+                skipped_row.extend(["External", "", "Plugin Env"])
+            table.add_row(*skipped_row)
 
         console.print(table)
 
@@ -933,6 +918,14 @@ class PluginCommand(BaseGroupCommand):
         plugin_found = any(p.name == package for p in plugins if not p.is_builtin)
 
         if not plugin_found:
+            if any(name == package for name, _version in self._skipped_plugins()):
+                return PluginOperationResult(
+                    success=False,
+                    action=PluginAction.REMOVE,
+                    package=package,
+                    message=f"Failed to remove {package}",
+                    error=E_PLUGIN_ENV_UNAVAILABLE,
+                )
             return PluginOperationResult(
                 success=False,
                 action=PluginAction.REMOVE,
@@ -951,7 +944,15 @@ class PluginCommand(BaseGroupCommand):
             # Force isolated-venv strategy for this plugin
             from .strategies import IsolatedVenvStrategy
 
-            _, python_exe = self._ensure_plugin_environment()
+            ok_env, python_exe = self._ensure_plugin_environment()
+            if not ok_env:
+                return PluginOperationResult(
+                    success=False,
+                    action=PluginAction.REMOVE,
+                    package=package,
+                    message=f"Failed to remove {package}",
+                    error=E_PLUGIN_ENV_UNAVAILABLE,
+                )
             strategy: PluginInstallStrategy = IsolatedVenvStrategy(python_exe)
         elif self._needs_isolated_venv(install_info.method):
             return PluginOperationResult(
@@ -998,6 +999,31 @@ class PluginCommand(BaseGroupCommand):
             message=f"Successfully removed {package}",
         )
 
+    def _skipped_plugins(self) -> list[tuple[str, str]]:
+        """Plugins recorded in the real-home plugin venv when this run skips it.
+
+        Only that venv's ``plugins.json`` is read (defensively); a skipped
+        venv found through ``$HOME`` is never read, and nothing in any
+        skipped venv runs.
+        """
+        rows: list[tuple[str, str]] = []
+        trusted = real_home_plugin_venv()
+        if trusted is None:
+            return rows
+        for venv in skipped_plugin_venvs():
+            if venv != trusted:
+                continue
+            state = read_plugin_state_file(venv.parent / "plugins.json")
+            entries = state.get("plugins")
+            if not isinstance(entries, dict):
+                continue
+            for name, info in entries.items():
+                version = info.get("version") if isinstance(info, dict) else None
+                rows.append(
+                    (str(name), version if isinstance(version, str) else "Unknown")
+                )
+        return rows
+
     def _discover_plugins(self) -> list[PluginPackage]:
         """Discover all installed plugins.
 
@@ -1016,10 +1042,13 @@ class PluginCommand(BaseGroupCommand):
                 discovered_names.add(plugin_key)
                 plugins.append(plugin)
 
-        # Also discover from plugin environment if it exists
-        if self._plugin_venv.exists():
-            _, plugin_python = self._ensure_plugin_environment()
-            plugin_env_plugins = self._discover_from_environment(plugin_python)
+        # Also discover from plugin environment if it exists (never from a
+        # venv this run doesn't use; see plugin_env.plugin_paths)
+        if self._plugin_venv is not None and self._plugin_venv.exists():
+            ok_env, plugin_python = self._ensure_plugin_environment()
+            plugin_env_plugins = (
+                self._discover_from_environment(plugin_python) if ok_env else []
+            )
 
             # Add only plugins not already discovered
             for plugin in plugin_env_plugins:

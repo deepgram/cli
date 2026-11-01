@@ -82,9 +82,7 @@ class TestFindSystemPython:
 
     @pytest.mark.unit
     def test_returns_none_when_no_python_found(self):
-        with patch(
-            "deepctl_core.plugin_env.shutil.which", return_value=None
-        ):
+        with patch("deepctl_core.plugin_env.shutil.which", return_value=None):
             # Also ensure no Homebrew paths exist
             with patch.object(Path, "exists", return_value=False):
                 result = find_system_python()
@@ -117,10 +115,13 @@ class TestFindSystemPython:
             mock_which.side_effect = lambda name: (
                 f"/usr/bin/{name}" if name == "python3" else None
             )
-            with patch(
-                "deepctl_core.plugin_env.subprocess.run",
-                side_effect=sp.TimeoutExpired("python3", 5),
-            ), patch.object(Path, "exists", return_value=False):
+            with (
+                patch(
+                    "deepctl_core.plugin_env.subprocess.run",
+                    side_effect=sp.TimeoutExpired("python3", 5),
+                ),
+                patch.object(Path, "exists", return_value=False),
+            ):
                 result = find_system_python()
                 assert result is None
 
@@ -214,9 +215,7 @@ class TestGetVenvPythonVersion:
         venv = tmp_path / "venv"
         venv.mkdir()
         (venv / "pyvenv.cfg").write_text(
-            "home = /usr/bin\n"
-            "include-system-site-packages = false\n"
-            "version = 3.13.7\n"
+            "home = /usr/bin\ninclude-system-site-packages = false\nversion = 3.13.7\n"
         )
         with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
             assert get_venv_python_version() == (3, 13)
@@ -238,10 +237,7 @@ class TestGetVenvPythonVersion:
     def test_returns_none_on_malformed_version(self, tmp_path):
         venv = tmp_path / "venv"
         venv.mkdir()
-        (venv / "pyvenv.cfg").write_text(
-            "home = /usr/bin\n"
-            "version = not-a-version\n"
-        )
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\nversion = not-a-version\n")
         with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
             assert get_venv_python_version() is None
 
@@ -250,8 +246,7 @@ class TestGetVenvPythonVersion:
         venv = tmp_path / "venv"
         venv.mkdir()
         (venv / "pyvenv.cfg").write_text(
-            "home = /usr/bin\n"
-            "include-system-site-packages = false\n"
+            "home = /usr/bin\ninclude-system-site-packages = false\n"
         )
         with patch("deepctl_core.plugin_env.PLUGIN_VENV", venv):
             assert get_venv_python_version() is None
@@ -267,15 +262,11 @@ class TestGetPluginState:
             assert state == {"plugins": {}}
 
     @pytest.mark.unit
-    def test_reads_existing_state(self):
-        test_state = {
-            "plugins": {"test-plugin": {"version": "1.0.0"}}
-        }
-        with patch.object(Path, "exists", return_value=True), patch.object(
-            Path, "read_text", return_value=json.dumps(test_state)
-        ):
-            state = get_plugin_state()
-            assert state == test_state
+    def test_reads_existing_state(self, tmp_path):
+        test_state = {"plugins": {"test-plugin": {"version": "1.0.0"}}}
+        state_file = tmp_path / "plugins.json"
+        state_file.write_text(json.dumps(test_state))
+        assert get_plugin_state(state_file) == test_state
 
     @pytest.mark.unit
     def test_returns_empty_on_parse_error(self):
@@ -290,9 +281,7 @@ class TestSavePluginState:
 
     @pytest.mark.unit
     def test_saves_state(self):
-        test_state = {
-            "plugins": {"test-plugin": {"version": "1.0.0"}}
-        }
+        test_state = {"plugins": {"test-plugin": {"version": "1.0.0"}}}
         with patch.object(Path, "mkdir") as mock_mkdir:
             with patch.object(Path, "write_text") as mock_write:
                 save_plugin_state(test_state)

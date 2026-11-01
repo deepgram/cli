@@ -1,16 +1,44 @@
 """Centralized plugin environment logic shared between PluginManager and PluginCommand."""
 
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+
+from ._plugin_trust import agent_plugin_venv, is_ai_agent, real_home_plugin_venv
 
 # --- Path constants ---
 PLUGIN_DIR = Path.home() / ".deepctl" / "plugins"
 PLUGIN_VENV = PLUGIN_DIR / "venv"
 PLUGIN_STATE_FILE = PLUGIN_DIR / "plugins.json"
+
+
+class PluginPaths(NamedTuple):
+    """Where the plugin environment lives for this run."""
+
+    dir: Path
+    venv: Path
+    state_file: Path
+
+
+def plugin_paths() -> PluginPaths | None:
+    """The plugin directory, venv and state file to use for this run.
+
+    Without an AI-agent signal these are the paths under ``~/.deepctl``.
+    Under one, they come from the account's real home directory
+    (``agent_plugin_venv``), never from ``$HOME``; ``None`` means the
+    plugin environment must not be used at all in this run.
+    """
+    if is_ai_agent():
+        venv = agent_plugin_venv()
+        if venv is None:
+            return None
+        return PluginPaths(venv.parent, venv, venv.parent / "plugins.json")
+    return PluginPaths(PLUGIN_DIR, PLUGIN_VENV, PLUGIN_STATE_FILE)
 
 
 def is_frozen() -> bool:
@@ -83,20 +111,45 @@ def find_system_python(min_version: tuple[int, int] = (3, 10)) -> str | None:
     return None
 
 
-def get_venv_python() -> str | None:
-    """Return the Python executable inside the plugin venv, or ``None``."""
-    if not PLUGIN_VENV.exists():
+def skipped_plugin_venvs() -> list[Path]:
+    """The real-home plugin venv when this run skips it (AI-agent runs only).
+
+    It counts only when this run refuses it (:func:`plugin_paths` is
+    ``None``) and its ``plugins.json``, read defensively, lists plugins. A
+    venv found through ``$HOME`` is never read and never counts.
+    """
+    if not is_ai_agent() or plugin_paths() is not None:
+        return []
+    venv = real_home_plugin_venv()
+    if venv is None:
+        return []
+    if not read_plugin_state_file(venv.parent / "plugins.json")["plugins"]:
+        return []
+    return [venv]
+
+
+def get_venv_python(venv: Path | None = None) -> str | None:
+    """Return the Python executable inside the plugin venv, or ``None``.
+
+    Without ``venv``, the venv comes from :func:`plugin_paths`.
+    """
+    if venv is None:
+        paths = plugin_paths()
+        if paths is None:
+            return None
+        venv = paths.venv
+    if not venv.exists():
         return None
 
     if sys.platform == "win32":
-        python = PLUGIN_VENV / "Scripts" / "python.exe"
+        python = venv / "Scripts" / "python.exe"
     else:
-        python = PLUGIN_VENV / "bin" / "python"
+        python = venv / "bin" / "python"
 
     return str(python) if python.exists() else None
 
 
-def get_venv_python_version() -> tuple[int, int] | None:
+def get_venv_python_version(venv: Path | None = None) -> tuple[int, int] | None:
     """Read the (major, minor) Python version that built the plugin venv.
 
     Reads ``pyvenv.cfg`` from :data:`PLUGIN_VENV`. Both ``version`` (stdlib
@@ -106,10 +159,11 @@ def get_venv_python_version() -> tuple[int, int] | None:
     or the version line can't be parsed — callers should treat ``None`` as
     "unknown" and skip ABI-mismatch checks rather than failing loudly.
     """
-    if not PLUGIN_VENV.exists():
+    venv = PLUGIN_VENV if venv is None else venv
+    if not venv.exists():
         return None
 
-    cfg = PLUGIN_VENV / "pyvenv.cfg"
+    cfg = venv / "pyvenv.cfg"
     if not cfg.exists():
         return None
 
@@ -135,7 +189,7 @@ def get_venv_python_version() -> tuple[int, int] | None:
     return None
 
 
-def get_venv_site_packages() -> Path | None:
+def get_venv_site_packages(venv: Path | None = None) -> Path | None:
     """Return the ``site-packages`` directory inside the plugin venv.
 
     On Unix this is typically ``lib/pythonX.Y/site-packages``.
@@ -144,15 +198,16 @@ def get_venv_site_packages() -> Path | None:
     Returns ``None`` if the venv doesn't exist or the path can't be
     determined.
     """
-    if not PLUGIN_VENV.exists():
+    venv = PLUGIN_VENV if venv is None else venv
+    if not venv.exists():
         return None
 
     if sys.platform == "win32":
-        sp = PLUGIN_VENV / "Lib" / "site-packages"
+        sp = venv / "Lib" / "site-packages"
         return sp if sp.exists() else None
 
     # Unix: lib/pythonX.Y/site-packages — find the actual version dir
-    lib_dir = PLUGIN_VENV / "lib"
+    lib_dir = venv / "lib"
     if not lib_dir.exists():
         return None
 
@@ -165,21 +220,74 @@ def get_venv_site_packages() -> Path | None:
     return None
 
 
-def get_plugin_state() -> dict[str, Any]:
+def get_plugin_state(state_file: Path | None = None) -> dict[str, Any]:
     """Read and return the plugin state from ``plugins.json``.
 
+    Without ``state_file``, the file comes from :func:`plugin_paths`.
     Returns a dict with at least ``{"plugins": {}}``.
     """
-    if PLUGIN_STATE_FILE.exists():
-        try:
-            result: dict[str, Any] = json.loads(PLUGIN_STATE_FILE.read_text())
-            return result
-        except Exception:
+    if state_file is None:
+        paths = plugin_paths()
+        if paths is None:
             return {"plugins": {}}
-    return {"plugins": {}}
+        state_file = paths.state_file
+    return read_plugin_state_file(state_file)
 
 
-def save_plugin_state(state: dict[str, Any]) -> None:
-    """Persist the plugin state to ``plugins.json``."""
-    PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
-    PLUGIN_STATE_FILE.write_text(json.dumps(state, indent=2))
+# The largest plugins.json read; a bigger file is treated as empty.
+MAX_STATE_FILE_BYTES = 1024 * 1024
+
+
+def read_plugin_state_file(path: Path) -> dict[str, Any]:
+    """Read a ``plugins.json`` defensively.
+
+    The file is opened without following a final symlink and without
+    blocking (a FIFO doesn't hang the read), must be a regular file of at
+    most :data:`MAX_STATE_FILE_BYTES`, and must hold a JSON object whose
+    ``plugins`` value is an object. Anything else reads as no plugins.
+    """
+    empty: dict[str, Any] = {"plugins": {}}
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except (OSError, ValueError):
+        return empty
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STATE_FILE_BYTES:
+            return empty
+        chunks: list[bytes] = []
+        size = 0
+        while size <= MAX_STATE_FILE_BYTES:
+            chunk = os.read(fd, MAX_STATE_FILE_BYTES + 1 - size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+        data = b"".join(chunks)
+    except OSError:
+        return empty
+    finally:
+        os.close(fd)
+    if len(data) > MAX_STATE_FILE_BYTES:
+        return empty
+    try:
+        result = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return empty
+    if not isinstance(result, dict) or not isinstance(result.get("plugins"), dict):
+        return empty
+    return result
+
+
+def save_plugin_state(state: dict[str, Any], paths: PluginPaths | None = None) -> None:
+    """Persist the plugin state to ``plugins.json``.
+
+    Without ``paths``, they come from :func:`plugin_paths`. Raises
+    ``RuntimeError`` when the plugin environment can't be used in this run.
+    """
+    paths = plugin_paths() if paths is None else paths
+    if paths is None:
+        raise RuntimeError("the plugin environment is not available in this run")
+    paths.dir.mkdir(parents=True, exist_ok=True)
+    paths.state_file.write_text(json.dumps(state, indent=2))

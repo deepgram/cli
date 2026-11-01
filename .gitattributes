@@ -1,3 +1,4 @@
-# output.py is CRLF on main and ruff format keeps it that way; let git diff --check accept it.
+# output.py and plugin_manager.py are CRLF on main and ruff format keeps it that way; let git diff --check accept it.
 packages/deepctl-core/src/deepctl_core/output.py whitespace=cr-at-eol
+packages/deepctl-core/src/deepctl_core/plugin_manager.py whitespace=cr-at-eol
 packages/deepctl-core/tests/unit/fixtures/legacy_v03/** -text

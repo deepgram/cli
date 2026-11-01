@@ -423,6 +423,27 @@ dg plugin remove <package>              # Remove
 
 Create your own — see the [plugin example](packages/deepctl-plugin-example).
 
+A plugin can't replace a built-in command such as `login` or `debug audio`.
+dg runs the built-in and prints a warning that names the plugin's package.
+A plugin whose entry point is named like a built-in command is skipped before
+it's imported, so none of its code runs; give the entry point a different name.
+To use a plugin's version anyway, list the command in the user config file
+at its standard location (`~/.config/deepctl/config.yaml` on Linux, or
+`$XDG_CONFIG_HOME/deepctl/config.yaml` when `XDG_CONFIG_HOME` is set;
+`~/Library/Application Support/deepctl/config.yaml` on macOS;
+`%LOCALAPPDATA%\deepgram\deepctl\config.yaml` on Windows):
+
+```yaml
+plugins:
+  allow_override:
+    - login
+    - debug audio
+```
+
+dg reads this setting only from that file, never from `deepgram.yaml` or a
+`--config` file. Only allow a plugin you trust: it receives everything you
+pass to that command, including API keys.
+
 ## Configuration
 
 **Priority:** CLI flags > environment variables > profile config > project config
