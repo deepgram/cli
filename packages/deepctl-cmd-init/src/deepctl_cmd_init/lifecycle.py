@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
+from deepctl_core.output import print_hint, print_info, print_warning
 from rich.console import Console
 
 if TYPE_CHECKING:
@@ -89,8 +91,125 @@ def clone_template(github_url: str, target_dir: Path) -> None:
 # ── .env injection ────────────────────────────────────────────────────────────
 
 
+#: Lines in a .gitignore that already keep ``.env`` out of git. Used only
+#: when git itself isn't available to ask.
+_GITIGNORE_ENV_PATTERNS = {".env", "/.env", ".env*", "/.env*", "*.env"}
+
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` readable by the owner only (0600).
+
+    The file is created 0600 (no window where the umask applies), and an
+    existing file is narrowed to 0600 before its new content is written.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW, 0o600)
+    try:
+        if os.name == "posix":
+            os.fchmod(fd, 0o600)
+        os.write(fd, text.encode())
+    finally:
+        os.close(fd)
+
+
+def _restrict_to_owner(path: Path) -> None:
+    """Narrow an existing file that holds a key to owner-only (POSIX)."""
+    if os.name != "posix":
+        return
+    fd = os.open(path, os.O_RDONLY | _NOFOLLOW)
+    try:
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+
+
+def _git(target_dir: Path, *args: str) -> int | None:
+    """Exit code of ``git -C target_dir args``, or None if git can't run."""
+    if shutil.which("git") is None:
+        return None
+    try:
+        # Only this project's repository: an inherited GIT_DIR, GIT_WORK_TREE
+        # or GIT_INDEX_FILE would point git at another one.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        result = subprocess.run(
+            ["git", "-C", str(target_dir), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    except OSError:
+        return None
+    return result.returncode
+
+
+def _env_ignored(target_dir: Path) -> bool | None:
+    """git's answer to "is .env ignored?", or None when git can't say."""
+    rc = _git(target_dir, "check-ignore", "-q", ".env")
+    if rc in (0, 1):
+        return rc == 0
+    return None
+
+
+def _append_env_line(gitignore: Path) -> None:
+    """Append ``.env`` as the last line: the last matching pattern wins,
+    so it also overrides an earlier ``!.env``."""
+    content = gitignore.read_bytes() if gitignore.exists() else b""
+    newline = b"\r\n" if b"\r\n" in content else b"\n"
+    sep = newline if content and not content.endswith(b"\n") else b""
+    with open(gitignore, "ab") as f:
+        f.write(sep + b".env" + newline)
+
+
+def ensure_env_gitignored(target_dir: Path) -> None:
+    """Keep ``.env`` out of git in ``target_dir`` and say what happened.
+
+    Asks git (``check-ignore``) when it can, so negations and order count,
+    and warns when the template already tracks ``.env``: ignoring a
+    tracked file doesn't stop a commit from including it.
+    """
+    gitignore = target_dir / ".gitignore"
+    tracked = _git(target_dir, "ls-files", "--error-unmatch", ".env") == 0
+    if tracked:
+        # Ignoring a tracked file changes nothing; untracking it does.
+        print_warning(
+            "This template tracks .env in git, so a commit would include your API key.",
+            stderr=True,
+        )
+        print_hint("Before you commit, run: git rm --cached .env")
+        return
+    if gitignore.is_symlink():
+        # A cloned repo controls its links: never write through one.
+        print_warning(
+            "Did not add .env to .gitignore: it is a symbolic link. "
+            "Make sure git ignores .env before you commit.",
+            stderr=True,
+        )
+        return
+    ignored = _env_ignored(target_dir)
+    if ignored is None:
+        lines = (
+            {ln.strip() for ln in gitignore.read_text().splitlines()}
+            if gitignore.exists()
+            else set()
+        )
+        if not lines & _GITIGNORE_ENV_PATTERNS:
+            _append_env_line(gitignore)
+            print_info(_ADDED, stderr=True)
+    elif not ignored:
+        _append_env_line(gitignore)
+        if _env_ignored(target_dir):
+            print_info(_ADDED, stderr=True)
+
+
+_ADDED = "Added .env to .gitignore to keep your API key out of git."
+
+
 def inject_env(target_dir: Path, api_key: str) -> None:
     """Create or update DEEPGRAM_API_KEY in .env inside target_dir.
+
+    The .env file is owner-only (0600) and kept out of git, since it holds
+    the API key.
 
     Args:
         target_dir: Directory containing the cloned template.
@@ -98,10 +217,22 @@ def inject_env(target_dir: Path, api_key: str) -> None:
     """
     env_path = target_dir / ".env"
 
+    if env_path.is_symlink():
+        # A cloned repo controls its links: never write the key through one.
+        print_warning(
+            "Not writing your API key to .env: it is a symbolic link.", stderr=True
+        )
+        print_hint(
+            "If you trust the file it links to, add DEEPGRAM_API_KEY there yourself."
+        )
+        return
+
     if env_path.exists():
         content = env_path.read_text()
         if "DEEPGRAM_API_KEY=" in content and "DEEPGRAM_API_KEY=$" not in content:
+            _restrict_to_owner(env_path)
             console.print("[dim]DEEPGRAM_API_KEY already set in .env[/dim]")
+            ensure_env_gitignored(target_dir)
             return
         # Replace placeholder or append
         if "DEEPGRAM_API_KEY=" in content:
@@ -112,16 +243,15 @@ def inject_env(target_dir: Path, api_key: str) -> None:
                 else ln
                 for ln in lines
             ]
-            env_path.write_text("\n".join(new_lines) + "\n")
+            _write_private(env_path, "\n".join(new_lines) + "\n")
         else:
-            with open(env_path, "a") as f:
-                if not content.endswith("\n"):
-                    f.write("\n")
-                f.write(f"DEEPGRAM_API_KEY={api_key}\n")
+            sep = "" if content.endswith("\n") or not content else "\n"
+            _write_private(env_path, f"{content}{sep}DEEPGRAM_API_KEY={api_key}\n")
     else:
-        env_path.write_text(f"DEEPGRAM_API_KEY={api_key}\n")
+        _write_private(env_path, f"DEEPGRAM_API_KEY={api_key}\n")
 
     console.print("[green]✓[/green] Injected DEEPGRAM_API_KEY into .env")
+    ensure_env_gitignored(target_dir)
 
 
 # ── make init ─────────────────────────────────────────────────────────────────
