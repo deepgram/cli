@@ -5,13 +5,8 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import sys
-from contextlib import contextmanager
-from typing import TYPE_CHECKING
 
 import click
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 from deepctl_core import (
     Config,
     TimingContext,
@@ -150,6 +145,89 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     return new_args + args[i:]
 
 
+def _root_option_tokens(args: list[str]) -> list[str]:
+    """The option tokens before the subcommand (values skipped)."""
+    flag_opts = _root_flag_opts()
+    tokens: list[str] = []
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        arg = args[i]
+        tokens.append(arg)
+        i += 1
+        if _takes_next_token(arg, flag_opts):
+            i += 1  # skip the option's value
+    return tokens
+
+
+def _no_telemetry_cb(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    """Turn telemetry off for this run. Eager, so root `--help` reflects it."""
+    if not value or ctx.resilient_parsing:
+        return
+    try:
+        from deepctl_telemetry import disable_for_run
+
+        disable_for_run()
+    except Exception:
+        pass
+
+
+def _init_telemetry(config: Config) -> None:
+    """Decide telemetry from the resolved Config. Never loads the SDK."""
+    try:
+        from deepctl_telemetry import init_telemetry
+
+        init_telemetry(config)
+    except Exception:
+        pass
+
+
+def _report_error(exc: BaseException) -> None:
+    """Send an error report if telemetry is on (the SDK loads only here).
+
+    A Ctrl-C while the report is sent is still a user cancellation: exit 2.
+    """
+    try:
+        from deepctl_telemetry import report_exception
+
+        report_exception(exc)
+    except KeyboardInterrupt:
+        _safe_console_print("\n[yellow]Stopped sending the error report.[/yellow]")
+        sys.exit(2)
+    except Exception:
+        pass
+
+
+def _argv_config_path(args: list[str]) -> str | None:
+    """`--config` from the root arguments, only for the notice on root `--help`.
+
+    Root `--help` is eager and fires before the root callback resolves
+    `--config`; every other path uses the parsed value. Accepts
+    `--config X`, `--config=X`, `-c X`, `-cX` and clusters such as `-qcX`.
+    When the option repeats, the last value wins, as in click.
+    """
+    flag_opts = _root_flag_opts()
+    found: str | None = None
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        arg = args[i]
+        i += 1
+        if arg.startswith("--config="):
+            found = arg.split("=", 1)[1]
+        elif arg == "--config":
+            found = args[i] if i < len(args) else None
+        elif not arg.startswith("--"):
+            for index, letter in enumerate(arg[1:]):
+                if f"-{letter}" in flag_opts:
+                    continue
+                if letter == "c":
+                    rest = arg[index + 2 :]
+                    found = rest or (args[i] if i < len(args) else None)
+                break
+        if _takes_next_token(arg, flag_opts):
+            i += 1
+    return found
+
+
 # Create CLI group
 @click.group(name="deepctl")
 @click.version_option(
@@ -208,6 +286,14 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     "--timing-detailed",
     is_flag=True,
     help="Show detailed performance timing information",
+)
+@click.option(
+    "--no-telemetry",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_no_telemetry_cb,
+    help="No effect: this version of dg sends no telemetry",
 )
 @click.option(
     "--non-interactive",
@@ -279,6 +365,10 @@ def cli(
             verbose=verbose,
         )
 
+        # Telemetry is decided here, after option parsing, so --config and
+        # --no-telemetry are honored.
+        _init_telemetry(ctx.obj["config"])
+
 
 # Load commands from entry points
 def load_commands() -> None:
@@ -293,27 +383,6 @@ def load_commands() -> None:
 
 # Load commands when module is imported
 load_commands()
-
-
-@contextmanager
-def _telemetry_transaction() -> Iterator[None]:
-    """Wrap CLI dispatch in a Sentry transaction (no-op when telemetry is off).
-
-    The transaction is named generically ('cli') here. BaseCommand.execute
-    renames it to the full Click command path (e.g. 'deepctl debug audio')
-    once Click has dispatched — which is the single source of truth for
-    the name. Trying to extract a command name from raw sys.argv is unsafe
-    because flag values can look like command names ('--output json' makes
-    'json' look like a command).
-    """
-    try:
-        import sentry_sdk
-    except ImportError:
-        yield
-        return
-
-    with sentry_sdk.start_transaction(op="cli.command", name="cli"):
-        yield
 
 
 def _global_option_hint(message: str) -> str | None:
@@ -374,17 +443,15 @@ def main() -> None:
         if timing_requested:
             enable_timing()
 
-        # Initialize phone-home telemetry and install the --help footer.
-        # Both are no-ops when the user has opted out via config or env.
+        # Install the --help telemetry footer. Telemetry itself is decided in
+        # the root callback, after option parsing. `--no-telemetry` is also
+        # applied here so it holds even after an eager `--help` before it.
         try:
-            from deepctl_telemetry import (
-                init_telemetry,
-                install_help_notice,
-            )
+            from deepctl_telemetry import disable_for_run, install_help_notice
 
-            telemetry_config = Config()
-            init_telemetry(telemetry_config)
-            install_help_notice(telemetry_config)
+            if "--no-telemetry" in _root_option_tokens(args):
+                disable_for_run()
+            install_help_notice(lambda: Config(config_path=_argv_config_path(args)))
         except Exception:
             pass
 
@@ -429,7 +496,7 @@ def main() -> None:
                 processed_args = preprocess_hyphenated_commands(args)
 
             exit_code = 0
-            with TimingContext("cli_execution"), _telemetry_transaction():
+            with TimingContext("cli_execution"):
                 try:
                     cli(args=processed_args, standalone_mode=False)
                 except SystemExit as exc:
@@ -475,6 +542,7 @@ def main() -> None:
         sys.exit(1)
     except Exception as e:
         _safe_console_print(f"[red]Error: {e}[/red]")
+        _report_error(e)
         sys.exit(1)  # 1 = error; 2 is reserved for user interrupt
 
 

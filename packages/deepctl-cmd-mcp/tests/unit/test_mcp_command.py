@@ -188,6 +188,46 @@ class TestMcpCommand:
         assert result.status == "error"
         assert "Connection refused" in result.message
 
+    @patch("deepctl_cmd_mcp.command.asyncio.run")
+    @patch("signal.signal")
+    def test_handle_error_is_reported_without_stdout(
+        self, mock_signal, mock_asyncio_run, capsys
+    ):
+        """A proxy failure reaches telemetry, which writes nothing to stdout."""
+        error = RuntimeError("proxy crashed")
+        mock_asyncio_run.side_effect = error
+
+        with patch("deepctl_telemetry.report_exception") as mock_report:
+            result = McpCommand().handle(
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                transport="stdio",
+                api_key="test-key",
+            )
+
+        mock_report.assert_called_once_with(error)
+        assert result.status == "error"
+        assert capsys.readouterr().out == ""
+
+    @patch("deepctl_cmd_mcp.command.asyncio.run")
+    @patch("signal.signal")
+    def test_handle_error_survives_telemetry_failure(
+        self, mock_signal, mock_asyncio_run
+    ):
+        mock_asyncio_run.side_effect = RuntimeError("proxy crashed")
+        with patch(
+            "deepctl_telemetry.report_exception", side_effect=RuntimeError("x")
+        ):
+            result = McpCommand().handle(
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                transport="stdio",
+                api_key="test-key",
+            )
+        assert result.status == "error"
+
     def test_handle_api_key_from_auth_manager(self):
         """Test API key fallback to auth manager."""
         command = McpCommand()

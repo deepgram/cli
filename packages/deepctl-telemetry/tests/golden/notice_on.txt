@@ -1,0 +1,1 @@
+Telemetry is on: unexpected errors only, with no flag values, paths or keys. Turn off: --no-telemetry, DEEPCTL_TELEMETRY_DISABLED=1, or telemetry.enabled: false in config.yaml.

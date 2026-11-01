@@ -20,6 +20,14 @@ from .timing import TimingContext
 console = stdout_console
 
 
+class UnexpectedCommandError(click.ClickException):
+    """A command failed with an error it didn't raise on purpose.
+
+    BaseCommand raises this `from` the original error. Telemetry reports
+    only that cause; every other ClickException is a message to the user.
+    """
+
+
 class BaseCommand(ABC):
     """Base class for all deepctl commands."""
 
@@ -134,7 +142,6 @@ class BaseCommand(ABC):
                         # and parsing the result should get a structured error,
                         # not an empty file. output_result is a no-op in
                         # default mode, so this adds nothing for humans.
-                        self._tag_telemetry_status("error")
                         try:
                             self.output_result(
                                 ErrorResult(error=str(auth_error)), config
@@ -163,17 +170,12 @@ class BaseCommand(ABC):
                         raise click.ClickException("Project ID required")
 
             self._guided = self.is_guided(ctx)
-            self._tag_telemetry_start(ctx)
+            self._record_telemetry_context(ctx)
 
             # Execute the command
             try:
                 with TimingContext(f"command_{self.name}_handler"):
                     result = self.handle(config, auth_manager, client, **kwargs)
-
-                status = "ok"
-                if result is not None and hasattr(result, "status"):
-                    status = str(result.status)
-                self._tag_telemetry_status(status)
 
                 # Handle command result
                 if result is not None:
@@ -191,16 +193,18 @@ class BaseCommand(ABC):
                                 raise
 
             except KeyboardInterrupt:
-                self._tag_telemetry_status("cancelled")
                 stderr_console.print("\n[yellow]Command cancelled by user[/yellow]")
                 raise click.Abort()
 
+            except click.ClickException:
+                # A message the command meant for the user; pass it through.
+                raise
+
             except Exception as e:
-                self._tag_telemetry_status("error")
                 print_error(f"Command failed: {e}")
                 if config.get("output.verbose", False):
                     stderr_console.print_exception()
-                raise click.ClickException(str(e))
+                raise UnexpectedCommandError(str(e)) from e
 
             # Payload is already on stdout; now make the exit code agree with it.
             exit_code = self.exit_code_for(result)
@@ -240,49 +244,17 @@ class BaseCommand(ABC):
                 return False
         return True
 
-    def _tag_telemetry_start(self, ctx: click.Context) -> None:
-        """Annotate the active Sentry transaction with command-level usage signal.
+    def _record_telemetry_context(self, ctx: click.Context) -> None:
+        """Record the command path and user-supplied flag names for telemetry.
 
-        Sets the transaction name to the full Click command path
-        (e.g. 'deepctl debug audio' instead of just 'debug') and tags it with
-        the user-provided flag NAMES (never values), the requested output
-        format, and the auth method. All values are bounded enums or
-        already-public flag identifiers — no PII risk.
-
-        Wrapped in a bare except so a Sentry hiccup, missing scope, or unknown
-        Click parameter-source enum value can never crash the user's command.
+        Stored in a stdlib dict that telemetry reads only if this run reports
+        an error, so the success path never loads the telemetry SDK. Wrapped
+        in a bare except so it can never crash the user's command.
         """
         try:
-            import sentry_sdk
+            from .telemetry_context import record_command
 
-            scope = sentry_sdk.get_current_scope()
-            transaction = getattr(scope, "transaction", None)
-            if transaction is not None and ctx.command_path:
-                transaction.name = ctx.command_path
-
-            used: list[str] = []
-            for param in ctx.command.params:
-                if not param.name:
-                    continue
-                src = ctx.get_parameter_source(param.name)
-                if src is not None and src.name == "COMMANDLINE":
-                    used.append(param.name)
-            scope.set_tag("cmd.flags", ",".join(sorted(used)) or "(none)")
-            scope.set_tag("cmd.output_format", ctx.params.get("output") or "default")
-        except Exception:
-            pass
-
-    def _tag_telemetry_status(self, status: str) -> None:
-        """Tag the active Sentry transaction with the command outcome.
-
-        Status is a bounded enum: 'ok', 'cancelled', 'error', or whatever the
-        command's BaseResult.status returned (also bounded by the result
-        model). Bare except so telemetry can't crash the command teardown.
-        """
-        try:
-            import sentry_sdk
-
-            sentry_sdk.get_current_scope().set_tag("cmd.status", status)
+            record_command(ctx)
         except Exception:
             pass
 

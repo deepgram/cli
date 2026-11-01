@@ -441,39 +441,9 @@ flag: `dg --output json <command>`. `dg speak --output FILE` writes audio to
 
 ## Telemetry
 
-The CLI phones home anonymous error reports to help us catch crashes and regressions before users have to file an issue. It's **on by default** and easy to turn off.
+This version of dg sends no telemetry: no error reports, usage data or other telemetry, whether a command succeeds or fails. dg still contacts the Deepgram API for the commands you run, and pypi.org to check for updates.
 
-**What's collected:** Python exceptions, stack traces, the CLI version, and the Python runtime. Request bodies, headers, cookies, API keys, email addresses, IP addresses, and usernames are scrubbed before send. No performance traces, no profiling, no replays — errors only.
-
-**Where it goes:** the `dx-cli` Sentry project owned by the Deepgram DX team.
-
-### Opt out
-
-Persistent (recommended) — add this to your `config.yaml`
-(`~/.config/deepctl/config.yaml` on Linux,
-`~/Library/Application Support/deepctl/config.yaml` on macOS,
-`%LOCALAPPDATA%\deepgram\deepctl\config.yaml` on Windows):
-
-```yaml
-telemetry:
-  enabled: false
-```
-
-One-shot (CI, scripts, single command):
-
-```bash
-DEEPCTL_TELEMETRY_DISABLED=1 dg listen recording.wav
-```
-
-### Override the destination
-
-For forks or self-hosted Sentry, point telemetry at your own DSN:
-
-```bash
-export DEEPCTL_TELEMETRY_DSN='https://<key>@<your-sentry>/<project>'
-```
-
-`DEEPCTL_TELEMETRY_DISABLED` always wins. The default DSN is baked into the package and only used when the override is unset.
+The `DEEPCTL_TELEMETRY_DISABLED` environment variable and the `telemetry.enabled` setting in `config.yaml` are still accepted, and the new `--no-telemetry` flag is accepted too, but none of them has an effect in this version. `DEEPCTL_TELEMETRY_DSN` is now ignored unless it points at the local machine, which is for tests. The last line of `dg --help` says that dg sends no telemetry.
 
 ## Development
 
@@ -520,7 +490,7 @@ cli/
 │   ├── deepctl-core/                 # Core components for deepctl
 │   ├── deepctl-plugin-example/       # Example plugin for deepctl
 │   ├── deepctl-shared-utils/         # Shared utilities for deepctl
-│   └── deepctl-telemetry/            # Opt-out phone-home telemetry for deepctl
+│   └── deepctl-telemetry/            # Error reporting for deepctl; this version sends no telemetry
 ├── tests/                            # Integration tests
 └── Makefile                          # Development tasks
 ```
@@ -596,7 +566,7 @@ cli/
 | [`deepctl-core`](packages/deepctl-core) | Core components for deepctl |
 | [`deepctl-plugin-example`](packages/deepctl-plugin-example) | Example plugin for deepctl |
 | [`deepctl-shared-utils`](packages/deepctl-shared-utils) | Shared utilities for deepctl |
-| [`deepctl-telemetry`](packages/deepctl-telemetry) | Opt-out phone-home telemetry for deepctl |
+| [`deepctl-telemetry`](packages/deepctl-telemetry) | Error reporting for deepctl; this version sends no telemetry |
 <!-- END:packages -->
 
 ## Release

@@ -52,7 +52,7 @@ class ToolsConfig(BaseModel):
 
 
 class TelemetryConfig(BaseModel):
-    """Phone-home telemetry configuration. Opt-out — defaults to on."""
+    """Telemetry setting, still accepted. This version sends no telemetry."""
 
     enabled: bool = True
 
@@ -85,6 +85,9 @@ class Config:
         )
         self._explicit_profile = profile  # Store explicitly set profile
         self._config: DeepgramConfig
+        # Text of the user config file as read by _load_config; None when the
+        # file was absent or couldn't be read.
+        self.user_config_text: str | None = None
         self._load_config()
 
     @property
@@ -143,13 +146,17 @@ class Config:
         # Start with default configuration
         self._config = DeepgramConfig()
 
-        # Load from user config file
+        # Load from user config file. The raw text is kept so other readers
+        # (telemetry's opt-out) can parse the same bytes without opening the
+        # file again; a FIFO or /dev/stdin can only be read once.
+        self.user_config_text = None
         if self.config_path.exists():
             try:
                 with open(self.config_path, encoding="utf-8") as f:
-                    user_config = yaml.safe_load(f)
-                    if user_config:
-                        self._merge_config(user_config)
+                    self.user_config_text = f.read()
+                user_config = yaml.safe_load(self.user_config_text)
+                if user_config:
+                    self._merge_config(user_config)
             except Exception as e:
                 # Don't fail on config load errors, just warn
                 print(f"Warning: Could not load config from {self.config_path}: {e}")
