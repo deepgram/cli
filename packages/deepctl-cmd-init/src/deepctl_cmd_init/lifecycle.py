@@ -76,7 +76,9 @@ def clone_template(github_url: str, target_dir: Path) -> None:
         raise RuntimeError(f"Directory already exists: {target_dir}")
 
     result = subprocess.run(
-        ["git", "clone", github_url, str(target_dir)],
+        # "--" ends git's options: a server-supplied URL that starts with "-"
+        # is taken as the repository, never as a git option.
+        ["git", "clone", "--", github_url, str(target_dir)],
         capture_output=True,
         text=True,
     )
