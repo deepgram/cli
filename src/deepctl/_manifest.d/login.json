@@ -8,7 +8,7 @@
   "requires_auth": false,
   "help": {
     "name": "login",
-    "help": "Log in to Deepgram with browser-based authentication or API key\n\nExamples:\n  dg login\n  dg login --api-key YOUR_API_KEY\n  dg login --api-key YOUR_KEY --project-id YOUR_PROJECT\n  dg login --profile staging --api-key YOUR_KEY\n  dg --base-url https://api.eu.deepgram.com login --save-base-url\n\n\nFor agents, use --agent-friendly.",
+    "help": "Log in to Deepgram with browser-based authentication or API key\n\nExamples:\n  dg login\n  dg login --no-browser\n  dg login --complete\n  dg login --api-key YOUR_API_KEY\n  dg login --api-key YOUR_KEY --project-id YOUR_PROJECT\n  dg login --profile staging --api-key YOUR_KEY\n  dg --base-url https://api.eu.deepgram.com login --save-base-url\n\n\nFor agents, use --agent-friendly.",
     "short_help": "Log in to Deepgram",
     "epilog": null,
     "hidden": false,
@@ -36,6 +36,69 @@
         "count": false,
         "hidden": false,
         "help": "Save the --base-url URL as this profile's API URL (asks for confirmation in a terminal)"
+      },
+      {
+        "class": "option",
+        "name": "wait",
+        "opts": [
+          "--wait"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Wait until the browser login is approved (the default in a terminal), instead of exiting with the link and code; with --complete, keep checking"
+      },
+      {
+        "class": "option",
+        "name": "complete",
+        "opts": [
+          "--complete"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Finish a pending browser login: check once whether it was approved, and save the key if it was (add --wait to keep checking)"
+      },
+      {
+        "class": "option",
+        "name": "no_browser",
+        "opts": [
+          "--no-browser"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Print the login link and code instead of opening a browser, then exit; finish with --complete, or add --wait to wait here"
       },
       {
         "class": "option",

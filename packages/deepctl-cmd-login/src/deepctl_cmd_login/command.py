@@ -1,10 +1,15 @@
 """Login command for deepctl."""
 
+import dataclasses
 import os
 import shlex
 import shutil
 import sys
-from typing import Any
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TextIO
 from urllib.parse import urlsplit
 
 import click
@@ -23,6 +28,8 @@ from deepctl_core import (
     is_ai_agent,
 )
 from deepctl_core import messages as msg
+from deepctl_core.auth import DeviceCodeUnreadable
+from deepctl_core.config import ConfigSaveRefused
 from deepctl_core.hosts import (
     SOURCE_ENV,
     SOURCE_FLAG,
@@ -37,21 +44,44 @@ from deepctl_core.hosts import (
     report,
     user_config_display,
 )
+from deepctl_core.login_state import (
+    MIN_POLL_INTERVAL,
+    LoadedPending,
+    PendingLogin,
+    load_pending,
+    remove_pending,
+    save_pending,
+    state_dir,
+    unwritable_dir,
+)
 from deepctl_core.output import (
     _output_config,
     print_error,
     print_error_hint,
     print_hint,
     print_info,
+    print_security_warning,
     print_warning,
+    stderr_console,
 )
 from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Prompt
 
-from .models import LoginCodedError, LoginResult, LogoutResult, WhoamiResult
+if TYPE_CHECKING:
+    from deepctl_core.auth import DeviceCodeResponse
+
+from .models import (
+    LoginCodedError,
+    LoginPendingResult,
+    LoginResult,
+    LogoutResult,
+    WhoamiResult,
+)
 
 console = Console()
+# Status chrome of the login flows: stderr, never the payload's stdout.
+status = stderr_console
 
 _PROG_NAMES = ("dg", "deepgram", "deepctl")
 _YES_FLAG = "--yes"
@@ -129,6 +159,11 @@ def _rerun_with_yes(prog: str | None) -> str | None:
     return step if shlex.join(shlex.split(step)) == step else None
 
 
+def _hard_signal() -> bool:
+    """An AI agent marked the environment, or ``DG_AGENT=1`` says one runs dg."""
+    return is_ai_agent() or os.environ.get("DG_AGENT") == "1"
+
+
 def _hint_for(
     human: str,
     agent: str,
@@ -138,7 +173,7 @@ def _hint_for(
     automation_null: str | None = None,
 ) -> str:
     """The hint for this run's mode, null-aware."""
-    if is_ai_agent():
+    if _hard_signal():
         return agent_null if next_step is None and agent_null else agent
     if _output_config["agentic"]:
         if next_step is None:
@@ -159,6 +194,145 @@ def _coded_error(
     print_hint(escape(hint))
     return LoginCodedError(
         error=error, code=code, hint=hint, next_step=next_step, details=details
+    )
+
+
+# Mode A stderr grammar: every line a caller reads starts with
+# one of these. Anything else a login flow prints is status chrome.
+_MODE_A_PREFIXES = (
+    "ERROR: ",
+    "WARN: ",
+    "INFO: ",
+    "HINT: ",
+    "OK: ",
+    "DEPRECATED: ",
+)
+
+
+class _ModeAStderr:
+    """``sys.stderr`` in mode A: each write that starts a line is kept or
+    dropped as a whole. With ``verbose``, chrome is kept as ``INFO:`` lines
+    instead of dropped."""
+
+    def __init__(self, stream: TextIO, verbose: bool = False) -> None:
+        self._stream = stream
+        self._verbose = verbose
+        self._keep = True
+        self._line_start = True
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        if self._line_start:
+            first = text.lstrip("\n").split("\n", 1)[0]
+            prefixed = first.startswith(_MODE_A_PREFIXES)
+            self._keep = bool(first.strip()) and (prefixed or self._verbose)
+            if self._keep and not prefixed:
+                lines = [line for line in text.strip("\n").split("\n") if line.strip()]
+                text = "".join(f"INFO: {line.strip()}\n" for line in lines)
+        if self._keep:
+            self._stream.write(text)
+        self._line_start = text.endswith("\n")
+        return len(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+@contextmanager
+def _without_chrome() -> Iterator[None]:
+    """In mode A, drop status chrome from stderr (``INFO:`` lines with
+    --verbose)."""
+    if not _output_config["agentic"]:
+        yield
+        return
+    real = sys.stderr
+    sys.stderr = _ModeAStderr(real, verbose=bool(_output_config["verbose"]))
+    try:
+        yield
+    finally:
+        sys.stderr = real
+
+
+def _shown_prog(prog: str | None) -> str:
+    return prog or _PROG_NAMES[0]
+
+
+def _state_unwritable(directory: Path) -> LoginCodedError:
+    shown = _shown_prog(_prog())
+    return _coded_error(
+        msg.E_STATE_UNWRITABLE.format(prog=shown, dir=msg.display_path(directory)),
+        msg.CODE_STATE_UNWRITABLE,
+        _hint_for(
+            msg.H_STATE_UNWRITABLE.format(prog=shown),
+            msg.A_STATE_UNWRITABLE.format(prog=shown),
+            None,
+        ),
+        None,
+        {"dir": str(directory)},
+    )
+
+
+def _preflight(config: Config) -> Any | None:
+    """Stop before any request when the login couldn't be saved.
+
+    In order: the state or credential directory isn't writable
+    (``E-STATE-UNWRITABLE``); then, in an AI agent session, the user config
+    is one dg won't save over (``E-CFG-SAVE-UNTRUSTED``). Both
+    come before the confirmations, so an agent is never told to pass --yes
+    for a save that would fail.
+    """
+    config_path = Path(config.config_path)
+    for directory, file in (
+        (state_dir(), None),
+        (config_path.parent, config_path),
+    ):
+        bad = unwritable_dir(directory, file)
+        if bad is not None:
+            return _state_unwritable(bad)
+    try:
+        config.check_saveable()
+    except ConfigSaveRefused as e:
+        shown = _shown_prog(_prog())
+        return _coded_error(
+            msg.E_CFG_SAVE_UNTRUSTED.format(
+                prog=shown,
+                path=msg.display_path(config_path),
+                why=msg.W_CFG_UNTRUSTED_WHY[e.why],
+            ),
+            msg.CODE_STATE_UNWRITABLE,
+            msg.W_CFG_UNTRUSTED_FILE_HINT,
+            None,
+            {"reason": "untrusted_config", "path": str(config_path)},
+        )
+    except OSError as e:
+        # A save that can't happen for another reason (not a regular file,
+        # content that wouldn't load back): stop before sending anything.
+        print_error(escape(f"Login failed: {e}"))
+        print_error_hint(e)
+        return LoginResult(
+            status="error",
+            message=str(e),
+            profile=config.profile or "default",
+            api_key_masked=None,
+        )
+    return None
+
+
+def _device_code_unreadable(host: str) -> LoginCodedError:
+    """The identity provider's device-code answer couldn't be read."""
+    shown = _shown_prog(_prog())
+    values = {"host": msg.display(host), "prog": shown}
+    return _coded_error(
+        msg.E_NETWORK_UNREADABLE.format(**values),
+        msg.CODE_NETWORK_UNAVAILABLE,
+        _hint_for(
+            msg.H_NETWORK_UNREADABLE.format(**values),
+            msg.A_NETWORK_UNREADABLE,
+            None,
+        ),
+        None,
+        {"host": msg.display(host), "reason": "unreadable response"},
     )
 
 
@@ -190,16 +364,18 @@ class LoginCommand(BaseCommand):
 
     examples = [
         "dg login",
+        "dg login --no-browser",
+        "dg login --complete",
         "dg login --api-key YOUR_API_KEY",
         "dg login --api-key YOUR_KEY --project-id YOUR_PROJECT",
         "dg login --profile staging --api-key YOUR_KEY",
         "dg --base-url https://api.eu.deepgram.com login --save-base-url",
     ]
     agent_help = (
-        "Authenticate with Deepgram. Can accept an API key directly via "
-        "--api-key flag, or prompt interactively. Credentials are stored "
-        "securely in the system keyring. Supports named profiles for "
-        "managing multiple environments."
+        "Log in to Deepgram. In an AI agent session, dg login prints a link "
+        "and code and exits: give both to the user, then run dg login "
+        "--complete (add --wait to keep checking). Never put an API key on "
+        "the command line. Profiles keep separate API keys and project IDs."
     )
 
     def get_arguments(self) -> list[dict[str, Any]]:
@@ -242,6 +418,35 @@ class LoginCommand(BaseCommand):
                 "is_option": True,
             },
             {
+                "names": ["--no-browser"],
+                "help": (
+                    "Print the login link and code instead of opening a browser, "
+                    "then exit; finish with --complete, or add --wait to wait here"
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--complete"],
+                "help": (
+                    "Finish a pending browser login: check once whether it was "
+                    "approved, and save the key if it was (add --wait to keep "
+                    "checking)"
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--wait"],
+                "help": (
+                    "Wait until the browser login is approved (the default in a "
+                    "terminal), instead of exiting with the link and code; with "
+                    "--complete, keep checking"
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
                 "names": ["--save-base-url"],
                 "help": (
                     "Save the --base-url URL as this profile's API URL "
@@ -260,17 +465,36 @@ class LoginCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle login command."""
+        with _without_chrome():
+            return self._login(config, auth_manager, **kwargs)
+
+    def _login(self, config: Config, auth_manager: AuthManager, **kwargs: Any) -> Any:
         api_key = kwargs.get("api_key")
         project_id = kwargs.get("project_id")
         force_write = bool(kwargs.get("yes") or kwargs.get("force_write"))
         profile = kwargs.get("profile")
         save_base_url = kwargs.get("save_base_url", False)
+        complete = bool(kwargs.get("complete"))
+        wait = bool(kwargs.get("wait"))
+        no_browser = bool(kwargs.get("no_browser"))
 
         # Set profile if provided
         if profile:
             config.profile = profile
 
         current_profile = config.profile or "default"
+
+        if complete:
+            if api_key:
+                raise click.UsageError("--complete can't be used with --api-key.")
+            if save_base_url:
+                raise click.UsageError("--complete can't be used with --save-base-url.")
+            return self._complete(config, auth_manager, wait=wait)
+
+        # Nothing is asked or sent when the login couldn't be saved.
+        stop = _preflight(config)
+        if stop is not None:
+            return stop
 
         # Decide where the key may go before doing anything else. A base URL
         # from --base-url or DEEPGRAM_BASE_URL is used for this login only;
@@ -313,21 +537,21 @@ class LoginCommand(BaseCommand):
                         automation_null=msg.C_CONFIRM_ENVKEY_NULL,
                     ),
                 )
-            console.print(
+            status.print(
                 "[yellow]Environment variable DEEPGRAM_API_KEY is set.[/yellow]"
             )
             if has_env_project:
-                console.print(
+                status.print(
                     "[yellow]Environment variable DEEPGRAM_PROJECT_ID is also set.[/yellow]\n"
                     "[green]Commands will work using these environment variables.[/green]"
                 )
             else:
-                console.print(
+                status.print(
                     "[yellow]Note: DEEPGRAM_PROJECT_ID is not set. "
                     "You'll need to set it or provide it via --project-id flag.[/yellow]"
                 )
 
-            console.print(
+            status.print(
                 "\n[dim]Logging in will create a profile that takes precedence "
                 "over environment variables.[/dim]"
             )
@@ -361,7 +585,7 @@ class LoginCommand(BaseCommand):
                         automation_null=msg.C_CONFIRM_YES_NULL,
                     ),
                 )
-            console.print(
+            status.print(
                 f"[yellow]Already logged in to profile:[/yellow] {current_profile}"
             )
 
@@ -398,7 +622,9 @@ class LoginCommand(BaseCommand):
                 config, auth_manager, str(api_key), project_id, force_write
             )
         else:
-            result = self._web_auth(config, auth_manager, force_write)
+            result = self._web_auth(
+                config, auth_manager, wait=wait, no_browser=no_browser
+            )
 
         if result.status == "success":
             self._report_base_url(config, current_profile)
@@ -408,6 +634,16 @@ class LoginCommand(BaseCommand):
             self._maybe_prompt_skills_setup()
 
         return result
+
+    def _pending_mode(self, *, wait: bool, no_browser: bool) -> bool:
+        """Return the link and code at once instead of waiting:
+        under a hard agent signal, with --no-browser, or when neither stdin
+        nor stdout is a terminal. --wait always waits."""
+        if wait:
+            return False
+        if no_browser or _hard_signal():
+            return True
+        return not sys.stdin.isatty() and not sys.stdout.isatty()
 
     def _can_ask(self) -> bool:
         """A person can answer login's confirmations here."""
@@ -648,18 +884,19 @@ class LoginCommand(BaseCommand):
         force_write: bool,
     ) -> LoginResult:
         """Handle CLI authentication with API key."""
-        console.print("[blue]Configuring CLI with API key...[/blue]")
+        status.print("[blue]Configuring CLI with API key...[/blue]")
 
         # The key's format isn't checked: Deepgram keys have no fixed prefix,
         # and login_with_api_key verifies the key with the API.
 
         # Validate project ID is provided with API key
         if not project_id:
-            console.print("[yellow]Warning:[/yellow] Project ID not provided")
-            console.print(
-                "You can set it later with: deepctl login --project-id <project_id>"
+            status.print("[yellow]Warning:[/yellow] Project ID not provided")
+            status.print(
+                "You can set it later with: "
+                f"{_shown_prog(_prog())} login --project-id <project_id>"
             )
-            console.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
+            status.print("Or use environment variable: DEEPGRAM_PROJECT_ID")
 
         # No need to check for existing config - we handle that in the main flow
 
@@ -684,7 +921,7 @@ class LoginCommand(BaseCommand):
             )
 
         except AuthenticationError as e:
-            console.print(f"[red]Login failed:[/red] {e}")
+            print_error(escape(f"Login failed: {e}"))
             return LoginResult(
                 status="error",
                 message=str(e),
@@ -693,7 +930,7 @@ class LoginCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+            print_error(escape(f"Login failed: {e}"))
             print_error_hint(e)
             return LoginResult(
                 status="error",
@@ -703,23 +940,38 @@ class LoginCommand(BaseCommand):
             )
 
     def _web_auth(
-        self, config: Config, auth_manager: AuthManager, force_write: bool
-    ) -> LoginResult | CodedErrorResult:
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        *,
+        wait: bool = False,
+        no_browser: bool = False,
+    ) -> Any:
         """Handle web authentication with device flow."""
         # The identity host mints the key: check it before anything else, and
         # keep a refusal off stdout apart from the structured result.
         try:
-            check_identity_host(config)
+            identity_url = check_identity_host(config)
         except CredentialHostError as e:
             return CodedErrorResult(error=e.error, code=e.code, hint=e.hint)
 
-        console.print("[blue]Starting web authentication...[/blue]")
+        if self._pending_mode(wait=wait, no_browser=no_browser):
+            return self._start_pending(config, auth_manager, identity_url)
 
-        # No need to check for existing config - we handle that in the main flow
+        status.print("[blue]Starting web authentication...[/blue]")
 
         try:
-            # Start device flow
-            auth_manager.login_with_device_flow()
+            open_browser = not (no_browser or _hard_signal())
+            if _output_config["agentic"]:
+                # Mode A: the link and code as an INFO line; chrome is dropped.
+                device = auth_manager._request_device_code(identity_url)
+                self._announce(device)
+                if open_browser:
+                    _open_browser(device)
+                token = auth_manager._poll_for_token(device, identity_url)
+                auth_manager._store_token(token)
+            else:
+                auth_manager.login_with_device_flow(open_browser=open_browser)
 
             profile_name = config.profile or "default"
 
@@ -745,8 +997,11 @@ class LoginCommand(BaseCommand):
                 config_path=str(config.config_path),
             )
 
+        except DeviceCodeUnreadable as e:
+            return _device_code_unreadable(e.host)
+
         except AuthenticationError as e:
-            console.print(f"[red]Authentication failed:[/red] {e}")
+            print_error(escape(f"Login failed: {e}"))
             return LoginResult(
                 status="error",
                 message=str(e),
@@ -755,7 +1010,7 @@ class LoginCommand(BaseCommand):
             )
 
         except KeyboardInterrupt:
-            console.print("\n[yellow]Authentication cancelled by user[/yellow]")
+            status.print("\n[yellow]Authentication cancelled by user[/yellow]")
             return LoginResult(
                 status="cancelled",
                 message="Login cancelled by user",
@@ -764,7 +1019,7 @@ class LoginCommand(BaseCommand):
             )
 
         except Exception as e:
-            console.print(f"[red]Error during web authentication:[/red] {e}")
+            print_error(escape(f"Error during web authentication: {e}"))
             print_error_hint(e)
             return LoginResult(
                 status="error",
@@ -772,6 +1027,269 @@ class LoginCommand(BaseCommand):
                 profile=config.profile or "default",
                 api_key_masked=None,
             )
+
+    def _announce(self, device: "DeviceCodeResponse") -> None:
+        """Print the link and code as an INFO line (stderr)."""
+        print_info(
+            escape(
+                msg.I_LOGIN_PENDING.format(
+                    verification_uri=msg.display(device.verification_uri),
+                    user_code=msg.display(device.user_code or ""),
+                )
+            ),
+            stderr=True,
+        )
+
+    def _start_pending(
+        self, config: Config, auth_manager: AuthManager, identity_url: str
+    ) -> Any:
+        """Get a device code, save it for --complete, and return the link and
+        code at once (exit 0; OQ-16)."""
+        profile_name = config.profile or "default"
+        try:
+            device = auth_manager._request_device_code(identity_url)
+            if not device.user_code:
+                raise AuthenticationError(
+                    "the login service didn't return a code. Try again in a moment."
+                )
+        except DeviceCodeUnreadable as e:
+            return _device_code_unreadable(e.host)
+        except AuthenticationError as e:
+            print_error(escape(f"Login failed: {e}"))
+            return LoginResult(
+                status="error",
+                message=str(e),
+                profile=profile_name,
+                api_key_masked=None,
+            )
+        pending = PendingLogin(
+            device_code=device.device_code,
+            user_code=device.user_code,
+            verification_uri=device.verification_uri,
+            interval=max(MIN_POLL_INTERVAL, device.interval),
+            expires_at=time.time() + device.expires_in,
+            host=identity_url,
+            profile=profile_name,
+        )
+        try:
+            save_pending(pending)
+        except OSError:
+            return _state_unwritable(state_dir())
+
+        prog = _prog()
+        shown = _shown_prog(prog)
+        next_step = f"{prog} login --complete" if prog else None
+        self._announce(device)
+        hint = (
+            msg.A_LOGIN_PENDING
+            if _hard_signal() or _output_config["agentic"]
+            else msg.H_LOGIN_PENDING
+        )
+        print_hint(escape(hint.format(prog=shown)))
+        return LoginPendingResult(
+            message=msg.M_LOGIN_PENDING,
+            verification_uri=device.verification_uri,
+            user_code=device.user_code,
+            expires_in=device.expires_in,
+            next_step=next_step,
+        )
+
+    def _complete(
+        self, config: Config, auth_manager: AuthManager, *, wait: bool
+    ) -> Any:
+        """``dg login --complete``: poll once (or, with --wait, until done)
+        for the saved device code, and save the key once it is approved."""
+        import httpx
+
+        stop = _preflight(config)
+        if stop is not None:
+            return stop
+        prog = _prog()
+        shown = _shown_prog(prog)
+        loaded = load_pending(agent=is_ai_agent())
+        if loaded.ignored_why is not None:
+            print_security_warning(
+                escape(
+                    msg.W_LOGIN_PENDING_UNTRUSTED.format(
+                        path=msg.display_path(loaded.path),
+                        prog=shown,
+                        why=msg.W_CFG_UNTRUSTED_WHY[loaded.ignored_why],
+                    )
+                )
+            )
+        pending = loaded.pending
+        if pending is None:
+            return self._auth_expired(prog)
+        try:
+            identity_url = check_identity_host(config)
+        except CredentialHostError as e:
+            return CodedErrorResult(error=e.error, code=e.code, hint=e.hint)
+        if canonical_url(pending.host) != identity_url:
+            # Issued by another login host: never send its code elsewhere.
+            return self._auth_expired(prog)
+
+        explicit = getattr(config, "_explicit_profile", None)
+        if explicit and explicit != pending.profile:
+            # The pending login was confirmed for its own profile.
+            raise click.UsageError(
+                f'The pending login is for profile "{msg.display(pending.profile)}". '
+                "Run --complete without --profile, or start a new login for "
+                f'"{msg.display(explicit)}" with dg login --profile.'
+            )
+        config.profile = pending.profile
+        interval = pending.interval
+        while True:
+            if pending.expired():
+                remove_pending(loaded)
+                return self._auth_expired(prog)
+            try:
+                poll = auth_manager.poll_device_token(pending.device_code, identity_url)
+            except httpx.RequestError as e:
+                text = f"Network error while completing the login: {e}"
+                print_error(escape(text))
+                return LoginResult(
+                    status="error",
+                    message=text,
+                    profile=pending.profile,
+                    api_key_masked=None,
+                )
+            if poll.state == "token" and poll.token is not None:
+                return self._finish(config, auth_manager, loaded, poll.token)
+            if poll.state == "unavailable" and not wait:
+                text = (
+                    f"Couldn't complete the login: {poll.detail}. "
+                    f"Run {shown} login to start again."
+                )
+                print_error(escape(text))
+                return LoginResult(
+                    status="error",
+                    message=text,
+                    profile=pending.profile,
+                    api_key_masked=None,
+                )
+            if poll.state in ("pending", "slow_down", "unavailable"):
+                if poll.state in ("slow_down", "unavailable"):
+                    interval = max(interval + 5, poll.retry_after or 0)
+                    pending = dataclasses.replace(pending, interval=interval)
+                    try:
+                        save_pending(pending)
+                        loaded = load_pending(agent=is_ai_agent())
+                    except OSError:
+                        pass  # the next --complete waits the old interval
+                if wait:
+                    time.sleep(
+                        max(0.0, min(interval, pending.expires_at - time.time()))
+                    )
+                    continue
+                return self._auth_pending(prog, pending)
+            if poll.state == "denied":
+                remove_pending(loaded)
+                return _coded_error(
+                    msg.E_AUTH_DENIED,
+                    msg.CODE_AUTH_DENIED,
+                    _hint_for(
+                        msg.H_AUTH_DENIED.format(prog=shown),
+                        msg.A_AUTH_DENIED,
+                        None,
+                    ),
+                    None,
+                )
+            if poll.state == "expired":
+                remove_pending(loaded)
+                return self._auth_expired(prog)
+            text = (
+                f"Couldn't complete the login: {poll.detail}. "
+                f"Run {shown} login to start again."
+            )
+            print_error(escape(text))
+            return LoginResult(
+                status="error",
+                message=text,
+                profile=pending.profile,
+                api_key_masked=None,
+            )
+
+    def _finish(
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        loaded: LoadedPending,
+        token: Any,
+    ) -> Any:
+        """Save the approved key (keyring only once the save can happen)."""
+        profile_name = config.profile or "default"
+        try:
+            auth_manager._store_token(token)
+            config._config.active_profile = profile_name
+            config.save()
+        except Exception as e:
+            print_error(escape(f"Login failed: {e}"))
+            print_error_hint(e)
+            return LoginResult(
+                status="error",
+                message=str(e),
+                profile=profile_name,
+                api_key_masked=None,
+            )
+        finally:
+            # The code is used up either way.
+            remove_pending(loaded)
+        key = token.dg_token or ""
+        return LoginResult(
+            status="success",
+            message="Successfully logged in via web authentication",
+            profile=profile_name,
+            api_key_masked=f"****{key[-4:]}" if key else None,
+            project_id=token.project_id or token.pid,
+            config_path=str(config.config_path),
+        )
+
+    def _auth_expired(self, prog: str | None) -> LoginCodedError:
+        shown = _shown_prog(prog)
+        return _coded_error(
+            msg.E_AUTH_EXPIRED,
+            msg.CODE_AUTH_EXPIRED,
+            _hint_for(
+                msg.H_AUTH_EXPIRED.format(prog=shown),
+                msg.A_AUTH_EXPIRED.format(prog=shown),
+                f"{prog} login" if prog else None,
+            ),
+            f"{prog} login" if prog else None,
+        )
+
+    def _auth_pending(self, prog: str | None, pending: PendingLogin) -> LoginCodedError:
+        shown = _shown_prog(prog)
+        values = {
+            "prog": shown,
+            "retry_after": pending.interval,
+            "verification_uri": msg.display(pending.verification_uri),
+            "user_code": msg.display(pending.user_code),
+        }
+        next_step = f"{prog} login --complete" if prog else None
+        return _coded_error(
+            msg.E_AUTH_PENDING,
+            msg.CODE_AUTH_PENDING,
+            _hint_for(
+                msg.H_AUTH_PENDING.format(**values),
+                msg.A_AUTH_PENDING.format(**values),
+                next_step,
+            ),
+            next_step,
+            {
+                "retry_after": pending.interval,
+                "verification_uri": pending.verification_uri,
+                "user_code": pending.user_code,
+            },
+        )
+
+
+def _open_browser(device: "DeviceCodeResponse") -> None:
+    import webbrowser
+
+    try:
+        webbrowser.open(device.verification_uri_complete or device.verification_uri)
+    except Exception as e:
+        print_warning(escape(f"Could not open a browser: {e}"), stderr=True)
 
 
 class LogoutCommand(BaseCommand):
