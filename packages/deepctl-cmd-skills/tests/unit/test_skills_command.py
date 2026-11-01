@@ -965,6 +965,104 @@ class TestSkillsStartupCheck:
         startup_check.check_and_notify(quiet=True)
         assert startup_check._thread is None
 
+    def test_suppressed_when_stderr_is_not_a_terminal(self):
+        from deepctl_cmd_skills import startup_check
+
+        with (
+            patch.object(startup_check, "_is_ci", return_value=False),
+            patch.object(startup_check, "_is_agent", return_value=False),
+            patch.object(startup_check, "_is_oneshot", return_value=False),
+            patch.object(startup_check, "_already_prompted", return_value=False),
+            patch.object(startup_check, "_stderr_is_terminal", return_value=False),
+            patch.object(startup_check.threading, "Thread") as thread_cls,
+        ):
+            startup_check.check_and_notify(quiet=False)
+        thread_cls.assert_not_called()
+
+    @pytest.mark.parametrize("case", ["mcp", "opt-out"])
+    def test_suppressed_for_mcp_and_opt_out(self, case, monkeypatch):
+        from deepctl_cmd_skills import startup_check
+
+        monkeypatch.delenv("DEEPCTL_NO_UPDATE_CHECK", raising=False)
+        if case == "opt-out":
+            monkeypatch.setenv("DEEPCTL_NO_UPDATE_CHECK", "1")
+            mcp = False
+        else:
+            mcp = True
+        with (
+            patch.object(startup_check, "_is_ci", return_value=False),
+            patch.object(startup_check, "_is_agent", return_value=False),
+            patch.object(startup_check, "_is_oneshot", return_value=False),
+            patch.object(startup_check, "_already_prompted", return_value=False),
+            patch.object(startup_check, "_stderr_is_terminal", return_value=True),
+            patch.object(startup_check, "_is_mcp", return_value=mcp),
+            patch.object(startup_check.threading, "Thread") as thread_cls,
+        ):
+            startup_check.check_and_notify(quiet=False)
+        thread_cls.assert_not_called()
+
+    def test_mcp_detected_through_root_options(self, monkeypatch):
+        from deepctl import _cli
+        from deepctl_cmd_skills import startup_check
+
+        monkeypatch.setattr(_cli, "_run_args", ["--profile", "x", "mcp"])
+        assert startup_check._is_mcp() is True
+        monkeypatch.setattr(_cli, "_run_args", ["models"])
+        assert startup_check._is_mcp() is False
+
+    def test_suppressed_for_an_agent(self):
+        from deepctl_cmd_skills import startup_check
+
+        with (
+            patch.object(startup_check, "_is_ci", return_value=False),
+            patch.object(startup_check, "_is_agent", return_value=True),
+            patch.object(startup_check, "_stderr_is_terminal", return_value=True),
+            patch.object(startup_check.threading, "Thread") as thread_cls,
+        ):
+            startup_check.check_and_notify(quiet=False)
+        thread_cls.assert_not_called()
+
+    def test_running_check_is_dropped_without_waiting(self):
+        import threading
+
+        from deepctl_cmd_skills import startup_check
+
+        release = threading.Event()
+        startup_check._result = {"should_prompt": True}
+        thread = threading.Thread(target=release.wait, daemon=True)
+        thread.start()
+        startup_check._thread = thread
+        try:
+            with (
+                patch.object(thread, "join") as join,
+                patch.object(startup_check, "_mark_prompted") as mark,
+                patch.object(sys, "stderr", MagicMock()) as err,
+            ):
+                startup_check.print_pending_notification()
+            join.assert_not_called()
+            err.write.assert_not_called()
+            mark.assert_not_called()
+        finally:
+            release.set()
+            thread.join(timeout=5.0)
+
+    def test_marked_only_once_shown(self):
+        import threading
+
+        from deepctl_cmd_skills import startup_check
+
+        startup_check._result = {"should_prompt": True}
+        startup_check._thread = threading.Thread(target=lambda: None)
+        startup_check._thread.start()
+        startup_check._thread.join()
+        with (
+            patch.object(startup_check, "_mark_prompted") as mark,
+            patch.object(sys, "stderr", MagicMock()) as err,
+        ):
+            startup_check.print_pending_notification()
+        err.write.assert_called_once()
+        mark.assert_called_once()
+
     @pytest.mark.parametrize(
         "error",
         [

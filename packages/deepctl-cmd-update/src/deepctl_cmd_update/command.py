@@ -153,15 +153,8 @@ class UpdateCommand(BaseCommand):
         detector = InstallationDetector()
         install_info = detector.detect()
 
-        # Store installation info for future use — serialize enum to its string value
-        config._set_config_value(
-            "update.installation_method", install_info.method.value
-        )
-        config._set_config_value("update.installation_path", install_info.path)
-        config.save(implicit=True)
-
         # Display installation info
-        console.print(f"Installation method: [cyan]{install_info.method}[/cyan]")
+        console.print(f"Installation method: [cyan]{install_info.method.value}[/cyan]")
         console.print(f"Installation path: [dim]{install_info.path}[/dim]")
         if install_info.virtual_env:
             console.print("[yellow]Virtual environment detected[/yellow]")
@@ -218,10 +211,6 @@ class UpdateCommand(BaseCommand):
                 print_success(
                     f"Successfully updated to version {version_info.latest_version}"
                 )
-
-                # Clear version cache
-                config._set_config_value("update.cached_version_info", None)
-                config.save(implicit=True)
 
                 return UpdateResult(
                     success=True,

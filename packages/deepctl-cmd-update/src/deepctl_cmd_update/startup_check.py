@@ -1,8 +1,23 @@
 """Background startup update check for deepctl.
 
-Runs a non-intrusive version check in a daemon thread during normal CLI
-execution, then prints a one-line notification to stderr *after* the
-command output completes.
+Runs a version check in a daemon thread while the command runs. When the
+command is done, a one-line notice goes to stderr only if the thread has
+already finished; dg never waits for it. A check that hasn't finished is
+dropped, and the interpreter stops the thread at exit.
+
+The check runs at most once per interval (daily by default). Its state lives
+in ``<cache>/update-check.json`` (``check_cache``), written just before the
+request goes out and again with the answer, so a failing or slow index is
+tried again only after a full interval. When no check is due and the saved
+answer names a newer version, the notice prints from it, at most once per
+interval (``notified_at``), so an answer that came in too late for its own
+run still reaches the person. The user config file is never written. When
+the cache directory can't be made private, the check doesn't run at all.
+
+The check is skipped entirely under ``--quiet``, in CI, in an AI agent or
+other non-interactive session, under ``dg mcp``, when stderr isn't a
+terminal, for one-shot runs (uvx, pipx run, npx) and when
+``DEEPCTL_NO_UPDATE_CHECK`` is set.
 """
 
 from __future__ import annotations
@@ -11,12 +26,13 @@ import importlib.metadata
 import os
 import sys
 import threading
-import time
-from pathlib import Path
 from typing import Any
 
-# Sentinel used when the background check is suppressed or has no result
-_NO_RESULT: dict[str, Any] = {}
+from . import check_cache
+
+PYPI_URL = "https://pypi.org/pypi/deepctl/json"
+NO_UPDATE_CHECK_ENV_VAR = "DEEPCTL_NO_UPDATE_CHECK"
+THREAD_NAME = "deepctl-update-check"
 
 # Environment variables that indicate a CI environment
 _CI_ENV_VARS = (
@@ -31,11 +47,6 @@ _CI_ENV_VARS = (
     "CODEBUILD_BUILD_ID",
 )
 
-# Cache file for last-check timestamp (separate from YAML config to
-# avoid race conditions)
-_CACHE_DIR = Path.home() / ".cache" / "deepctl"
-_CACHE_FILE = _CACHE_DIR / "last_version_check"
-
 
 def _is_ci() -> bool:
     """Return True if running inside a CI environment."""
@@ -48,31 +59,67 @@ def _is_oneshot() -> bool:
     if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
         return True
     # pipx run
+    from pathlib import Path
+
     exe_path = str(Path(sys.executable).resolve())
     pipx_home = os.environ.get("PIPX_HOME", str(Path.home() / ".local" / "pipx"))
     pipx_cache = str(Path(pipx_home) / ".cache")
     return bool(exe_path.startswith(pipx_cache))
 
 
-def _read_cache_timestamp() -> float:
-    """Read the last-check timestamp from the cache file.
+def _opted_out() -> bool:
+    """``DEEPCTL_NO_UPDATE_CHECK`` is set to anything but empty, 0 or false."""
+    value = os.environ.get(NO_UPDATE_CHECK_ENV_VAR, "").strip().lower()
+    return value not in ("", "0", "false", "no")
 
-    Returns:
-        Unix timestamp of the last check, or ``0.0`` if not available.
+
+def _stderr_is_terminal() -> bool:
+    try:
+        return bool(sys.stderr is not None and sys.stderr.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def _is_agent() -> bool:
+    """An AI agent or another non-interactive session (deepctl_core's rules)."""
+    try:
+        from deepctl_core.output import is_agentic, is_ai_agent
+    except ImportError:
+        return False
+    return is_agentic() or is_ai_agent()
+
+
+def _subcommand() -> str | None:
+    """The command this run executes (``mcp`` for ``dg -q mcp``), if known."""
+    cli = sys.modules.get("deepctl._cli")
+    args = getattr(cli, "_run_args", None)
+    if args is None:
+        args = sys.argv[1:]
+    try:
+        flag_opts = cli._root_flag_opts() if cli is not None else set()
+        i = 0
+        while i < len(args) and args[i].startswith("-"):
+            takes_value = cli is not None and cli._takes_next_token(args[i], flag_opts)
+            i += 2 if takes_value else 1
+    except Exception:
+        return None
+    return args[i] if i < len(args) else None
+
+
+def suppressed(quiet: bool) -> bool:
+    """Whether this run must not check for updates at all.
+
+    Shared by the plugin-update check. Cheap: no config or network access.
     """
-    try:
-        return float(_CACHE_FILE.read_text().strip())
-    except (FileNotFoundError, ValueError, OSError):
-        return 0.0
-
-
-def _write_cache_timestamp() -> None:
-    """Persist the current time to the cache file."""
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(str(time.time()))
-    except OSError:
-        pass
+    return (
+        quiet
+        or _opted_out()
+        or _is_ci()
+        or not _stderr_is_terminal()
+        or _is_agent()
+        or _is_oneshot()
+        or _subcommand() == "mcp"
+    )
 
 
 def _get_check_interval_seconds(quiet: bool) -> float | None:
@@ -101,43 +148,78 @@ def _get_check_interval_seconds(quiet: bool) -> float | None:
 
 
 def _background_check(current_version: str, result: dict[str, Any]) -> None:
-    """Run the version check synchronously (called inside a thread)."""
+    """Run the version check synchronously (called inside a thread).
+
+    The attempt is saved just before the request goes out, so one that
+    fails or never finishes still counts as this interval's check, while a
+    run that ends before the request (imports take a while) doesn't.
+    """
     try:
+        # httpx loads here, in the thread, never on the main path. Building
+        # the client (CA bundle, proxy settings) also comes before the record.
         import httpx
-
-        response = httpx.get(
-            "https://pypi.org/pypi/deepctl/json",
-            timeout=5.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        latest_version: str = data["info"]["version"]
-
         from packaging import version as pkg_version
 
-        current = pkg_version.parse(current_version)
-        latest = pkg_version.parse(latest_version)
-
-        if latest > current:
-            result["latest"] = latest_version
-            result["current"] = current_version
-
-        _write_cache_timestamp()
+        client = httpx.Client(timeout=5.0)
     except Exception:
-        # Silently swallow — this is best-effort
-        pass
+        return
+    with client:
+        check_cache.write(check_cache.UPDATE_FILE, ok=False, latest=None, source="pypi")
+        try:
+            response = client.get(PYPI_URL)
+            response.raise_for_status()
+            latest_version = response.json()["info"]["version"]
+            if not isinstance(latest_version, str):
+                return
+            newer = pkg_version.parse(latest_version) > pkg_version.parse(
+                current_version
+            )
+        except Exception:
+            # Best effort: the failure is already recorded above.
+            return
+
+    check_cache.write(
+        check_cache.UPDATE_FILE, ok=True, latest=latest_version, source="pypi"
+    )
+    if newer:
+        result["latest"] = latest_version
+        result["current"] = current_version
+
+
+def _newer_saved(
+    state: dict[str, Any] | None, current_version: str, interval: float
+) -> tuple[str, str] | None:
+    """``(current, latest)`` when the saved answer names a newer version
+    whose notice wasn't shown within ``interval``."""
+    if not state or state.get("ok") is not True:
+        return None
+    latest = state.get("latest")
+    if not isinstance(latest, str):
+        return None
+    if not check_cache.elapsed(check_cache.notified_at(state), interval):
+        return None
+    try:
+        from packaging import version as pkg_version
+
+        if pkg_version.parse(latest) <= pkg_version.parse(current_version):
+            return None
+    except Exception:
+        return None
+    return current_version, latest
 
 
 # Module-level state for the background thread
 _thread: threading.Thread | None = None
 _result: dict[str, Any] = {}
+# A notice from the saved answer, when no check ran this time.
+_saved_notice: tuple[str, str] | None = None
 
 
 def check_and_notify(
     current_version: str | None = None,
     quiet: bool = False,
 ) -> None:
-    """Start a background version check.
+    """Start a background version check, unless this run skips it.
 
     Call this **before** CLI execution. It spawns a daemon thread that
     runs concurrently. Call :func:`print_pending_notification` after CLI
@@ -148,20 +230,20 @@ def check_and_notify(
             detected automatically from package metadata.
         quiet: If True, suppress the check entirely.
     """
-    global _thread, _result
+    global _thread, _result, _saved_notice
+    _thread = None
     _result = {}
+    _saved_notice = None
 
-    # Suppress in quiet mode, CI, or one-shot execution
-    if quiet or _is_ci() or _is_oneshot():
+    if suppressed(quiet):
         return
 
-    # Check interval
     interval = _get_check_interval_seconds(quiet)
     if interval is None:
         return
 
-    last_check = _read_cache_timestamp()
-    if time.time() - last_check < interval:
+    # A cache directory that can't be made private: no check, no state.
+    if not check_cache.usable():
         return
 
     # Resolve current version
@@ -171,39 +253,50 @@ def check_and_notify(
         except importlib.metadata.PackageNotFoundError:
             return
 
+    state = check_cache.read(check_cache.UPDATE_FILE)
+    if not check_cache.elapsed(check_cache.checked_at(state), interval):
+        _saved_notice = _newer_saved(state, current_version, interval)
+        return
+
     _thread = threading.Thread(
         target=_background_check,
         args=(current_version, _result),
+        name=THREAD_NAME,
         daemon=True,
     )
     _thread.start()
 
 
 def print_pending_notification() -> None:
-    """Print the update notification if one is pending.
+    """Print the update notice if the check already found one.
 
-    Call this **after** CLI execution completes. It joins the background
-    thread (with a short timeout) and, if an update was found, prints a
-    single ANSI-colored line to stderr.
+    Call this **after** CLI execution completes. It never waits: a check
+    that is still running is dropped (its answer, once saved, gives the
+    notice on a later run). Without a check this run, a saved answer that
+    names a newer version prints instead, at most once per interval.
     """
-    global _thread
+    global _thread, _saved_notice
 
-    if _thread is None:
+    thread, _thread = _thread, None
+    notice, _saved_notice = _saved_notice, None
+    if thread is not None:
+        if thread.is_alive():
+            return
+        latest = _result.get("latest")
+        current = _result.get("current")
+        notice = (current, latest) if latest and current else None
+    if notice is None:
         return
 
-    _thread.join(timeout=2.0)
-    _thread = None
-
-    latest = _result.get("latest")
-    current = _result.get("current")
-    if latest and current:
-        try:
-            sys.stderr.write(
-                f"\n\033[33m  Update available:  {current} → {latest}"
-                f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
-            )
-        except (BrokenPipeError, OSError, ValueError):
-            # The output stream closed (e.g. an MCP host disconnected stdio
-            # after `dg mcp` finished). Nothing useful to do — the notification
-            # is purely advisory.
-            pass
+    current, latest = notice
+    try:
+        sys.stderr.write(
+            f"\n\033[33m  Update available:  {current} → {latest}"
+            f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
+        )
+    except (BrokenPipeError, OSError, ValueError):
+        # The output stream closed (e.g. an MCP host disconnected stdio
+        # after `dg mcp` finished). Nothing useful to do — the notification
+        # is purely advisory.
+        return
+    check_cache.mark_notified(check_cache.UPDATE_FILE)

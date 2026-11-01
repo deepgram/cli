@@ -90,14 +90,6 @@ def _ffprobe_reset(config, auth, client):
     FfprobeCommand().handle(config, auth, client, reset=True)
 
 
-def _version_cache(config, auth, client):
-    VersionChecker(config)._cache_info(
-        VersionInfo(
-            current_version="0.4.0", latest_version="0.4.1", update_available=True
-        )
-    )
-
-
 def _device_login(config, auth, client):
     auth._store_token(
         TokenResponse(
@@ -124,7 +116,6 @@ SAVERS = [
     _switch_profile,
     _ffprobe_set,
     _ffprobe_reset,
-    _version_cache,
     _device_login,
     _update_install_method,
     _delete_and_create,
@@ -171,3 +162,21 @@ def test_command_never_saves_runtime_base_url(tmp_path, monkeypatch, saver, via)
     monkeypatch.delenv("DEEPGRAM_BASE_URL", raising=False)
     later = Config(config_path=str(path))
     assert later.get_profile().base_url == "https://api.deepgram.com"
+
+
+def test_version_cache_never_writes_the_config(tmp_path, monkeypatch):
+    """The update check's answer goes to the cache directory instead."""
+    from deepctl import _cache
+
+    monkeypatch.setattr(_cache, "cache_root", lambda: str(tmp_path / "cache"))
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({"profiles": {"default": {"project_id": "P1"}}}))
+    before = path.read_bytes()
+    config = Config(config_path=str(path), base_url=URL)
+    VersionChecker(config)._cache_info(
+        VersionInfo(
+            current_version="0.4.0", latest_version="0.4.1", update_available=True
+        )
+    )
+    assert path.read_bytes() == before
+    assert (tmp_path / "cache" / "update-check.json").is_file()

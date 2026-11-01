@@ -1,10 +1,20 @@
-"""Version checking functionality for deepctl."""
+"""Version checking functionality for deepctl.
+
+The last check's result lives in ``<cache>/update-check.json`` (see
+``check_cache``), shared with the startup check. Versions before 0.5.0 kept
+it in the user config (``update.last_check`` and
+``update.cached_version_info``); those keys are still read while no cache
+file exists, and never written.
+"""
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from deepctl_core import Config
 from packaging import version
 from pydantic import BaseModel, Field
+
+from . import check_cache
 
 
 class VersionInfo(BaseModel):
@@ -44,6 +54,8 @@ class VersionChecker:
         """
         self.config = config
         self.current_version = current_version
+        # Where the last successful answer came from ("pypi" or "github").
+        self._source = "pypi"
 
     def _get_cache_duration(self) -> timedelta | None:
         """Get the cache duration based on ``check_frequency`` config.
@@ -80,6 +92,7 @@ class VersionChecker:
                 return cached_info
 
         # Choose version source
+        self._source = "pypi"
         if install_method == "homebrew":
             version_info = await self._check_github_releases()
         else:
@@ -88,6 +101,10 @@ class VersionChecker:
         if version_info is not None:
             self._cache_info(version_info)
             return version_info
+
+        check_cache.write(
+            check_cache.UPDATE_FILE, ok=False, latest=None, source=self._source
+        )
 
         # On error, return current version with no update
         return VersionInfo(
@@ -174,6 +191,7 @@ class VersionChecker:
                 )
 
             release_notes_url = data.get("html_url")
+            self._source = "github"
 
             current = version.parse(self.current_version)
             latest = version.parse(latest_version)
@@ -188,6 +206,7 @@ class VersionChecker:
             )
         except Exception:
             # Fall back to PyPI on GitHub API failure
+            self._source = "pypi"
             return await self._check_pypi()
 
     def should_check(self) -> bool:
@@ -206,7 +225,14 @@ class VersionChecker:
             # "never" — always skip
             return False
 
-        # Check last check timestamp
+        state = self._saved_state()
+        if state is not None:
+            elapsed = datetime.now(timezone.utc).timestamp() - check_cache.checked_at(
+                state
+            )
+            return not 0 <= elapsed < cache_duration.total_seconds()
+
+        # No cache file yet: the timestamp older versions kept in the config
         last_check = self.config.get("update.last_check")
         if last_check:
             try:
@@ -222,12 +248,32 @@ class VersionChecker:
 
         return True
 
+    @staticmethod
+    def _saved_state() -> dict[str, Any] | None:
+        return check_cache.read(check_cache.UPDATE_FILE)
+
     def _get_cached_info(self) -> VersionInfo | None:
-        """Get cached version info from config.
+        """Get the cached version info.
 
         Returns:
             Cached version info or None
         """
+        state = self._saved_state()
+        if state is not None:
+            latest = state.get("latest")
+            if not state.get("ok") or not isinstance(latest, str):
+                return None
+            try:
+                available = version.parse(latest) > version.parse(self.current_version)
+            except version.InvalidVersion:
+                return None
+            return VersionInfo(
+                current_version=self.current_version,
+                latest_version=latest,
+                update_available=available,
+            )
+
+        # No cache file yet: what older versions kept in the config
         cached_data = self.config.get("update.cached_version_info")
         if cached_data:
             try:
@@ -237,18 +283,19 @@ class VersionChecker:
         return None
 
     def _cache_info(self, info: VersionInfo) -> None:
-        """Cache version info in config.
+        """Save the answer to the cache file (never to the user config).
 
         Args:
             info: Version info to cache
         """
-        self.config._set_config_value(
-            "update.last_check", datetime.now(timezone.utc).isoformat()
+        if not check_cache.usable():
+            return
+        check_cache.write(
+            check_cache.UPDATE_FILE,
+            ok=True,
+            latest=info.latest_version,
+            source=self._source,
         )
-        self.config._set_config_value(
-            "update.cached_version_info", info.model_dump(mode="json")
-        )
-        self.config.save(implicit=True)
 
 
 def format_version_message(info: VersionInfo) -> str:

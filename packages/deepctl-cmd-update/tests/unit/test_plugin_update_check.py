@@ -3,8 +3,6 @@
 import io
 import sys
 import threading
-import time
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -13,11 +11,35 @@ from deepctl_cmd_update.plugin_update_check import (
     _check_pypi_versions,
     _discover_community_plugins,
     _is_excluded,
-    _read_plugin_cache_timestamp,
-    _write_plugin_cache_timestamp,
     check_plugins_and_notify,
     print_pending_plugin_notifications,
 )
+
+@pytest.fixture
+def cache_dir(tmp_path, monkeypatch):
+    """dg's cache directory, pointed at a fresh temp dir (not created yet)."""
+    from deepctl import _cache
+
+    root = tmp_path / "cache" / "deepctl"
+    monkeypatch.setattr(_cache, "cache_root", lambda: str(root))
+    return root
+
+
+@pytest.fixture
+def check_allowed(monkeypatch, cache_dir):
+    """A run where the startup checks may start: an interactive person at a
+    terminal, outside CI and ``dg mcp``. Returns the cache directory."""
+    import deepctl_cmd_update.startup_check as core
+
+    monkeypatch.delenv(core.NO_UPDATE_CHECK_ENV_VAR, raising=False)
+    monkeypatch.setattr(core, "_is_ci", lambda: False)
+    monkeypatch.setattr(core, "_stderr_is_terminal", lambda: True)
+    monkeypatch.setattr(core, "_is_agent", lambda: False)
+    monkeypatch.setattr(core, "_is_oneshot", lambda: False)
+    monkeypatch.setattr(core, "_subcommand", lambda: None)
+    monkeypatch.setattr(core, "_get_check_interval_seconds", lambda quiet: 86400.0)
+    return cache_dir
+
 
 # ---------------------------------------------------------------------------
 # _is_excluded
@@ -47,39 +69,6 @@ class TestIsExcluded:
 
     def test_arbitrary_community_plugin_not_excluded(self):
         assert _is_excluded("my-deepctl-addon") is False
-
-
-# ---------------------------------------------------------------------------
-# Cache timestamp
-# ---------------------------------------------------------------------------
-
-
-class TestPluginCacheTimestamp:
-    """Test file-based plugin cache timestamp."""
-
-    def test_read_missing_returns_zero(self, tmp_path):
-        with patch(
-            "deepctl_cmd_update.plugin_update_check._PLUGIN_CACHE_FILE",
-            tmp_path / "nonexistent",
-        ):
-            assert _read_plugin_cache_timestamp() == 0.0
-
-    def test_write_then_read_roundtrip(self, tmp_path):
-        cache_file = tmp_path / "last_plugin_version_check"
-        with (
-            patch(
-                "deepctl_cmd_update.plugin_update_check._PLUGIN_CACHE_FILE",
-                cache_file,
-            ),
-            patch(
-                "deepctl_cmd_update.plugin_update_check._CACHE_DIR",
-                tmp_path,
-            ),
-        ):
-            _write_plugin_cache_timestamp()
-            ts = _read_plugin_cache_timestamp()
-            assert ts > 0.0
-            assert abs(ts - time.time()) < 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -254,42 +243,44 @@ class TestCheckPypiVersions:
 class TestCheckPluginsAndNotify:
     """Test the plugin check lifecycle."""
 
-    @patch.dict("os.environ", {"CI": "true"}, clear=False)
-    def test_suppressed_in_ci(self):
+    @pytest.fixture(autouse=True)
+    def _reset(self):
         import deepctl_cmd_update.plugin_update_check as mod
 
         mod._thread = None
         mod._result = {}
+        yield
+        if mod._thread is not None:
+            mod._thread.join(timeout=5.0)
+        mod._thread = None
+
+    def test_suppressed_with_the_core_check(self, check_allowed, monkeypatch):
+        import deepctl_cmd_update.plugin_update_check as mod
+        import deepctl_cmd_update.startup_check as core
+
+        monkeypatch.setattr(core, "_stderr_is_terminal", lambda: False)
+        with patch.object(mod.threading, "Thread") as thread_cls:
+            check_plugins_and_notify()
+        thread_cls.assert_not_called()
+        assert not check_allowed.exists()
+
+    def test_suppressed_in_ci(self, check_allowed, monkeypatch):
+        import deepctl_cmd_update.plugin_update_check as mod
+        import deepctl_cmd_update.startup_check as core
+
+        monkeypatch.setattr(core, "_is_ci", lambda: True)
         check_plugins_and_notify()
         assert mod._thread is None
 
-    def test_suppressed_in_quiet_mode(self):
+    def test_suppressed_in_quiet_mode(self, check_allowed):
         import deepctl_cmd_update.plugin_update_check as mod
 
-        mod._thread = None
-        mod._result = {}
         check_plugins_and_notify(quiet=True)
         assert mod._thread is None
 
-    @patch("deepctl_cmd_update.plugin_update_check._is_ci", return_value=False)
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._is_oneshot",
-        return_value=False,
-    )
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._get_check_interval_seconds",
-        return_value=86400.0,
-    )
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._read_plugin_cache_timestamp",
-        return_value=0.0,
-    )
-    def test_fresh_cache_spawns_thread(self, *_mocks):
-        """Cache expired → thread should be spawned."""
+    def test_due_spawns_thread(self, check_allowed):
+        """No check within the interval → thread should be spawned."""
         import deepctl_cmd_update.plugin_update_check as mod
-
-        mod._thread = None
-        mod._result = {}
 
         with patch(
             "deepctl_cmd_update.plugin_update_check._background_plugin_check",
@@ -298,30 +289,45 @@ class TestCheckPluginsAndNotify:
             check_plugins_and_notify()
             assert mod._thread is not None
             assert mod._thread.daemon is True
-            mod._thread.join(timeout=2.0)
+            assert mod._thread.name == mod.THREAD_NAME
 
-    @patch("deepctl_cmd_update.plugin_update_check._is_ci", return_value=False)
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._is_oneshot",
-        return_value=False,
-    )
-    @patch(
-        "deepctl_cmd_update.plugin_update_check._get_check_interval_seconds",
-        return_value=86400.0,
-    )
-    def test_fresh_cache_suppresses_thread(self, *_mocks):
-        """Cache still fresh → no thread should be spawned."""
+    def test_failure_waits_a_day(self, check_allowed):
+        """A failed check is recorded; the next run makes no attempt."""
         import deepctl_cmd_update.plugin_update_check as mod
+        from deepctl_cmd_update import check_cache
 
-        mod._thread = None
-        mod._result = {}
+        seen = {}
 
-        with patch(
-            "deepctl_cmd_update.plugin_update_check._read_plugin_cache_timestamp",
-            return_value=time.time(),  # just checked
+        def unreachable(*args, **kwargs):
+            seen["state"] = check_cache.read(check_cache.PLUGIN_FILE)
+            raise OSError("unreachable")
+
+        with (
+            patch.object(
+                mod, "_discover_community_plugins", return_value={"deepctl-x": "1"}
+            ),
+            patch("httpx.Client.get", side_effect=unreachable),
         ):
             check_plugins_and_notify()
-            assert mod._thread is None
+            mod._thread.join(timeout=5.0)
+        # Recorded before the request went out.
+        assert seen["state"] is not None and seen["state"]["ok"] is False
+        assert check_cache.read(check_cache.PLUGIN_FILE) is not None
+
+        with patch.object(mod.threading, "Thread") as thread_cls:
+            check_plugins_and_notify()
+        thread_cls.assert_not_called()
+
+    def test_success_is_recorded(self, check_allowed):
+        import deepctl_cmd_update.plugin_update_check as mod
+        from deepctl_cmd_update import check_cache
+
+        with patch.object(mod, "_discover_community_plugins", return_value={}):
+            check_plugins_and_notify()
+            mod._thread.join(timeout=5.0)
+        state = check_cache.read(check_cache.PLUGIN_FILE)
+        assert state is not None and state["ok"] is True
+        assert check_cache.read(check_cache.UPDATE_FILE) is None
 
 
 # ---------------------------------------------------------------------------
@@ -436,20 +442,63 @@ class TestPrintPendingPluginNotifications:
         captured = capsys.readouterr()
         assert captured.err == ""
 
-    def test_thread_timeout_handling(self):
-        """If the thread is still running after timeout, no crash."""
+    def test_running_check_is_dropped_without_waiting(self):
+        """A check still running at exit is never joined."""
         import deepctl_cmd_update.plugin_update_check as mod
 
-        # Create a thread that would take longer than the timeout
-        mod._result = {}
-        mod._thread = threading.Thread(target=lambda: time.sleep(10), daemon=True)
-        mod._thread.start()
+        release = threading.Event()
+        mod._result = {
+            "updates": [{"name": "deepctl-plugin-x", "current": "1", "latest": "2"}]
+        }
+        thread = threading.Thread(target=release.wait, daemon=True)
+        thread.start()
+        mod._thread = thread
+        try:
+            with patch.object(thread, "join") as join:
+                stderr_capture = io.StringIO()
+                with patch.object(sys, "stderr", stderr_capture):
+                    print_pending_plugin_notifications()
+            join.assert_not_called()
+            assert stderr_capture.getvalue() == ""
+            assert mod._thread is None
+        finally:
+            release.set()
+            thread.join(timeout=5.0)
 
-        # Should not raise — just returns with no output
-        with patch.object(mod._thread, "join", side_effect=lambda timeout=None: None):
-            stderr_capture = io.StringIO()
-            with patch.object(sys, "stderr", stderr_capture):
-                print_pending_plugin_notifications()
 
-            output = stderr_capture.getvalue()
-            assert output == ""
+
+class TestPluginAttemptRecording:
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        import deepctl_cmd_update.plugin_update_check as mod
+
+        mod._thread = None
+        yield
+        if mod._thread is not None:
+            mod._thread.join(timeout=5.0)
+        mod._thread = None
+
+    def test_nothing_recorded_before_the_request(self, check_allowed, monkeypatch):
+        """A failure before any request (here: discovery) uses up nothing."""
+        import deepctl_cmd_update.plugin_update_check as mod
+
+        with patch.object(
+            mod, "_discover_community_plugins", side_effect=RuntimeError("boom")
+        ):
+            check_plugins_and_notify()
+            mod._thread.join(timeout=5.0)
+        assert not (check_allowed / "plugin-update-check.json").exists()
+
+    def test_unusable_cache_dir_skips(self, check_allowed, monkeypatch):
+        import os
+
+        import deepctl_cmd_update.plugin_update_check as mod
+        from deepctl_cmd_update import check_cache
+
+        check_allowed.mkdir(parents=True, mode=0o755)
+        monkeypatch.setattr(
+            check_cache.os, "getuid", lambda: os.stat(check_allowed).st_uid + 1
+        )
+        with patch.object(mod.threading, "Thread") as thread_cls:
+            check_plugins_and_notify()
+        thread_cls.assert_not_called()

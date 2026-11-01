@@ -14,6 +14,25 @@ from deepctl_cmd_update.version_check import (
 )
 
 
+@pytest.fixture
+def cache_dir(tmp_path, monkeypatch):
+    """dg's cache directory, pointed at a fresh temp dir (not created yet)."""
+    from deepctl import _cache
+
+    root = tmp_path / "cache" / "deepctl"
+    monkeypatch.setattr(_cache, "cache_root", lambda: str(root))
+    return root
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cache(cache_dir):
+    """Every test here gets its own empty cache directory."""
+    from deepctl_cmd_update import check_cache
+
+    assert check_cache.usable()
+    return cache_dir
+
+
 class TestCheckFrequency:
     """Test check_frequency configuration values."""
 
@@ -274,3 +293,93 @@ class TestFormatVersionMessage:
         assert "1.0.0" in msg
         assert "2.0.0" in msg
         assert "dg update" in msg
+
+
+class TestCacheFile:
+    """The last answer lives in the cache file, never in the user config."""
+
+    @staticmethod
+    def _config(values=None):
+        config = MagicMock()
+        values = {"update.check_enabled": True, **(values or {})}
+        config.get.side_effect = lambda key, default=None: values.get(key, default)
+        return config
+
+    @pytest.mark.asyncio
+    async def test_answer_goes_to_the_cache_file(self, cache_dir):
+        from deepctl_cmd_update import check_cache
+
+        config = self._config()
+        checker = VersionChecker(config, "1.0.0")
+        info = VersionInfo(
+            current_version="1.0.0", latest_version="2.0.0", update_available=True
+        )
+        with patch.object(checker, "_check_pypi", AsyncMock(return_value=info)):
+            await checker.check_version(force=True)
+
+        state = check_cache.read(check_cache.UPDATE_FILE)
+        assert state is not None
+        assert (state["ok"], state["latest"], state["source"]) == (
+            True,
+            "2.0.0",
+            "pypi",
+        )
+        config.save.assert_not_called()
+        config._set_config_value.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_answer_names_its_source(self):
+        from deepctl_cmd_update import check_cache
+
+        checker = VersionChecker(self._config(), "1.0.0")
+        response = MagicMock()
+        response.json.return_value = {"tag_name": "v2.0.0", "html_url": "u"}
+        client = AsyncMock()
+        client.get.return_value = response
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+        with patch("httpx.AsyncClient", return_value=client):
+            await checker.check_version(force=True, install_method="homebrew")
+        state = check_cache.read(check_cache.UPDATE_FILE)
+        assert state is not None and state["source"] == "github"
+
+    def test_cache_file_wins_over_legacy_keys(self):
+        from deepctl_cmd_update import check_cache
+
+        check_cache.write(check_cache.UPDATE_FILE, ok=True, latest="3.0.0", source="pypi")
+        config = self._config(
+            {
+                "update.last_check": "2000-01-01T00:00:00+00:00",
+                "update.cached_version_info": {
+                    "current_version": "1.0.0",
+                    "latest_version": "9.9.9",
+                    "update_available": True,
+                },
+            }
+        )
+        checker = VersionChecker(config, "1.0.0")
+        assert checker.should_check() is False
+        info = checker._get_cached_info()
+        assert info is not None
+        assert (info.latest_version, info.update_available) == ("3.0.0", True)
+
+    def test_failed_check_has_no_cached_answer(self):
+        from deepctl_cmd_update import check_cache
+
+        check_cache.write(check_cache.UPDATE_FILE, ok=False, latest=None, source="pypi")
+        checker = VersionChecker(self._config(), "1.0.0")
+        assert checker.should_check() is False
+        assert checker._get_cached_info() is None
+
+    def test_legacy_keys_read_when_no_cache_file(self):
+        config = self._config(
+            {
+                "update.cached_version_info": {
+                    "current_version": "1.0.0",
+                    "latest_version": "1.5.0",
+                    "update_available": True,
+                },
+            }
+        )
+        info = VersionChecker(config, "1.0.0")._get_cached_info()
+        assert info is not None and info.latest_version == "1.5.0"
