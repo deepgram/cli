@@ -24,6 +24,10 @@ returns the process exit code when the session ends, and raises an
 written stdout. Its message is the complete text shown to the client.
 
 Nothing but JSON-RPC is ever written to stdout. Diagnostics go to stderr.
+``isolate_stdout()`` (called by ``deepctl.main`` for every ``dg mcp`` run)
+keeps it that way for code that doesn't know about the protocol: fd 1 then
+points at stderr, and the protocol stream is a private copy of the
+original stdout.
 """
 
 import json
@@ -40,6 +44,9 @@ SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-1
 LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 
 SERVER_NAME = "deepgram-mcp"
+
+# The original stdout, once isolate_stdout() moved fd 1 to stderr.
+_PROTOCOL_OUT: "BinaryIO | None" = None
 
 # Fixed local text, never passed through from the remote service: its
 # instructions and tool descriptions are text an attacker could influence.
@@ -83,6 +90,40 @@ INTERNAL_ERROR = -32603
 
 # Shown when the proxy package itself can't be imported.
 CANT_START = "dg mcp can't start the documentation search: {reason}"
+
+
+def isolate_stdout() -> None:
+    """Give the protocol its own copy of stdout and point fd 1 at stderr.
+
+    After this, a stray ``print()``, a library warning or a child process
+    writing to fd 1 lands on stderr instead of corrupting the JSON-RPC
+    stream; ``protocol_stdout()`` is the only way to the client. Safe to
+    call twice. Does nothing when stdout or stderr is closed.
+    """
+    global _PROTOCOL_OUT
+    if _PROTOCOL_OUT is not None:
+        return
+    try:
+        sys.stdout.flush()
+    except (AttributeError, OSError, ValueError):
+        pass
+    try:
+        proto = os.dup(1)
+    except OSError:
+        return
+    try:
+        os.dup2(2, 1)
+    except OSError:
+        os.close(proto)
+        return
+    _PROTOCOL_OUT = os.fdopen(proto, "wb")
+
+
+def protocol_stdout() -> "BinaryIO":
+    """The stream the client reads: the isolated copy, else stdout."""
+    if _PROTOCOL_OUT is not None:
+        return _PROTOCOL_OUT
+    return sys.stdout.buffer
 
 
 def _write(out: "BinaryIO", message: "dict[str, Any]") -> None:
@@ -155,13 +196,13 @@ def _hand_off(
     return code
 
 
-def _silence_stdout() -> None:
+def _silence(out: "BinaryIO") -> None:
     """The client closed stdout: drop further writes, including at exit."""
     try:
         devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
+        os.dup2(devnull, out.fileno())
         os.close(devnull)
-    except (OSError, ValueError):
+    except (AttributeError, OSError, ValueError):
         pass
 
 
@@ -175,7 +216,7 @@ def serve(
             return 0
         inp = sys.stdin.buffer
     if out is None:
-        out = sys.stdout.buffer
+        out = protocol_stdout()
 
     initialize_params: dict[str, Any] | None = None
     msg_id: object = None
@@ -227,7 +268,7 @@ def serve(
     except KeyboardInterrupt:
         return 0
     except BrokenPipeError:
-        _silence_stdout()
+        _silence(out)
         return 0
     except Exception as exc:
         sys.stderr.write(f"ERROR: dg mcp stopped: {exc}\n")

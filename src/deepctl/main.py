@@ -8,6 +8,10 @@ argv first, so two paths finish without Click or ``deepctl_core``:
 - ``dg mcp`` (stdio, no other options) answers the MCP handshake locally in
   ``deepctl.mcp._fast`` and hands the session to the proxy on the first call.
 
+Every ``dg mcp`` run except a help request first moves fd 1 to stderr
+(``deepctl.mcp._fast.isolate_stdout``), so only the MCP server can write
+to the client's stdout, whatever runs after it.
+
 Everything else imports ``deepctl._cli`` and runs the Click CLI as before.
 Names that used to live here (``cli``, ``load_commands`` and the helpers)
 resolve from ``deepctl._cli`` through ``__getattr__``; ``cli`` comes back with
@@ -46,6 +50,44 @@ _FAST_MCP_ARGS: "tuple[list[str], ...]" = (
     ["--transport=stdio"],
     ["-t", "stdio"],
 )
+
+
+# Root options that take a value (``dg --profile staging mcp``). Must match
+# the root group's non-flag options; tests/unit/test_main.py checks it.
+_ROOT_VALUE_OPTIONS = frozenset(
+    {
+        "--config",
+        "-c",
+        "--profile",
+        "-p",
+        "--base-url",
+        "--api-key",
+        "--output",
+        "-o",
+        "--record-install-method",
+    }
+)
+# Arguments that make `dg mcp` print help or metadata to stdout instead of
+# serving.
+_MCP_HELP_ARGS = frozenset({"--help", "-h", "--agent-friendly"})
+
+
+def _is_mcp_server_run(args: "list[str]") -> bool:
+    """True when argv runs ``dg mcp`` as a server (not for help)."""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            i += 1
+            break
+        if not arg.startswith("-") or arg == "-":
+            break
+        if arg in _MCP_HELP_ARGS or arg == "--version":
+            return False
+        i += 2 if arg in _ROOT_VALUE_OPTIONS else 1
+    if i >= len(args) or args[i] != "mcp":
+        return False
+    return not any(arg in _MCP_HELP_ARGS for arg in args[i + 1 :])
 
 
 def capture_launcher() -> "str | None":
@@ -175,10 +217,12 @@ def main(prog: "str | None" = None) -> None:
     # and falls back to a stub on ImportError; this skips it.
     sys.modules.setdefault("httpx._main", None)  # type: ignore[arg-type]
 
-    if args and args[0] == "mcp" and args[1:] in _FAST_MCP_ARGS:
-        from deepctl.mcp._fast import serve
+    if _is_mcp_server_run(args):
+        from deepctl.mcp._fast import isolate_stdout, serve
 
-        sys.exit(serve())
+        isolate_stdout()
+        if args[0] == "mcp" and args[1:] in _FAST_MCP_ARGS:
+            sys.exit(serve())
 
     safe_output_streams()
     sys.excepthook = _rich_excepthook

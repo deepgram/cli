@@ -76,7 +76,7 @@ class TestMcpCommand:
         stream = object()
         seen = {}
         with (
-            patch("deepctl_cmd_mcp.command.isolate_stdout", return_value=stream),
+            patch("deepctl.mcp._fast.protocol_stdout", return_value=stream),
             patch("deepctl_cmd_mcp.command.run_proxy", lambda **kw: seen.update(kw)),
             patch("deepctl_cmd_mcp.command.asyncio.run"),
             patch("signal.signal"),

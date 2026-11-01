@@ -21,7 +21,7 @@ from rich.markup import escape
 
 from . import messages as mcp_msg
 from .models import MCPServerResult, TransportType
-from .proxy import DEFAULT_BASE_URL, isolate_stdout, report_error, run_proxy
+from .proxy import DEFAULT_BASE_URL, report_error, run_proxy
 
 if TYPE_CHECKING:
     pass
@@ -188,6 +188,8 @@ class McpCommand(BaseCommand):
                 report(err)
                 raise SystemExit(1) from err
 
+        from deepctl.mcp._fast import protocol_stdout
+
         from .handoff import key_or_error
 
         debug = kwargs.get("debug", False)
@@ -200,17 +202,13 @@ class McpCommand(BaseCommand):
 
         import asyncio
 
-        # From here on only JSON-RPC reaches the client: anything else
-        # written to stdout (fd 1) goes to stderr.
-        protocol = isolate_stdout()
-
         try:
             asyncio.run(
                 run_proxy(
                     base_url=canonical_url(base_url),
                     api_key=lambda: key_or_error(config, auth_manager),
                     debug=debug,
-                    stdout=protocol,
+                    stdout=protocol_stdout(),
                 )
             )
 
