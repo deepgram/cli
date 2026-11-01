@@ -23,7 +23,7 @@ iwr deepgram.com/install.ps1 | iex
 pip install deepctl       # pip
 pipx install deepctl      # pipx (isolated)
 uvx deepctl --help        # uvx (run without install)
-brew install deepgram/tap/deepctl  # Homebrew
+brew install deepgram/tap/deepgram  # Homebrew
 ```
 
 Aliases: `dg`, `deepctl`, `deepgram`
