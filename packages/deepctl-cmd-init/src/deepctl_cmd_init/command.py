@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,14 +14,30 @@ from deepctl_core import (
     DeepgramClient,
 )
 from deepctl_core import messages as core_msg
-from deepctl_core.output import _agentic, print_error
+from deepctl_core.output import _agentic, print_error, print_hint
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from . import lifecycle, templates_api
+from . import clones, lifecycle, templates_api
 from . import messages as msg
-from .models import InitResult, TemplateDetail, TemplateInfo
+from .models import InitCodedError, InitResult, TemplateDetail, TemplateInfo
+
+
+def _coded(
+    error: str,
+    code: str,
+    hint: str,
+    next_step: str | None,
+    details: dict[str, Any] | None = None,
+) -> InitCodedError:
+    """Report a coded error on stderr and return its payload."""
+    print_error(escape(error))
+    print_hint(escape(hint))
+    return InitCodedError(
+        error=error, code=code, hint=hint, next_step=next_step, details=details
+    )
+
 
 console = Console()
 status_console = Console(stderr=True)
@@ -199,27 +216,56 @@ class InitCommand(BaseCommand):
         dest = Path(target_dir) if target_dir else Path(f"./{detail.name}")
         dest = dest.resolve()
 
-        # ── Confirm ────────────────────────────────────────────────────────────
-        self._print_template_summary(detail)
-        console.print(f"[dim]Destination:[/dim] {dest}")
-        console.print()
+        # ── Rerun contract: resume in a clone dg init made ─────────────────────
+        # Only dg's own record (in its state directory) says a directory is a
+        # clone dg made; nothing inside the directory is trusted for that,
+        # and no git command runs in it until the record does.
+        record: clones.CloneRecord | None = None
+        if lifecycle.directory_in_use(dest):
+            record = clones.load(os.path.realpath(dest))
+            if record is None:
+                return self._dir_error(msg.E_INIT_DIR_IN_USE, detail, dest)
+            if record.template != detail.name:
+                return self._dir_error(
+                    msg.E_INIT_DIR_OTHER_TEMPLATE, detail, dest, record.template
+                )
+            # The same directory (not one made again at this path), owned by
+            # this user, before git runs in it; then git checks HEAD.
+            if (
+                record.url != github_url
+                or not lifecycle.same_directory(dest, record.dev, record.ino)
+                or not lifecycle.clone_matches(dest, record.commit)
+            ):
+                return self._dir_error(msg.E_INIT_DIR_IN_USE, detail, dest)
+        phases: list[str] = list(record.phases) if record else []
+        commit = record.commit if record else None
+        if record is None:
+            # ── Confirm ────────────────────────────────────────────────────────
+            self._print_template_summary(detail)
+            console.print(f"[dim]Destination:[/dim] {dest}")
+            console.print()
 
-        if not _agentic and not self.confirm("Clone this template?", default=True):
-            return InitResult(status="cancelled", message="Clone cancelled")
+            if not _agentic and not self.confirm("Clone this template?", default=True):
+                return InitResult(status="cancelled", message="Clone cancelled")
 
-        # ── Clone ──────────────────────────────────────────────────────────────
-        console.print()
-        with console.status("[blue]Cloning repository...[/blue]"):
-            try:
-                lifecycle.clone_template(github_url, dest)
-            except RuntimeError as e:
-                return InitResult(status="error", message=str(e))
+            # ── Clone ──────────────────────────────────────────────────────────
+            console.print()
+            with console.status("[blue]Cloning repository...[/blue]"):
+                try:
+                    lifecycle.clone_template(github_url, dest)
+                except RuntimeError as e:
+                    return InitResult(status="error", message=str(e))
+            phases = ["clone"]
+            commit = lifecycle.head_commit(dest)
+            self._save_progress(dest, detail.name, github_url, commit, phases)
 
-        console.print(f"[green]✓[/green] Cloned to [cyan]{dest}[/cyan]")
-        console.print(
-            "[dim]The cloned directory is a full git repository — "
-            "you can add your own remote and push.[/dim]"
-        )
+            console.print(f"[green]✓[/green] Cloned to [cyan]{dest}[/cyan]")
+            console.print(
+                "[dim]The cloned directory is a full git repository — "
+                "you can add your own remote and push.[/dim]"
+            )
+        else:
+            console.print(f"[dim]Resuming in[/dim] [cyan]{dest}[/cyan]")
 
         # ── Inject API key ─────────────────────────────────────────────────────
         try:
@@ -232,10 +278,10 @@ class InitCommand(BaseCommand):
             )
 
         # ── Setup (make check-prereqs && make init) ────────────────────────────
-        installed = False
+        installed = "setup" in phases
         has_makefile = (dest / "Makefile").exists()
 
-        if not no_install:
+        if not installed and not no_install:
             if _agentic or do_install:
                 run_setup = True
             elif has_makefile:
@@ -255,6 +301,9 @@ class InitCommand(BaseCommand):
                     installed = lifecycle.run_lifecycle_step(
                         detail.config.install, dest
                     )
+                if installed:
+                    phases.append("setup")
+                    self._save_progress(dest, detail.name, github_url, commit, phases)
 
         # ── Start step (optional) ──────────────────────────────────────────────
         started = False
@@ -289,6 +338,54 @@ class InitCommand(BaseCommand):
             directory=str(dest),
             installed=installed,
             started=started,
+        )
+
+    # ── The rerun contract ────────────────────────────────────────────────────
+
+    def _save_progress(
+        self,
+        dest: Path,
+        template: str,
+        url: str,
+        commit: str | None,
+        phases: list[str],
+    ) -> None:
+        """Record the clone and what is done in dg's state, so a rerun
+        resumes. Without a commit there is nothing a rerun could check."""
+        identity = lifecycle.directory_identity(dest)
+        if commit is None or identity is None:
+            return
+        record = clones.CloneRecord(
+            os.path.realpath(dest), template, url, commit, phases, *identity
+        )
+        try:
+            clones.save(record)
+        except OSError as exc:
+            console.print(
+                f"[yellow]Could not record progress in {dest}:[/yellow] {exc}"
+            )
+
+    def _dir_error(
+        self,
+        message: str,
+        detail: TemplateDetail,
+        dest: Path,
+        other: str | None = None,
+    ) -> InitCodedError:
+        """A directory dg init can't clone into or resume in."""
+        from deepctl_core.transport import prog
+
+        program = prog()
+        error = message.format(
+            dest=core_msg.display_path(dest),
+            template=core_msg.display(detail.name),
+            other=core_msg.display(other or ""),
+        )
+        return _coded(
+            error,
+            msg.CODE_INVALID_ARGUMENT,
+            msg.H_INIT_DIR,
+            f"{program} init --help" if program else None,
         )
 
     def output_result(self, result: Any, config: Config) -> None:
