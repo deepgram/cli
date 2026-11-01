@@ -30,6 +30,7 @@ from deepctl_core import (
     DeepgramClient,
 )
 from deepctl_core.output import _agentic
+from deepctl_core.websocket import connect_async
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
@@ -65,10 +66,30 @@ def _is_url(s: str) -> bool:
 
 
 def _ws_base(client: DeepgramClient) -> str:
-    """Build the WebSocket base URL from the configured profile."""
-    profile = client.config.get_profile()
-    base = (profile.base_url or "https://api.deepgram.com").rstrip("/")
-    return base.replace("https://", "wss://").replace("http://", "ws://")
+    """Build the WebSocket base URL from the configured profile.
+
+    Goes through the same host check as every path that sends the key.
+    """
+    base = str(client.auth_manager.check_base_url()).rstrip("/")
+    scheme, sep, rest = base.partition("://")
+    if not sep:
+        return f"wss://{base}"
+    return f"{'ws' if scheme.lower() in ('http', 'ws') else 'wss'}://{rest}"
+
+
+def _live_connect(url: str, api_key: str | None) -> Any:
+    """Open the live WebSocket for ``async with``, without redirects.
+
+    A 3xx on the upgrade, same origin or not, stops the command before a
+    second connection is opened, so the key and the audio go only to the
+    host that passed the host check.
+    """
+    return connect_async(
+        url,
+        {"Authorization": f"Token {api_key}"},
+        command="dg listen",
+        payload="audio",
+    )
 
 
 async def _cancel_and_drain(*tasks: asyncio.Task[Any]) -> None:
@@ -822,7 +843,6 @@ class ListenCommand(BaseCommand):
     ) -> ListenResult:
         import numpy as np
         import sounddevice as sd
-        import websockets
 
         url = self._ws_url(
             client,
@@ -844,9 +864,7 @@ class ListenCommand(BaseCommand):
         v2_state = self._new_v2_state() if api_version >= 2 else None
         stop_event = threading.Event()
 
-        async with websockets.connect(
-            url, additional_headers={"Authorization": f"Token {api_key}"}
-        ) as ws:
+        async with _live_connect(url, api_key) as ws:
 
             async def send_audio() -> None:
                 loop = asyncio.get_event_loop()
@@ -1015,8 +1033,6 @@ class ListenCommand(BaseCommand):
         channels: int,
         caption_writer: StreamingCaptionWriter | None = None,
     ) -> ListenResult:
-        import websockets
-
         url = self._ws_url(
             client,
             api_version=api_version,
@@ -1036,9 +1052,7 @@ class ListenCommand(BaseCommand):
         full_transcript: list[str] = []
         v2_state = self._new_v2_state() if api_version >= 2 else None
 
-        async with websockets.connect(
-            url, additional_headers={"Authorization": f"Token {api_key}"}
-        ) as ws:
+        async with _live_connect(url, api_key) as ws:
             loop = asyncio.get_running_loop()
             audio_queue: asyncio.Queue[bytes | Exception | None] = asyncio.Queue()
             stop_reader = threading.Event()

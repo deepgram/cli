@@ -1,4 +1,4 @@
-"""User-facing strings for config files.
+"""User-facing strings for API hosts, credentials and config files.
 
 Keyed by message ID (E-*, W-*) so every string lives in one place.
 Placeholders: ``{host}`` is a hostname only,
@@ -16,6 +16,110 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# ── Base URL and credentials ─────────────────────────────────────
+
+E_FH_FLAG = "Not sending your API key to {host}: it is not a Deepgram API host."
+E_FH_FLAG_HINT = (
+    "If you trust {host}, add it to api.allowed_hosts in {user_config}, "
+    "or export DEEPGRAM_BASE_URL in your shell."
+)
+E_FH_PROFILE = (
+    'Not sending your API key to {host}: profile "{profile}" points to a '
+    "host that is not a Deepgram API host."
+)
+# The command comes last, with no trailing period, so it can be copied.
+E_FH_PROFILE_HINT = (
+    "If you trust {host}, add it to api.allowed_hosts in {user_config}. To "
+    "switch back to Deepgram, run: dg --base-url https://api.deepgram.com "
+    "login --profile {profile} --save-base-url --force-write"
+)
+# Agent-mode hint shared by every foreign_host error. Never names a flag,
+# an environment variable or a file path.
+E_FH_AGENT_HINT = (
+    "A person must approve {host} in the deepctl user config. If you are an AI "
+    "agent, ask the user."
+)
+
+E_INSECURE = (
+    "Refusing to use {origin}: API URLs must use https (plain http is allowed "
+    "only for localhost, 127.0.0.0/8 and [::1])."
+)
+E_INSECURE_HINT = "Use an https:// URL. This one came from {source_label}."
+# Agent-mode hints never name a key, variable or flag an agent could use to
+# approve its own host.
+E_INSECURE_AGENT_HINT = (
+    "API URLs must use https. Ask the user to fix the configured URL."
+)
+
+# W-ENV-* and E-FH-IDENTITY.
+W_ENV_BASEURL = (
+    "Sending your API key to {host} (from {variable}), which is not a "
+    "Deepgram API host."
+)
+W_ENV_BASEURL_HINT = (
+    "If you trust {host}, add it to api.allowed_hosts in {user_config} to "
+    "stop this warning."
+)
+W_ENV_BASEURL_AGENT_HINT = (
+    "To stop this warning, a person can approve {host} in the deepctl user "
+    "config. If you are an AI agent, ask the user."
+)
+W_ENV_IDENTITY = (
+    "Logging in through {host} (from DEEPGRAM_CLI_BASE_URL), which is not a "
+    "Deepgram login host. dg will save the API key it returns."
+)
+E_FH_IDENTITY = (
+    "Not logging in through {host} (from DEEPGRAM_CLI_BASE_URL): it is not a "
+    "Deepgram login host."
+)
+E_FH_IDENTITY_HINT = (
+    "If you trust {host}, add it to api.allowed_hosts in {user_config}."
+)
+
+W_INSECURE_AGENT = (
+    "Ignoring DEEPGRAM_CLI_INSECURE in an AI agent session: TLS certificates "
+    "are verified."
+)
+
+SOURCE_LABELS = {
+    "flag": "--base-url",
+    "parent_env": "DEEPGRAM_BASE_URL",
+    "user_config": 'profile "{profile}" in {user_config}',
+}
+
+CODE_FOREIGN_HOST = "foreign_host"
+CODE_INSECURE_BASE_URL = "insecure_base_url"
+CODE_CONFIRMATION_REQUIRED = "confirmation_required"
+
+# ── Login ────────────────────────────────────────────────────────
+
+I_LOGIN_NOT_SAVED = (
+    'Used {origin} for this login only. Profile "{profile}" still uses {saved_origin}.'
+)
+I_LOGIN_NOT_SAVED_HINT = "To save it, run: dg --base-url {origin} login --save-base-url"
+P_SAVE_BASEURL_FOREIGN = (
+    "{host} is not a Deepgram API host. Saving it also adds it to api.allowed_hosts."
+)
+P_SAVE_BASEURL = (
+    'Save {origin} as the API URL for profile "{profile}"? dg will send your '
+    "API key there on every command."
+)
+S_SAVE_BASEURL = 'Saved {origin} as the API URL for profile "{profile}".'
+S_SAVE_BASEURL_ADDED = " Added {host} to api.allowed_hosts."
+E_SAVE_DECLINED = "Not saved. Nothing was sent to {host}."
+E_SAVE_NOTTY = (
+    "--save-base-url needs a person to confirm in a terminal. Nothing was "
+    "saved or sent."
+)
+E_SAVE_NOTTY_HINT = "Run the command in an interactive terminal."
+E_SAVE_NOTTY_AGENT_HINT = "A person must run this command in an interactive terminal."
+E_SAVE_NOURL = "--save-base-url needs --base-url URL."
+E_SAVE_CUSTOM_CONFIG = (
+    "--save-base-url can't be used with --config: only the default user "
+    "config ({user_config}) can approve API hosts. Run the command without "
+    "--config."
+)
 
 # ── Project file deepgram.yaml ───────────────────────────────────
 
@@ -174,6 +278,13 @@ W_CFG_SAVE_UNTRUSTED = (
     "in an AI agent session, dg can't save this config because the file {why}, "
     "so nothing was saved."
 )
+# No API key once the user file's key was left unused.
+# Hint: W_CFG_UNTRUSTED_FILE_HINT.
+E_KEY_UNTRUSTED = (
+    "dg didn't use the API key in {user_config} (see the warning above), and no "
+    "other API key is set."
+)
+
 # A key-holding user config others can change, in an AI agent session. Agent
 # hint: W_CFG_UNTRUSTED_FILE_HINT.
 W_PERM_AGENT = (

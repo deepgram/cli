@@ -310,7 +310,7 @@ Most of these go on `dg` itself, before the command: `dg --profile staging liste
 | `--verbose`, `-v` | Enable verbose/debug output |
 | `--profile`, `-p` | Use named credential profile |
 | `--config`, `-c` | Path to config file |
-| `--base-url` | Override the API base URL |
+| `--base-url` | Override the API base URL (a non-Deepgram host is refused unless listed in `api.allowed_hosts`) |
 | `--api-key` | Explicit API key (overrides profile) |
 | `--timing`, `--timing-detailed` | Show performance timing |
 | `--non-interactive` | Skip prompts; use defaults |
@@ -376,8 +376,25 @@ Available on every command. Outputs a JSON contract describing the command:
 
 Config file location:
 - macOS: `~/Library/Application Support/deepctl/config.yaml`
-- Linux: `~/.config/deepctl/config.yaml`
+- Linux: `~/.config/deepctl/config.yaml` (`$XDG_CONFIG_HOME/deepctl/config.yaml` when `XDG_CONFIG_HOME` is set)
 - Windows: `%LOCALAPPDATA%\deepgram\deepctl\config.yaml`
+
+dg sends your API key only to Deepgram API hosts, to hosts you list in
+`api.allowed_hosts` in your own `config.yaml`, or to `DEEPGRAM_BASE_URL` (not in
+an AI agent session). Anything else is refused before a request is made. Plain
+http works only for localhost, 127.0.0.0/8 and [::1]; other hosts must use https.
+For a proxy or self-hosted deployment, add its host (and port, to approve only
+that port):
+
+```yaml
+api:
+  allowed_hosts:
+    - my-proxy.example.com
+    - localhost:8080
+```
+
+A project's `deepgram.yaml` can't set credentials, a project ID, a profile or a
+non-Deepgram `base_url`, and can't approve hosts.
 
 Environment variables:
 - `DEEPGRAM_API_KEY` — API key (overrides profile)

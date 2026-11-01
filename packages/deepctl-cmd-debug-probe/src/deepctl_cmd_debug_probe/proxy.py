@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 from aiohttp import web
+from deepctl_core.websocket import RedirectRefused, redirect_refused
 from deepctl_shared_utils import probe_buffer
 from rich.console import Console
+from rich.markup import escape
 
 from .models import ProbeConnectionStats, ProbeSnapshot
 
@@ -19,6 +21,31 @@ if TYPE_CHECKING:
     from deepctl_core import Config
 
 console = Console()
+
+
+def _refuse_redirects(upstream_url: str) -> aiohttp.TraceConfig:
+    """A trace hook that stops aiohttp before it follows a redirect.
+
+    aiohttp's ws_connect has no allow_redirects switch; it follows a 3xx
+    on the upgrade and would then stream the audio to the new host. The
+    hook runs after the 3xx arrives and before any request to the new
+    location, so nothing reaches it.
+    """
+
+    async def on_redirect(
+        _session: aiohttp.ClientSession,
+        _ctx: object,
+        params: aiohttp.TraceRequestRedirectParams,
+    ) -> None:
+        location = params.response.headers.get("Location")
+        params.response.close()
+        raise redirect_refused(
+            upstream_url, location, command="dg debug probe", payload="audio"
+        )
+
+    trace = aiohttp.TraceConfig()
+    trace.on_request_redirect.append(on_redirect)
+    return trace
 
 
 class ProbeProxy:
@@ -91,7 +118,9 @@ class ProbeProxy:
 
         try:
             async with (
-                aiohttp.ClientSession() as session,
+                aiohttp.ClientSession(
+                    trace_configs=[_refuse_redirects(upstream_url)]
+                ) as session,
                 session.ws_connect(
                     upstream_url,
                     headers=upstream_headers,
@@ -179,6 +208,11 @@ class ProbeProxy:
                     # Suppress CancelledError from the cancelled task
                     await asyncio.gather(task_c2u, task_u2c, return_exceptions=True)
 
+        except RedirectRefused as e:
+            console.print(
+                f"[red]Upstream connection refused[/red] [{conn_id}]: "
+                f"{escape(e.message)}"
+            )
         except aiohttp.ClientError as e:
             console.print(f"[red]Upstream connection failed[/red] [{conn_id}]: {e}")
         except Exception as e:

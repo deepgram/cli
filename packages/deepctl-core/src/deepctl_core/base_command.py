@@ -8,8 +8,9 @@ import click
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config, flush_config_notices
-from .models import ErrorResult
-from .output import _agentic, print_error, stderr_console
+from .hosts import CredentialHostError
+from .models import CodedErrorResult, ErrorResult
+from .output import _agentic, print_error, print_error_hint, stderr_console
 from .output import console as stdout_console
 from .timing import TimingContext
 
@@ -41,6 +42,9 @@ class BaseCommand(ABC):
     requires_auth: bool = False
     requires_project: bool = False
     ci_friendly: bool = True
+    # True when stdout is a protocol channel (``dg mcp``): structured errors
+    # then go to stderr only.
+    stdout_is_protocol: bool = False
 
     # Result status -> process exit code, per the contract published in
     # llms-full.txt: 0 = success, 1 = error, 2 = user interrupt. A command that
@@ -98,6 +102,16 @@ class BaseCommand(ABC):
                 # Create Deepgram client
                 client = DeepgramClient(config, auth_manager)
 
+            # Refusals that need no credentials come before the auth check,
+            # so a refused command sends nothing at all.
+            early = self.pre_auth_check(config, **kwargs)
+            if early is not None:
+                try:
+                    self.output_result(early, config)
+                except (OSError, ValueError):
+                    pass
+                raise SystemExit(self.exit_code_for(early) or 1)
+
             # Check authentication if required
             if self.requires_auth:
                 with TimingContext("authentication_check"):
@@ -145,9 +159,7 @@ class BaseCommand(ABC):
                         # not an empty file. output_result is a no-op in
                         # default mode, so this adds nothing for humans.
                         try:
-                            self.output_result(
-                                ErrorResult(error=str(auth_error)), config
-                            )
+                            self._output_error(auth_error, config)
                         except OSError:
                             # Downstream stream closed. BrokenPipeError is an
                             # OSError, so one clause covers both.
@@ -198,12 +210,21 @@ class BaseCommand(ABC):
                 stderr_console.print("\n[yellow]Command cancelled by user[/yellow]")
                 raise click.Abort()
 
+            except CredentialHostError as e:
+                # Already reported on stderr; nothing was sent.
+                try:
+                    self._output_error(e, config)
+                except (OSError, ValueError):
+                    pass
+                raise SystemExit(1) from e
+
             except click.ClickException:
                 # A message the command meant for the user; pass it through.
                 raise
 
             except Exception as e:
                 print_error(f"Command failed: {e}")
+                print_error_hint(e)
                 if config.get("output.verbose", False):
                     stderr_console.print_exception()
                 raise UnexpectedCommandError(str(e)) from e
@@ -212,6 +233,26 @@ class BaseCommand(ABC):
             exit_code = self.exit_code_for(result)
             if exit_code:
                 raise SystemExit(exit_code)
+
+    def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
+        """Return a result to stop with before authentication, or ``None``.
+
+        Override for refusals that must happen before any request,
+        including the credential check.
+        """
+        return None
+
+    def _output_error(self, error: Exception, config: Config) -> None:
+        """Write the structured payload for an error that stops the command."""
+        if isinstance(error, CredentialHostError):
+            if self.stdout_is_protocol:
+                return
+            self.output_result(
+                CodedErrorResult(error=error.error, code=error.code, hint=error.hint),
+                config,
+            )
+        else:
+            self.output_result(ErrorResult(error=str(error)), config)
 
     def exit_code_for(self, result: Any) -> int:
         """Map a command result to a process exit code.

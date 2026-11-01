@@ -1,18 +1,46 @@
 """Login command for deepctl."""
 
+import sys
 from typing import Any
 
+import click
 from deepctl_core import (
     AuthenticationError,
     AuthManager,
     BaseCommand,
+    CodedErrorResult,
     Config,
+    CredentialHostError,
     DeepgramClient,
     ProfileInfo,
     ProfilesResult,
     get_output_format,
+    is_agentic,
+    is_ai_agent,
 )
-from deepctl_core.output import print_warning
+from deepctl_core import messages as msg
+from deepctl_core.hosts import (
+    SOURCE_ENV,
+    SOURCE_FLAG,
+    canonical_url,
+    check_identity_host,
+    evaluate,
+    host_entry,
+    is_allowlisted,
+    is_loopback,
+    is_regional,
+    parse_origin,
+    report,
+    user_config_display,
+)
+from deepctl_core.output import (
+    _output_config,
+    print_error,
+    print_error_hint,
+    print_hint,
+    print_info,
+    print_warning,
+)
 from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Prompt
@@ -22,12 +50,21 @@ from .models import LoginResult, LogoutResult, WhoamiResult
 console = Console()
 
 
+def _interactive_terminal() -> bool:
+    """A person can answer a prompt: stdin and stderr are both terminals."""
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
 class LoginCommand(BaseCommand):
     """Login command for authenticating with Deepgram."""
 
     name = "login"
     help = "Log in to Deepgram with browser-based authentication or API key"
     short_help = "Log in to Deepgram"
+
+    # Set by --save-base-url once a person confirmed it.
+    _saved_origin: str | None = None
+    _added_host: str | None = None
 
     # Login doesn't require existing auth
     requires_auth = False
@@ -39,6 +76,7 @@ class LoginCommand(BaseCommand):
         "dg login --api-key YOUR_API_KEY",
         "dg login --api-key YOUR_KEY --project-id YOUR_PROJECT",
         "dg login --profile staging --api-key YOUR_KEY",
+        "dg --base-url https://api.eu.deepgram.com login --save-base-url",
     ]
     agent_help = (
         "Authenticate with Deepgram. Can accept an API key directly via "
@@ -77,6 +115,15 @@ class LoginCommand(BaseCommand):
                 "required": False,
                 "is_option": True,
             },
+            {
+                "names": ["--save-base-url"],
+                "help": (
+                    "Save the --base-url URL as this profile's API URL "
+                    "(asks for confirmation in a terminal)"
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
         ]
 
     def handle(
@@ -91,12 +138,33 @@ class LoginCommand(BaseCommand):
         project_id = kwargs.get("project_id")
         force_write = kwargs.get("force_write", False)
         profile = kwargs.get("profile")
+        save_base_url = kwargs.get("save_base_url", False)
 
         # Set profile if provided
         if profile:
             config.profile = profile
 
         current_profile = config.profile or "default"
+
+        # Decide where the key may go before doing anything else. A base URL
+        # from --base-url or DEEPGRAM_BASE_URL is used for this login only;
+        # --save-base-url, confirmed by a person, is the one way to save it.
+        if save_base_url:
+            stop = self._confirm_save_base_url(config, current_profile)
+            if stop is not None:
+                return stop
+            if not api_key:
+                has_key, _ = auth_manager.has_profile_credentials(current_profile)
+                if has_key:
+                    # The confirmed URL is the change; keep the stored key.
+                    return self._save_base_url_for_existing_key(
+                        config, auth_manager, current_profile
+                    )
+        else:
+            try:
+                auth_manager.check_base_url()
+            except CredentialHostError as e:
+                return CodedErrorResult(error=e.error, code=e.code, hint=e.hint)
 
         # Check for environment variables
         has_env_key, has_env_project = auth_manager.has_env_credentials()
@@ -168,6 +236,7 @@ class LoginCommand(BaseCommand):
                     )
 
         # Determine authentication method
+        result: LoginResult | CodedErrorResult
         if api_key:
             result = self._cli_auth(
                 config, auth_manager, str(api_key), project_id, force_write
@@ -175,11 +244,152 @@ class LoginCommand(BaseCommand):
         else:
             result = self._web_auth(config, auth_manager, force_write)
 
+        if result.status == "success":
+            self._report_base_url(config, current_profile)
+
         # Post-login: offer skills setup if login succeeded and no skills installed
         if result.status == "success":
             self._maybe_prompt_skills_setup()
 
         return result
+
+    def _confirm_save_base_url(self, config: Config, profile: str) -> Any | None:
+        """Ask a person to approve saving the base URL.
+
+        Returns a result to stop with, or ``None`` to continue with the URL
+        approved for saving.
+        """
+        override = config.base_url_override
+        if override is None or override[1] not in (SOURCE_FLAG, SOURCE_ENV):
+            raise click.UsageError(msg.E_SAVE_NOURL)
+        url, source = override
+
+        agent = is_agentic() or is_ai_agent()
+        if agent or not _interactive_terminal():
+            hint = msg.E_SAVE_NOTTY_AGENT_HINT if agent else msg.E_SAVE_NOTTY_HINT
+            print_error(msg.E_SAVE_NOTTY)
+            print_hint(hint)
+            return CodedErrorResult(
+                error=msg.E_SAVE_NOTTY,
+                code=msg.CODE_CONFIRMATION_REQUIRED,
+                hint=hint,
+            )
+
+        # Only the default user config can approve hosts.
+        if not config.trusted_file:
+            raise click.UsageError(
+                msg.E_SAVE_CUSTOM_CONFIG.format(user_config=user_config_display())
+            )
+
+        # Only https, or http to a loopback host, can be saved.
+        origin = parse_origin(url)
+        if origin is None:
+            raise click.UsageError(msg.E_SAVE_NOURL)
+        if not origin.secure and not is_loopback(origin.host):
+            try:
+                evaluate(url, source, profile=profile, agentic=False)
+            except CredentialHostError as e:
+                report(e)
+                return CodedErrorResult(error=e.error, code=e.code, hint=e.hint)
+
+        host = msg.display(origin.host)
+        shown_origin = msg.display(origin.origin)
+        needs_allowlist = not is_regional(origin) and not is_allowlisted(
+            origin, config.allowed_hosts()
+        )
+        if needs_allowlist:
+            click.echo(msg.P_SAVE_BASEURL_FOREIGN.format(host=host), err=True)
+        try:
+            confirmed = click.confirm(
+                msg.P_SAVE_BASEURL.format(
+                    origin=shown_origin, profile=msg.display(profile)
+                ),
+                default=False,
+                err=True,
+            )
+        except click.Abort:
+            confirmed = False
+        if not confirmed:
+            print_error(msg.E_SAVE_DECLINED.format(host=host))
+            return LoginResult(
+                status="cancelled",
+                message=msg.E_SAVE_DECLINED.format(host=host),
+                profile=profile,
+                api_key_masked=None,
+            )
+
+        config.approve_base_url(profile, canonical_url(url))
+        if needs_allowlist:
+            self._added_host = host_entry(origin)
+            config.add_allowed_host(self._added_host)
+        self._saved_origin = shown_origin
+        return None
+
+    def _save_base_url_for_existing_key(
+        self, config: Config, auth_manager: AuthManager, profile: str
+    ) -> Any:
+        """Save the approved base URL for a profile that already has a key.
+
+        The stored key is checked against the approved URL first; nothing
+        is saved if that fails.
+        """
+        api_key = auth_manager.get_api_key(ignore_env=True)
+        success, message, _ = auth_manager.verify_api_key(api_key)
+        if not success:
+            print_error(escape(message))
+            return LoginResult(
+                status="error",
+                message=message,
+                profile=profile,
+                api_key_masked=None,
+            )
+        config.save()
+        self._report_base_url(config, profile)
+        return LoginResult(
+            status="success",
+            message=msg.S_SAVE_BASEURL.format(
+                origin=self._saved_origin, profile=msg.display(profile)
+            ),
+            profile=profile,
+            api_key_masked=f"****{api_key[-4:]}" if api_key else None,
+            config_path=str(config.config_path),
+        )
+
+    def _report_base_url(self, config: Config, profile: str) -> None:
+        """Tell the user whether the base URL used for login was saved."""
+        if _output_config["quiet"]:
+            return
+        if self._saved_origin:
+            text = msg.S_SAVE_BASEURL.format(
+                origin=self._saved_origin, profile=msg.display(profile)
+            )
+            if self._added_host:
+                text += msg.S_SAVE_BASEURL_ADDED.format(
+                    host=msg.display(self._added_host)
+                )
+            print_info(escape(text), stderr=True)
+            return
+        unsaved = config.unsaved_base_url(profile)
+        if not isinstance(unsaved, tuple):
+            return
+        used = parse_origin(unsaved[0])
+        was = parse_origin(unsaved[1])
+        saved = unsaved[1]
+        if used is None or (was is not None and used.origin == was.origin):
+            return
+        print_info(
+            escape(
+                msg.I_LOGIN_NOT_SAVED.format(
+                    origin=msg.display(used.origin),
+                    profile=msg.display(profile),
+                    saved_origin=msg.display(was.origin if was else saved),
+                )
+            ),
+            stderr=True,
+        )
+        print_hint(
+            escape(msg.I_LOGIN_NOT_SAVED_HINT.format(origin=msg.display(used.origin)))
+        )
 
     def _maybe_prompt_skills_setup(self) -> None:
         """After login, offer interactive skills setup for detected AI tools."""
@@ -335,6 +545,7 @@ class LoginCommand(BaseCommand):
 
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
+            print_error_hint(e)
             return LoginResult(
                 status="error",
                 message=str(e),
@@ -344,8 +555,15 @@ class LoginCommand(BaseCommand):
 
     def _web_auth(
         self, config: Config, auth_manager: AuthManager, force_write: bool
-    ) -> LoginResult:
+    ) -> LoginResult | CodedErrorResult:
         """Handle web authentication with device flow."""
+        # The identity host mints the key: check it before anything else, and
+        # keep a refusal off stdout apart from the structured result.
+        try:
+            check_identity_host(config)
+        except CredentialHostError as e:
+            return CodedErrorResult(error=e.error, code=e.code, hint=e.hint)
+
         console.print("[blue]Starting web authentication...[/blue]")
 
         # No need to check for existing config - we handle that in the main flow
@@ -398,6 +616,7 @@ class LoginCommand(BaseCommand):
 
         except Exception as e:
             console.print(f"[red]Error during web authentication:[/red] {e}")
+            print_error_hint(e)
             return LoginResult(
                 status="error",
                 message=str(e),
@@ -518,6 +737,7 @@ class LogoutCommand(BaseCommand):
 
         except Exception as e:
             console.print(f"[red]Error during logout:[/red] {e}")
+            print_error_hint(e)
             return LogoutResult(status="error", message=str(e))
 
 
@@ -681,6 +901,7 @@ class ProfilesCommand(BaseCommand):
 
             except Exception as e:
                 console.print(f"[red]Error accessing credentials:[/red] {e}")
+                print_error_hint(e)
                 return ProfilesResult(
                     status="error",
                     message=f"Could not access credentials: {e}",

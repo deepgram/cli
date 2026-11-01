@@ -1250,7 +1250,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = ">=3.8.0" },
+    { name = "aiohttp", specifier = ">=3.11.0" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
@@ -1384,7 +1384,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "sounddevice", specifier = ">=0.4.6" },
-    { name = "websockets", specifier = ">=11.0" },
+    { name = "websockets", specifier = ">=13.1" },
 ]
 
 [[package]]

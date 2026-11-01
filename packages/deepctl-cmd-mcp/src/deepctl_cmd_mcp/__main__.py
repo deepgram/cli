@@ -21,7 +21,10 @@ def main() -> None:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    parser = argparse.ArgumentParser(description="Run Deepgram MCP proxy")
+    # No abbreviations: --base-url must be recognised as the flag it is.
+    parser = argparse.ArgumentParser(
+        description="Run Deepgram MCP proxy", allow_abbrev=False
+    )
     parser.add_argument(
         "--transport",
         default="stdio",
@@ -34,7 +37,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
     parser.add_argument(
         "--base-url",
-        default=os.getenv("DEEPGRAM_DX_URL", "https://api.dx.deepgram.com"),
+        default=None,
         help="Base URL for Deepgram developer API",
     )
     parser.add_argument(
@@ -52,6 +55,50 @@ def main() -> None:
         )
         sys.exit(1)
 
+    # Same host check as `dg mcp`: the key goes only to the Deepgram
+    # developer API, a host in the user's api.allowed_hosts, or (outside
+    # agent mode) a DEEPGRAM_DX_URL from the environment.
+    from deepctl_core.hosts import (
+        DEFAULT_DX_URL,
+        DX_API_HOSTS,
+        SOURCE_DEFAULT,
+        SOURCE_ENV,
+        SOURCE_FLAG,
+        CredentialHostError,
+        canonical_url,
+        evaluate,
+        is_allowlisted,
+        is_regional,
+        parse_origin,
+        report,
+        warn_env_host,
+    )
+
+    env_url = os.getenv("DEEPGRAM_DX_URL")
+    if args.base_url is not None:
+        base_url, source = args.base_url, SOURCE_FLAG
+    elif env_url:
+        base_url, source = env_url, SOURCE_ENV
+    else:
+        base_url, source = DEFAULT_DX_URL, SOURCE_DEFAULT
+    origin = parse_origin(base_url)
+    if origin is None or not is_regional(origin, DX_API_HOSTS):
+        # Only now read the user config (for api.allowed_hosts); stdout is
+        # the protocol channel, so nothing here may print to it.
+        from contextlib import redirect_stdout
+
+        from deepctl_core import Config
+
+        try:
+            with redirect_stdout(sys.stderr):
+                allowed = Config().allowed_hosts()
+            approved = evaluate(base_url, source, allowed, trusted_hosts=DX_API_HOSTS)
+        except CredentialHostError as err:
+            report(err)
+            sys.exit(1)
+        if source == SOURCE_ENV and not is_allowlisted(approved, allowed):
+            warn_env_host(approved, "DEEPGRAM_DX_URL")
+
     from deepgram_mcp import run_proxy
 
     try:
@@ -61,7 +108,7 @@ def main() -> None:
                 host=args.host,
                 port=args.port,
                 api_key=args.api_key,
-                base_url=args.base_url,
+                base_url=canonical_url(base_url),
                 debug=args.debug,
             )
         )

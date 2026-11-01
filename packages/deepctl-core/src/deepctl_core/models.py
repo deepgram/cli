@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 __all__ = [
     "BaseModel",
     "BaseResult",
+    "CodedErrorResult",
     "ErrorResult",
     "PluginInfo",
     "ProfileInfo",
@@ -49,3 +50,14 @@ class ErrorResult(BaseModel):
 
     error: str
     status: str = "error"
+
+
+class CodedErrorResult(ErrorResult):
+    """Error result that also carries a machine-readable code and a hint.
+
+    A subclass rather than optional fields on ErrorResult, so payloads of
+    every other error keep their existing keys.
+    """
+
+    code: str
+    hint: str

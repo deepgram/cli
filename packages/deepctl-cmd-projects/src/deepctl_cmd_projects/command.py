@@ -342,4 +342,7 @@ class ProjectsCommand(BaseCommand):
 
         except Exception as e:
             status_console.print(f"[red]Failed to set default project:[/red] {e}")
+            from deepctl_core.output import print_error_hint
+
+            print_error_hint(e)
             return BaseResult(status="error", message=str(e))

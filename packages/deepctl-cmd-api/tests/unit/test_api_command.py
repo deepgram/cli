@@ -21,13 +21,16 @@ class TestApiCommand:
     @pytest.fixture
     def mock_config(self):
         """Create a mock config."""
-        return Mock(spec=Config)
+        config = Mock(spec=Config)
+        config.allowed_hosts.return_value = []
+        return config
 
     @pytest.fixture
     def mock_auth_manager(self):
         """Create a mock auth manager."""
         manager = Mock(spec=AuthManager)
         manager.get_api_key.return_value = "test-api-key"
+        manager.check_base_url.return_value = DEFAULT_BASE_URL
         return manager
 
     @pytest.fixture
@@ -259,6 +262,7 @@ class TestApiCommand:
         """Test handling when no API key is available."""
         mock_auth = Mock(spec=AuthManager)
         mock_auth.get_api_key.return_value = None
+        mock_auth.check_base_url.return_value = DEFAULT_BASE_URL
 
         result = command.handle(
             config=mock_config,

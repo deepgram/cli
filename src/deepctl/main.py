@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import os
 import sys
 
 import click
@@ -253,7 +252,9 @@ def _argv_config_path(args: list[str]) -> str | None:
 @click.option(
     "--base-url",
     help=(
-        "Override the API base URL (e.g. https://api.staging.deepgram.com). "
+        "Override the API base URL (e.g. https://api.eu.deepgram.com). "
+        "Hosts other than Deepgram API hosts must be listed in "
+        "api.allowed_hosts. "
         "REST and WebSocket endpoints are derived from this host. "
         "Also settable via the DEEPGRAM_BASE_URL environment variable."
     ),
@@ -351,14 +352,14 @@ def cli(
         enable_timing()
 
     with TimingContext("cli_initialization"):
-        # A --base-url flag overrides the configured/env base URL (flag wins).
-        # Config reads DEEPGRAM_BASE_URL at init, so set it before constructing.
-        if base_url:
-            os.environ["DEEPGRAM_BASE_URL"] = base_url
-
-        # Initialize configuration
+        # Initialize configuration. A --base-url flag overrides the
+        # configured/env base URL for this run only; Config records that it
+        # came from the command line, so it is never saved and gets
+        # credentials only if the host is trusted.
         ctx.ensure_object(dict)
-        ctx.obj["config"] = Config(config_path=config, profile=profile)
+        ctx.obj["config"] = Config(
+            config_path=config, profile=profile, base_url=base_url
+        )
         # Global --api-key passthrough (highest-precedence explicit credential).
         ctx.obj["api_key"] = api_key
         ctx.obj["timing"] = timing or timing_detailed
