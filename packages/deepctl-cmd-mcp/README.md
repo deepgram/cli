@@ -2,7 +2,7 @@
 
 > Part of [deepctl](https://github.com/deepgram/cli) — Official Deepgram CLI
 
-MCP server for deepctl: Deepgram documentation search over stdio
+Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors
 
 ## Installation
 
@@ -33,22 +33,44 @@ pipx run deepctl --help
 
 ## MCP Server Setup
 
-The `deepctl mcp` command runs an MCP (Model Context Protocol) server over
-stdio that gives AI code editors one tool: search of Deepgram's documentation.
+`dg mcp` (also `deepctl mcp`) runs a local MCP (Model Context Protocol) server
+over stdio. Your AI editor starts it and gets one tool,
+`search_deepgram_knowledge_sources`, which searches Deepgram's documentation
+and returns passages with their source URLs. Each search goes to Deepgram's
+hosted documentation search and uses your Deepgram API key. `dg mcp` doesn't
+transcribe, synthesize speech or call other Deepgram APIs.
 
 ### Prerequisites
 
-```bash
-# Login to Deepgram (stores credentials in system keyring)
-deepctl login
+The API key comes from `dg login` or the `DEEPGRAM_API_KEY` environment
+variable. Never put the API key in the MCP config's `args`: a project config
+such as `.mcp.json` is usually committed.
 
-# Or set the environment variable
+```bash
+# Log in once (stores the API key in the system keyring)
+dg login
+
+# Or set the environment variable in the shell that starts your editor
 export DEEPGRAM_API_KEY="your-api-key"
 ```
 
+Without a key, the server still starts, and each search returns a tool error
+that says to run `dg login` or set `DEEPGRAM_API_KEY`. If dg ignored the key in
+your config file because other users can change the file or it's owned by
+someone else, the error asks a person to fix the file instead; an AI agent
+should ask the user.
+
+Claude Desktop passes `env` values in its config literally, so
+`"DEEPGRAM_API_KEY": "${DEEPGRAM_API_KEY}"` sends the text `${DEEPGRAM_API_KEY}`
+as the key. Use `dg login` instead.
+
 ### Claude Code
 
-Add to your project's `.mcp.json`:
+```bash
+claude mcp add deepgram --scope project -- uvx deepctl mcp
+```
+
+Or add to your project's `.mcp.json`:
 
 ```json
 {
@@ -61,24 +83,6 @@ Add to your project's `.mcp.json`:
   }
 }
 ```
-
-Or pass `DEEPGRAM_API_KEY` through the editor's `env` block, which forwards it
-from your shell (a key saved by `deepctl login` takes precedence):
-
-```json
-{
-  "mcpServers": {
-    "deepgram": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["deepctl", "mcp"],
-      "env": { "DEEPGRAM_API_KEY": "${DEEPGRAM_API_KEY}" }
-    }
-  }
-}
-```
-
-Don't write the key itself into `.mcp.json` or any other file you commit.
 
 ### Cursor
 
@@ -110,6 +114,18 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
+### Installed CLI
+
+If `dg` is already installed (Homebrew, the install script, `pip`, `uv tool`
+or `pipx`), use it directly in any of the above configurations:
+
+```json
+{
+  "command": "dg",
+  "args": ["mcp"]
+}
+```
+
 ### Alternative: pipx
 
 Replace `uvx` with `pipx run` in any of the above configurations:
@@ -132,12 +148,12 @@ If running from a local clone of the repository:
 }
 ```
 
-### Transport modes
+### Transport
 
-The MCP server runs over stdio: your editor starts `dg mcp` and talks to it over
-stdin and stdout. `--transport sse` was removed in deepctl 0.4.1. `--transport
-streamable-http` was never supported. Both exit with an error, so remove them
-from your MCP config.
+The MCP server runs over stdio only: your editor starts `dg mcp` and talks to
+it over stdin and stdout. SSE and HTTP transports aren't supported, and a
+`--transport` other than `stdio` exits with an error, so remove it from your
+MCP config.
 
 ## Dependencies
 

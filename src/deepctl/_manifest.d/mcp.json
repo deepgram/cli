@@ -3,13 +3,13 @@
   "module": "deepctl_cmd_mcp.command",
   "attr": "McpCommand",
   "dist": "deepctl-cmd-mcp",
-  "summary": "Run MCP proxy for Deepgram AI",
+  "summary": "Run an MCP server that searches Deepgram's docs",
   "hidden": false,
   "requires_auth": false,
   "help": {
     "name": "mcp",
-    "help": "Run an MCP proxy that connects to Deepgram's developer API and exposes remote tools locally for AI editors\n\nExamples:\n  dg mcp\n  dg mcp --base-url https://api.dx.deepgram.com\n\n\nFor agents, use --agent-friendly.",
-    "short_help": "Run MCP proxy for Deepgram AI",
+    "help": "Run a local MCP server over stdio that lets AI editors search Deepgram's documentation, using your API key from dg login or DEEPGRAM_API_KEY\n\nExamples:\n  dg mcp\n  dg mcp --base-url https://api.dx.deepgram.com\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Run an MCP server that searches Deepgram's docs",
     "epilog": null,
     "hidden": false,
     "deprecated": false,
@@ -35,7 +35,7 @@
         "is_flag": true,
         "count": false,
         "hidden": false,
-        "help": "Enable debug logging"
+        "help": "Log each documentation search request to stderr"
       },
       {
         "class": "option",
@@ -56,7 +56,7 @@
         "is_flag": false,
         "count": false,
         "hidden": false,
-        "help": "Base URL for Deepgram developer API"
+        "help": "Base URL of Deepgram's documentation search service. It must use https unless the host is localhost, and any host other than Deepgram's must be in api.allowed_hosts in your user config"
       },
       {
         "class": "option",
