@@ -7,6 +7,14 @@ from deepctl_cmd_ffprobe.command import FfprobeCommand
 from deepctl_cmd_ffprobe.models import FfprobeResult
 
 
+@pytest.fixture(autouse=True)
+def _person_at_terminal(monkeypatch):
+    """Tests run as a person unless they say otherwise."""
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
+    monkeypatch.setattr(ffprobe_module, "is_ai_agent", lambda: False)
+
+
 class TestFfprobeCommand:
     """Test cases for FfprobeCommand."""
 
@@ -227,3 +235,46 @@ class TestOutputChannels:
         captured = capsys.readouterr()
 
         assert "ffprobe is available" in captured.out
+
+
+def test_set_path_refused_in_agent_sessions(monkeypatch, tmp_path):
+    """A stored tool path runs later; an AI agent session can't set it."""
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
+    monkeypatch.setattr(ffprobe_module, "is_ai_agent", lambda: True)
+    config = Mock()
+    tool = tmp_path / "ffprobe"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+    result = FfprobeCommand().handle(config, Mock(), Mock(), path=str(tool))
+    assert result.code == "confirmation_required"
+    assert result.hint == (
+        "A person must run this command. If you are an AI agent, ask the user."
+    )
+    config.save.assert_not_called()
+
+
+def test_set_path_allowed_for_scripts_and_ci(monkeypatch, tmp_path):
+    """No TTY, or CI=true, alone isn't refused."""
+    from deepctl_core import output
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(output, "is_agentic", lambda: True)
+    config = Mock()
+    tool = tmp_path / "ffprobe"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+    with patch("deepctl_cmd_ffprobe.command.subprocess.run", Mock()):
+        result = FfprobeCommand().handle(config, Mock(), Mock(), path=str(tool))
+    assert getattr(result, "code", None) != "confirmation_required"
+    config.save.assert_called_once()
+
+
+def test_reset_allowed_in_agent_sessions(monkeypatch):
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
+    monkeypatch.setattr(ffprobe_module, "is_ai_agent", lambda: True)
+    config = Mock()
+    result = FfprobeCommand().handle(config, Mock(), Mock(), reset=True)
+    assert result.status == "success"
+    config.save.assert_called_once()

@@ -10,12 +10,16 @@ from deepctl_core import (
     AuthManager,
     BaseCommand,
     BaseResult,
+    CodedErrorResult,
     Config,
     DeepgramClient,
     get_console,
     get_output_format,
     get_status_console,
+    is_ai_agent,
 )
+from deepctl_core import messages as msg
+from deepctl_core.output import print_error, print_hint
 from deepctl_core.tools import find_executable
 from deepctl_shared_utils import (
     get_ffprobe_path,
@@ -87,7 +91,7 @@ class FfprobeCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult:
+    ) -> BaseResult | CodedErrorResult:
         """Handle ffprobe command."""
         path = kwargs.get("path")
         reset = kwargs.get("reset", False)
@@ -105,6 +109,17 @@ class FfprobeCommand(BaseCommand):
             return self._handle_reset(config)
 
         if path:
+            # A stored tool path is run by later commands: an AI agent
+            # session never sets it. Scripts and CI without an agent marker
+            # still can.
+            if is_ai_agent():
+                print_error(msg.E_TOOL_PATH_AGENT)
+                print_hint(msg.E_PERSON_ONLY_AGENT_HINT)
+                return CodedErrorResult(
+                    error=msg.E_TOOL_PATH_AGENT,
+                    code=msg.CODE_CONFIRMATION_REQUIRED,
+                    hint=msg.E_PERSON_ONLY_AGENT_HINT,
+                )
             return self._handle_set_path(config, path)
 
         return self._handle_status(config)
