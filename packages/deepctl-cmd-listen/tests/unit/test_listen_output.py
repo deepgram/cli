@@ -17,7 +17,7 @@ from deepctl_core import Config
 
 @pytest.fixture
 def command(monkeypatch):
-    monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: True)
+    monkeypatch.setattr(listen_cmd, "agent_mode", lambda: True)
     return ListenCommand()
 
 
@@ -67,7 +67,7 @@ def test_output_outcome_is_output_unwritable_with_the_kept_finals(command, capsy
 
 
 def test_person_gets_the_human_hint(command, monkeypatch):
-    monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+    monkeypatch.setattr(listen_cmd, "agent_mode", lambda: False)
     monkeypatch.setattr(listen_cmd, "_agentic", False)
     outcome = live.LiveOutcome(
         status="error", kind="output", os_error="Input/output error"

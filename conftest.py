@@ -49,22 +49,24 @@ def _clean_ai_agent_env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clean_deepgram_env(monkeypatch):
-    """Remove all DEEPGRAM_* environment variables for test isolation."""
+    """Remove all DEEPGRAM_* environment variables, and the DG_AGENT
+    override, for test isolation."""
     for key in list(os.environ):
         if key.startswith("DEEPGRAM_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("DG_AGENT", raising=False)
 
 
 @pytest.fixture(autouse=True)
 def _speak_tests_run_as_a_person(request, monkeypatch):
     """Speak tests run as a person by default: the agent rules key off hard
     agent markers, which a developer's own shell may set (CLAUDECODE=1).
-    Tests that need agent mode patch ``is_ai_agent`` themselves."""
+    Tests that need agent mode patch ``agent_mode`` themselves."""
     if "deepctl-cmd-speak" not in request.path.parts:
         return
     from deepctl_core.output import AI_AGENT_ENV_MARKERS
 
-    for name in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL"):
+    for name in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL", "DG_AGENT"):
         monkeypatch.delenv(name, raising=False)
 
 

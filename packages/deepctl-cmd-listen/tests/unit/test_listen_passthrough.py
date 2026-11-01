@@ -48,7 +48,7 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setitem(output._output_config, "quiet", False)
     monkeypatch.setitem(output._output_config, "format", "json")
     monkeypatch.setitem(output._output_config, "format_source", "explicit")
-    monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+    monkeypatch.setattr(listen_cmd, "agent_mode", lambda: False)
     monkeypatch.setattr(transport, "prog", lambda: "dg")
     monkeypatch.setattr(listen_cmd, "_prog", lambda: "dg")
     monkeypatch.setattr(listen_cmd, "_listen_json_warned", False)
@@ -225,7 +225,7 @@ def test_a_body_that_is_not_an_object_is_unreadable(monkeypatch):
 
 def agent(monkeypatch) -> None:
     fmt(monkeypatch, "json", "hard_agent")
-    monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: True)
+    monkeypatch.setattr(listen_cmd, "agent_mode", lambda: True)
 
 
 def test_large_result_under_an_agent_is_compacted(monkeypatch, capsysbinary, tmp_path):
@@ -294,7 +294,7 @@ def test_compaction_boundaries(monkeypatch, capsysbinary, case):
         fmt(monkeypatch, "json", "explicit")
     elif case == "soft":
         fmt(monkeypatch, "json", "soft")
-        monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+        monkeypatch.setattr(listen_cmd, "agent_mode", lambda: False)
     elif case == "full_output":
         full_output = True
     elif case == "regular_file":
@@ -302,7 +302,7 @@ def test_compaction_boundaries(monkeypatch, capsysbinary, case):
             "deepctl_core.result_store.stdout_is_file_or_null", lambda: True
         )
     elif case == "no_agent":
-        monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+        monkeypatch.setattr(listen_cmd, "agent_mode", lambda: False)
     elif case == "text":
         fmt(monkeypatch, "text", "explicit")
     run(rest_client(body), full_output=full_output)

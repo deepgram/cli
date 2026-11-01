@@ -160,8 +160,14 @@ def _rerun_with_yes(prog: str | None) -> str | None:
 
 
 def _hard_signal() -> bool:
-    """An AI agent marked the environment, or ``DG_AGENT=1`` says one runs dg."""
-    return is_ai_agent() or os.environ.get("DG_AGENT") == "1"
+    """Hard agent mode: an AI agent marked the environment, or ``DG_AGENT=1``
+    says one runs dg (``DG_AGENT=0`` turns it off)."""
+    from deepctl_core.agents import override
+
+    forced = override()
+    if forced is not None:
+        return forced == "1"
+    return is_ai_agent()
 
 
 def _hint_for(
@@ -1044,7 +1050,7 @@ class LoginCommand(BaseCommand):
         self, config: Config, auth_manager: AuthManager, identity_url: str
     ) -> Any:
         """Get a device code, save it for --complete, and return the link and
-        code at once (exit 0; OQ-16)."""
+        code at once (exit 0)."""
         profile_name = config.profile or "default"
         try:
             device = auth_manager._request_device_code(identity_url)

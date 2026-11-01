@@ -44,6 +44,9 @@ from typing import Any
 
 FORMAT = 1
 
+# The project file, read from the working directory.
+PROJECT_FILE = "deepgram.yaml"
+
 # Environment variables root --help output, or the plugin set, depends on.
 HELP_ENV_VARS = (
     "COLUMNS",
@@ -264,16 +267,27 @@ def _read_private(path: str) -> bytes | None:
 
 
 def file_state(path: str) -> dict[str, Any]:
-    """What the help-cache key records about one file or directory."""
+    """What the help-cache key records about one file or directory.
+
+    ``mode`` and ``uid`` are there because the trust checks read them and
+    chmod or chown changes neither mtime nor size. A path ``stat`` can't
+    follow but ``lstat`` finds (a dangling symlink) is recorded from
+    ``lstat``, so a reader's ``stat`` fails on it and never matches;
+    ``absent`` means not even ``lstat`` finds it."""
     try:
         info = os.stat(path)
     except OSError:
-        return {"path": path, "absent": True}
+        try:
+            info = os.lstat(path)
+        except OSError:
+            return {"path": path, "absent": True}
     return {
         "path": path,
         "mtime_ns": info.st_mtime_ns,
         "size": info.st_size,
         "inode": info.st_ino,
+        "mode": info.st_mode,
+        "uid": info.st_uid,
     }
 
 
@@ -318,26 +332,33 @@ def plugin_state_paths() -> list[str]:
     return list(dict.fromkeys(paths))
 
 
-def _plugin_dir_trust() -> list[Any]:
-    """Owner and mode of dg's own plugin directories (``.deepctl``,
-    ``.deepctl/plugins``, the venv) under each home: what the plugin
-    loader's trust check reads. chmod and chown change neither mtime nor
-    size, so the stamp records them itself."""
+def _plugin_dirs() -> list[str]:
+    """dg's own plugin directories (``.deepctl``, ``.deepctl/plugins``,
+    the venv) under each home: the ones the plugin loader's trust check
+    reads the owner and mode of."""
     homes = {os.path.expanduser("~")}
     real = _real_home()
     if real:
         homes.add(real)
-    trust: list[Any] = []
+    paths: list[str] = []
     for home in sorted(homes):
         dot = os.path.join(home, ".deepctl")
         plugins = os.path.join(dot, "plugins")
-        for path in (dot, plugins, os.path.join(plugins, "venv")):
-            try:
-                info = os.stat(path)
-            except OSError:
-                trust.append([path, None])
-                continue
-            trust.append([path, info.st_mode, info.st_uid])
+        paths += [dot, plugins, os.path.join(plugins, "venv")]
+    return paths
+
+
+def _plugin_dir_trust() -> list[Any]:
+    """Owner and mode of ``_plugin_dirs``. chmod and chown change neither
+    mtime nor size, so the stamp records them itself."""
+    trust: list[Any] = []
+    for path in _plugin_dirs():
+        try:
+            info = os.stat(path)
+        except OSError:
+            trust.append([path, None])
+            continue
+        trust.append([path, info.st_mode, info.st_uid])
     return trust
 
 
@@ -600,15 +621,23 @@ def help_width() -> int:
 def key_inputs() -> dict[str, Any]:
     """The interpreter, files and environment variables root ``--help``
     output depends on, as the key records them. ``run()`` takes this before
-    rendering, and ``write_help`` writes nothing unless it still holds."""
-    files = [file_state(p) for p in plugin_state_paths()]
-    files.append(file_state(_default_config_file()))
+    rendering, and ``write_help`` writes nothing unless it still holds.
+
+    Besides the plugin set and the user config, the key records the
+    project file in the working directory (``cwd_relative``, so a reader
+    looks in its own) and every input of the agent detection table
+    (``deepctl_core.agents.hard_inputs``): a key written by a person is
+    never served to an agent session, nor under other trust state."""
+    env_names, marker_files = _agent_markers()
+    paths = [*plugin_state_paths(), *_plugin_dirs(), _default_config_file()]
+    files = [file_state(p) for p in dict.fromkeys([*paths, *marker_files])]
+    files.append({**file_state(PROJECT_FILE), "cwd_relative": True})
     return {
         "executable": sys.executable,
         "files": files,
         "env": {
             name: os.environ.get(name, None)
-            for name in sorted(set(HELP_ENV_VARS) | set(_agent_markers()))
+            for name in sorted(set(HELP_ENV_VARS) | set(env_names))
         },
     }
 
@@ -639,10 +668,12 @@ def help_key(
     }
 
 
-def _agent_markers() -> tuple[str, ...]:
-    from deepctl_core.output import AI_AGENT_ENV_MARKERS
+def _agent_markers() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The variables (``DG_AGENT`` too) and files agent detection reads."""
+    from deepctl_core.agents import OVERRIDE_VAR, hard_inputs
 
-    return AI_AGENT_ENV_MARKERS
+    env_names, files = hard_inputs()
+    return (*env_names, OVERRIDE_VAR), files
 
 
 def _default_config_file() -> str:

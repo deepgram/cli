@@ -42,7 +42,7 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setitem(output._output_config, "quiet", False)
     monkeypatch.setitem(output._output_config, "format", "json")
     monkeypatch.setitem(output._output_config, "format_source", "explicit")
-    monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+    monkeypatch.setattr(listen_cmd, "agent_mode", lambda: False)
     monkeypatch.setattr(transport, "prog", lambda: "dg")
     monkeypatch.setattr(listen_cmd, "_prog", lambda: "dg")
     monkeypatch.setattr(listen_cmd, "_listen_json_warned", False)

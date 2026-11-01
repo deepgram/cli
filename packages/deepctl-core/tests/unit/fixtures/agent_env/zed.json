@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "agent": null,
+    "captured": false,
+    "sanitising": "Not captured: written from the variables this terminal is documented or known to set (source below), values \"x\" unless the value matters. Replace with a sanitised capture when one is available.",
+    "source": "Zed sets TERM_PROGRAM=zed and ZED_TERM=true",
+    "terminal": "Zed integrated terminal"
+  },
+  "env": {
+    "COLORTERM": "truecolor",
+    "LANG": "en_US.UTF-8",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "SHELL": "/bin/zsh",
+    "SHLVL": "1",
+    "TERM": "xterm-256color",
+    "TERM_PROGRAM": "zed",
+    "TERM_PROGRAM_VERSION": "x",
+    "ZED_TERM": "true"
+  }
+}

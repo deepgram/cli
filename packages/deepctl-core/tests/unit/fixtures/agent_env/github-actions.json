@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "agent": null,
+    "captured": false,
+    "sanitising": "Not captured: written from the variables this terminal is documented or known to set (source below), values \"x\" unless the value matters. Replace with a sanitised capture when one is available.",
+    "source": "docs.github.com, Variables reference: default environment variables",
+    "terminal": "GitHub Actions job step (ubuntu runner)"
+  },
+  "env": {
+    "CI": "true",
+    "GITHUB_ACTION": "x",
+    "GITHUB_ACTIONS": "true",
+    "GITHUB_ACTOR": "x",
+    "GITHUB_EVENT_NAME": "push",
+    "GITHUB_JOB": "x",
+    "GITHUB_REF": "x",
+    "GITHUB_REPOSITORY": "x",
+    "GITHUB_RUN_ID": "x",
+    "GITHUB_SHA": "x",
+    "GITHUB_WORKFLOW": "x",
+    "GITHUB_WORKSPACE": "x",
+    "HOME": "/home/runner",
+    "ImageOS": "ubuntu24",
+    "LANG": "C.UTF-8",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "RUNNER_ARCH": "X64",
+    "RUNNER_OS": "Linux",
+    "RUNNER_TEMP": "x",
+    "SHELL": "/bin/bash"
+  }
+}
