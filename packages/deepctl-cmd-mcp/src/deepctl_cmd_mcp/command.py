@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import signal
-import sys
 from typing import TYPE_CHECKING, Any
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient, output
@@ -22,15 +21,7 @@ from rich.markup import escape
 
 from . import messages as mcp_msg
 from .models import MCPServerResult, TransportType
-from .proxy import (
-    CANT_START,
-    DEFAULT_BASE_URL,
-    NO_KEY,
-    isolate_stdout,
-    reason,
-    report_error,
-    run_proxy,
-)
+from .proxy import DEFAULT_BASE_URL, isolate_stdout, report_error, run_proxy
 
 if TYPE_CHECKING:
     pass
@@ -50,30 +41,6 @@ def __getattr__(name: str) -> Any:
 # MCP host (Claude Desktop, Codex, etc.), stdout is the JSON-RPC protocol
 # channel and must not receive any human-readable messages.
 console = stderr_console
-
-
-def key_or_error(config: Any, auth_manager: Any) -> str:
-    """The API key, or RuntimeError with the complete text for the client."""
-    from contextlib import redirect_stdout
-
-    from deepctl_core import messages as msg
-
-    try:
-        with redirect_stdout(sys.stderr):
-            api_key = auth_manager.get_api_key()
-    except Exception as exc:
-        raise RuntimeError(CANT_START.format(reason=reason(exc))) from exc
-    if api_key:
-        return str(api_key)
-    if getattr(config, "api_key_untrusted", False) is True:
-        # The config file's key was left unused (W-PERM-AGENT /
-        # W-CFG-UNTRUSTED): send the agent to a person, never to dg login.
-        raise RuntimeError(
-            msg.E_KEY_UNTRUSTED.format(user_config=msg.display_path(config.config_path))
-            + " "
-            + msg.W_CFG_UNTRUSTED_FILE_HINT
-        )
-    raise RuntimeError(CANT_START.format(reason=NO_KEY))
 
 
 def _refuse_transport(transport: str) -> None:
@@ -220,6 +187,8 @@ class McpCommand(BaseCommand):
             except CredentialHostError as err:
                 report(err)
                 raise SystemExit(1) from err
+
+        from .handoff import key_or_error
 
         debug = kwargs.get("debug", False)
 

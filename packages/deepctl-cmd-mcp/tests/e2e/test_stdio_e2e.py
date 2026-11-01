@@ -206,7 +206,7 @@ def test_handshake_and_tool_list_are_fixed_local_text(
 ) -> None:
     from importlib.metadata import version
 
-    from deepctl_cmd_mcp.proxy import INSTRUCTIONS, TOOLS
+    from deepctl.mcp._fast import INSTRUCTIONS, TOOLS
 
     async def body(session: Any, init: Any) -> Any:
         return init, await session.list_tools()
