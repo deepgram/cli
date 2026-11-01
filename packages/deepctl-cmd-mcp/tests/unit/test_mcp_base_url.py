@@ -84,7 +84,7 @@ def test_standalone_entrypoint_refuses_foreign_flag(monkeypatch, capsys, tmp_pat
     )
     with (
         patch("signal.signal"),
-        patch("deepgram_mcp.run_proxy") as run_proxy,
+        patch("deepctl_cmd_mcp.proxy.run_proxy") as run_proxy,
         pytest.raises(SystemExit) as exc,
     ):
         mcp_main.main()
@@ -105,7 +105,7 @@ def test_standalone_entrypoint_agent_env_refused(monkeypatch, tmp_path):
     )
     with (
         patch("signal.signal"),
-        patch("deepgram_mcp.run_proxy") as run_proxy,
+        patch("deepctl_cmd_mcp.proxy.run_proxy") as run_proxy,
         pytest.raises(SystemExit),
     ):
         mcp_main.main()
@@ -118,7 +118,7 @@ def test_standalone_entrypoint_rejects_abbreviated_flag(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["deepctl-cmd-mcp", "--base=https://evil.test"])
     with (
         patch("signal.signal"),
-        patch("deepgram_mcp.run_proxy") as run_proxy,
+        patch("deepctl_cmd_mcp.proxy.run_proxy") as run_proxy,
         pytest.raises(SystemExit) as exc,
     ):
         mcp_main.main()
@@ -134,12 +134,13 @@ def test_standalone_entrypoint_default_host_reads_no_config(monkeypatch, tmp_pat
     with (
         patch("signal.signal"),
         patch("deepctl_core.Config", side_effect=AssertionError("no config")),
-        patch("deepgram_mcp.run_proxy") as run_proxy,
+        patch("deepctl_cmd_mcp.proxy.run_proxy") as run_proxy,
         patch("asyncio.run") as run,
     ):
         mcp_main.main()
     run.assert_called_once()
     assert run_proxy.call_args.kwargs["base_url"] == "https://api.dx.deepgram.com"
+    assert run_proxy.call_args.kwargs["api_key"]() == "sk-USERKEY"
 
 
 def test_standalone_entrypoint_env_host_warns(monkeypatch, capsys, tmp_path):
@@ -152,7 +153,7 @@ def test_standalone_entrypoint_env_host_warns(monkeypatch, capsys, tmp_path):
     )
     with (
         patch("signal.signal"),
-        patch("deepgram_mcp.run_proxy"),
+        patch("deepctl_cmd_mcp.proxy.run_proxy"),
         patch("asyncio.run") as run,
     ):
         mcp_main.main()
@@ -217,7 +218,7 @@ def test_standalone_entrypoint_refuses_other_transports(
     monkeypatch.setenv("DEEPGRAM_API_KEY", "sk-USERKEY")
     monkeypatch.setattr(sys, "argv", ["deepctl-cmd-mcp", "--transport", transport])
     with (
-        patch("deepgram_mcp.run_proxy") as run_proxy,
+        patch("deepctl_cmd_mcp.proxy.run_proxy") as run_proxy,
         patch("signal.signal"),
         pytest.raises(SystemExit) as exc,
     ):

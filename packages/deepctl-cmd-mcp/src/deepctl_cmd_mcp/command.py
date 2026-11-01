@@ -1,10 +1,11 @@
-"""MCP proxy command for Deepgram — bridges remote MCP tools to local editors."""
+"""dg mcp: an MCP server that serves Deepgram documentation search over stdio."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import signal
+import sys
 from typing import TYPE_CHECKING, Any
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient, output
@@ -18,12 +19,19 @@ from deepctl_core.hosts import (
 )
 from deepctl_core.messages import display
 from deepctl_core.output import stderr_console
-from deepgram_mcp import TransportType, run_proxy
-from deepgram_mcp.proxy import DEFAULT_BASE_URL
 from rich.markup import escape
 
 from . import messages as mcp_msg
-from .models import MCPServerResult
+from .models import MCPServerResult, TransportType
+from .proxy import (
+    CANT_START,
+    DEFAULT_BASE_URL,
+    NO_KEY,
+    isolate_stdout,
+    reason,
+    report_error,
+    run_proxy,
+)
 
 if TYPE_CHECKING:
     pass
@@ -34,19 +42,28 @@ if TYPE_CHECKING:
 console = stderr_console
 
 
-def _report_error(exc: Exception) -> None:
-    """Send a telemetry error report if telemetry is on for this run.
+def key_or_error(config: Any, auth_manager: Any) -> str:
+    """The API key, or RuntimeError with the complete text for the client."""
+    from contextlib import redirect_stdout
 
-    The proxy turns failures into an error result instead of raising, so
-    they never reach main()'s error path. Reporting writes nothing to
-    stdout, which the MCP host owns in stdio mode.
-    """
+    from deepctl_core import messages as msg
+
     try:
-        from deepctl_telemetry import report_exception
-
-        report_exception(exc)
-    except Exception:
-        pass
+        with redirect_stdout(sys.stderr):
+            api_key = auth_manager.get_api_key()
+    except Exception as exc:
+        raise RuntimeError(CANT_START.format(reason=reason(exc))) from exc
+    if api_key:
+        return str(api_key)
+    if getattr(config, "api_key_untrusted", False) is True:
+        # The config file's key was left unused (W-PERM-AGENT /
+        # W-CFG-UNTRUSTED): send the agent to a person, never to dg login.
+        raise RuntimeError(
+            msg.E_KEY_UNTRUSTED.format(user_config=msg.display_path(config.config_path))
+            + " "
+            + msg.W_CFG_UNTRUSTED_FILE_HINT
+        )
+    raise RuntimeError(CANT_START.format(reason=NO_KEY))
 
 
 def _refuse_transport(transport: str) -> None:
@@ -61,16 +78,19 @@ def _refuse_transport(transport: str) -> None:
 
 
 class McpCommand(BaseCommand):
-    """MCP proxy that connects to Deepgram's developer tools."""
+    """MCP server that serves Deepgram documentation search over stdio."""
 
     name = "mcp"
     help = (
-        "Run an MCP proxy that connects to Deepgram's developer API and "
-        "exposes remote tools locally for AI editors"
+        "Run an MCP server that exposes Deepgram documentation search to "
+        "your AI editor over stdio"
     )
-    short_help = "Run MCP proxy for Deepgram AI"
+    short_help = "Serve Deepgram docs search over MCP"
 
-    requires_auth = True
+    # No credential check at startup: the server answers the handshake with
+    # or without a key, and a missing or refused key is a tool error on the
+    # first call (stdout belongs to the MCP client from the first byte).
+    requires_auth = False
     requires_project = False
     ci_friendly = True
     stdout_is_protocol = True
@@ -80,8 +100,8 @@ class McpCommand(BaseCommand):
         "dg mcp --base-url https://api.dx.deepgram.com",
     ]
     agent_help = (
-        "Run an MCP (Model Context Protocol) proxy that connects to Deepgram's "
-        "developer API and exposes remote AI assistant tools locally. Configure "
+        "Run an MCP (Model Context Protocol) server that exposes Deepgram "
+        "documentation search to your AI editor. Configure "
         "in your AI editor's MCP settings. It runs over stdio."
     )
 
@@ -144,11 +164,19 @@ class McpCommand(BaseCommand):
             _refuse_transport(transport)
         return None
 
+    def output_result(self, result: Any, config: Config) -> None:
+        """Write nothing: stdout belongs to the MCP client.
+
+        A failure was already reported on stderr; the result only sets the
+        exit code.
+        """
+        return None
+
     def _handle_shutdown(self, signum: int, frame: Any) -> None:
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
             self._shutdown_requested = True
-            console.print("\n[yellow]MCP proxy stopped by user[/yellow]")
+            console.print("\n[yellow]MCP server stopped by user[/yellow]")
             os._exit(0)
 
     def handle(
@@ -158,7 +186,7 @@ class McpCommand(BaseCommand):
         client: DeepgramClient,
         **kwargs: Any,
     ) -> Any:
-        """Handle MCP proxy command."""
+        """Handle the MCP server command."""
         transport = (kwargs.get("transport") or "stdio").lower()
         base_url = kwargs.get("base_url") or DEFAULT_BASE_URL
 
@@ -183,8 +211,6 @@ class McpCommand(BaseCommand):
                 report(err)
                 raise SystemExit(1) from err
 
-        api_key = auth_manager.get_api_key()
-        assert api_key  # guaranteed by requires_auth = True
         debug = kwargs.get("debug", False)
 
         # Set up signal handling for graceful shutdown
@@ -193,15 +219,17 @@ class McpCommand(BaseCommand):
         )
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
+        # From here on only JSON-RPC reaches the client: anything else
+        # written to stdout (fd 1) goes to stderr.
+        protocol = isolate_stdout()
+
         try:
             asyncio.run(
                 run_proxy(
-                    transport="stdio",
-                    host="127.0.0.1",
-                    port=0,
-                    api_key=api_key,
                     base_url=canonical_url(base_url),
+                    api_key=lambda: key_or_error(config, auth_manager),
                     debug=debug,
+                    stdout=protocol,
                 )
             )
 
@@ -213,16 +241,16 @@ class McpCommand(BaseCommand):
         except KeyboardInterrupt:
             return MCPServerResult(
                 status="cancelled",
-                message="MCP proxy stopped by user",
+                message="MCP server stopped by user",
                 transport=TransportType.STDIO,
             )
         except Exception as e:
-            _report_error(e)
+            report_error(e)
             msg = str(e)
             if hasattr(e, "exceptions"):
                 for sub in e.exceptions:
                     msg += f"\n  Caused by: {sub!r}"
-            console.print(f"[red]Error running MCP proxy:[/red] {msg}")
+            console.print(f"[red]Error running MCP server:[/red] {msg}")
             return MCPServerResult(
                 status="error",
                 message=str(e),

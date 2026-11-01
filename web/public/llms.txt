@@ -37,4 +37,4 @@
 - Plugin system: `dg plugin install <package>` installs community extensions in isolated venv (refused in an AI agent session: a person runs it)
 - `--dry-run` on all destructive operations (key deletion, member removal)
 - Shell completion for bash, zsh, and fish
-- MCP server mode: `dg mcp` for AI editor integration (stdio/SSE/HTTP)
+- MCP server mode: `dg mcp` (stdio) gives AI editors Deepgram documentation search

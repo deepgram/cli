@@ -148,11 +148,9 @@ module = [
     "sounddevice.*",
     "numpy",
     "numpy.*",
-    "deepgram_mcp",
-    "deepgram_mcp.*",
 ]
-# Optional microphone dependencies (sounddevice, numpy) and the MCP SDK
-# (deepgram_mcp) ship without type stubs.
+# Optional microphone dependencies (sounddevice, numpy) ship without type
+# stubs.
 ignore_missing_imports = true
 # numpy>=2.2 ships PEP 695 `type` aliases in its stubs, which mypy rejects
 # under python_version = "3.10" (aborting before our code is checked). Skip

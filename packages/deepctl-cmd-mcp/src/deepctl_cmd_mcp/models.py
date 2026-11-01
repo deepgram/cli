@@ -1,9 +1,19 @@
 """Models for the MCP command."""
 
+from enum import Enum
 from typing import Optional
 
-from deepgram_mcp import TransportType as TransportType
 from pydantic import BaseModel
+
+
+class TransportType(str, Enum):
+    """MCP transports. Only ``STDIO`` is served.
+
+    ``SSE`` stays so code that names it still imports; ``dg mcp`` refuses it.
+    """
+
+    STDIO = "stdio"
+    SSE = "sse"
 
 
 class MCPServerResult(BaseModel):
