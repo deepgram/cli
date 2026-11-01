@@ -113,6 +113,8 @@ class Run:
             git(dest, "add", "-A")
             git(dest, "commit", "-q", "-m", "init")
             git(dest, "remote", "add", "origin", url)
+        else:
+            (dest / ".git").mkdir()
 
     def _make(self, dest: Path) -> bool:  # noqa: ARG002
         self.setup_runs.append("make")

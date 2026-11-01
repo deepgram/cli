@@ -8,7 +8,7 @@
   "requires_auth": false,
   "help": {
     "name": "init",
-    "help": "Browse, clone, and set up Deepgram starter apps.\n\nFetches templates from the Deepgram templates gallery. Run with no arguments for an interactive search-and-select picker, or pass a template name directly to clone immediately.\n\nExamples:\n  dg init\n  dg init --search python\n  dg init node-transcription\n  dg init node-transcription --dir ./my-app\n  dg init node-transcription --install\n  dg init node-transcription --no-install\n  dg init --list\n  dg init --list --search flask\n\n\nFor agents, use --agent-friendly.",
+    "help": "Browse, clone, and set up Deepgram starter apps.\n\nFetches templates from the Deepgram templates gallery. Run with no arguments for an interactive search-and-select picker, or pass a template name directly to clone immediately.\n\nExamples:\n  dg init\n  dg init --search python\n  dg init node-transcription\n  dg init node-transcription --dir ./my-app\n  dg init node-transcription --install\n  dg init node-transcription --no-install\n  dg init node-transcription --yes\n  dg init --list\n  dg init --list --search flask\n\n\nFor agents, use --agent-friendly.",
     "short_help": "Scaffold a Deepgram starter app (alpha)",
     "epilog": null,
     "hidden": false,
@@ -16,6 +16,28 @@
     "no_args_is_help": false,
     "options_metavar": "[OPTIONS]",
     "params": [
+      {
+        "class": "option",
+        "name": "yes",
+        "opts": [
+          "--yes",
+          "-y"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Approve and run the template's setup commands without asking; the only way in an AI agent session"
+      },
       {
         "class": "option",
         "name": "no_start",
@@ -98,7 +120,7 @@
         "is_flag": true,
         "count": false,
         "hidden": false,
-        "help": "Run setup (make check-prereqs && make init) without prompting"
+        "help": "Run the setup commands without asking (in an AI agent session, use --yes)"
       },
       {
         "class": "option",
