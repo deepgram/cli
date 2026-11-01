@@ -249,3 +249,35 @@ def test_tool_table_shape() -> None:
     for tool in _fast.TOOLS:
         assert set(tool) >= {"name", "description", "inputSchema"}
         assert tool["inputSchema"]["type"] == "object"
+
+
+def test_isolate_stdout_leaves_only_the_protocol_on_stdout() -> None:
+    """Stray prints and child processes land on stderr, not the client's stream."""
+    import subprocess
+
+    code = (
+        "import os, subprocess, sys\n"
+        "from deepctl.mcp import _fast\n"
+        "_fast.isolate_stdout()\n"
+        "_fast.isolate_stdout()\n"
+        "print('stray print')\n"
+        "sys.stdout.flush()\n"
+        "subprocess.run([sys.executable, '-c', 'print(\"child\")'])\n"
+        "out = _fast.protocol_stdout()\n"
+        "out.write(b'{}\\n')\n"
+        "out.flush()\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, timeout=60, check=True
+    )
+    assert proc.stdout == b"{}\n"
+    assert b"stray print" in proc.stderr
+    assert b"child" in proc.stderr
+
+
+def test_serve_writes_to_the_isolated_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = io.BytesIO()
+    monkeypatch.setattr(_fast, "_PROTOCOL_OUT", out)
+    assert _fast.protocol_stdout() is out
+    _fast.serve(_session(_init()))
+    assert _replies(out)[0]["id"] == 1

@@ -21,7 +21,6 @@ Callers decide which hosts may receive the key before they get here.
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, BinaryIO
@@ -303,30 +302,6 @@ class LineWriter:
 
     async def flush(self) -> None:
         self._stdout.flush()
-
-
-def isolate_stdout() -> BinaryIO:
-    """Give the protocol its own copy of stdout and point fd 1 at stderr.
-
-    After this, a stray ``print()``, a library warning or a child process
-    writing to fd 1 lands on stderr instead of corrupting the JSON-RPC
-    stream; the returned stream is the only way to the client. Falls back
-    to ``sys.stdout.buffer`` when the descriptors can't be duplicated.
-    """
-    try:
-        sys.stdout.flush()
-    except (AttributeError, OSError, ValueError):
-        pass
-    try:
-        proto = os.dup(1)
-    except OSError:
-        return sys.stdout.buffer
-    try:
-        os.dup2(2, 1)
-    except OSError:
-        os.close(proto)
-        return sys.stdout.buffer
-    return os.fdopen(proto, "wb")
 
 
 async def serve(
