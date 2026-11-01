@@ -536,6 +536,57 @@ def write_discovery(
         pass
 
 
+def _subcommands_file(directory: str) -> str:
+    import zlib
+
+    prefix = zlib.crc32(sys.prefix.encode("utf-8", "replace"))
+    return os.path.join(directory, f"subcommands-{prefix:08x}.json")
+
+
+def _builtin_only_groups(directory: str, stamp: str) -> list[str]:
+    data = _read_private(_subcommands_file(directory))
+    if data is None:
+        return []
+    try:
+        cached = json.loads(data)
+    except ValueError:
+        return []
+    if not isinstance(cached, dict) or cached.get("stamp") != stamp:
+        return []
+    groups = cached.get("builtin_only")
+    if not isinstance(groups, list) or not all(isinstance(g, str) for g in groups):
+        return []
+    return groups
+
+
+def read_builtin_only(stamp: str, group: str) -> bool:
+    """True when a scan with this stamp found only the built-in
+    subcommands' own entry points for ``group``. Next to the discovery
+    cache, with the same directory, ownership and agent rules; anything
+    else in the file means "scan again"."""
+    directory = _discovery_dir(create=False)
+    if directory is None:
+        return False
+    return group in _builtin_only_groups(directory, stamp)
+
+
+def write_builtin_only(stamp: str, group: str) -> None:
+    """Record that ``group``'s entry points are all built-in for ``stamp``
+    (only that outcome is kept: any other scans again each run)."""
+    try:
+        directory = _discovery_dir(create=True)
+        if directory is None:
+            return
+        groups = _builtin_only_groups(directory, stamp)
+        if group in groups:
+            return
+        _prune_stale_tmp(directory)
+        data = json.dumps({"stamp": stamp, "builtin_only": sorted([*groups, group])})
+        _write_private(_subcommands_file(directory), data.encode("utf-8"))
+    except OSError:
+        pass
+
+
 def help_width() -> int:
     """The width Click formats help for: the terminal's, at most 80."""
     import shutil

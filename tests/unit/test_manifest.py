@@ -78,11 +78,12 @@ class TestRepoManifest:
         )
         assert proc.returncode == 0, proc.stderr
 
-    def test_builder_is_stdlib_only(self) -> None:
+    def test_builder_is_stdlib_only(self, tmp_path: Path) -> None:
         """It runs in the build_py hook, where only setuptools is installed."""
         code = (
             "import sys; before = set(sys.modules); "
-            "import deepctl._manifest_build as b; b.assemble(); "
+            "import deepctl._manifest_build as b; "
+            f"b.assemble(None, None, {str(tmp_path / '_help')!r}); "
             "new = {m.split('.')[0] for m in set(sys.modules) - before}; "
             "bad = sorted(m for m in new if m not in sys.stdlib_module_names "
             "and m != 'deepctl'); print(bad); sys.exit(1 if bad else 0)"
@@ -258,6 +259,230 @@ class TestAssembleRules:
         assert "duplicate" in proc.stderr
 
 
+class TestHelpSpecs:
+    """Each fragment's ``help`` block is its command's --help as data."""
+
+    def test_every_help_block_is_fresh(self) -> None:
+        """The drift check CI runs on every PR: each block matches its
+        command as installed, and rebuilds to the same help text."""
+        assert _manifest_build.stale_help(str(FRAGMENTS)) == []
+
+    def test_every_fragment_has_a_help_block(self) -> None:
+        assert all("help" in f for f in load_fragments(str(FRAGMENTS)))
+
+    def test_help_stays_out_of_the_manifest(self) -> None:
+        text = _manifest_build.dumps(assemble(str(FRAGMENTS)))
+        assert '"params"' not in text
+        assert '"help"' not in text
+
+    def _check(self, directory: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "deepctl._manifest_build",
+                "--check",
+                str(directory),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_check_fails_on_a_stale_help_block(self, tmp_path: Path) -> None:
+        directory = tmp_path / "d"
+        shutil.copytree(FRAGMENTS, directory)
+        assert self._check(directory).returncode == 0
+        listen = directory / "listen.json"
+        data = json.loads(listen.read_text(encoding="utf-8"))
+        data["help"]["params"][0]["help"] = "An older description"
+        listen.write_text(_manifest_build.dump_fragment(data), encoding="utf-8")
+        proc = self._check(directory)
+        assert proc.returncode == 1
+        assert "help blocks out of date" in proc.stderr
+        assert "listen.json" in proc.stderr
+
+    def test_check_fails_on_a_missing_help_block(self, tmp_path: Path) -> None:
+        directory = tmp_path / "d"
+        shutil.copytree(FRAGMENTS, directory)
+        speak = directory / "speak.json"
+        data = json.loads(speak.read_text(encoding="utf-8"))
+        del data["help"]
+        speak.write_text(_manifest_build.dump_fragment(data), encoding="utf-8")
+        proc = self._check(directory)
+        assert proc.returncode == 1
+        assert "speak.json" in proc.stderr
+
+    def test_write_help_restores_the_block(self, tmp_path: Path) -> None:
+        directory = tmp_path / "d"
+        shutil.copytree(FRAGMENTS, directory)
+        listen = directory / "listen.json"
+        data = json.loads(listen.read_text(encoding="utf-8"))
+        data["help"]["help"] = "stale"
+        listen.write_text(_manifest_build.dump_fragment(data), encoding="utf-8")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "deepctl._manifest_build",
+                "--write-help",
+                str(directory),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stderr == "manifest: wrote the help block of listen.json\n"
+        assert listen.read_bytes() == (FRAGMENTS / "listen.json").read_bytes()
+
+    def test_assemble_writes_one_help_file_per_command(self, tmp_path: Path) -> None:
+        help_dir = tmp_path / "_help"
+        help_dir.mkdir()
+        (help_dir / "removed-command.json").write_text("{}")
+        assemble(str(FRAGMENTS), None, str(help_dir))
+        fragments = load_fragments(str(FRAGMENTS))
+        files = sorted(p.name for p in help_dir.iterdir())
+        assert files == sorted(_manifest_build.fragment_file_name(f) for f in fragments)
+        for fragment in fragments:
+            path = help_dir / _manifest_build.fragment_file_name(fragment)
+            assert json.loads(path.read_text(encoding="utf-8")) == fragment["help"]
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            [],
+            {"name": "other", "params": []},
+            {"name": "a", "params": "x"},
+            {"name": "a", "params": [1]},
+        ],
+    )
+    def test_bad_help_block_fails(self, tmp_path: Path, bad: Any) -> None:
+        directory = _write(tmp_path / "d", _fragment("a", help=bad))
+        with pytest.raises(ManifestError, match="'help"):
+            assemble(str(directory))
+
+    def test_help_dir_without_a_value(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, "-m", "deepctl._manifest_build", "--help-dir"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 2
+        assert proc.stderr == "manifest: --help-dir needs a directory\n"
+
+
+class TestSpecFormat:
+    """``to_spec`` keeps only what help rendering reads, and refuses what it
+    can't carry rather than writing an incomplete spec."""
+
+    def _round_trip(self, command: Any) -> None:
+        from deepctl import _help_spec
+
+        spec = _help_spec.to_spec(command)
+        assert json.loads(json.dumps(spec)) == spec
+        _help_spec.verify(command, spec)
+
+    def test_types_round_trip(self) -> None:
+        import click
+
+        @click.command()
+        @click.argument("src", type=click.Path(exists=True, dir_okay=False))
+        @click.argument("rest", nargs=-1, required=False)
+        @click.option("--level", type=click.IntRange(0, 9, clamp=True))
+        @click.option("--ratio", type=click.FloatRange(0.0, 1.0, max_open=True))
+        @click.option("--mode", type=click.Choice(["a", "b"], case_sensitive=False))
+        @click.option("--out", type=click.File("w"), metavar="FILE")
+        @click.option("--id", type=click.UUID, required=True)
+        @click.option("--color/--no-color", "-c/-C", help="Colour")
+        @click.option("-v", "--verbose", count=True, hidden=True)
+        @click.option("--tag", multiple=True, help="Repeatable")
+        @click.option("--conv", type=int, help="A converter")
+        def command(**kwargs: Any) -> None:
+            """Do things.
+
+            \b
+            Kept   as is.
+            """
+
+        self._round_trip(command)
+
+    def test_function_type_round_trips(self) -> None:
+        import click
+
+        def parse_pair(value: str) -> tuple[str, str]:
+            return tuple(value.split("=", 1))  # type: ignore[return-value]
+
+        command = click.Command(
+            "pair",
+            params=[
+                click.Option(["--pair"], type=click.types.FuncParamType(parse_pair))
+            ],
+        )
+        self._round_trip(command)
+
+    @pytest.mark.parametrize(
+        "option",
+        [
+            {"show_default": True, "default": "x"},
+            {"envvar": "DG_X"},
+            {"prompt": True},
+            {"show_choices": False, "type": ["a", "b"]},
+        ],
+    )
+    def test_refuses_what_help_would_show_differently(
+        self, option: dict[str, Any]
+    ) -> None:
+        import click
+
+        from deepctl import _help_spec
+
+        kwargs = dict(option)
+        if isinstance(kwargs.get("type"), list):
+            kwargs["type"] = click.Choice(kwargs["type"])
+        command = click.Command("x", params=[click.Option(["--x"], **kwargs)])
+        with pytest.raises(_help_spec.SpecError):
+            _help_spec.to_spec(command)
+
+    def test_refuses_a_custom_command_class(self) -> None:
+        import click
+
+        from deepctl import _help_spec
+
+        class Custom(click.Command):
+            pass
+
+        with pytest.raises(_help_spec.SpecError):
+            _help_spec.to_spec(Custom("x"))
+
+    def test_verify_catches_help_the_spec_does_not_carry(self) -> None:
+        """The spec round-trips, but the real command renders something the
+        spec has no field for: verify() compares the rendered help too."""
+        import click
+
+        from deepctl import _help_spec
+
+        command = click.Command("x", help="Does x.", params=[click.Option(["--y"])])
+        spec = _help_spec.to_spec(command)
+        _help_spec.verify(command, spec)  # the same help: passes
+
+        def format_epilog(ctx: click.Context, formatter: click.HelpFormatter) -> None:
+            formatter.write_paragraph()
+            formatter.write_text("Written by a method the spec can't see.")
+
+        command.format_epilog = format_epilog  # type: ignore[method-assign]
+        assert _help_spec.to_spec(command) == spec  # still round-trips
+        with pytest.raises(_help_spec.SpecError, match="help differs at width 50"):
+            _help_spec.verify(command, spec)
+
+    def test_rebuilt_command_has_no_callback(self) -> None:
+        from deepctl import _help_spec
+
+        spec = load_fragments(str(FRAGMENTS))[0]["help"]
+        assert _help_spec.from_spec(spec).callback is None
+
+
 class TestBuilderCli:
     def test_out_without_a_value(self) -> None:
         proc = subprocess.run(
@@ -348,6 +573,27 @@ class TestBuiltFile:
         assert _manifest.load() == assemble(str(FRAGMENTS))
         assert _manifest.source == "built"
 
+    def test_built_help_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        package = tmp_path / "deepctl"
+        package.mkdir()
+        assemble(
+            str(FRAGMENTS), str(package / "_manifest.json"), str(package / "_help")
+        )
+        monkeypatch.setattr(_manifest, "_HERE", str(package))
+        monkeypatch.setattr(_manifest, "_manifest", None)
+        monkeypatch.setattr(_manifest, "source", None)
+        listen = json.loads((FRAGMENTS / "listen.json").read_text())["help"]
+        probe = json.loads((FRAGMENTS / "debug-probe.json").read_text())["help"]
+        assert _manifest.help_spec("listen") == listen
+        assert _manifest.help_spec("debug probe") == probe
+        assert _manifest.help_spec("nosuch") is None
+        (package / "_help" / "speak.json").write_text("{not json")
+        assert _manifest.help_spec("speak") is None
+        (package / "_help" / "models.json").write_text('{"name": "other"}')
+        assert _manifest.help_spec("models") is None
+
     def test_fragments_win_in_a_source_tree(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -358,6 +604,8 @@ class TestBuiltFile:
         monkeypatch.setattr(_manifest, "_manifest", None)
         assert _manifest.load() == assemble(str(FRAGMENTS))
         assert _manifest.source == "fragments"
+        listen = json.loads((FRAGMENTS / "listen.json").read_text())["help"]
+        assert _manifest.help_spec("listen") == listen
 
 
 def test_load_fragments_ignores_other_files(tmp_path: Path) -> None:

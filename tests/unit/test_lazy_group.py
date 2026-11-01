@@ -281,9 +281,16 @@ class TestSubprocess:
         assert lazy.returncode == eager.returncode == 0
         assert lazy.stdout == eager.stdout
 
-    def test_command_help_imports_only_that_command(self, tmp_path: Path) -> None:
+    def test_command_help_imports_no_command(self, tmp_path: Path) -> None:
+        """A built-in's help renders from its help spec: no command module."""
         modules = _imported(["models", "--help"], tmp_path)
+        assert not [m for m in modules if m.startswith("deepctl_cmd_")]
+
+    def test_running_a_command_imports_only_that_command(self, tmp_path: Path) -> None:
+        modules = _imported(["models", "--agent-friendly"], tmp_path)
         commands = {m.split(".")[0] for m in modules if m.startswith("deepctl_cmd_")}
+        # The startup checks a run (not help) starts live in these two.
+        commands -= {"deepctl_cmd_update", "deepctl_cmd_skills"}
         assert commands == {"deepctl_cmd_models"}
 
     def test_dash_m_usage_names_dg(self, tmp_path: Path) -> None:
@@ -548,3 +555,306 @@ class TestGroupDistMissing:
         monkeypatch.setattr(fresh_cli, "get_command", missing)
         ctx = click.Context(fresh_cli)
         assert fresh_cli._expand_command_word(ctx, ["debug-foo"]) == ["debug-foo"]
+
+
+class TestHelpFromSpec:
+    """`dg <cmd> --help` and `dg <group> <sub> --help` for a built-in leaf
+    render from its help spec, without importing the command."""
+
+    def _resolved(self, group: _cli.LazyGroup, args: list[str]) -> click.Command:
+        ctx = click.Context(group, info_name="dg")
+        _, command, _ = group.resolve_command(ctx, list(args))
+        assert command is not None
+        return command
+
+    @pytest.mark.parametrize(
+        "args", [["listen", "--help"], ["debug", "probe", "--help"]]
+    )
+    def test_spec_command_has_no_callback(
+        self, fresh_cli: _cli.LazyGroup, args: list[str]
+    ) -> None:
+        with patch.object(_cli.LazyGroup, "_load_builtin") as load:
+            command = self._resolved(fresh_cli, args)
+        load.assert_not_called()
+        assert fresh_cli.help_from_spec is not None
+        leaf = command.commands[args[1]] if len(args) == 3 else command  # type: ignore[attr-defined]
+        assert leaf.callback is None
+        assert command.callback is None
+        assert fresh_cli.commands == {}
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["listen"],
+            ["listen", "--help", "x"],
+            ["listen", "-o", "json", "--help"],
+            ["debug", "--help"],
+            ["debug", "toolkit", "--help"],
+            ["debug-audio", "--help"],
+            ["plugin", "install", "--help"],
+            ["nosuch", "--help"],
+            ["--help"],
+        ],
+    )
+    def test_other_argv_takes_the_full_path(
+        self, fresh_cli: _cli.LazyGroup, args: list[str]
+    ) -> None:
+        ctx = click.Context(fresh_cli, info_name="dg")
+        assert fresh_cli._help_command(ctx, args) is None
+
+    def test_eager_load_takes_the_full_path(
+        self, fresh_cli: _cli.LazyGroup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(_cli.EAGER_LOAD_ENV_VAR, "1")
+        ctx = click.Context(fresh_cli, info_name="dg")
+        assert fresh_cli._help_command(ctx, ["listen", "--help"]) is None
+
+    @pytest.mark.parametrize(
+        ("allowed", "args"),
+        [
+            ({"listen"}, ["listen", "--help"]),
+            ({"debug probe"}, ["debug", "probe", "--help"]),
+            ({"debug"}, ["debug", "probe", "--help"]),
+        ],
+    )
+    def test_allowed_override_takes_the_full_path(
+        self, fresh_cli: _cli.LazyGroup, allowed: set[str], args: list[str]
+    ) -> None:
+        with patch(
+            "deepctl_core._plugin_trust.allow_override_names",
+            return_value=frozenset(allowed),
+        ):
+            ctx = click.Context(fresh_cli, info_name="dg")
+            assert fresh_cli._help_command(ctx, args) is None
+
+    def test_foreign_subcommand_entry_point_takes_the_full_path(
+        self, fresh_cli: _cli.LazyGroup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from importlib import metadata
+
+        from deepctl import _cache
+
+        real = [ep for dist in metadata.distributions() for ep in dist.entry_points]
+        assert _cli._only_builtin_subcommands("debug") is True
+        for index, (group, name, value) in enumerate(
+            [
+                ("deepctl.subcommands.debug", "extra", "evil.cmd:Extra"),
+                ("deepctl.subcommands.debug", "probe", "evil.cmd:Probe"),
+                ("deepctl.subplugins.debug", "extra", "evil.cmd:Extra"),
+            ]
+        ):
+            # Installing a distribution changes site-packages: a new stamp.
+            monkeypatch.setattr(_cache, "plugin_stamp", lambda i=index: f"new-{i}")
+            extra = metadata.EntryPoint(name=name, value=value, group=group)
+            fake = metadata.EntryPoints([*real, extra])
+            monkeypatch.setattr(metadata, "entry_points", lambda fake=fake: fake)
+            assert _cli._only_builtin_subcommands("debug") is False
+            ctx = click.Context(fresh_cli, info_name="dg")
+            assert fresh_cli._help_command(ctx, ["debug", "probe", "--help"]) is None
+
+    def test_builtin_only_scan_is_cached_per_stamp(
+        self, fresh_cli: _cli.LazyGroup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from importlib import metadata
+
+        from deepctl import _cache
+
+        scans: list[int] = []
+        real_scan = _cli._scan_builtin_only
+
+        def counted(group: str) -> bool:
+            scans.append(1)
+            return real_scan(group)
+
+        monkeypatch.setattr(_cli, "_scan_builtin_only", counted)
+        monkeypatch.setattr(_cache, "plugin_stamp", lambda: "stamp-1")
+        assert _cli._only_builtin_subcommands("debug") is True
+        assert _cli._only_builtin_subcommands("debug") is True
+        assert len(scans) == 1
+        # Another stamp scans again; a "no" is never kept.
+        monkeypatch.setattr(_cache, "plugin_stamp", lambda: "stamp-2")
+        extra = metadata.EntryPoint(
+            name="x", value="evil:X", group="deepctl.subplugins.debug"
+        )
+        real = [ep for dist in metadata.distributions() for ep in dist.entry_points]
+        fake = metadata.EntryPoints([*real, extra])
+        monkeypatch.setattr(metadata, "entry_points", lambda: fake)
+        assert _cli._only_builtin_subcommands("debug") is False
+        assert _cli._only_builtin_subcommands("debug") is False
+        assert len(scans) == 3
+        directory = _cache._discovery_dir(create=False)
+        assert directory is not None
+        cached = json.loads(Path(_cache._subcommands_file(directory)).read_text())
+        assert cached == {"stamp": "stamp-1", "builtin_only": ["debug"]}
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "not json",
+            '{"stamp": "s", "builtin_only": "debug"}',
+            '{"stamp": "s", "builtin_only": [1]}',
+            '{"stamp": "other", "builtin_only": ["debug"]}',
+        ],
+    )
+    def test_builtin_only_cache_ignores_a_changed_file(
+        self, fresh_cli: _cli.LazyGroup, content: str
+    ) -> None:
+        from deepctl import _cache
+
+        directory = _cache._discovery_dir(create=True)
+        assert directory is not None
+        path = Path(_cache._subcommands_file(directory))
+        path.write_text(content)
+        path.chmod(0o600)
+        assert _cache.read_builtin_only("s", "debug") is False
+        path.chmod(0o666)
+        path.write_text('{"stamp": "s", "builtin_only": ["debug"]}')
+        assert _cache.read_builtin_only("s", "debug") is False  # others can write
+
+    def test_no_spec_takes_the_full_path(
+        self, fresh_cli: _cli.LazyGroup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(_manifest, "help_spec", lambda path: None)
+        ctx = click.Context(fresh_cli, info_name="dg")
+        assert fresh_cli._help_command(ctx, ["listen", "--help"]) is None
+
+    def test_missing_module_still_prints_help(
+        self,
+        fresh_cli: _cli.LazyGroup,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A built-in whose package is gone still shows its help; running it
+        reports dependency_missing."""
+        gone = dict(_manifest.commands()["models"], module="deepctl_cmd_gone.command")
+        commands = dict(_manifest.commands(), models=gone)
+        monkeypatch.setattr(_manifest, "commands", lambda: commands)
+        _cli.run(["models", "--help"], prog="dg")
+        out = capsys.readouterr()
+        assert out.out.startswith("Usage: dg models [OPTIONS]")
+        with pytest.raises(SystemExit) as exc:
+            _cli.run(["models"], prog="dg")
+        assert exc.value.code == 1
+        assert "dg models needs deepctl-cmd-models" in capsys.readouterr().err
+
+    def test_root_callback_only_scans_the_config(
+        self, fresh_cli: _cli.LazyGroup
+    ) -> None:
+        seen: dict[str, Any] = {}
+        real = _cli.cli.callback
+        assert real is not None
+
+        def spy(**kwargs: Any) -> None:
+            real(**kwargs)
+            seen["config"] = click.get_current_context().obj["config"]
+
+        with patch.object(_cli.cli, "callback", spy):
+            _invoke(fresh_cli, ["listen", "--help"])
+            assert seen["config"].scan_only is True
+            _invoke(fresh_cli, ["debug", "--help"])
+            assert seen["config"].scan_only is False
+
+    def test_never_writes_the_help_cache(
+        self,
+        fresh_cli: _cli.LazyGroup,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        import deepctl.main
+        from deepctl import _cache
+
+        monkeypatch.setattr(deepctl.main, "HELP_CACHE", True, raising=False)
+        writes: list[Any] = []
+        monkeypatch.setattr(_cache, "write_help", lambda *a: writes.append(a))
+        with patch("deepctl_core.output.is_ai_agent", return_value=False):
+            _cli.run(["listen", "--help"], prog="dg")
+            _cli.run(["debug", "probe", "--help"], prog="dg")
+            assert writes == []
+            _cli.run(["--help"], prog="dg")  # the one help the cache holds
+        assert len(writes) == 1
+        capsys.readouterr()
+
+    def test_a_later_run_in_the_process_resolves_normally(
+        self, fresh_cli: _cli.LazyGroup
+    ) -> None:
+        self._resolved(fresh_cli, ["listen", "--help"])
+        command = self._resolved(fresh_cli, ["listen", "x.wav"])
+        assert command.callback is not None
+        assert fresh_cli.help_from_spec is None
+
+    def test_imports_no_command_module(self, tmp_path: Path) -> None:
+        modules = _imported(["-q", "debug", "probe", "--help"], tmp_path)
+        assert not [m for m in modules if m.startswith("deepctl_cmd_")]
+        assert "deepctl_core.plugin_manager" not in modules
+        assert "pydantic" not in modules
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0, reason="needs an unreadable HOME"
+)
+class TestUnreadableHomeSubcommandHelp:
+    """`dg debug <sub> --help` with an unreadable HOME prints help:
+    Click calls the group's callback first, which must not need a Config."""
+
+    SUBS = sorted(_manifest.subcommands("debug"))
+
+    @pytest.mark.parametrize("eager", ["", "1"], ids=["lazy", "eager"])
+    @pytest.mark.parametrize("sub", SUBS)
+    def test_exits_zero(self, sub: str, eager: str, tmp_path: Path) -> None:
+        home = tmp_path / "home"
+        home.mkdir(mode=0)
+        try:
+            proc = _dg(
+                ["debug", sub, "--help"],
+                tmp_path,
+                HOME=str(home),
+                DEEPCTL_EAGER_LOAD=eager,
+            )
+        finally:
+            home.chmod(0o700)
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.startswith("Usage: ")
+        assert f" debug {sub} [OPTIONS]" in proc.stdout.splitlines()[0]
+        # Eager mode loads plugins too: one line for their unreadable home.
+        assert proc.stderr == "" or (
+            eager
+            and proc.stderr.startswith("WARN: Couldn't load plugins: ")
+            and proc.stderr.count("\n") == 1
+        )
+
+    @pytest.mark.parametrize("sub", SUBS)
+    def test_full_lazy_path(
+        self,
+        sub: str,
+        fresh_cli: _cli.LazyGroup,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        home = tmp_path / "noperm"
+        home.mkdir(mode=0)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(_cli.LazyGroup, "_help_command", lambda *a: None)
+        try:
+            _cli.run(["debug", sub, "--help"], prog="dg")
+        finally:
+            home.chmod(0o700)
+        assert capsys.readouterr().out.startswith(f"Usage: dg debug {sub} [OPTIONS]")
+
+    def test_running_the_subcommand_still_fails(
+        self,
+        fresh_cli: _cli.LazyGroup,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``-f --help`` makes --help a value: the subcommand runs, and its
+        own Config fails as before."""
+        home = tmp_path / "noperm"
+        home.mkdir(mode=0)
+        monkeypatch.setenv("HOME", str(home))
+        try:
+            with pytest.raises(SystemExit) as exc:
+                _cli.run(["debug", "audio", "-f", "--help"], prog="dg")
+        finally:
+            home.chmod(0o700)
+        assert exc.value.code == 1

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/deepgram/cli/docs/contracts/manifest.schema.json",
   "title": "deepctl command manifest",
-  "description": "deepctl/_manifest.json, assembled by deepctl/_manifest_build.py:assemble() from the per-command fragments in deepctl/_manifest.d/ (ADR-02, W3.2). $defs.fragment describes one fragment. Rules that span fragments (unique command paths, alias and tool names; a subcommand's group must have a fragment; an alias can't be a command name) are checked by assemble().",
+  "description": "deepctl/_manifest.json, assembled by deepctl/_manifest_build.py:assemble() from the per-command fragments in deepctl/_manifest.d/. $defs.fragment describes one fragment, and $defs.help the help block a fragment can carry. Rules that span fragments (unique command paths, alias and tool names; a subcommand's group must have a fragment; an alias can't be a command name) are checked by assemble().",
   "type": "object",
   "additionalProperties": false,
   "required": ["manifest_version", "commands", "aliases", "tools"],
@@ -116,8 +116,83 @@
           "type": "array",
           "items": {"$ref": "#/$defs/tool"},
           "uniqueItems": true
-        }
+        },
+        "help": {"$ref": "#/$defs/help"}
       }
+    },
+    "help": {
+      "description": "The command's --help as data: written by python -m deepctl._manifest_build --write-help from the command as dg builds it, checked by --check. assemble() copies it to deepctl/_help/<fragment file name>, never into the manifest. dg <cmd> --help and dg <group> <sub> --help render a leaf from it without importing the command.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "help", "short_help", "epilog", "hidden", "deprecated", "no_args_is_help", "options_metavar", "params"],
+      "properties": {
+        "name": {"$ref": "#/$defs/name"},
+        "help": {"description": "Click help: the help text with its examples and the agent line already joined.", "type": ["string", "null"]},
+        "short_help": {"type": ["string", "null"]},
+        "epilog": {"type": ["string", "null"]},
+        "hidden": {"type": "boolean"},
+        "deprecated": {"oneOf": [{"type": "boolean"}, {"type": "string", "minLength": 1}]},
+        "no_args_is_help": {"type": "boolean"},
+        "options_metavar": {"type": ["string", "null"]},
+        "params": {"type": "array", "items": {"$ref": "#/$defs/helpParam"}},
+        "group": {"description": "The command is a group: the spec describes the group itself (the parent in dg <group> <sub> --help). Its subcommands have their own fragments; its own help is never rendered from a spec.", "const": true},
+        "subcommand_metavar": {"type": "string"}
+      },
+      "if": {"required": ["group"]},
+      "then": {"required": ["subcommand_metavar"]}
+    },
+    "helpParam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "name", "opts", "secondary_opts", "type", "required", "nargs", "metavar", "eager", "expose"],
+      "properties": {
+        "class": {"enum": ["option", "argument"]},
+        "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "opts": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "secondary_opts": {"type": "array", "items": {"type": "string"}},
+        "type": {"$ref": "#/$defs/helpType"},
+        "required": {"type": "boolean"},
+        "nargs": {"type": "integer"},
+        "metavar": {"type": ["string", "null"]},
+        "eager": {"type": "boolean"},
+        "expose": {"type": "boolean"},
+        "multiple": {"type": "boolean"},
+        "is_flag": {"type": "boolean"},
+        "count": {"type": "boolean"},
+        "hidden": {"type": "boolean"},
+        "help": {"type": ["string", "null"]}
+      },
+      "if": {"properties": {"class": {"const": "option"}}},
+      "then": {"required": ["multiple", "is_flag", "count", "hidden", "help"]},
+      "else": {"not": {"anyOf": [{"required": ["multiple"]}, {"required": ["is_flag"]}, {"required": ["count"]}, {"required": ["hidden"]}, {"required": ["help"]}]}}
+    },
+    "helpType": {
+      "description": "A Click parameter type: a named one (text, integer, float, boolean, uuid), choice, integer range, float range, path, file, or a converter function by name (func).",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "choices": {"type": "array", "items": {"type": "string"}},
+        "case_sensitive": {"type": "boolean"},
+        "min": {"type": ["number", "null"]},
+        "max": {"type": ["number", "null"]},
+        "min_open": {"type": "boolean"},
+        "max_open": {"type": "boolean"},
+        "clamp": {"type": "boolean"},
+        "exists": {"type": "boolean"},
+        "file_okay": {"type": "boolean"},
+        "dir_okay": {"type": "boolean"},
+        "writable": {"type": "boolean"},
+        "readable": {"type": "boolean"},
+        "resolve_path": {"type": "boolean"},
+        "allow_dash": {"type": "boolean"},
+        "mode": {"type": "string"},
+        "encoding": {"type": ["string", "null"]},
+        "lazy": {"type": ["boolean", "null"]},
+        "atomic": {"type": "boolean"},
+        "func": {"const": true}
+      },
+      "additionalProperties": false
     }
   }
 }

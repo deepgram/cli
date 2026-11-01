@@ -120,3 +120,29 @@ def builtin_subcommand_modules() -> dict[str, dict[str, str]]:
         if sep:
             groups.setdefault(group, {})[name] = entry["module"]
     return groups
+
+
+def help_spec(path: str) -> dict[str, Any] | None:
+    """The help spec of the built-in at ``path`` (``"listen"``, ``"debug
+    audio"``), or ``None`` when there is none or it can't be read.
+
+    An installed wheel has one file per command in ``deepctl/_help/``; a
+    source tree reads the ``help`` block of the command's fragment. Neither
+    is ever parsed for root ``--help``.
+    """
+    load()
+    group, _, name = path.rpartition(" ")
+    file_name = f"{group}-{name}.json" if group else f"{name}.json"
+    try:
+        if source == "fragments":
+            with open(
+                os.path.join(_HERE, "_manifest.d", file_name), encoding="utf-8"
+            ) as f:
+                data = json.load(f)
+            spec = data.get("help") if isinstance(data, dict) else None
+        else:
+            with open(os.path.join(_HERE, "_help", file_name), encoding="utf-8") as f:
+                spec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return spec if isinstance(spec, dict) and spec.get("name") == name else None

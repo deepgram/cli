@@ -17,6 +17,15 @@ stdlib only: it runs in the ``build_py`` hook (no third-party imports are
 available there) and, from a source tree, at run time. ``python -m
 deepctl._manifest_build [--check] [--out FILE] [FRAGMENT_DIR]`` runs it by
 hand; ``--check`` validates without writing.
+
+Each fragment can also carry a ``help`` block: its command's ``--help`` as
+data (``deepctl._help_spec``). ``assemble()`` copies those blocks to
+``deepctl/_help/<fragment>.json`` when given a ``help_dir`` (never into
+``_manifest.json``, which root ``--help`` and ``dg mcp`` parse). The blocks
+are written at dev time by ``--write-help``, which imports every command
+through ``PluginManager``; ``--check`` then fails on a block that no longer
+matches its command. Those two options, unlike ``assemble()``, need the
+installed CLI.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ MANIFEST_VERSION = 1
 
 FRAGMENT_DIR_NAME = "_manifest.d"
 MANIFEST_NAME = "_manifest.json"
+HELP_DIR_NAME = "_help"
 
 # Command, alias and tool names: the plugin name rule (0.4.2), so a built-in
 # name is always one a plugin could also try to claim.
@@ -55,6 +65,7 @@ _OPTIONAL: dict[str, type | tuple[type, ...]] = {
     "deprecated": (bool, str),
     "aliases": list,
     "tools": list,
+    "help": dict,
 }
 
 
@@ -103,14 +114,31 @@ def _check_fragment(file_name: str, data: Any) -> dict[str, Any]:
     for tool in data.get("tools", []):
         if not isinstance(tool, str) or TOOL_NAME.fullmatch(tool) is None:
             raise ManifestError(f"{where}: tool {tool!r} is not valid")
-    expected = (
-        f"{data['parent']}-{data['name']}.json"
-        if "parent" in data
-        else f"{data['name']}.json"
-    )
-    if file_name != expected:
-        raise ManifestError(f"{where}: this fragment must be named {expected}")
+    if "help" in data:
+        _check_help(where, data["help"], data["name"])
+    if file_name != fragment_file_name(data):
+        raise ManifestError(
+            f"{where}: this fragment must be named {fragment_file_name(data)}"
+        )
     return data
+
+
+def fragment_file_name(fragment: dict[str, Any]) -> str:
+    """``<name>.json``, or ``<parent>-<name>.json`` for a subcommand: the
+    fragment's file name, and its help file's in ``_help/``."""
+    if "parent" in fragment:
+        return f"{fragment['parent']}-{fragment['name']}.json"
+    return f"{fragment['name']}.json"
+
+
+def _check_help(where: str, spec: Any, name: str) -> None:
+    """The shape the runtime relies on; ``--check`` compares the content."""
+    if not isinstance(spec, dict) or spec.get("name") != name:
+        raise ManifestError(f"{where}: 'help' must be an object named {name!r}")
+    if not isinstance(spec.get("params"), list) or not all(
+        isinstance(p, dict) for p in spec["params"]
+    ):
+        raise ManifestError(f"{where}: 'help.params' must be a list of objects")
 
 
 def load_fragments(directory: str | None = None) -> list[dict[str, Any]]:
@@ -186,18 +214,102 @@ def dumps(manifest: dict[str, Any]) -> str:
     return json.dumps(manifest, indent=1, ensure_ascii=False, sort_keys=False) + "\n"
 
 
+def _write_atomic(path: str, text: str) -> None:
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def write_help_files(fragments: list[dict[str, Any]], help_dir: str) -> list[str]:
+    """Write each fragment's ``help`` block to ``help_dir/<fragment>.json``
+    and remove any other file there; returns the paths written."""
+    os.makedirs(help_dir, exist_ok=True)
+    written = []
+    for fragment in fragments:
+        if "help" not in fragment:
+            continue
+        path = os.path.join(help_dir, fragment_file_name(fragment))
+        text = json.dumps(fragment["help"], ensure_ascii=False, separators=(",", ":"))
+        _write_atomic(path, text + "\n")
+        written.append(path)
+    keep = {os.path.basename(p) for p in written}
+    for file_name in os.listdir(help_dir):
+        if file_name.endswith(".json") and file_name not in keep:
+            os.remove(os.path.join(help_dir, file_name))
+    return written
+
+
 def assemble(
-    directory: str | None = None, out_path: str | None = None
+    directory: str | None = None,
+    out_path: str | None = None,
+    help_dir: str | None = None,
 ) -> dict[str, Any]:
-    """Build the manifest from the fragments in ``directory`` and, when
-    ``out_path`` is given, write it there atomically."""
-    manifest = build(load_fragments(directory))
+    """Build the manifest from the fragments in ``directory``. When
+    ``out_path`` is given, write it there atomically; when ``help_dir`` is,
+    write the fragments' help specs there (``write_help_files``)."""
+    fragments = load_fragments(directory)
+    manifest = build(fragments)
     if out_path is not None:
-        tmp = f"{out_path}.{os.getpid()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(dumps(manifest))
-        os.replace(tmp, out_path)
+        _write_atomic(out_path, dumps(manifest))
+    if help_dir is not None:
+        write_help_files(fragments, help_dir)
     return manifest
+
+
+def dump_fragment(fragment: dict[str, Any]) -> str:
+    """A fragment as stored in ``_manifest.d`` (stable bytes)."""
+    return json.dumps(fragment, indent=2, ensure_ascii=False) + "\n"
+
+
+def generate_help(directory: str | None = None) -> dict[str, dict[str, Any]]:
+    """Fragment file name to the help spec of its command as installed.
+
+    Each command is built the way ``dg`` builds it
+    (``PluginManager._create_click_command``) and its spec is checked by
+    rebuilding the command and rendering both (``_help_spec.verify``).
+    Needs Click and the installed commands.
+    """
+    import importlib
+
+    from deepctl_core.plugin_manager import PluginManager
+
+    from deepctl import _help_spec
+
+    manager = PluginManager()
+    specs: dict[str, dict[str, Any]] = {}
+    for fragment in load_fragments(directory):
+        command_class = getattr(
+            importlib.import_module(fragment["module"]), fragment["attr"]
+        )
+        command = manager._create_click_command(command_class())
+        try:
+            spec = _help_spec.to_spec(command)
+            _help_spec.verify(command, spec)
+        except _help_spec.SpecError as exc:
+            raise ManifestError(
+                f"{FRAGMENT_DIR_NAME}/{fragment_file_name(fragment)}: {exc}"
+            ) from None
+        specs[fragment_file_name(fragment)] = spec
+    return specs
+
+
+def stale_help(directory: str | None = None, *, write: bool = False) -> list[str]:
+    """Fragments whose ``help`` block doesn't match their command. With
+    ``write``, those fragments are rewritten with the current block."""
+    directory = directory or fragment_dir()
+    stale = []
+    for file_name, spec in sorted(generate_help(directory).items()):
+        path = os.path.join(directory, file_name)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("help") == spec:
+            continue
+        stale.append(file_name)
+        if write:
+            data["help"] = spec
+            _write_atomic(path, dump_fragment(data))
+    return stale
 
 
 def __getattr__(name: str) -> Any:
@@ -223,39 +335,79 @@ def _build_py_class() -> type:
         def _manifest_path(self) -> str:
             return os.path.join(self.build_lib, "deepctl", MANIFEST_NAME)
 
+        def _help_dir(self) -> str:
+            return os.path.join(self.build_lib, "deepctl", HELP_DIR_NAME)
+
         def run(self) -> None:
             super().run()
             if getattr(self, "editable_mode", False):
                 return
             os.makedirs(os.path.dirname(self._manifest_path()), exist_ok=True)
-            assemble(fragment_dir(), self._manifest_path())
+            assemble(fragment_dir(), self._manifest_path(), self._help_dir())
 
         def get_outputs(self, include_bytecode: bool = True) -> list[str]:
             outputs: list[str] = super().get_outputs(include_bytecode)
             if not getattr(self, "editable_mode", False):
                 outputs.append(self._manifest_path())
+                outputs.extend(
+                    os.path.join(self._help_dir(), fragment_file_name(f))
+                    for f in load_fragments(fragment_dir())
+                    if "help" in f
+                )
             return outputs
 
     return BuildPy
 
 
+def _option_value(args: list[str], option: str) -> tuple[str | None, bool]:
+    """Remove ``option VALUE`` from ``args``: ``(value, ok)``."""
+    if option not in args:
+        return None, True
+    index = args.index(option)
+    if index + 1 >= len(args):
+        return None, False
+    value = args[index + 1]
+    del args[index : index + 2]
+    return value, True
+
+
 def _main(argv: list[str]) -> int:
     check = "--check" in argv
-    args = [a for a in argv if a != "--check"]
-    out = None
-    if "--out" in args:
-        index = args.index("--out")
-        if index + 1 >= len(args):
-            sys.stderr.write("manifest: --out needs a file name\n")
-            return 2
-        out = args[index + 1]
-        del args[index : index + 2]
+    write_help = "--write-help" in argv
+    args = [a for a in argv if a not in ("--check", "--write-help")]
+    out, ok = _option_value(args, "--out")
+    if not ok:
+        sys.stderr.write("manifest: --out needs a file name\n")
+        return 2
+    help_dir, ok = _option_value(args, "--help-dir")
+    if not ok:
+        sys.stderr.write("manifest: --help-dir needs a directory\n")
+        return 2
+    directory = args[0] if args else None
     try:
-        manifest = assemble(args[0] if args else None, None if check else out)
+        if write_help:
+            for file_name in stale_help(directory, write=True):
+                sys.stderr.write(f"manifest: wrote the help block of {file_name}\n")
+        manifest = assemble(
+            directory,
+            None if check else out,
+            None if check else help_dir,
+        )
+        if check:
+            stale = stale_help(directory)
+            if stale:
+                sys.stderr.write(
+                    "manifest: help blocks out of date (run python -m "
+                    f"deepctl._manifest_build --write-help): {', '.join(stale)}\n"
+                )
+                return 1
     except (ManifestError, OSError) as exc:
         sys.stderr.write(f"manifest: {exc}\n")
         return 1
-    if out is None and not check:
+    except ImportError as exc:
+        sys.stderr.write(f"manifest: can't import a command to check help: {exc}\n")
+        return 1
+    if out is None and not check and not write_help:
         sys.stdout.write(dumps(manifest))
     return 0
 

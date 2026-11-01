@@ -37,3 +37,29 @@ def test_expired_credential_warning_is_visible_to_toolkit_script() -> None:
 
     assert result.exit_code == 0
     assert "Run `dg login` again" in result.output
+
+
+def test_unreadable_cache_counts_as_no_cache(tmp_path: Path, monkeypatch) -> None:
+    """Loading the debug group reads the toolkit cache; a HOME the user
+    can't read must not fail it (every `dg debug <sub> --help` loads it)."""
+    import os
+
+    import pytest
+
+    from deepctl_cmd_debug_toolkit import command, fetcher
+
+    if os.geteuid() == 0:
+        pytest.skip("root can read any directory")
+    locked = tmp_path / "home"
+    (locked / "toolkit").mkdir(parents=True)
+    monkeypatch.setattr(
+        fetcher, "_MANIFEST_CACHE", locked / "toolkit" / "manifest.json"
+    )
+    monkeypatch.setattr(fetcher, "_MANIFEST_AGE", locked / "toolkit" / "manifest.age")
+    locked.chmod(0)
+    try:
+        assert fetcher.get_cached_manifest() is None
+        names = [c.name for c in command.ToolkitCommand().setup_commands()]
+    finally:
+        locked.chmod(0o700)
+    assert names == ["refresh"]

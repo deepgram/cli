@@ -1,8 +1,8 @@
 """Command modules import no network stack at module level.
 
-``dg <cmd> --help`` imports the command's module, so a module-level
-``asyncio``, ``ssl``, ``httpx``, ``websockets`` or Deepgram SDK import is
-paid by every help and every run of that command. Each built-in module in
+Running a command imports its module (its ``--help`` renders from the help
+spec instead), so a module-level ``asyncio``, ``ssl``, ``httpx``,
+``websockets`` or Deepgram SDK import is paid by every run of that command. Each built-in module in
 the manifest is imported in a fresh interpreter and must leave all of them
 out of ``sys.modules``; they belong inside the functions that use them.
 """
@@ -84,17 +84,29 @@ def test_command_help_imports_no_network_stack(command: str, tmp_path: Path) -> 
     assert proc.returncode == 0, proc.stderr[-1500:]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the debug group callback builds an API client before a subcommand's "
-        "--help, which imports httpx, ssl and keyring (pre-existing; followup "
-        "W3.2-r1 N2)"
-    ),
-)
+def _is_group(path: str) -> bool:
+    return bool((_manifest.help_spec(path) or {}).get("group"))
+
+
 @pytest.mark.parametrize(
     "path",
-    sorted(p.split(" ") for p in _manifest.commands() if " " in p),
+    [
+        pytest.param(
+            p.split(" "),
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "a subcommand group's help takes the full path, where the "
+                    "parent group's callback builds an API client (httpx, ssl, "
+                    "keyring) before the subcommand parses --help"
+                ),
+            )
+            if _is_group(p)
+            else (),
+        )
+        for p in sorted(_manifest.commands())
+        if " " in p
+    ],
     ids=lambda p: " ".join(p),
 )
 def test_subcommand_help_imports_no_network_stack(
@@ -102,4 +114,34 @@ def test_subcommand_help_imports_no_network_stack(
 ) -> None:
     """`dg <group> <sub> --help` for every built-in subcommand."""
     proc = _help_imports(path, tmp_path)
+    assert proc.returncode == 0, proc.stderr[-1500:]
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(
+        p.split(" ")
+        for p in _manifest.commands()
+        if p not in _manifest.groups() and not _is_group(p)
+    ),
+    ids=lambda p: " ".join(p),
+)
+def test_leaf_help_imports_no_command_module(path: list[str], tmp_path: Path) -> None:
+    """`dg <cmd> --help` for a built-in leaf renders from its help spec: no
+    command module is imported."""
+    code = (
+        "import sys; sys.argv = ['dg', *sys.argv[1:], '--help']; "
+        "from deepctl.main import main\n"
+        "try:\n    main()\nexcept SystemExit as e:\n    assert not e.code, e.code\n"
+        "bad = sorted(m for m in sys.modules if m.startswith('deepctl_cmd_'))\n"
+        "sys.stderr.write('BAD ' + ' '.join(bad) + chr(10)); sys.exit(1 if bad else 0)"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code, *path],
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path),
+        stdin=subprocess.DEVNULL,
+        timeout=120,
+    )
     assert proc.returncode == 0, proc.stderr[-1500:]
