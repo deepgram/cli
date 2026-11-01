@@ -575,12 +575,6 @@ class AuthManager:
             project_id: Deepgram project ID (optional — can be set later)
             force_write: Skip confirmation prompts
         """
-        # Validate API key format (basic check)
-        if not api_key.startswith(("sk-", "pk-")):
-            console.print(
-                "[red]Warning:[/red] API key format doesn't match expected pattern"
-            )
-
         # Verify API key (and project if provided)
         console.print("[dim]Verifying credentials...[/dim]")
         success, message, error_type = self.verify_credentials(
