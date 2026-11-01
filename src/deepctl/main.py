@@ -150,7 +150,20 @@ def main(prog: "str | None" = None) -> None:
         sys.exit(serve())
 
     sys.excepthook = _rich_excepthook
-    from deepctl._cli import run
+    try:
+        from deepctl_core.signals import install_interrupt_handler
+
+        install_interrupt_handler()
+        from deepctl._cli import run
+    except KeyboardInterrupt:
+        # Ctrl-C while the CLI is still loading: cancelled, exit 2, the same
+        # line run() prints (rich may not be loaded yet), and no traceback.
+        try:
+            sys.stderr.write("\nOperation cancelled by user\n")
+            sys.stderr.flush()
+        except (AttributeError, OSError, ValueError):
+            pass
+        sys.exit(2)
 
     run(args, started_at, prog)
 
