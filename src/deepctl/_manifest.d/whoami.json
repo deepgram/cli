@@ -5,5 +5,153 @@
   "dist": "deepctl-cmd-login",
   "summary": "Show auth status",
   "hidden": false,
-  "requires_auth": false
+  "requires_auth": false,
+  "help": {
+    "name": "whoami",
+    "help": "Show current authentication status\n\nExamples:\n  dg whoami\n  dg whoami --profile staging\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Show auth status",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": false,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "profile",
+        "opts": [
+          "--profile"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Profile to inspect (default: active profile)"
+      },
+      {
+        "class": "option",
+        "name": "agent_friendly",
+        "opts": [
+          "--agent-friendly"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": true,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output machine-readable JSON metadata for this command and exit."
+      },
+      {
+        "class": "option",
+        "name": "non_interactive",
+        "opts": [
+          "--non-interactive"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip interactive prompts; use defaults for any optional features."
+      },
+      {
+        "class": "option",
+        "name": "output",
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "choice",
+          "choices": [
+            "json",
+            "yaml",
+            "table",
+            "csv"
+          ],
+          "case_sensitive": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Output format (same as the global -o before the command)."
+      },
+      {
+        "class": "option",
+        "name": "quiet",
+        "opts": [
+          "--quiet",
+          "-q"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Suppress non-essential output."
+      },
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose output."
+      }
+    ]
+  }
 }

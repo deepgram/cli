@@ -5,5 +5,365 @@
   "dist": "deepctl-cmd-requests",
   "summary": "Request history",
   "hidden": false,
-  "requires_auth": true
+  "requires_auth": true,
+  "help": {
+    "name": "requests",
+    "help": "View Deepgram API request history\n\nExamples:\n  dg requests\n  dg requests --limit 50\n  dg requests --status failed\n  dg requests --endpoint listen --method streaming\n  dg requests --show REQUEST_ID\n  dg requests --last-week\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Request history",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": false,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "project_id",
+        "opts": [
+          "--project-id",
+          "-p"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Project ID (uses configured project if not provided)"
+      },
+      {
+        "class": "option",
+        "name": "last_day",
+        "opts": [
+          "--last-day"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Show requests from last 24 hours"
+      },
+      {
+        "class": "option",
+        "name": "last_week",
+        "opts": [
+          "--last-week"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Show requests from last 7 days"
+      },
+      {
+        "class": "option",
+        "name": "end_date",
+        "opts": [
+          "--end-date"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "End date (YYYY-MM-DD)"
+      },
+      {
+        "class": "option",
+        "name": "start_date",
+        "opts": [
+          "--start-date"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Start date (YYYY-MM-DD)"
+      },
+      {
+        "class": "option",
+        "name": "page",
+        "opts": [
+          "--page"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "integer"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Page number for pagination"
+      },
+      {
+        "class": "option",
+        "name": "limit",
+        "opts": [
+          "--limit"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "integer"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Maximum number of results (default: 10)"
+      },
+      {
+        "class": "option",
+        "name": "method",
+        "opts": [
+          "--method"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Filter by method (sync, async, streaming)"
+      },
+      {
+        "class": "option",
+        "name": "endpoint",
+        "opts": [
+          "--endpoint"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Filter by endpoint (listen, read, speak, agent)"
+      },
+      {
+        "class": "option",
+        "name": "status",
+        "opts": [
+          "--status"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Filter by status (succeeded, failed)"
+      },
+      {
+        "class": "option",
+        "name": "show",
+        "opts": [
+          "--show",
+          "-s"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Show details for a specific request"
+      },
+      {
+        "class": "option",
+        "name": "agent_friendly",
+        "opts": [
+          "--agent-friendly"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": true,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output machine-readable JSON metadata for this command and exit."
+      },
+      {
+        "class": "option",
+        "name": "non_interactive",
+        "opts": [
+          "--non-interactive"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip interactive prompts; use defaults for any optional features."
+      },
+      {
+        "class": "option",
+        "name": "output",
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "choice",
+          "choices": [
+            "json",
+            "yaml",
+            "table",
+            "csv"
+          ],
+          "case_sensitive": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Output format (same as the global -o before the command)."
+      },
+      {
+        "class": "option",
+        "name": "quiet",
+        "opts": [
+          "--quiet",
+          "-q"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Suppress non-essential output."
+      },
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose output."
+      }
+    ]
+  }
 }
