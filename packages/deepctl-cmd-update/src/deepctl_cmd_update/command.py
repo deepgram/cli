@@ -20,7 +20,11 @@ from rich.prompt import Confirm
 
 from .installation import InstallationDetector
 from .models import UpdateResult
-from .version_check import VersionChecker, format_version_message
+from .version_check import (
+    UpdateCheckError,
+    VersionChecker,
+    format_version_message,
+)
 
 
 # asyncio (and with it ssl) loads only when an update check runs, so
@@ -120,9 +124,12 @@ class UpdateCommand(BaseCommand):
         version_checker = VersionChecker(config, current_version)
 
         # Check for updates
+        unreachable: UpdateCheckError | None = None
         with console.status("Checking for updates..."):
             try:
                 version_info = asyncio.run(version_checker.check_version(force=True))
+            except UpdateCheckError as e:
+                unreachable = e
             except Exception as e:
                 print_error(f"Failed to check for updates: {e}")
                 # status="error" on the model, not a dict: see the docstring.
@@ -132,6 +139,15 @@ class UpdateCommand(BaseCommand):
                     success=False,
                     message=f"Failed to check for updates: {e}",
                 )
+        if unreachable is not None:
+            # Never "you're on the latest version": that's unknown. A coded
+            # error (update_check_failed, exit 1) with ERROR/HINT on stderr.
+            from deepctl_core.transport import TransportError
+
+            host = unreachable.host
+            raise TransportError(
+                "update_check_failed", values={"host": host}, details={"host": host}
+            )
 
         # Display version info
         message = format_version_message(version_info)

@@ -669,3 +669,38 @@ class TestDryRun:
         )
         assert result["message"] == "Run: pipx upgrade deepctl"
         assert capsys.readouterr().out == ""
+
+
+class TestUnreachableIndex:
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    def test_raises_update_check_failed(self, checker, run):
+        from deepctl_cmd_update.version_check import UpdateCheckError
+        from deepctl_core.transport import TransportError
+
+        run.side_effect = UpdateCheckError("pypi.org")
+        with pytest.raises(TransportError) as raised:
+            UpdateCommand().handle(
+                config=MagicMock(), auth_manager=MagicMock(), client=MagicMock()
+            )
+        err = raised.value
+        assert err.code == "update_check_failed"
+        assert err.details == {"host": "pypi.org"}
+        assert err.error == "Couldn't check for updates: couldn't reach pypi.org."
+
+    def test_renders_with_both_hints(self, monkeypatch):
+        from deepctl_core import output, transport
+
+        err = transport.TransportError(
+            "update_check_failed", values={"host": "pypi.org"}, details={"host": "pypi.org"}
+        )
+        monkeypatch.setitem(output._output_config, "agentic", False)
+        human = transport.render(err, command_path="update")
+        assert human.code == "update_check_failed"
+        assert human.hint.startswith("Check your network connection")
+        assert human.next_step is None
+        assert human.details == {"host": "pypi.org"}
+        monkeypatch.setitem(output._output_config, "agentic", True)
+        monkeypatch.setenv("AI_AGENT", "x")
+        agent = transport.render(err, command_path="update")
+        assert agent.hint.startswith("The update check needs network access")

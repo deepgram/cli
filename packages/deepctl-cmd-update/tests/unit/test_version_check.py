@@ -383,3 +383,33 @@ class TestCacheFile:
         )
         info = VersionChecker(config, "1.0.0")._get_cached_info()
         assert info is not None and info.latest_version == "1.5.0"
+
+
+class TestUnreachable:
+    """No answer is an error, never "you are on the latest version"."""
+
+    @staticmethod
+    def _config():
+        config = MagicMock()
+        config.get.side_effect = lambda key, default=None: (
+            True if key == "update.check_enabled" else default
+        )
+        return config
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("install_method", [None, "homebrew"])
+    async def test_raises_and_records_the_failure(self, install_method):
+        from deepctl_cmd_update import check_cache
+        from deepctl_cmd_update.version_check import UpdateCheckError
+
+        client = AsyncMock()
+        client.get.side_effect = httpx.ConnectError("unreachable")
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+        checker = VersionChecker(self._config(), "1.0.0")
+        with patch("httpx.AsyncClient", return_value=client):
+            with pytest.raises(UpdateCheckError) as raised:
+                await checker.check_version(force=True, install_method=install_method)
+        assert raised.value.host == "pypi.org"
+        state = check_cache.read(check_cache.UPDATE_FILE)
+        assert state is not None and state["ok"] is False
