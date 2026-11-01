@@ -747,6 +747,19 @@ def test_complete_with_another_profile_is_a_usage_error(env):
     assert result.code == "auth_pending"
 
 
+def test_other_profile_error_suggests_commands_that_run(env):
+    import click
+
+    run(env, profile="work")
+    with pytest.raises(click.UsageError) as err:
+        run(env, complete=True, profile="my team")
+    assert err.value.message == (
+        'The pending login is for profile "work". Run dg login --complete '
+        'without --profile, or start a new login for "my team" with dg login '
+        "--profile 'my team'."
+    )
+
+
 def test_complete_with_save_base_url_is_a_usage_error(env):
     import click
 

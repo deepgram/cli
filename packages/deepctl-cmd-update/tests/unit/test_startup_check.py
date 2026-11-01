@@ -68,6 +68,12 @@ def _finished_thread() -> threading.Thread:
     return thread
 
 
+@pytest.fixture(autouse=True)
+def _invoked_as_dg(monkeypatch):
+    """Notices name the program as invoked; these tests expect dg."""
+    monkeypatch.setenv("DEEPCTL_PROG_NAME", "dg")
+
+
 class TestCIDetection:
     """Test CI environment detection."""
 
@@ -565,3 +571,135 @@ class TestSavedNotice:
         assert "2.0.0" in self._notice()
         check_and_notify(current_version="1.0.0")
         assert self._notice() == ""
+
+
+
+# One dg process finishing: claim the notice for 2.0.0 at a set time.
+_CLAIM = """
+import sys, time
+from deepctl import _cache
+from deepctl_cmd_update import check_cache
+_cache.cache_root = lambda: sys.argv[1]
+start = float(sys.argv[2])
+while time.time() < start:
+    pass
+print(check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0))
+"""
+
+class TestNoticeOnce:
+    """Several dg processes finishing together show the notice once."""
+
+    @staticmethod
+    def _state(cache_dir, **extra):
+        assert check_cache.usable()
+        check_cache.write(check_cache.UPDATE_FILE, ok=True, latest="2.0.0", source="x")
+        state = check_cache.read(check_cache.UPDATE_FILE)
+        state.update(extra)
+        check_cache._save(check_cache.UPDATE_FILE, state)
+        return cache_dir
+
+    def test_concurrent_processes_claim_once(self, check_allowed):
+        import subprocess
+
+        self._state(check_allowed)
+        start = time.time() + 3.0
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", _CLAIM, str(check_allowed), str(start)],
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(6)
+        ]
+        results = [proc.communicate(timeout=60)[0].strip() for proc in procs]
+        assert results.count("True") == 1, results
+        assert results.count("False") == 5, results
+        state = check_cache.read(check_cache.UPDATE_FILE)
+        assert state["notified_latest"] == "2.0.0"
+        assert not list(check_allowed.glob(".*.lock"))
+
+    def test_lock_taken_shows_nothing(self, check_allowed):
+        self._state(check_allowed)
+        lock = check_allowed / f".{check_cache.UPDATE_FILE}.lock"
+        lock.write_text("")
+        assert check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0) is False
+        assert lock.exists()  # a fresh lock belongs to a live process
+        os.utime(lock, (1, 1))
+        assert check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0) is False
+        assert not lock.exists()  # a stale one is cleared for the next run
+        assert check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0) is True
+
+    def test_a_check_finishing_later_keeps_the_record(self, check_allowed):
+        """A second process's fresh check that lands after the first showed
+        the notice doesn't make it show again."""
+        self._state(check_allowed)
+        assert check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0)
+        check_cache.write(check_cache.UPDATE_FILE, ok=False, latest=None, source="x")
+        check_cache.write(check_cache.UPDATE_FILE, ok=True, latest="2.0.0", source="x")
+        mod._result = {"latest": "2.0.0", "current": "1.0.0"}
+        mod._thread = _finished_thread()
+        err = io.StringIO()
+        with patch.object(sys, "stderr", err):
+            print_pending_notification()
+        assert err.getvalue() == ""
+
+    def test_a_claim_during_a_check_write_is_kept(self, check_allowed, monkeypatch):
+        """A claim made while another process's check is between reading
+        the state and saving it isn't erased by that save."""
+        self._state(check_allowed)
+        real_read, real_save = check_cache.read, check_cache._save
+        read_done, claim_done = threading.Event(), threading.Event()
+
+        def writer() -> bool:
+            return threading.current_thread() is checker
+
+        def read(name):
+            state = real_read(name)
+            if writer():
+                read_done.set()
+            return state
+
+        def save(name, state):
+            if writer():
+                claim_done.wait(5.0)
+            real_save(name, state)
+
+        monkeypatch.setattr(check_cache, "read", read)
+        monkeypatch.setattr(check_cache, "_save", save)
+        checker = threading.Thread(
+            target=check_cache.write,
+            args=(check_cache.UPDATE_FILE,),
+            kwargs={"ok": True, "latest": "2.0.0", "source": "x"},
+        )
+        checker.start()
+        assert read_done.wait(5.0)
+        first = check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0)
+        claim_done.set()
+        checker.join(5.0)
+        second = check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0)
+        assert [first, second].count(True) == 1, (first, second)
+        assert not list(check_allowed.glob(".*.lock"))
+
+    def test_a_lock_that_cannot_be_made_still_shows(self, check_allowed, monkeypatch):
+        """No lock can be created (read-only mount, full disk): the notice
+        shows rather than never."""
+        self._state(check_allowed)
+        real_open = os.open
+
+        def no_lock(path, *args, **kwargs):
+            if str(path).endswith(".lock"):
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(check_cache.os, "open", no_lock)
+        claimed = check_cache.claim_notice(check_cache.UPDATE_FILE, "2.0.0", 86400.0)
+        assert claimed is True
+
+    def test_a_newer_version_shows_again(self, check_allowed):
+        self._state(check_allowed, notified_at=time.time(), notified_latest="1.5.0")
+        mod._result = {"latest": "2.0.0", "current": "1.0.0"}
+        mod._thread = _finished_thread()
+        err = io.StringIO()
+        with patch.object(sys, "stderr", err):
+            print_pending_notification()
+        assert err.getvalue().count("Update available") == 1

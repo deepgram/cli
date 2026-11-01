@@ -324,7 +324,7 @@ class TestSubprocess:
         proc = _dg(["--help"], tmp_path, DEEPCTL_PROG_NAME="foo")
         assert proc.stdout.startswith("Usage: foo [OPTIONS] COMMAND [ARGS]...")
         version = _dg(["--version"], tmp_path, DEEPCTL_PROG_NAME="foo")
-        assert version.stdout.startswith("deepctl, version ")
+        assert version.stdout.startswith("foo, version ")
 
     def test_alias_help(self, tmp_path: Path) -> None:
         proc = _dg(["debug-audio", "--help"], tmp_path)

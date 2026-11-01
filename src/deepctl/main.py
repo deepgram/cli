@@ -3,8 +3,8 @@
 Only ``sys`` and ``os`` are imported at module level. ``main()`` peeks at
 argv first, so two paths finish without Click or ``deepctl_core``:
 
-- ``dg --version`` prints the version constant (the same bytes Click printed
-  in 0.4.x) and exits 0.
+- ``dg --version`` prints the version line (the same bytes as the Click
+  path) and exits 0.
 - ``dg mcp`` (stdio, no other options) answers the MCP handshake locally in
   ``deepctl.mcp._fast`` and hands the session to the proxy on the first call.
 
@@ -143,15 +143,28 @@ def _rich_excepthook(
     sys.excepthook(exc_type, exc, tb)
 
 
-def _print_version() -> None:
+def version_line() -> str:
+    """``<name>, version <version>``: ``DEEPCTL_PROG_NAME`` when a launcher
+    sets it to a plain program name, else the name the user typed (``dg``,
+    ``deepgram`` or ``deepctl``), else ``deepctl`` (``python -m deepctl``,
+    a renamed script). The Click path prints the same line."""
     from deepctl import __version__
 
+    name = prog_name_from_env()
+    if not name:
+        name = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+        if os.name == "nt" and name.lower().endswith(".exe"):
+            name = name[:-4]
+        if name not in ("dg", "deepgram", "deepctl"):
+            name = "deepctl"
+    return f"{name}, version {__version__}"
+
+
+def _print_version() -> None:
     if sys.stdout is None:  # started with stdout closed (`dg --version >&-`)
         return
     try:
-        # Byte-identical to 0.4.x, where Click's version_option printed this
-        # with prog_name="deepctl" for every console script.
-        sys.stdout.write(f"deepctl, version {__version__}\n")
+        sys.stdout.write(version_line() + "\n")
         sys.stdout.flush()
     except BrokenPipeError:
         # The reader went away (`dg --version | true`): exit quietly, and

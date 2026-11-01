@@ -32,7 +32,7 @@ from deepctl_core import (
 )
 from deepctl_core.output import stderr_console
 
-from deepctl import __version__, _manifest
+from deepctl import _manifest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -712,9 +712,27 @@ def _argv_config_path(args: list[str]) -> str | None:
     return found
 
 
+def _show_version(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    """``--version`` past the argv peek: the line ``deepctl.main`` prints."""
+    del param
+    if not value or ctx.resilient_parsing:
+        return
+    from deepctl.main import version_line
+
+    click.echo(version_line(), color=ctx.color)
+    ctx.exit()
+
+
 # Create CLI group
 @click.group(name="deepctl", cls=LazyGroup)
-@click.version_option(version=__version__, prog_name="deepctl")
+@click.option(
+    "--version",
+    is_flag=True,
+    expose_value=False,
+    is_eager=True,
+    callback=_show_version,
+    help="Show the version and exit.",
+)
 @click.option(
     "--config",
     "-c",
@@ -1098,6 +1116,26 @@ def _start_checks(quiet: bool) -> list[Callable[[], object]]:
     return pending
 
 
+def _agent_mode_notice(quiet: bool) -> None:
+    """Tell a person at a terminal, once per run, that an AI-agent marker in
+    their environment put dg in agent mode (``deepctl_core.agents``)."""
+    if quiet:
+        return
+    from deepctl_core import agents, output
+
+    try:
+        line = agents.mode_notice("{prog}")
+        if line is None:
+            return
+        from rich.markup import escape
+
+        output.print_info(
+            escape(line.replace("{prog}", output.invoked_prog())), stderr=True
+        )
+    except (OSError, ValueError):
+        pass
+
+
 def _record_startup(started_at: float) -> None:
     """Add process startup (from ``main()``'s first line) to ``--timing``."""
     from deepctl_core.timing import TimingEntry, get_timing_collector
@@ -1188,6 +1226,8 @@ def run(
         # Background update and AI-CLI checks (non-blocking). Not for help,
         # which makes no network connection and prints only the help.
         pending = [] if _is_help_run(args) else _start_checks(quiet_requested)
+        if not _is_help_run(args):
+            _agent_mode_notice(quiet_requested)
 
         # Root `dg --help` is saved for the native launcher when it asks
         # (DEEPCTL_HELP_CACHE=1), outside an AI agent, unless the run writes

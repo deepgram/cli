@@ -187,7 +187,7 @@ def _newer_saved(
     latest = state.get("latest")
     if not isinstance(latest, str):
         return None
-    if not check_cache.elapsed(check_cache.notified_at(state), interval):
+    if not check_cache.notice_due(state, latest, interval):
         return None
     try:
         from packaging import version as pkg_version
@@ -204,6 +204,8 @@ _thread: threading.Thread | None = None
 _result: dict[str, Any] = {}
 # A notice from the saved answer, when no check ran this time.
 _saved_notice: tuple[str, str] | None = None
+# The check interval this run used: a notice shows at most once per interval.
+_interval: float = 86400.0
 
 
 def check_and_notify(
@@ -221,7 +223,7 @@ def check_and_notify(
             detected automatically from package metadata.
         quiet: If True, suppress the check entirely.
     """
-    global _thread, _result, _saved_notice
+    global _thread, _result, _saved_notice, _interval
     _thread = None
     _result = {}
     _saved_notice = None
@@ -232,6 +234,7 @@ def check_and_notify(
     interval = _get_check_interval_seconds(quiet)
     if interval is None:
         return
+    _interval = interval
 
     # A cache directory that can't be made private: no check, no state.
     if not check_cache.usable():
@@ -280,14 +283,23 @@ def print_pending_notification() -> None:
         return
 
     current, latest = notice
-    try:
-        sys.stderr.write(
-            f"\n\033[33m  Update available:  {current} → {latest}"
-            f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
+    # Several dg processes can finish together: only one shows it.
+    if not check_cache.claim_notice(check_cache.UPDATE_FILE, latest, _interval):
+        return
+    from deepctl_core.output import invoked_prog, stderr_color
+
+    command = f"{invoked_prog()} update"
+    if stderr_color():
+        line = (
+            f"\033[33m  Update available:  {current} → {latest}"
+            f"  —  run \033[1m{command}\033[0m\033[33m to upgrade\033[0m"
         )
+    else:
+        line = f"  Update available:  {current} → {latest}  —  run {command} to upgrade"
+    try:
+        sys.stderr.write(f"\n{line}\n\n")
     except (BrokenPipeError, OSError, ValueError):
         # The output stream closed (e.g. an MCP host disconnected stdio
         # after `dg mcp` finished). Nothing useful to do — the notification
         # is purely advisory.
         return
-    check_cache.mark_notified(check_cache.UPDATE_FILE)
