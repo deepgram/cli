@@ -253,3 +253,30 @@ class TestHttpxCliGuard:
         proc = _run([sys.executable, "-c", code], tmp_path)
         assert proc.returncode == 0, proc.stderr
         assert proc.stderr.split()[-3:] == ["False", "True", "True"], proc.stderr
+
+
+class TestInterruptWhileLoading:
+    def test_ctrl_c_while_the_cli_loads_is_cancelled_quietly(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A Ctrl-C before run() is entered is cancelled: exit 2, run()'s
+        cancel line, no traceback."""
+        from deepctl import main as entry
+
+        class Interrupts:
+            def find_spec(self, name: str, *args: object) -> None:
+                if name == "deepctl._cli":
+                    raise KeyboardInterrupt
+                return None
+
+        monkeypatch.delitem(sys.modules, "deepctl._cli", raising=False)
+        monkeypatch.setattr(sys, "meta_path", [Interrupts(), *sys.meta_path])
+        monkeypatch.setattr(sys, "argv", ["dg", "speak", "hi"])
+        monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+        with pytest.raises(SystemExit) as exc:
+            entry.main()
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        assert "Traceback" not in captured.err
+        assert captured.err == "\nOperation cancelled by user\n"
+        assert captured.out == ""
