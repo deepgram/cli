@@ -99,16 +99,25 @@ class TestCIDetection:
 class TestOneshotDetection:
     """Test one-shot execution detection."""
 
-    def test_not_oneshot(self, monkeypatch):
-        monkeypatch.delenv("UV_INTERNAL__PARENT_INTERPRETER", raising=False)
+    def test_not_oneshot(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("UV_CACHE_DIR", raising=False)
+        monkeypatch.delenv("PIPX_HOME", raising=False)
+        monkeypatch.delenv("DEEPCTL_LAUNCHER", raising=False)
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
         assert _is_oneshot() is False
 
-    @patch.dict(
-        "os.environ",
-        {"UV_INTERNAL__PARENT_INTERPRETER": "/usr/bin/python3"},
-        clear=True,
-    )
-    def test_uvx_oneshot(self):
+    def test_uvx_oneshot(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uvc"))
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "uvc" / "archive-v0" / "x"))
+        assert _is_oneshot() is True
+
+    def test_npx_oneshot(self, monkeypatch, tmp_path):
+        main = sys.modules.get("deepctl.main")
+        if main is not None:
+            monkeypatch.setattr(main, "LAUNCHER_CAPTURED", False, raising=False)
+        monkeypatch.setenv("DEEPCTL_LAUNCHER", "npx")
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
         assert _is_oneshot() is True
 
 
