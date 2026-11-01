@@ -119,7 +119,9 @@ class TestAudioCommand:
         result = command.run_ffprobe("test.mp3")
 
         assert result == sample_probe_data
-        mock_probe.assert_called_once_with("test.mp3", cmd="/usr/bin/ffprobe")
+        mock_probe.assert_called_once_with(
+            "file:" + os.path.abspath("test.mp3"), cmd="/usr/bin/ffprobe"
+        )
 
     @patch("shutil.which", return_value="/usr/bin/ffprobe")
     @patch("subprocess.run")
@@ -143,10 +145,55 @@ class TestAudioCommand:
             "json",
             "-show_streams",
             "-show_format",
-            "test.mp3",
+            "file:" + os.path.abspath("test.mp3"),
         ]
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == expected_cmd
+
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("ffmpeg.probe")
+    def test_option_like_file_name_is_probed_as_a_file(
+        self, mock_probe, mock_which, command, sample_probe_data, tmp_path, monkeypatch
+    ):
+        """A file named "-f lavfi" is an input, not options."""
+        mock_probe.return_value = sample_probe_data
+        monkeypatch.chdir(tmp_path)
+
+        command.run_ffprobe("-f lavfi")
+
+        target = mock_probe.call_args.args[0]
+        assert target == f"file:{tmp_path}{os.sep}-f lavfi"
+        assert not target.startswith("-")
+
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("subprocess.run")
+    def test_custom_args_are_split_like_a_shell(
+        self, mock_run, mock_which, command, sample_probe_data
+    ):
+        """--ffprobe-args keeps a quoted value as one argument (shlex)."""
+        mock_run.return_value = Mock(returncode=0, stdout=json.dumps(sample_probe_data))
+
+        command.run_ffprobe(
+            "-f lavfi", "-show_entries 'format=duration,size' -select_streams a"
+        )
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[5:] == [
+            "-show_entries",
+            "format=duration,size",
+            "-select_streams",
+            "a",
+            "file:" + os.path.abspath("-f lavfi"),
+        ]
+
+    @patch("shutil.which", return_value="/usr/bin/ffprobe")
+    @patch("subprocess.run")
+    def test_unbalanced_quotes_in_custom_args_fail_before_running(
+        self, mock_run, mock_which, command
+    ):
+        with pytest.raises(Exception, match="Failed to probe file"):
+            command.run_ffprobe("test.mp3", "-show_entries 'format")
+        mock_run.assert_not_called()
 
     def test_parse_audio_info(self, command, sample_probe_data):
         """Test parsing ffprobe output into AudioInfo."""
