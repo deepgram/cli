@@ -4,7 +4,27 @@ on:
   push:
     branches:
       - main
+  # A dispatch with no tag runs release-please, like a push. A dispatch
+  # with a tag rebuilds and publishes that existing release instead: the
+  # way to recover when a release was tagged but never reached PyPI.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Existing root release tag (vX.Y.Z) to rebuild and publish.
+          Leave empty to run release-please.
+        type: string
+        required: false
+        default: ""
+      index:
+        description: >-
+          Where a tag dispatch publishes. testpypi is the dry run of the
+          trusted-publishing setup and advertises nothing.
+        type: choice
+        options:
+          - pypi
+          - testpypi
+        default: pypi
 
 permissions:
   contents: write
@@ -30,6 +50,16 @@ jobs:
           token: ${{ github.token }}
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+        # Only a push or a plain dispatch cuts a release. A tag dispatch
+        # republishes an existing tag, and a TestPyPI dry run must not
+        # create a real release.
+        if: ${{ github.event_name == 'push' || (inputs.tag == '' && inputs.index != 'testpypi') }}
+
+      - name: Refuse a TestPyPI dry run without a tag
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi' && inputs.tag == '' }}
+        run: |
+          echo "::error::a TestPyPI dry run needs a tag to publish"
+          exit 1
 
   # The release PR's re-pin runs as two jobs so that no third-party code ever
   # runs next to a write credential:
@@ -222,10 +252,54 @@ jobs:
   build:
     name: Build packages
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
+    if: >-
+      ${{ needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          persist-credentials: false
+          # A new release builds the tag release-please just created, not
+          # whatever the run's branch points at. A recovery checks out its
+          # tag below, and needs the branch history and its tags for that.
+          ref: ${{ (github.event_name != 'workflow_dispatch' || inputs.tag == '') && needs.release-please.outputs.tag_name || '' }}
+          fetch-depth: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && '0' || '1' }}
+
+      # Only a root release tag that is already a published GitHub release
+      # and is in the history of the branch this run was started on. The
+      # publish environments accept only main, release/* and next/*.
+      - name: Check out the recovery tag
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Checked before TAG is printed anywhere.
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::the tag input is not a root release tag (vX.Y.Z)"; exit 1
+          fi
+          case "${GITHUB_REF}" in
+            refs/heads/main | refs/heads/release/* | refs/heads/next/*) ;;
+            *) echo "::error::start a recovery from main, release/* or next/*, not ${GITHUB_REF}"; exit 1 ;;
+          esac
+          if ! git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
+            echo "::error::no tag ${TAG}"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" "${GITHUB_SHA}"; then
+            echo "::error::${TAG} is not in the history of ${GITHUB_REF_NAME}"; exit 1
+          fi
+          if ! DRAFT=$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft); then
+            echo "::error::${TAG} has no GitHub release"; exit 1
+          fi
+          if [ "${DRAFT}" != "false" ]; then
+            echo "::error::${TAG}'s GitHub release is still a draft"; exit 1
+          fi
+          git checkout --detach "refs/tags/${TAG}^{commit}"
+          echo "Rebuilding ${TAG} at $(git rev-parse HEAD)"
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -241,6 +315,20 @@ jobs:
       - name: Verify built packages
         run: make verify-packages
 
+      # A tag name can move; the version inside the build can't. Publish
+      # only if the tree that was built carries the tag's version.
+      - name: Check the build matches the release tag
+        if: ${{ startsWith(inputs.tag || needs.release-please.outputs.tag_name, 'v') }}
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if ! compgen -G "dist/deepctl-${TAG#v}-*.whl" >/dev/null; then
+            echo "::error::the build has no deepctl ${TAG#v} wheel; ${TAG} does not point at that release"
+            ls dist/
+            exit 1
+          fi
+
       - name: Upload artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
@@ -251,8 +339,12 @@ jobs:
     name: Test installation
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -377,10 +469,20 @@ jobs:
     uses: ./.github/workflows/web-production.yml
     secrets: inherit
 
+  # Trusted Publishing: each of the 31 PyPI projects names this file and
+  # the pypi environment as its publisher, and PyPI swaps the job's OIDC
+  # token for a short-lived upload token. There is no API token to read.
+  # The pypi environment deploys only from main, release/* and next/*.
   publish:
     name: Publish to PyPI
     needs: [build, test]
+    if: ${{ github.event_name == 'push' || inputs.index == 'pypi' }}
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/deepctl/
+    permissions:
+      id-token: write
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
@@ -388,11 +490,68 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish to PyPI
+      # The root package goes last: it pins every sub-package ==, so it must
+      # never be on the index before them. "deepctl-" sorts before
+      # "deepctl_", so one upload of dist/ would send it first.
+      - name: Hold the root package back
+        run: |
+          set -euo pipefail
+          mkdir root-dist
+          mv dist/deepctl-[0-9]* root-dist/
+          ls root-dist/
+
+      - name: Publish the sub-packages to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist/
+          skip-existing: true
+
+      - name: Publish the root package to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          packages-dir: root-dist/
+          skip-existing: true
+
+  # The same upload against TestPyPI, from its own environment so that its
+  # OIDC token can never match a production PyPI publisher. Nothing
+  # downstream needs this job, so a dry run advertises nothing.
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [build, test]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/deepctl/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      # Root package last, as in publish.
+      - name: Hold the root package back
+        run: |
+          set -euo pipefail
+          mkdir root-dist
+          mv dist/deepctl-[0-9]* root-dist/
+          ls root-dist/
+
+      - name: Publish the sub-packages to TestPyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true
+
+      - name: Publish the root package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: root-dist/
           skip-existing: true
 
   bump-brew-formula:
