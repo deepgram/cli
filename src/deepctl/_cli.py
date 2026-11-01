@@ -624,6 +624,14 @@ def _root_option_tokens(args: list[str]) -> list[str]:
     return tokens
 
 
+def _full_output_cb(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """``--full-output``: shared with every subcommand through ``ctx.meta``."""
+    if value:
+        from deepctl_core.result_store import FULL_OUTPUT_META
+
+        ctx.meta[FULL_OUTPUT_META] = True
+
+
 def _no_telemetry_cb(ctx: click.Context, param: click.Parameter, value: bool) -> None:
     """Turn telemetry off for this run. Eager, so root `--help` reflects it."""
     if not value or ctx.resilient_parsing:
@@ -777,6 +785,16 @@ def _argv_config_path(args: list[str]) -> str | None:
     is_eager=True,
     expose_value=False,
     help="Skip interactive prompts; use defaults for any optional features.",
+)
+@click.option(
+    "--full-output",
+    is_flag=True,
+    expose_value=False,
+    callback=_full_output_cb,
+    help=(
+        "In an AI agent session, print a large result in full instead of "
+        "saving it to a file and printing a summary."
+    ),
 )
 @click.option(
     "--record-install-method",

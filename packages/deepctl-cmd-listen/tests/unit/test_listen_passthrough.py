@@ -1,17 +1,21 @@
 """Prerecorded ``listen`` output (0.5.0): the server's body for ``-o json``,
-``-o yaml`` and ``-o text``, and ``DEEPCTL_LISTEN_JSON=sdk``."""
+``-o yaml`` and ``-o text``, ``DEEPCTL_LISTEN_JSON=sdk``, and agent-mode
+compaction."""
 
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 import yaml
 from deepctl_cmd_listen import command as listen_cmd
-from deepctl_cmd_listen.command import ListenCommand
+from deepctl_cmd_listen.command import COMPACT_THRESHOLD, ListenCommand
 from deepctl_core import Config, login_state, output, transport
 
 SPARSE = (
@@ -214,3 +218,156 @@ def test_a_body_that_is_not_an_object_is_unreadable(monkeypatch):
     with pytest.raises(transport.TransportError) as err:
         run(rest_client(b"<html>portal</html>"))
     assert err.value.code == "network_unavailable"
+
+
+# ── Compaction ────────────────────────────────────────────────────────
+
+
+def agent(monkeypatch) -> None:
+    fmt(monkeypatch, "json", "hard_agent")
+    monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: True)
+
+
+def test_large_result_under_an_agent_is_compacted(monkeypatch, capsysbinary, tmp_path):
+    agent(monkeypatch)
+    body = big_body()
+    assert len(body) + 1 > COMPACT_THRESHOLD
+    run(rest_client(body))
+    captured = capsysbinary.readouterr()
+    assert len(captured.out) <= 4096
+    compact = json.loads(captured.out)
+    assert list(compact) == [
+        "schema_version",
+        "status",
+        "truncated",
+        "full_result_path",
+        "full_result_bytes",
+        "transcript_path",
+        "transcript_chars",
+        "transcript_preview",
+        "request_id",
+        "duration_s",
+        "hint",
+        "next_step",
+    ]
+    assert compact["truncated"] is True and compact["next_step"] is None
+    assert compact["request_id"] == "r-big" and compact["duration_s"] == 12.5
+    full = compact["full_result_path"]
+    assert Path(full).read_bytes() == body + b"\n"
+    assert compact["full_result_bytes"] == len(body) + 1
+    assert stat.S_IMODE(os.stat(full).st_mode) == 0o600
+    text = json.loads(body)["results"]["channels"][0]["alternatives"][0]["transcript"]
+    assert Path(compact["transcript_path"]).read_text() == text + "\n"
+    assert compact["transcript_chars"] == len(text)
+    assert len(compact["transcript_preview"].encode()) <= 2048
+    assert text.startswith(compact["transcript_preview"])
+    assert full.startswith(str((tmp_path / "state" / "results").resolve()))
+    notice = [line for line in captured.err.decode().splitlines() if "saved to" in line]
+    assert len(notice) == 1
+    assert notice[0].startswith("INFO: The result is 299.0 KB so it was saved to ")
+    assert full in notice[0] and "--full-output" in notice[0]
+
+
+def test_preview_never_splits_a_code_point(monkeypatch, capsysbinary):
+    agent(monkeypatch)
+    text = "é" * 40000
+    body = json.dumps(
+        {"results": {"channels": [{"alternatives": [{"transcript": text}]}]}},
+        ensure_ascii=False,
+    ).encode()
+    run(rest_client(body))
+    preview = json.loads(capsysbinary.readouterr().out)["transcript_preview"]
+    assert preview == "é" * 1024
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["small", "explicit", "soft", "full_output", "regular_file", "no_agent", "text"],
+)
+def test_compaction_boundaries(monkeypatch, capsysbinary, case):
+    agent(monkeypatch)
+    body = big_body()
+    full_output = False
+    if case == "small":
+        body = SPARSE
+    elif case == "explicit":
+        fmt(monkeypatch, "json", "explicit")
+    elif case == "soft":
+        fmt(monkeypatch, "json", "soft")
+        monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+    elif case == "full_output":
+        full_output = True
+    elif case == "regular_file":
+        monkeypatch.setattr(
+            "deepctl_core.result_store.stdout_is_file_or_null", lambda: True
+        )
+    elif case == "no_agent":
+        monkeypatch.setattr(listen_cmd, "is_ai_agent", lambda: False)
+    elif case == "text":
+        fmt(monkeypatch, "text", "explicit")
+    run(rest_client(body), full_output=full_output)
+    out = capsysbinary.readouterr().out
+    if case == "text":
+        assert not out.startswith(b"{")
+    else:
+        assert out == body + b"\n"
+
+
+def test_exactly_the_threshold_is_not_compacted(monkeypatch, capsysbinary):
+    agent(monkeypatch)
+    body = b'{"x":"' + b"a" * (COMPACT_THRESHOLD - 9) + b'"}'
+    assert len(body) + 1 == COMPACT_THRESHOLD
+    run(rest_client(body))
+    assert capsysbinary.readouterr().out == body + b"\n"
+
+
+def test_sdk_shape_is_compacted_too(monkeypatch, capsysbinary):
+    agent(monkeypatch)
+    monkeypatch.setenv("DEEPCTL_LISTEN_JSON", "sdk")
+    client = rest_client()
+    client.transcribe_file.return_value = json.loads(big_body())
+    run(client)
+    compact = json.loads(capsysbinary.readouterr().out)
+    saved = Path(compact["full_result_path"]).read_bytes()
+    assert saved.startswith(b"{\n  ") and saved.endswith(b"}\n")
+
+
+def test_nowhere_to_save_is_state_unwritable(monkeypatch, capsysbinary, tmp_path):
+    from deepctl_core import result_store
+
+    agent(monkeypatch)
+
+    def fail(*a: Any, **kw: Any) -> Any:
+        raise result_store.ResultStoreError(tmp_path / "state")
+
+    monkeypatch.setattr(result_store, "save", fail)
+    command, _ = run(rest_client(big_body()))
+    captured = capsysbinary.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["code"] == "state_unwritable"
+    assert payload["next_step"] is None
+    assert payload["details"] == {"dir": str(tmp_path / "state")}
+    assert "too large to print here" in payload["error"]
+    assert b"word" not in captured.out  # never the full result
+    assert command.exit_code_for(None) == 1
+
+
+def test_root_full_output_is_read_from_the_context():
+    import click
+    from deepctl_core import result_store
+
+    @click.command()
+    @click.pass_context
+    def probe(ctx: click.Context) -> None:
+        ctx.meta[result_store.FULL_OUTPUT_META] = True
+        assert listen_cmd._root_full_output() is True
+
+    probe.main([], standalone_mode=False)
+    assert listen_cmd._root_full_output() is False
+
+
+@pytest.mark.parametrize(
+    ("n", "text"), [(65537, "65.5 KB"), (999_999, "1000.0 KB"), (7_658_261, "7.7 MB")]
+)
+def test_human_size(n, text):
+    assert listen_cmd._human_bytes(n) == text
