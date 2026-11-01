@@ -280,7 +280,7 @@ dg plugin install deepctl-plugin-example  # Install from PyPI
 dg plugin list                            # List installed plugins
 dg plugin update deepctl-plugin-example   # Update plugin
 dg plugin remove deepctl-plugin-example   # Uninstall
-dg plugin search <term>                   # Search registry
+dg plugin search <term>                   # Search Deepgram-published plugins
 ```
 
 Plugins install into an isolated venv at `~/.deepctl/plugins/venv/`.

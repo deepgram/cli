@@ -33,7 +33,7 @@ class PluginRegistryEntry(BaseModel):
 
     name: str
     description: str
-    version: str
+    version: str | None = None
     author: str | None = None
     url: str | None = None
     keywords: list[str] = Field(default_factory=list)

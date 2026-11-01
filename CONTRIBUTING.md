@@ -124,6 +124,11 @@ Register in your plugin's `pyproject.toml`:
 mycommand = "my_plugin.command:MyCommand"
 ```
 
+Don't reuse a built-in command name. dg ignores a plugin command named like a
+built-in (for example `login`, or `audio` under `debug`) and prints a warning.
+Run `dg --help` for the current names, and give your command a name specific
+to your plugin so a future built-in doesn't take it.
+
 See [`packages/deepctl-plugin-example`](packages/deepctl-plugin-example) for a complete example.
 
 ## Reporting Issues
