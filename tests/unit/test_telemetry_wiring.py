@@ -30,6 +30,7 @@ def telemetry_on(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from deepctl_telemetry import client
 
     monkeypatch.delenv(client.DISABLE_ENV_VAR, raising=False)
+    monkeypatch.delenv(client.CI_ENV_VAR, raising=False)
     monkeypatch.setenv(client.DSN_ENV_VAR, DEAD_DSN)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
@@ -428,7 +429,8 @@ def _probe_env(tmp_path: Path, dsn: str | None = DEAD_DSN) -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("DEEPCTL_TELEMETRY_DISABLED", "DEEPCTL_TELEMETRY_DSN")
+        if key
+        not in ("DEEPCTL_TELEMETRY_DISABLED", "DEEPCTL_TELEMETRY_DSN", "CI", "DO_NOT_TRACK")
         and not key.startswith("DEEPGRAM_")
     }
     if dsn is not None:

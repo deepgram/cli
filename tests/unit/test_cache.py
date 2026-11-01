@@ -134,7 +134,8 @@ class TestHelpCache:
         assert recorded["prog"] == "dg" and recorded["isatty"] is False
         assert not any("deepgram.yaml" in f["path"] for f in recorded["files"])
         assert not any("cwd_relative" in f for f in recorded["files"])
-        assert "DEEPCTL_TELEMETRY_DISABLED" in recorded["env"]
+        for name in ("DEEPCTL_TELEMETRY_DISABLED", "DO_NOT_TRACK", "CI"):
+            assert name in recorded["env"], name
         assert "DEEPCTL_HELP_CACHE" not in recorded["env"]
 
     def test_no_gate_writes_nothing(
@@ -273,7 +274,7 @@ class TestHelpCache:
         key = _cache.help_key("dg", 80, False, b"")
         assert len(key["files"]) <= _cache.MAX_KEY_FILES == 32
         assert _cache.MAX_KEY_ENV == 64
-        assert len(key["env"]) == 18
+        assert len(key["env"]) == 20
 
 
 def _poison(stamp: str, commands: list[dict[str, Any]]) -> None:
