@@ -488,6 +488,8 @@ class AuthManager:
         # Store API key in keyring for security
         profile_name = self.config.profile or "default"
         keyring_available = False
+        # Nothing goes to the keyring when the profile can't be saved.
+        self.config.check_saveable()
 
         try:
             keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
@@ -666,6 +668,8 @@ class AuthManager:
             ).isoformat()
 
             keyring_available = False
+            # Nothing goes to the keyring when the profile can't be saved.
+            self.config.check_saveable()
             try:
                 keyring.set_password(
                     KEYRING_SERVICE, f"api-key.{profile_name}", api_key
@@ -727,12 +731,9 @@ class AuthManager:
         if keep_config:
             # Clear sensitive data from config but keep profile
             if profile_name in self.config.list_profiles():
-                profile = self.config.get_profile(profile_name)
-                self.config.create_profile(
-                    profile_name,
-                    api_key=None,  # Clear API key
-                    project_id=profile.project_id,  # Keep project ID
-                    base_url=profile.base_url,  # Keep base URL
+                # Only the credential changes; project ID and base URL stay.
+                self.config.update_profile(
+                    profile_name, api_key=None, dg_token_expires_at=None
                 )
         else:
             # Clear profile completely from config

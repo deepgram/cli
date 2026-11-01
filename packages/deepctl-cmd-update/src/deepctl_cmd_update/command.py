@@ -147,7 +147,7 @@ class UpdateCommand(BaseCommand):
             "update.installation_method", install_info.method.value
         )
         config._set_config_value("update.installation_path", install_info.path)
-        config.save()
+        config.save(implicit=True)
 
         # Display installation info
         console.print(f"Installation method: [cyan]{install_info.method}[/cyan]")
@@ -210,7 +210,7 @@ class UpdateCommand(BaseCommand):
 
                 # Clear version cache
                 config._set_config_value("update.cached_version_info", None)
-                config.save()
+                config.save(implicit=True)
 
                 return UpdateResult(
                     success=True,

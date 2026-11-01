@@ -364,19 +364,39 @@ def print_success(message: str) -> None:
 def print_error(message: str) -> None:
     """Print error message."""
     if _output_config["agentic"]:
-        stderr_console.print(f"ERROR: {message}")
+        stderr_console.print(f"ERROR: {message}", soft_wrap=True)
     else:
-        stderr_console.print(f"[red]✗[/red] {message}")
+        stderr_console.print(f"[red]✗[/red] {message}", soft_wrap=True)
+
+
+def print_security_warning(message: str) -> None:
+    """Print a warning to stderr even under ``--quiet``.
+
+    For warnings about where credentials go or what a project file tried
+    to set; those must never be silenced.
+    """
+    if _output_config["agentic"]:
+        stderr_console.print(f"WARN: {message}", soft_wrap=True)
+    else:
+        stderr_console.print(f"[yellow]⚠[/yellow] {message}", soft_wrap=True)
+
+
+def print_hint(message: str) -> None:
+    """Print the hint line that follows an error or warning (always stderr)."""
+    if _output_config["agentic"]:
+        stderr_console.print(f"HINT: {message}", soft_wrap=True)
+    else:
+        stderr_console.print(f"  [dim]{message}[/dim]", soft_wrap=True)
 
 
 def print_warning(message: str, *, stderr: bool = False) -> None:
     """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too."""
     if not _output_config["quiet"]:
         if _output_config["agentic"]:
-            stderr_console.print(f"WARN: {message}")
+            stderr_console.print(f"WARN: {message}", soft_wrap=True)
         else:
             (stderr_console if stderr else console).print(
-                f"[yellow]⚠[/yellow] {message}"
+                f"[yellow]⚠[/yellow] {message}", soft_wrap=True
             )
 
 
@@ -384,9 +404,11 @@ def print_info(message: str, *, stderr: bool = False) -> None:
     """Print info message."""
     if not _output_config["quiet"]:
         if _output_config["agentic"]:
-            stderr_console.print(f"INFO: {message}")
+            stderr_console.print(f"INFO: {message}", soft_wrap=True)
         else:
-            (stderr_console if stderr else console).print(f"[blue]ℹ[/blue] {message}")
+            (stderr_console if stderr else console).print(
+                f"[blue]ℹ[/blue] {message}", soft_wrap=True
+            )
 
 
 def print_debug(message: str) -> None:

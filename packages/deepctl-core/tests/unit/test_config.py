@@ -71,19 +71,12 @@ class TestConfig:
 
         assert config._explicit_profile == "test"
 
-    @patch("deepctl_core.config.Path.exists")
-    @patch("builtins.open", new_callable=mock_open)
-    def test_load_config_from_file(
-        self, mock_file, mock_exists, mock_config_data
-    ):
+    def test_load_config_from_file(self, mock_config_data, tmp_path, monkeypatch):
         """Test loading configuration from file."""
-        mock_exists.return_value = True
-        mock_file.return_value.read.return_value = yaml.dump(mock_config_data)
-
-        with patch(
-            "deepctl_core.config.yaml.safe_load", return_value=mock_config_data
-        ):
-            config = Config()
+        monkeypatch.chdir(tmp_path)
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(mock_config_data))
+        config = Config(config_path=str(path))
 
         assert config._config.profiles["test"].api_key == "sk-test"
         assert config._config.active_profile == "default"
@@ -100,16 +93,26 @@ class TestConfig:
         assert config._config.active_profile is None
 
     @patch("deepctl_core.config.Path.exists")
-    @patch("builtins.open", side_effect=Exception("Read error"))
+    @patch("deepctl_core.config._open_config", side_effect=Exception("Read error"))
     def test_load_config_error_handling(self, mock_file, mock_exists, capsys):
         """Test error handling when loading config fails."""
         mock_exists.return_value = True
 
-        config = Config()
+        from deepctl_core import config as config_module
+        from deepctl_core.config import flush_config_notices
 
-        # Should warn but not fail
+        # Notices print once per process: start from a clean slate.
+        config_module._seen_notices.clear()
+        config_module._pending_notices.clear()
+        Config()
+        flush_config_notices()
+
+        # Warns once on stderr, without the exception's text, and doesn't fail
         captured = capsys.readouterr()
-        assert "Warning: Could not load config" in captured.out
+        assert "Could not load config" not in captured.out
+        assert captured.err.count("Could not load config") == 1
+        assert "an unexpected error (Exception)" in captured.err
+        assert "Read error" not in captured.out + captured.err
 
     @patch.dict(os.environ, {"DEEPGRAM_API_KEY": "sk-env"})
     @patch("deepctl_core.config.Path.exists", return_value=False)
@@ -175,21 +178,16 @@ class TestConfig:
         profile = config.get_profile("missing")
         assert profile.api_key is None
 
-    @patch("deepctl_core.config.Path.exists", return_value=False)
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("deepctl_core.config.yaml.safe_dump")
-    def test_save_config(self, mock_dump, mock_file, mock_exists):
+    def test_save_config(self, tmp_path, monkeypatch):
         """Test saving configuration."""
-        config = Config()
+        monkeypatch.chdir(tmp_path)
+        path = tmp_path / "cfg" / "config.yaml"
+        config = Config(config_path=str(path))
         config._set_config_value("output.format", "yaml")
 
         config.save()
 
-        # Verify file was opened for writing
-        mock_file.assert_called_with(config.config_path, "w", encoding="utf-8")
-
-        # Verify yaml.safe_dump was called
-        assert mock_dump.called
+        assert yaml.safe_load(path.read_text()) == {"output": {"format": "yaml"}}
 
     @patch("deepctl_core.config.Path.exists", return_value=False)
     def test_create_profile(self, mock_exists):
@@ -294,20 +292,9 @@ class TestUserConfigText:
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
     @pytest.mark.timeout(10)
-    def test_fifo_is_read_once(self, tmp_path, monkeypatch):
-        import threading
-
+    def test_fifo_is_never_read(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         fifo = tmp_path / "config.fifo"
         os.mkfifo(fifo)
-
-        def write() -> None:
-            with open(fifo, "w", encoding="utf-8") as f:
-                f.write("output:\n  format: json\n")
-
-        writer = threading.Thread(target=write)
-        writer.start()
         config = Config(config_path=str(fifo))
-        writer.join()
-        assert config.user_config_text == "output:\n  format: json\n"
-        assert config.get("output.format") == "json"
+        assert config.user_config_text is None

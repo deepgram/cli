@@ -219,25 +219,20 @@ class TestWhatIsReported:
 
 
 class TestReadOnceConfigSources:
-    """A --config that can be read only once still carries its opt-out."""
+    """A --config that is a FIFO, a pipe or /dev/stdin is never read, so it
+    can't carry an opt-out: it counts as opted out."""
 
     OPT_OUT = "telemetry:\n  enabled: false\n"
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
     @pytest.mark.timeout(30)
     def test_fifo(self, telemetry_on, boom_command, tmp_path: Path) -> None:
+        # Config never reads a FIFO, and a config file that isn't a regular
+        # file counts as opted out.
         fifo = tmp_path / "config.fifo"
         os.mkfifo(fifo)
-
-        def write() -> None:
-            with open(fifo, "w", encoding="utf-8") as f:
-                f.write(self.OPT_OUT)
-
-        writer = threading.Thread(target=write, daemon=True)
-        writer.start()
         with patch("sentry_sdk.init") as mock_init:
             assert _run_main(["dg", "--config", str(fifo), boom_command]) == 1
-        writer.join(timeout=5)
         mock_init.assert_not_called()
         assert telemetry_on._state["opt_out"] == "config"
 

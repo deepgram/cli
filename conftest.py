@@ -14,6 +14,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _reset_config_parse_cache():
+    """Config files are parsed once per process; each test is its own run."""
+    from deepctl_core import config
+
+    config._parse_cache.clear()
+    yield
+    config._parse_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _clean_deepgram_env(monkeypatch):
     """Remove all DEEPGRAM_* environment variables for test isolation."""
     for key in list(os.environ):
