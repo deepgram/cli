@@ -209,6 +209,26 @@ def test_pending_without_an_agent_marker(env, agent, monkeypatch, why):
     assert isinstance(result, LoginPendingResult)
 
 
+def test_dg_agent_0_waits_like_a_person(env, agent, monkeypatch):
+    """DG_AGENT=0 restores the interactive login for a person whose shell
+    carries an agent marker; trust still reads the marker."""
+    agent(True)
+    monkeypatch.setenv("DG_AGENT", "0")
+    output._output_config["agentic"] = False  # as the process computes it
+    output._output_config["format"] = "default"
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+    calls = []
+    monkeypatch.setattr(
+        AuthManager,
+        "login_with_device_flow",
+        lambda self, open_browser=True: calls.append(open_browser),
+    )
+    run(env)
+    assert calls == [True]
+    assert not pending_path(env).exists()
+
+
 def test_person_at_a_terminal_still_waits(env, agent, monkeypatch):
     agent(False)
     output._output_config["format"] = "default"

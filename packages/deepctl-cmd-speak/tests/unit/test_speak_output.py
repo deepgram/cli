@@ -66,7 +66,7 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(speak, "_deprecation_shown", False)
     monkeypatch.setattr(speak, "_agentic", False)
-    monkeypatch.setattr(speak, "is_ai_agent", lambda: False)
+    monkeypatch.setattr(speak, "agent_mode", lambda: False)
     # stdout is "a pipe" unless a test says otherwise.
     monkeypatch.setattr(sinks, "stdout_stat", lambda: None)
     # The signal guard re-delivers a signal after _CLOSE_TIMEOUT_S if the
@@ -749,7 +749,7 @@ class TestTerminateMidStream:
         assert died == [signal.SIGTERM]
 
     def test_second_ctrl_c_cleans_up_and_cancels_like_the_first(self, monkeypatch):
-        """N-3: the second Ctrl-C (or the timer) unwinds by KeyboardInterrupt
+        """The second Ctrl-C (or the timer) unwinds by KeyboardInterrupt
         again, so the usual cancel path, exit 2 and exit handlers follow;
         the hard-exit backstop is cancelled with the guard."""
         import signal
@@ -859,7 +859,7 @@ class TestRound3Sinks:
     def test_a_signal_inside_the_rename_leaves_no_temp_file(
         self, tmp_path, monkeypatch
     ):
-        """N-1 (the reviewer's repro): os.replace interrupted; abort still
+        """os.replace interrupted; abort still
         removes the temp file."""
         path = tmp_path / "a.wav"
         path.write_bytes(b"old")
@@ -1070,7 +1070,7 @@ class TestSignalGuardEdges:
             signal.signal(signal.SIGHUP, before)
 
     def test_most_severe_deferred_signal_wins(self):
-        """N-1: TERM then INT during a section ends by TERM."""
+        """TERM then INT during a section ends by TERM."""
         import signal
 
         seen: list[int] = []
@@ -1095,7 +1095,7 @@ class TestSignalGuardEdges:
     def test_a_signal_during_the_restore_reaches_the_restored_handler(
         self, monkeypatch, signame
     ):
-        """S-2: closed guard, original handlers back, no live timer, no
+        """Closed guard, original handlers back, no live timer, no
         cleanup; the signal goes to the handler that was there before."""
         import signal
 
@@ -1145,7 +1145,7 @@ class TestSignalGuardEdges:
         not hasattr(__import__("signal"), "pthread_sigmask"), reason="POSIX"
     )
     def test_mask_is_restored_under_a_signal_flood(self):
-        """S-3: the mask is always restored, even when a pending handler
+        """The mask is always restored, even when a pending handler
         raises inside the section's own setup. Run in a child process: the
         flood can land on any bytecode."""
         import subprocess
@@ -1197,7 +1197,7 @@ print(f"raises={raises} masks_left_blocked={stuck} critical={sinks._critical}")
         assert "raises=0" not in p.stdout
 
     def test_abort_outside_the_guard_still_removes_the_temp_file(self, tmp_path):
-        """N-2: a Ctrl-C taken by another thread while abort() runs with no
+        """A Ctrl-C taken by another thread while abort() runs with no
         guard installed is held until the removal is done."""
         import signal
 

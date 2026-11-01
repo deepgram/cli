@@ -64,7 +64,7 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(speak, "_deprecation_shown", False)
     monkeypatch.setattr(speak, "_agentic", True)
-    monkeypatch.setattr(speak, "is_ai_agent", lambda: True)
+    monkeypatch.setattr(speak, "agent_mode", lambda: True)
     monkeypatch.setattr(sinks, "stdout_stat", lambda: None)  # a pipe
     monkeypatch.setattr(sinks, "stdout_takes_audio", lambda: False)
 
@@ -110,7 +110,7 @@ class TestNoText:
         assert client.speak_text.call_args.kwargs["text"] == "from stdin"
 
     def test_dash_reads_stdin_for_a_person_too(self, monkeypatch):
-        monkeypatch.setattr(speak, "is_ai_agent", lambda: False)
+        monkeypatch.setattr(speak, "agent_mode", lambda: False)
         cmd = SpeakCommand()
         client = Mock(spec=DeepgramClient)
         client.speak_text.return_value = iter([b"a"])
@@ -124,7 +124,7 @@ class TestNoText:
         assert client.speak_text.call_args.kwargs["text"] == "typed"
 
     def test_ci_only_keeps_reading_piped_stdin(self, monkeypatch):
-        monkeypatch.setattr(speak, "is_ai_agent", lambda: False)
+        monkeypatch.setattr(speak, "agent_mode", lambda: False)
         assert _pre(["speak"], monkeypatch, text=None) is None
 
 
@@ -226,7 +226,7 @@ class TestNoOutput:
         assert _pre(["speak", "hi"], monkeypatch) is None
 
     def test_people_and_ci_may_pipe_audio(self, monkeypatch):
-        monkeypatch.setattr(speak, "is_ai_agent", lambda: False)
+        monkeypatch.setattr(speak, "agent_mode", lambda: False)
         assert _pre(["speak", "hi"], monkeypatch) is None
 
 

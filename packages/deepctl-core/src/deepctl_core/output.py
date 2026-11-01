@@ -3,90 +3,31 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
 from io import StringIO
 from typing import TYPE_CHECKING, Any, cast
+
+from . import agents
 
 if TYPE_CHECKING:
     from rich.console import Console
     from rich.progress import Progress
 
 # ── Agentic / non-TTY detection ──────────────────────────────────
+# deepctl_core.agents holds the table; these names stay importable from here.
+# is_agentic(): agent or automation, for output, prompts and notices (honors
+# DG_AGENT). is_ai_agent(): a raw AI-agent marker, for trust decisions.
+is_agentic = agents.is_agentic
+is_ai_agent = agents.is_ai_agent
+AI_AGENT_ENV_MARKERS: tuple[str, ...] = agents.HARD_ENV_VARS
 
 
-def is_agentic() -> bool:
-    """Detect if running inside an AI coding tool or non-interactive context.
-
-    Uses a layered signal approach:
-    - Hard signals: known AI-tool environment variables (high confidence)
-    - Soft signals: score-based TTY/CI heuristics (3+ = probable agent)
-
-    Returns True when the context is likely non-interactive or AI-driven.
-    """
-    env = os.environ
-
-    # Hard signals: explicit non-interactive intent or known AI tool env vars
-    if "--non-interactive" in sys.argv:
-        return True
-    if "--agent-friendly" in sys.argv:
-        return True
-    if env.get("CI") in ("true", "1"):
-        return True
-    if env.get("CLAUDECODE"):
-        return True
-    if env.get("CLAUDE_CODE_ENTRYPOINT"):
-        return True
-    if env.get("CODEX_SANDBOX"):
-        return True
-    if env.get("CODEX_SANDBOX_NETWORK_DISABLED"):
-        return True
-    if env.get("OR_APP_NAME") == "Aider":
-        return True
-    if "aider" in env.get("OR_SITE_URL", ""):
-        return True
-
-    # Soft signals — score-based; none is conclusive alone
-    score = 0
-    if not sys.stdin.isatty():
-        score += 1
-    if not sys.stdout.isatty():
-        score += 1
-    if not env.get("TERM") or env.get("TERM") == "dumb":
-        score += 1
-    if "NO_COLOR" in env:
-        score += 1
-
-    return score >= 3
-
-
-# Environment markers set by AI coding agents themselves. Used, instead of
-# is_agentic(), wherever the CLI decides whom to trust with the API key: a
-# hard signal only. CI, a missing TTY or a missing TERM are never on this
-# list, so CI jobs, cron and containers keep the environment they were given.
-# An exact list; is_agentic() above is for output formatting and is broader.
-AI_AGENT_ENV_MARKERS: tuple[str, ...] = (
-    "AI_AGENT",
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CODEX_SANDBOX",
-    "CODEX_SANDBOX_NETWORK_DISABLED",
-    "CURSOR_AGENT",
-    "GEMINI_CLI",
-)
-
-
-def is_ai_agent() -> bool:
-    """True only when an AI coding agent marked the environment.
-
-    Hard signals: any non-empty variable in ``AI_AGENT_ENV_MARKERS``, or
-    Aider (``OR_APP_NAME=Aider`` or "aider" in ``OR_SITE_URL``). Never
-    ``CI``, TTY state, ``TERM`` or command-line flags.
-    """
-    env = os.environ
-    if any(env.get(name) for name in AI_AGENT_ENV_MARKERS):
-        return True
-    return env.get("OR_APP_NAME") == "Aider" or "aider" in env.get("OR_SITE_URL", "")
+def agent_mode() -> bool:
+    """Hard agent mode for presentation, prompts and login: ``DG_AGENT``
+    when it is 0 or 1, else :func:`is_ai_agent`. Never for trust."""
+    forced = agents.override()
+    if forced is not None:
+        return forced == "1"
+    return is_ai_agent()
 
 
 _agentic = is_agentic()
@@ -150,18 +91,23 @@ class _LazyConsole:
 
 
 # Global console instance — plain when agentic, rich when interactive
-console = cast("Console", _LazyConsole(no_color=_agentic, highlight=not _agentic))
-stderr_console = cast(
-    "Console",
-    _LazyConsole(stderr=True, no_color=_agentic, highlight=not _agentic),
-)
+# Plain text (no colour and no bold or dim either) in agent mode and when
+# NO_COLOR is set: rich's own NO_COLOR handling still writes styles. Never
+# no_color=False, which would override NO_COLOR; otherwise rich reads
+# FORCE_COLOR and TERM itself.
+_plain = _agentic or agents.no_color()
+_console_kwargs: dict[str, Any] = {"highlight": not _agentic}
+if _plain:
+    _console_kwargs.update(no_color=True, color_system=None)
+console = cast("Console", _LazyConsole(**_console_kwargs))
+stderr_console = cast("Console", _LazyConsole(stderr=True, **_console_kwargs))
 
 # Global output configuration
 _output_config: dict[str, Any] = {
     "format": "default",
     "quiet": False,
     "verbose": False,
-    "color": not _agentic,
+    "color": not _plain,
     "agentic": _agentic,
     "format_source": "default",
 }
@@ -173,7 +119,7 @@ def _format_source(requested: str) -> str:
         return "explicit"
     if not _output_config["agentic"]:
         return "default"
-    return "hard_agent" if is_ai_agent() else "soft"
+    return "hard_agent" if agent_mode() else "soft"
 
 
 def setup_output(
@@ -711,7 +657,7 @@ def format_source() -> str:
     """Why the output format is what it is.
 
     ``"explicit"``: asked for with ``-o``. ``"hard_agent"``: JSON chosen
-    implicitly while an AI-agent marker (``is_ai_agent()``) is set.
+    implicitly in hard agent mode (``agents.agent_mode()``).
     ``"soft"``: JSON chosen implicitly by the TTY/CI heuristics alone.
     ``"default"``: no format was chosen.
     """
@@ -741,3 +687,46 @@ def get_status_console() -> Console:
         Console instance writing to stderr
     """
     return stderr_console
+
+
+def invoked_prog() -> str:
+    """The program name to show in notices and messages.
+
+    ``DEEPCTL_PROG_NAME`` when it is a plain program name (see
+    ``deepctl.main.prog_name_from_env``); else the running executable as a
+    command (``dg``, ``deepctl``, ``deepgram`` when that name runs this
+    same file, else its path); else ``dg``.
+    """
+    try:
+        from deepctl.main import prog_name_from_env
+    except ImportError:  # deepctl-core without the CLI: no launcher name
+        name = None
+    else:
+        name = prog_name_from_env()
+    if name:
+        return name
+    from .transport import prog
+
+    return prog() or "dg"
+
+
+def stderr_color() -> bool:
+    """Whether a raw notice written to stderr may use ANSI colour.
+
+    Only for a person's session (never agent or automation output), with
+    NO_COLOR unset or empty and TERM not ``dumb``; and only on a terminal,
+    unless FORCE_COLOR is set.
+    """
+    import os
+    import sys
+
+    if _output_config["agentic"] or os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("TERM") == "dumb":
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    try:
+        return bool(sys.stderr.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False

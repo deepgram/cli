@@ -22,13 +22,15 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "mtime_ns", "size", "inode"],
+            "required": ["path", "mtime_ns", "size", "inode", "mode", "uid"],
             "properties": {
               "path": {"type": "string", "minLength": 1},
               "mtime_ns": {"type": "integer"},
               "size": {"type": "integer", "minimum": 0},
               "inode": {"type": "integer", "minimum": 0},
-              "cwd_relative": {"description": "Reserved; never written.", "const": true}
+              "mode": {"description": "st_mode: file type and permission bits.", "type": "integer", "minimum": 0},
+              "uid": {"description": "st_uid (0 on Windows).", "type": "integer", "minimum": 0},
+              "cwd_relative": {"description": "path is relative to the working directory.", "const": true}
             }
           },
           {
@@ -38,7 +40,7 @@
             "properties": {
               "path": {"type": "string", "minLength": 1},
               "absent": {"const": true},
-              "cwd_relative": {"description": "Reserved; never written.", "const": true}
+              "cwd_relative": {"description": "path is relative to the working directory.", "const": true}
             }
           }
         ]

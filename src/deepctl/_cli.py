@@ -100,7 +100,7 @@ class DependencyMissingError(click.ClickException):
         from deepctl_core import output
 
         install_hint = H_DEPENDENCY_REINSTALL.format(prog=self.prog)
-        if output.is_agentic() or output.is_ai_agent():
+        if output.is_agentic() or output.agent_mode():
             hint = A_DEPENDENCY.format(
                 prog=self.prog,
                 dependency=self.dependency,

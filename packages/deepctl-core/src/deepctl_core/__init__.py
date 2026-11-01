@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     )
     from .output import (
         OutputFormatter,
+        agent_mode,
         get_console,
         get_output_format,
         get_status_console,
@@ -71,6 +72,7 @@ _LAZY_NAMES: dict[str, str] = {
     "ProfileInfo": "models",
     "ProfilesResult": "models",
     "TimingContext": "timing",
+    "agent_mode": "output",
     "enable_timing": "timing",
     "get_console": "output",
     "get_output_format": "output",
@@ -130,6 +132,7 @@ __all__ = [
     "ProfileInfo",
     "ProfilesResult",
     "TimingContext",
+    "agent_mode",
     "enable_timing",
     "get_console",
     "get_output_format",
