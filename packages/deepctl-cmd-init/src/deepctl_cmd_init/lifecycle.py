@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from deepctl_core.output import print_hint, print_info, print_warning
 from rich.console import Console
@@ -59,6 +61,54 @@ def check_prereqs() -> list[tuple[str, str, str]]:
 
 
 # ── Git clone ─────────────────────────────────────────────────────────────────
+
+#: The GitHub organizations dg clones templates from.
+TEMPLATE_ORGS = ("deepgram", "deepgram-starters")
+
+# A repository or template name: ASCII letters, digits, ".", "_" and "-",
+# not starting with "-" (git or a shell would read it as an option).
+_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def valid_name(name: object) -> bool:
+    """Whether ``name`` is a usable template or repository name."""
+    return (
+        isinstance(name, str)
+        and _NAME.fullmatch(name) is not None
+        and not name.startswith("-")
+        and name not in (".", "..")
+    )
+
+
+def is_template_repo(url: str) -> bool:
+    """Whether ``url`` is an https GitHub repository of a Deepgram organization.
+
+    The template service supplies the URL, so only
+    ``https://github.com/deepgram/<repo>`` and
+    ``https://github.com/deepgram-starters/<repo>`` are cloned: no other
+    host, scheme, port, user name, query or fragment, and the repository
+    name is plain (``valid_name``): no escapes, separators or option-like
+    leading ``-``.
+    """
+    if not url.isprintable() or any(c.isspace() for c in url):
+        return False  # urlsplit drops tabs and newlines; git wouldn't
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme != "https" or parts.netloc != "github.com" or port is not None:
+        return False
+    if parts.query or parts.fragment or "\\" in url:
+        return False
+    segments = parts.path.split("/")
+    # "", org, repo (and an optional trailing "")
+    if len(segments) == 4 and segments[3] == "":
+        segments = segments[:3]
+    if len(segments) != 3 or segments[0] != "":
+        return False
+    org, repo = segments[1], segments[2]
+    return org in TEMPLATE_ORGS and valid_name(repo)
 
 
 def clone_template(github_url: str, target_dir: Path) -> None:
