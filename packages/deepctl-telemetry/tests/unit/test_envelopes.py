@@ -114,6 +114,7 @@ def transport(monkeypatch: pytest.MonkeyPatch) -> Any:
     saved_thread_hook = threading.excepthook
     monkeypatch.setattr(sentry_sdk, "init", init_with_capture)
     monkeypatch.delenv(client.DISABLE_ENV_VAR, raising=False)
+    monkeypatch.delenv(client.CI_ENV_VAR, raising=False)
     monkeypatch.setenv(client.DSN_ENV_VAR, "http://public@127.0.0.1:9/1")
     monkeypatch.setattr(sys, "argv", list(ARGV))
     monkeypatch.setattr(client, "_state", client._fresh_state())

@@ -77,7 +77,7 @@ The launcher serves an entry only when every one of the following holds. Anythin
 4. **Each name in `env`** has the same value in the launcher's environment, and `null` means the variable must be unset. On Windows, look the names up case-insensitively, as the OS does. A variable that isn't listed doesn't matter. `DEEPCTL_PROG_NAME` and `DEEPCTL_HELP_CACHE` are never listed: the launcher sets them, and `prog` already records the name.
 5. **`text_sha256`** (lowercase hex) equals the SHA-256 of the entry bytes the launcher read. This binds the text to its key: Python writes the text first and the key second, so text from another run under this key is a miss and is never served.
 
-A bundle install (`-I`, no user site, `HOME` is the real home) lists about 10 files and 18 environment variables. Python writes no key over the limits (32 files, 64 variables), so an install with a long `sys.path` (an editable install, say) gets no entry and always takes the Python path.
+A bundle install (`-I`, no user site, `HOME` is the real home) lists about 10 files and 20 environment variables. Python writes no key over the limits (32 files, 64 variables), so an install with a long `sys.path` (an editable install, say) gets no entry and always takes the Python path.
 
 **Paths and values that aren't valid Unicode.**
 - **Unix:** a path or environment value with bytes that don't decode under the filesystem encoding reaches Python as a lone surrogate (`\udcXX`).

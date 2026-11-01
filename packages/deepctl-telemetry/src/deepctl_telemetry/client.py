@@ -39,8 +39,12 @@ TELEMETRY_BUILD_ENABLED = True
 
 DSN_ENV_VAR = "DEEPCTL_TELEMETRY_DSN"
 DISABLE_ENV_VAR = "DEEPCTL_TELEMETRY_DISABLED"
+# Cross-tool opt-outs, honored like DEEPCTL_TELEMETRY_DISABLED: the
+# consoledonottrack.com convention, and the variable CI services set.
+DO_NOT_TRACK_ENV_VAR = "DO_NOT_TRACK"
+CI_ENV_VAR = "CI"
 
-# Values of DEEPCTL_TELEMETRY_DISABLED that leave telemetry on. Any other
+# Values of the opt-out variables that leave telemetry on. Any other
 # non-empty value turns it off.
 _ENV_KEEPS_ON = frozenset({"0", "false", "no", "off"})
 
@@ -55,10 +59,10 @@ def _fresh_state() -> dict[str, Any]:
     """Per-run state, stdlib types only.
 
     `opt_out` names the switch that turned telemetry off ("build", "dsn"
-    when there is no destination, "flag", "env" or "config"); `config_path`
-    is the user config file the decision was read from; `reported` is set
-    once a report starts, `sent` once an event has been handed to the
-    transport.
+    when there is no destination, "flag", "env", "do_not_track", "ci" or
+    "config"); `config_path` is the user config file the decision was read
+    from; `reported` is set once a report starts, `sent` once an event has
+    been handed to the transport.
     """
     return {
         "enabled": False,
@@ -81,9 +85,15 @@ def disable_for_run() -> None:
     _state["enabled"] = False
 
 
-def _env_opts_out() -> bool:
-    value = os.environ.get(DISABLE_ENV_VAR, "").strip().lower()
+def _env_set(name: str) -> bool:
+    """Whether the variable `name` turns telemetry off (any non-empty value
+    except the ones in _ENV_KEEPS_ON)."""
+    value = os.environ.get(name, "").strip().lower()
     return bool(value) and value not in _ENV_KEEPS_ON
+
+
+def _env_opts_out() -> bool:
+    return _env_set(DISABLE_ENV_VAR)
 
 
 # Keys whose repetition in a config file makes the telemetry setting
@@ -189,6 +199,10 @@ def _opt_out_source(config: Config) -> str | None:
         return "flag"
     if _env_opts_out():
         return "env"
+    if _env_set(DO_NOT_TRACK_ENV_VAR):
+        return "do_not_track"
+    if _env_set(CI_ENV_VAR):
+        return "ci"
     if _user_config_opts_out(config):
         return "config"
     return None
@@ -199,9 +213,10 @@ def is_enabled(config: Config) -> bool:
 
     Resolution order: the build switch, then whether there is a
     destination (a loopback DEEPCTL_TELEMETRY_DSN; without one telemetry is
-    off), then `--no-telemetry` for this run, then the env override
-    (DEEPCTL_TELEMETRY_DISABLED), then `telemetry.enabled` in the user's
-    config file (default on). The project's `deepgram.yaml` is never read.
+    off), then `--no-telemetry` for this run, then the env overrides
+    (DEEPCTL_TELEMETRY_DISABLED, DO_NOT_TRACK, CI), then `telemetry.enabled`
+    in the user's config file (default on). The project's `deepgram.yaml` is
+    never read.
     """
     return _opt_out_source(config) is None
 
