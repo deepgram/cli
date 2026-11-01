@@ -530,7 +530,22 @@ class BaseCommand(ABC):
             return str(obj)
 
         if isinstance(result, dict | list):
-            console.print_json(json.dumps(result, indent=2, default=_default))
+            if console.is_terminal:
+                # A person reading a terminal: highlighted.
+                console.print_json(json.dumps(result, indent=2, default=_default))
+                return
+            # A pipe or file: the same text rich would print, in one write
+            # (rich's renderer takes seconds on a large result).
+            from .output import _output_config
+
+            if _output_config["quiet"]:
+                return
+            stream = console.file
+            stream.write(
+                json.dumps(result, indent=2, ensure_ascii=False, default=_default)
+                + "\n"
+            )
+            stream.flush()
         else:
             console.print(
                 json.dumps({"result": str(result)}, indent=2, default=_default)
