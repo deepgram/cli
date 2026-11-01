@@ -33,6 +33,7 @@ from deepctl_core.plugin_env import (
     get_plugin_state,
     get_venv_python,
     is_frozen,
+    make_plugin_dirs_private,
     plugin_paths,
     read_plugin_state_file,
     save_plugin_state,
@@ -204,12 +205,15 @@ class PluginCommand(BaseGroupCommand):
         if self._plugin_dir is None or self._plugin_venv is None:
             return False, ""
 
-        # Create plugin directory if it doesn't exist
-        self._plugin_dir.mkdir(parents=True, exist_ok=True)
+        # The plugin directory and venv are owner-only (0700) whatever the
+        # umask; this also narrows ones an earlier version left open.
+        make_plugin_dirs_private(self._plugin_venv)
 
         # Check if venv exists
         if not self._plugin_venv.exists():
             print_info("Creating plugin environment...")
+            self._plugin_venv.mkdir(mode=0o700)
+            make_plugin_dirs_private(self._plugin_venv)
 
             # Determine which Python to use for venv creation
             if is_frozen():

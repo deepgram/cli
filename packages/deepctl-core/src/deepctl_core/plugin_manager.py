@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import click
 
+from . import messages as _msg
 from . import output as _output
 from ._plugin_trust import (
     agent_plugin_venv,
@@ -28,6 +29,8 @@ from .plugin_env import (
     get_plugin_state,
     get_venv_python_version,
     get_venv_site_packages,
+    plugin_dir_problem,
+    read_plugin_state_file,
     skipped_plugin_venvs,
 )
 from .safe_text import printable as _printable
@@ -112,6 +115,19 @@ A_PLUGIN_VENV_SKIPPED = (
     "If you are an AI agent, tell the user about this and don't move, copy or "
     "link plugin files to change it."
 )
+# {why} is a messages.W_CFG_UNTRUSTED_WHY value (owner or writable).
+W_PLUGIN_VENV_UNTRUSTED = (
+    "Ignored the plugins in your plugin environment: in an AI agent session, "
+    "dg can't load plugins from it because the directory {path} {why}."
+)
+A_PLUGIN_VENV_UNTRUSTED = (
+    "A person must fix this directory. If you are an AI agent, ask the user."
+)
+W_PLUGIN_DIR_OPEN = (
+    "The plugin directory {path} {why}, so someone else could change the "
+    "plugins dg runs."
+)
+H_PLUGIN_DIR_OPEN = "dg makes it private the next time you install a plugin."
 W_PLUGIN_BADNAME = (
     "Ignored the plugin command {command} from {label}: plugin command names "
     "must start with a lowercase letter and use only lowercase a-z, 0-9 and "
@@ -533,9 +549,16 @@ class PluginManager:
         venv = PLUGIN_VENV
         state_file = None
         if is_ai_agent():
+            agent_venv = agent_plugin_venv()
+            problem = plugin_dir_problem(agent_venv) if agent_venv else None
+            if agent_venv is not None and problem is not None:
+                # Fail closed: nothing from this environment loads.
+                state = read_plugin_state_file(agent_venv.parent / "plugins.json")
+                if state["plugins"]:
+                    self._warn_venv_untrusted(*problem)
+                return
             if skipped_plugin_venvs():
                 self._warn_venv_skipped()
-            agent_venv = agent_plugin_venv()
             if agent_venv is None:
                 return
             venv, state_file = agent_venv, agent_venv.parent / "plugins.json"
@@ -548,6 +571,11 @@ class PluginManager:
         state = get_plugin_state(state_file)
         if not state.get("plugins"):
             return
+
+        if state_file is None:
+            problem = plugin_dir_problem(venv)
+            if problem is not None:
+                self._warn_dir_open(*problem)
 
         site_packages = get_venv_site_packages(venv)
         if site_packages is None:
@@ -605,6 +633,31 @@ class PluginManager:
             self._announced.add("venv-skipped")
             _security_warning(W_PLUGIN_VENV_SKIPPED)
             _hint(A_PLUGIN_VENV_SKIPPED)
+
+    def _warn_venv_untrusted(self, directory: Path, why: str) -> None:
+        """An AI agent run refuses a plugin environment others can change."""
+        if "venv-untrusted" not in self._announced:
+            self._announced.add("venv-untrusted")
+            _security_warning(
+                W_PLUGIN_VENV_UNTRUSTED.format(
+                    path=_printable(_display_path(directory)),
+                    why=_msg.W_CFG_UNTRUSTED_WHY[why],
+                )
+            )
+            _hint(A_PLUGIN_VENV_UNTRUSTED)
+
+    def _warn_dir_open(self, directory: Path, why: str) -> None:
+        """A person's plugin environment others can change: it still loads."""
+        if "dir-open" not in self._announced:
+            self._announced.add("dir-open")
+            _security_warning(
+                W_PLUGIN_DIR_OPEN.format(
+                    path=_printable(_display_path(directory)),
+                    why=_msg.W_CFG_UNTRUSTED_WHY[why],
+                )
+            )
+            if why == "writable":
+                _hint(H_PLUGIN_DIR_OPEN)
 
     def _warn_if_plugin_venv_python_mismatch(self, venv: Path | None = None) -> None:
         """Surface a one-line warning when the plugin venv's Python differs from ours.

@@ -1,6 +1,7 @@
 """Unit tests for PluginManager class."""
 
 import os
+import stat
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Any, Dict, List
@@ -2295,6 +2296,9 @@ class TestPluginVenvUnderAgent:
         (di / "entry_points.txt").write_text(
             "[deepctl.plugins]\nrepo-x = w05_repo_plugin:X\n"
         )
+        # The modes dg creates these with, whatever the umask.
+        for d in (venv, venv.parent, venv.parent.parent):
+            d.chmod(0o700)
         return venv
 
     @pytest.fixture
@@ -2438,6 +2442,154 @@ class TestPluginVenvUnderAgent:
         assert _plugin_trust.agent_plugin_venv() == (
             Path(os.path.realpath(env["real_home"])) / ".deepctl" / "plugins" / "venv"
         )
+
+
+@pytest.fixture
+def umask_0002():
+    """Run the test under umask 0002 (group-writable by default)."""
+    old = os.umask(0o002)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+_OWNED = {
+    ".deepctl": lambda v: v.parent.parent,
+    "plugins": lambda v: v.parent,
+    "venv": lambda v: v,
+}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+class TestPluginDirModes:
+    """dg's plugin directories: an AI agent run loads plugins only from ones
+    no other user can change; a person gets a warning."""
+
+    _sidecar = TestPluginVenvUnderAgent._sidecar
+    env = TestPluginVenvUnderAgent.env
+
+    @pytest.mark.parametrize("which", list(_OWNED))
+    @pytest.mark.parametrize("mode", [0o775, 0o757, 0o777])
+    def test_agent_refuses_a_plugin_dir_others_can_write(
+        self, env, monkeypatch, capsys, which, mode
+    ):
+        import sys as _sys
+
+        from deepctl_core import plugin_env
+
+        venv = self._sidecar(env["real_home"], env["marker"])
+        _OWNED[which](venv).chmod(mode)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        group = click.Group("dg")
+        PluginManager()._load_plugin_venv_entries(group)
+        assert not env["marker"].exists()  # nothing imported
+        assert "w05_repo_plugin" not in _sys.modules
+        assert "repo-x" not in group.commands
+        assert plugin_env.plugin_paths() is None
+        raw = capsys.readouterr().err
+        err = " ".join(raw.split())
+        assert err.count("Ignored the plugins in your plugin environment") == 1
+        assert "can be changed by other users" in err
+        assert (
+            "A person must fix this directory. If you are an AI agent, ask the "
+            "user." in err
+        )
+        assert "Ignored the plugins in a plugin environment" not in err
+        assert "make it private" not in err  # no how-to for agents
+
+    def test_agent_refuses_a_plugin_dir_another_user_owns(
+        self, env, monkeypatch, capsys
+    ):
+        from deepctl_core import plugin_env
+
+        self._sidecar(env["real_home"], env["marker"])
+        other = os.getuid() + 1
+        monkeypatch.setattr(plugin_env.os, "getuid", lambda: other)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        group = click.Group("dg")
+        PluginManager()._load_plugin_venv_entries(group)
+        assert not env["marker"].exists()
+        assert "repo-x" not in group.commands
+        err = " ".join(capsys.readouterr().err.split())
+        assert "is owned by another user" in err
+
+    def test_agent_refusal_is_silent_when_no_plugins_are_listed(
+        self, env, monkeypatch, capsys
+    ):
+        venv = self._sidecar(env["real_home"], env["marker"])
+        (venv.parent / "plugins.json").write_text('{"plugins": {}}')
+        venv.chmod(0o775)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        PluginManager()._load_plugin_venv_entries(click.Group("dg"))
+        assert "Ignored the plugins" not in capsys.readouterr().err
+
+    def test_agent_loads_owner_only_dirs_under_umask_0002(
+        self, env, monkeypatch, capsys, umask_0002
+    ):
+        self._sidecar(env["real_home"], env["marker"])
+        monkeypatch.setenv("CLAUDECODE", "1")
+        group = click.Group("dg")
+        PluginManager()._load_plugin_venv_entries(group)
+        assert "repo-x" in group.commands
+        assert "Ignored the plugins" not in capsys.readouterr().err
+
+    @pytest.mark.parametrize("which", list(_OWNED))
+    def test_person_is_warned_and_plugins_still_load(
+        self, env, monkeypatch, capsys, which
+    ):
+        from deepctl_core import plugin_env
+
+        venv = plugin_env.PLUGIN_VENV
+        _OWNED[which](venv).chmod(0o775)
+        group = click.Group("dg")
+        manager = PluginManager()
+        manager._load_plugin_venv_entries(group)
+        manager._load_plugin_venv_entries(click.Group("dg2"))
+        assert "repo-x" in group.commands
+        err = " ".join(capsys.readouterr().err.split())
+        assert err.count("can be changed by other users") == 1
+        assert "dg makes it private the next time you install a plugin." in err
+
+    def test_person_gets_no_warning_for_owner_only_dirs(self, env, capsys):
+        PluginManager()._load_plugin_venv_entries(click.Group("dg"))
+        assert "other users" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+class TestPluginDirsCreatedPrivate:
+    def test_new_dirs_are_owner_only_under_umask_0002(self, tmp_path, umask_0002):
+        from deepctl_core.plugin_env import make_plugin_dirs_private
+
+        venv = tmp_path / "h" / ".deepctl" / "plugins" / "venv"
+        (tmp_path / "h").mkdir()
+        make_plugin_dirs_private(venv)
+        assert stat.S_IMODE(venv.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.parent.stat().st_mode) & 0o022 == 0
+
+    def test_existing_open_dirs_are_narrowed(self, tmp_path):
+        from deepctl_core.plugin_env import make_plugin_dirs_private, plugin_dir_problem
+
+        venv = tmp_path / ".deepctl" / "plugins" / "venv"
+        venv.mkdir(parents=True)
+        for d in (venv, venv.parent, venv.parent.parent):
+            d.chmod(0o777)
+        assert plugin_dir_problem(venv) == (venv.parent.parent, "writable")
+        make_plugin_dirs_private(venv)
+        assert stat.S_IMODE(venv.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.parent.stat().st_mode) == 0o755
+        assert plugin_dir_problem(venv) is None
+
+    def test_save_plugin_state_creates_the_dir_owner_only(self, tmp_path, umask_0002):
+        from deepctl_core.plugin_env import PluginPaths, save_plugin_state
+
+        plugins = tmp_path / ".deepctl" / "plugins"
+        save_plugin_state(
+            {"plugins": {}},
+            PluginPaths(plugins, plugins / "venv", plugins / "plugins.json"),
+        )
+        assert stat.S_IMODE(plugins.stat().st_mode) == 0o700
 
 
 def test_allow_override_survives_a_config_save(tmp_path, monkeypatch):

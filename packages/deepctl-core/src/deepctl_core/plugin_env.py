@@ -35,10 +35,58 @@ def plugin_paths() -> PluginPaths | None:
     """
     if is_ai_agent():
         venv = agent_plugin_venv()
-        if venv is None:
+        if venv is None or plugin_dir_problem(venv) is not None:
             return None
         return PluginPaths(venv.parent, venv, venv.parent / "plugins.json")
     return PluginPaths(PLUGIN_DIR, PLUGIN_VENV, PLUGIN_STATE_FILE)
+
+
+def _owned_plugin_dirs(venv: Path) -> tuple[Path, Path, Path]:
+    """dg's own directories on the way to the venv: ``.deepctl``,
+    ``.deepctl/plugins`` and the venv itself."""
+    return venv.parent.parent, venv.parent, venv
+
+
+def plugin_dir_problem(venv: Path) -> tuple[Path, str] | None:
+    """``(directory, why)`` for the first of dg's plugin directories (see
+    :func:`_owned_plugin_dirs`) that another user owns or that the group or
+    others can write, or ``None`` when there is none.
+
+    ``why`` is a key of ``messages.W_CFG_UNTRUSTED_WHY`` (``owner`` or
+    ``writable``). The venv root being private keeps everything inside it
+    out of other users' reach. Directories that don't exist yet, and every
+    directory on Windows, are no problem.
+    """
+    if os.name != "posix":
+        return None
+    for directory in _owned_plugin_dirs(venv):
+        try:
+            st = os.stat(directory)
+        except OSError:
+            return None
+        if st.st_uid != os.getuid():
+            return directory, "owner"
+        if stat.S_IMODE(st.st_mode) & 0o022:
+            return directory, "writable"
+    return None
+
+
+def make_plugin_dirs_private(venv: Path) -> None:
+    """Create ``.deepctl/plugins`` owner-only (0700, whatever the umask) and
+    narrow dg's own plugin directories that already exist: no group or
+    other access to ``plugins`` and the venv, and no group or other write
+    on ``.deepctl``."""
+    dot, plugins, _ = _owned_plugin_dirs(venv)
+    plugins.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name != "posix":
+        return
+    for directory, keep in ((dot, 0o7755), (plugins, 0o700), (venv, 0o700)):
+        try:
+            st = os.stat(directory)
+            if st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) & ~keep:
+                os.chmod(directory, stat.S_IMODE(st.st_mode) & keep)
+        except OSError:
+            continue
 
 
 def is_frozen() -> bool:
@@ -289,5 +337,5 @@ def save_plugin_state(state: dict[str, Any], paths: PluginPaths | None = None) -
     paths = plugin_paths() if paths is None else paths
     if paths is None:
         raise RuntimeError("the plugin environment is not available in this run")
-    paths.dir.mkdir(parents=True, exist_ok=True)
+    make_plugin_dirs_private(paths.venv)
     paths.state_file.write_text(json.dumps(state, indent=2))
