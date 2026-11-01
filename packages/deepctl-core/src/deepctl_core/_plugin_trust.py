@@ -10,8 +10,6 @@ group or other write).
 import os
 from pathlib import Path
 
-import yaml
-
 from . import config as _config
 from .output import is_ai_agent
 
@@ -67,7 +65,10 @@ def allow_override_names() -> frozenset[str]:
             data = root[1] if root is not None else None
         else:
             _, data = _config._read_yaml_fd(_config._default_config_file())
-    except (OSError, ValueError, yaml.YAMLError):
+    except Exception as exc:
+        # OSError, ValueError or a YAML error (yaml loads only with a file).
+        if not _config._is_parse_error(exc):
+            raise
         return frozenset()
     plugins = data.get("plugins") if isinstance(data, dict) else None
     names = plugins.get("allow_override") if isinstance(plugins, dict) else None

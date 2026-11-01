@@ -123,11 +123,14 @@ class _LazyConsole:
     ``stderr_console`` never changes.
     """
 
-    __slots__ = ("_deepctl_console", "_deepctl_kwargs")
+    __slots__ = ("_deepctl_console", "_deepctl_kwargs", "_deepctl_quiet")
 
     def __init__(self, **kwargs: Any) -> None:
         object.__setattr__(self, "_deepctl_kwargs", kwargs)
         object.__setattr__(self, "_deepctl_console", None)
+        # ``quiet`` set before the console exists: applied when it's built,
+        # so setup_output() doesn't import rich for a run that prints nothing.
+        object.__setattr__(self, "_deepctl_quiet", None)
 
     def _deepctl_real(self) -> Console:
         real = object.__getattribute__(self, "_deepctl_console")
@@ -136,12 +139,21 @@ class _LazyConsole:
 
             real = Console(**object.__getattribute__(self, "_deepctl_kwargs"))
             object.__setattr__(self, "_deepctl_console", real)
+            quiet = object.__getattribute__(self, "_deepctl_quiet")
+            if quiet is not None:
+                real.quiet = quiet
         return cast("Console", real)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._deepctl_real(), name)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if (
+            name == "quiet"
+            and object.__getattribute__(self, "_deepctl_console") is None
+        ):
+            object.__setattr__(self, "_deepctl_quiet", value)
+            return
         setattr(self._deepctl_real(), name, value)
 
     def __delattr__(self, name: str) -> None:
