@@ -83,6 +83,8 @@ class TestMcpCommand:
         """
         command = McpCommand()
         config = MagicMock()
+        # A non-default --base-url must be approved in the user config.
+        config.allowed_hosts.return_value = ["localhost"]
         auth_manager = MagicMock()
         client = MagicMock()
 
@@ -236,8 +238,10 @@ class TestMcpCommand:
         auth_manager.get_api_key.return_value = "stored-key"
         client = MagicMock()
 
-        with patch("deepctl_cmd_mcp.command.asyncio.run") as mock_run, \
-             patch("signal.signal"):
+        with (
+            patch("deepctl_cmd_mcp.command.asyncio.run") as mock_run,
+            patch("signal.signal"),
+        ):
             mock_run.return_value = None
 
             result = command.handle(

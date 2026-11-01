@@ -33,6 +33,7 @@ TRUST_CONFIG = {
 def real_home(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module, "_pending_notices", [])
     monkeypatch.setattr(config_module, "_seen_notices", set())
+    monkeypatch.setattr(hosts, "_reported", set())
     home = tmp_path / "home"
     home.mkdir()
     # The account's home directory as the OS reports it.
@@ -83,6 +84,8 @@ def assert_filtered(config: Config) -> None:
         assert "~" not in line
         assert "--config" not in line
     assert any(line.startswith("Ignored api.allowed_hosts in /") for line in lines)
+    with pytest.raises(hosts.CredentialHostError):
+        hosts.check_credential_host(Config(base_url="http://127.0.0.1:8000"))
 
 
 def test_agent_real_config_honored_with_cwd_home(real_home, monkeypatch):
@@ -432,6 +435,8 @@ def test_writable_config_with_key_left_alone_and_untrusted_in_agent_mode(
     assert all(line.endswith("because the file can be changed by other users.")
                for line in lines)
     assert config.get_profile().base_url == "https://api.deepgram.com"
+    with pytest.raises(hosts.CredentialHostError):
+        hosts.check_credential_host(Config(base_url="http://127.0.0.1:8000"))
 
 
 def test_writable_key_file_warning_ignores_quiet_and_prints_once(
@@ -755,6 +760,45 @@ def test_agent_foreign_owned_key_file_key_unused_and_not_saved(real_home, monkey
     assert cfg.read_bytes() == before
 
 
+def test_missing_key_after_untrusted_file_key_says_so(real_home, monkeypatch, capsys):
+    """The error says neither 'not set in the configuration file' nor dg login."""
+    from deepctl_core.auth import AuthenticationError, AuthManager
+
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    _no_keyring(monkeypatch)
+    agent(monkeypatch, True)
+    plant_with_key(real_home, 0o666)
+    output._output_config.update(agentic=True)
+    try:
+        with pytest.raises(AuthenticationError) as err:
+            AuthManager(Config()).guard()
+    finally:
+        output._output_config.update(agentic=False)
+    expected = (
+        "dg didn't use the API key in ~/.config/deepctl/config.yaml (see the warning "
+        "above), and no other API key is set."
+    )
+    assert str(err.value) == expected
+    captured = capsys.readouterr()
+    text = (captured.out + captured.err).replace("\n", " ")
+    assert f"ERROR: {expected}" in text
+    assert f"HINT: {FILE_HINT}" in text
+    assert "not set in the configuration file" not in text
+    assert "deepctl login" not in text
+    assert "dg login" not in text
+
+
+def test_missing_key_outside_untrusted_case_unchanged(real_home, monkeypatch, capsys):
+    from deepctl_core.auth import AuthenticationError, AuthManager
+
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    _no_keyring(monkeypatch)
+    agent(monkeypatch, True)
+    plant(real_home / ".config" / "deepctl")
+    with pytest.raises(AuthenticationError, match="DEEPGRAM_API_KEY is not set"):
+        AuthManager(Config()).guard()
+
+
 # ── Credential metadata, one hint per run, owner without W-PERM ───────────
 
 
@@ -867,6 +911,67 @@ def test_foreign_owned_key_file_outside_agent_mode_unchanged(real_home, monkeypa
     assert config.get_profile().api_key == "k"
     texts = [t for i, t, _, _ in config_module._pending_notices if i == "W-PERM-FAILED"]
     assert len(texts) == 1 and "set DEEPGRAM_API_KEY instead" in texts[0]
+
+
+def _run_projects_guard(capsys):
+    """Config load + notices + guard, as a `dg projects` run renders them."""
+    from deepctl_core.auth import AuthenticationError, AuthManager
+
+    output._output_config.update(agentic=True)
+    try:
+        config = Config()
+        config_module.flush_config_notices()
+        with pytest.raises(AuthenticationError):
+            AuthManager(config).guard()
+    finally:
+        output._output_config.update(agentic=False)
+    return capsys.readouterr().err
+
+
+@pytest.mark.parametrize("case", ["own_0666_hosts", "foreign_0644", "foreign_0666_two"])
+def test_untrusted_file_hint_prints_once_per_run(real_home, monkeypatch, capsys, case):
+    """Warnings, one hint, then the error."""
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    _no_keyring(monkeypatch)
+    agent(monkeypatch, True)
+    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg.parent.mkdir(parents=True)
+    profiles = {"default": {"api_key": "k"}}
+    if case == "foreign_0666_two":
+        profiles["work"] = {"api_key": "k2"}
+    cfg.write_text(
+        yaml.safe_dump({"profiles": profiles, "api": {"allowed_hosts": ["evil.example"]}})
+    )
+    cfg.chmod(0o644 if case == "foreign_0644" else 0o666)
+    if case.startswith("foreign"):
+        real_euid = os.geteuid()
+        monkeypatch.setattr(config_module.os, "geteuid", lambda: real_euid + 1)
+    err = _run_projects_guard(capsys)
+    lines = [line for line in err.splitlines() if line.strip()]
+    hints = [i for i, line in enumerate(lines) if line.startswith("HINT: ")]
+    assert len(hints) == 1, err
+    assert lines[hints[0]] == f"HINT: {FILE_HINT}"
+    error = next(i for i, line in enumerate(lines) if line.startswith("ERROR: "))
+    assert all(line.startswith("WARN: ") for line in lines[: hints[0]]), err
+    assert hints[0] == error - 1, err
+
+
+def test_untrusted_hint_follows_the_error_when_nothing_warned(real_home, monkeypatch, capsys):
+    from deepctl_core.auth import AuthenticationError, AuthManager
+
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    _no_keyring(monkeypatch)
+    agent(monkeypatch, True)
+    plant_with_key(real_home, 0o666)
+    output._output_config.update(agentic=True)
+    try:
+        with pytest.raises(AuthenticationError):
+            AuthManager(Config()).guard()
+    finally:
+        output._output_config.update(agentic=False)
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert lines[-1] == f"HINT: {FILE_HINT}"
+    assert lines[-2].startswith("ERROR: ")
 
 
 # ── Keyless untrusted files, unreadable real configs ─────────────

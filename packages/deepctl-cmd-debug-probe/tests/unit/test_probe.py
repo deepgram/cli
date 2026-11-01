@@ -1,9 +1,13 @@
 """Tests for debug probe command and proxy."""
 
+import asyncio
+import io
 import json
 from unittest.mock import Mock, patch
 
+import aiohttp
 import pytest
+from aiohttp import web
 from deepctl_cmd_debug_probe.command import ProbeCommand, _find_available_port
 from deepctl_cmd_debug_probe.models import (
     ProbeConnectionStats,
@@ -11,6 +15,7 @@ from deepctl_cmd_debug_probe.models import (
     ProbeSnapshot,
 )
 from deepctl_cmd_debug_probe.proxy import ProbeProxy
+from rich.console import Console
 
 
 class TestModels:
@@ -75,9 +80,7 @@ class TestProbeProxy:
 
         data = {
             "channel": {
-                "alternatives": [
-                    {"transcript": "hello world", "confidence": 0.99}
-                ]
+                "alternatives": [{"transcript": "hello world", "confidence": 0.99}]
             },
             "is_final": True,
         }
@@ -91,9 +94,7 @@ class TestProbeProxy:
         stats = ProbeConnectionStats(connection_id="test")
 
         data = {
-            "channel": {
-                "alternatives": [{"transcript": "hello"}]
-            },
+            "channel": {"alternatives": [{"transcript": "hello"}]},
             "is_final": False,
         }
 
@@ -188,3 +189,108 @@ class TestFindAvailablePort:
 
         port = _find_available_port(3100, 3100)
         assert port is None
+
+
+_REAL_SESSION = aiohttp.ClientSession
+
+
+class _PlainUpstream:
+    """A real aiohttp session whose ws_connect goes over plain http to a
+    loopback stub instead of wss. It takes the same arguments as
+    ClientSession, so the proxy's trace hook is installed as usual."""
+
+    def __init__(self, *args, **kwargs):
+        self._session = _REAL_SESSION(*args, **kwargs)
+
+    async def __aenter__(self):
+        await self._session.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc):
+        return await self._session.__aexit__(*exc)
+
+    def ws_connect(self, url, **kwargs):
+        return self._session.ws_connect(url.replace("wss://", "http://", 1), **kwargs)
+
+
+def _probe_through_redirect(location: str):
+    """Proxy one client stream to an upstream that answers the upgrade with
+    a redirect. Returns (origin requests, target requests, console text)."""
+    origin_reqs: list[bytes] = []
+    target_reqs: list[bytes] = []
+
+    async def read_head(reader):
+        try:
+            return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError):
+            return b""
+
+    async def run():
+        ports = {}
+
+        async def origin(reader, writer):
+            origin_reqs.append(await read_head(reader))
+            loc = location.format(target=f"127.0.0.1:{ports['target']}")
+            writer.write(
+                f"HTTP/1.1 302 Found\r\nLocation: {loc}\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n".encode()
+            )
+            await writer.drain()
+            writer.close()
+
+        async def target(reader, writer):
+            target_reqs.append(await read_head(reader) or b"<conn>")
+            writer.close()
+
+        for name, handler in (("origin", origin), ("target", target)):
+            srv = await asyncio.start_server(handler, "127.0.0.1", 0)
+            ports[name] = srv.sockets[0].getsockname()[1]
+
+        proxy = ProbeProxy(
+            api_key="fa1ce0000000000000000000000000000000000d",
+            upstream_host=f"127.0.0.1:{ports['origin']}",
+        )
+        app = web.Application()
+        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        try:
+            async with _REAL_SESSION() as client:
+                ws = await client.ws_connect(f"http://127.0.0.1:{port}/v1/listen?x=1")
+                await ws.send_bytes(b"\0\0" * 800)
+                await asyncio.wait_for(ws.receive(), 5)
+                await ws.close()
+        finally:
+            await runner.cleanup()
+
+    out = io.StringIO()
+    with (
+        patch("deepctl_cmd_debug_probe.proxy.aiohttp.ClientSession", _PlainUpstream),
+        patch(
+            "deepctl_cmd_debug_probe.proxy.console",
+            Console(file=out, force_terminal=False, width=300),
+        ),
+    ):
+        asyncio.run(run())
+    return origin_reqs, target_reqs, out.getvalue()
+
+
+class TestProbeUpstreamRedirect:
+    """The upstream connect never follows a redirect."""
+
+    # aiohttp follows http(s) Locations itself; ws:// ones it rejects.
+    @pytest.mark.parametrize(
+        "location", ["http://{target}/second", "ws://{target}/second", "/second"]
+    )
+    def test_redirect_refused_and_nothing_reaches_the_target(self, location):
+        origin, target, text = _probe_through_redirect(location)
+        assert target == []
+        assert len(origin) == 1
+        assert "Upstream connection refused" in text
+        assert "dg debug probe doesn't follow redirects, so no audio was sent." in (
+            " ".join(text.split())
+        )
+        assert "fa1ce0" not in text

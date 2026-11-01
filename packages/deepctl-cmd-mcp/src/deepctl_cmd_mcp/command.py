@@ -8,6 +8,14 @@ import signal
 from typing import TYPE_CHECKING, Any
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core.hosts import (
+    DX_API_HOSTS,
+    SOURCE_FLAG,
+    CredentialHostError,
+    canonical_url,
+    evaluate,
+    report,
+)
 from deepctl_core.output import stderr_console
 from deepgram_mcp import TransportType, run_proxy
 from deepgram_mcp.proxy import DEFAULT_BASE_URL
@@ -51,6 +59,7 @@ class McpCommand(BaseCommand):
     requires_auth = True
     requires_project = False
     ci_friendly = True
+    stdout_is_protocol = True
 
     examples = [
         "dg mcp",
@@ -131,9 +140,25 @@ class McpCommand(BaseCommand):
         transport = kwargs.get("transport", "stdio").lower()
         port = kwargs.get("port", 8000)
         host = kwargs.get("host", "127.0.0.1")
+        base_url = kwargs.get("base_url") or DEFAULT_BASE_URL
+
+        # The proxy sends the key to --base-url, so that host must be the
+        # Deepgram developer API or one the user approved in their config.
+        # Refuse at startup, on stderr only: stdout is the protocol channel.
+        if base_url != DEFAULT_BASE_URL:
+            try:
+                evaluate(
+                    base_url,
+                    SOURCE_FLAG,
+                    config.allowed_hosts(),
+                    trusted_hosts=DX_API_HOSTS,
+                )
+            except CredentialHostError as err:
+                report(err)
+                raise SystemExit(1) from err
+
         api_key = auth_manager.get_api_key()
         assert api_key  # guaranteed by requires_auth = True
-        base_url = kwargs.get("base_url", DEFAULT_BASE_URL)
         debug = kwargs.get("debug", False)
 
         valid_transports = ["stdio", "sse"]
@@ -164,7 +189,7 @@ class McpCommand(BaseCommand):
                     host=host,
                     port=port,
                     api_key=api_key,
-                    base_url=base_url,
+                    base_url=canonical_url(base_url),
                     debug=debug,
                 )
             )

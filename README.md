@@ -427,6 +427,23 @@ Create your own — see the [plugin example](packages/deepctl-plugin-example).
 
 **Priority:** CLI flags > environment variables > profile config > project config
 
+dg sends your API key only to Deepgram API hosts, to hosts you list in
+`api.allowed_hosts` in your own `config.yaml`, or to `DEEPGRAM_BASE_URL` (not in
+an AI agent session). Anything else is refused before a request is made. Hosts
+must use https: plain http works only for localhost, 127.0.0.0/8 and [::1]. For
+a proxy or self-hosted deployment, add its host (and port, to approve only that
+port):
+
+```yaml
+api:
+  allowed_hosts:
+    - my-proxy.example.com
+    - localhost:8080
+```
+
+A project's `deepgram.yaml` can't set credentials, a project ID, a profile or a
+non-Deepgram `base_url`, and can't approve hosts.
+
 ```bash
 dg login                                 # Interactive or --api-key
 dg login --profile staging --api-key SK  # Named profiles
