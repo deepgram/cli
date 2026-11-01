@@ -1,5 +1,6 @@
 """Unit tests for update command."""
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -7,6 +8,55 @@ import pytest
 from deepctl_cmd_update.command import UpdateCommand
 from deepctl_cmd_update.installation import InstallationInfo, InstallMethod
 from deepctl_cmd_update.version_check import VersionInfo
+
+
+def _real_config(tmp_path, monkeypatch):
+    """The default user config (so update.* keys are honored), in tmp_path."""
+    from deepctl_core import Config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    path = tmp_path / "xdg" / "deepctl" / "config.yaml"
+    path.parent.mkdir(parents=True, mode=0o700)
+    path.write_text(
+        "profiles:\n  default:\n    project_id: P1\n"
+        "update:\n  installation_method: pipx\n  check_frequency: daily\n"
+    )
+    os.chmod(path, 0o600)
+    config = Config()
+    assert config.config_path == path
+    return config, path
+
+
+class TestConfigUntouched:
+    """dg update never writes the user config (no implicit save)."""
+
+    @pytest.mark.parametrize("returncode", [0, 1])
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector.detect")
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    def test_full_update_leaves_the_file_byte_identical(
+        self, run_check, detect, run, returncode, tmp_path, monkeypatch
+    ):
+        config, path = _real_config(tmp_path, monkeypatch)
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+        run_check.return_value = VersionInfo(
+            current_version="0.1.0", latest_version="0.2.0", update_available=True
+        )
+        detect.return_value = InstallationInfo(
+            method=InstallMethod.PIP,
+            path="/p",
+            virtual_env=True,
+            editable=False,
+            python_executable="/p/bin/python3",
+        )
+        run.return_value = subprocess.CompletedProcess([], returncode, "", "")
+        UpdateCommand().handle(
+            config=config, auth_manager=MagicMock(), client=MagicMock(), yes=True
+        )
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+        # The legacy key is still readable, and was not rewritten.
+        assert config.get("update.installation_method") == "pipx"
 
 
 class TestUpdateCommand:
