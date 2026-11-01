@@ -8,7 +8,7 @@
   "requires_auth": false,
   "help": {
     "name": "update",
-    "help": "Check for and install updates to deepctl\n\nExamples:\n  dg update\n  dg update --check-only\n\n\nFor agents, use --agent-friendly.",
+    "help": "Check for and install updates to deepctl\n\nExamples:\n  dg update\n  dg update --check-only\n  dg update --dry-run\n\n\nFor agents, use --agent-friendly.",
     "short_help": "Check for and install updates to deepctl",
     "epilog": null,
     "hidden": false,
@@ -58,6 +58,27 @@
         "count": false,
         "hidden": false,
         "help": "Force update even if already up to date"
+      },
+      {
+        "class": "option",
+        "name": "dry_run",
+        "opts": [
+          "--dry-run"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Show how deepctl was installed and the command that updates it, without checking for or installing updates"
       },
       {
         "class": "option",

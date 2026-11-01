@@ -14,6 +14,7 @@ from deepctl_core import (
     print_success,
     print_warning,
 )
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm
 
@@ -42,6 +43,7 @@ class UpdateCommand(BaseCommand):
     examples = [
         "dg update",
         "dg update --check-only",
+        "dg update --dry-run",
     ]
     agent_help = (
         "Check for and install updates to deepctl. Can check PyPI for newer "
@@ -55,6 +57,15 @@ class UpdateCommand(BaseCommand):
             {
                 "names": ["--check-only", "--check"],
                 "help": "Only check for updates without installing",
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--dry-run"],
+                "help": (
+                    "Show how deepctl was installed and the command that "
+                    "updates it, without checking for or installing updates"
+                ),
                 "is_flag": True,
                 "is_option": True,
             },
@@ -94,6 +105,8 @@ class UpdateCommand(BaseCommand):
 
         # Extract arguments from kwargs
         check_only = kwargs.get("check_only", False)
+        if kwargs.get("dry_run", False):
+            return self._dry_run()
         force = kwargs.get("force", False)
         yes = kwargs.get("yes", False)
 
@@ -254,3 +267,31 @@ class UpdateCommand(BaseCommand):
                 update_available=version_info.update_available,
                 installation_method=install_info.method.value,
             )
+
+    def _dry_run(self) -> dict[str, Any]:
+        """Print the installation method and its update command; change
+        nothing and make no network request.
+
+        The lines print only in the default format: in the others, stdout
+        carries just the payload, whose ``message`` holds the same command.
+        """
+        from deepctl_core.output import get_output_format
+
+        detector = InstallationDetector()
+        install_info = detector.detect()
+        update_command = detector.get_update_command(install_info.method)
+        if update_command:
+            message = f"Run: {shlex.join(update_command)}"
+        else:
+            message = detector.get_update_instructions(install_info)
+        if get_output_format() == "default":
+            console = get_console()
+            method = install_info.method.value
+            console.print(f"Installation method: [cyan]{method}[/cyan]")
+            console.print(f"Installation path: [dim]{escape(install_info.path)}[/dim]")
+            console.print(message, markup=False, highlight=False)
+        return UpdateResult(
+            success=True,
+            message=message,
+            installation_method=install_info.method.value,
+        ).model_dump()

@@ -28,7 +28,7 @@ import sys
 import threading
 from typing import Any
 
-from . import check_cache
+from . import channel, check_cache
 
 PYPI_URL = "https://pypi.org/pypi/deepctl/json"
 NO_UPDATE_CHECK_ENV_VAR = "DEEPCTL_NO_UPDATE_CHECK"
@@ -54,17 +54,8 @@ def _is_ci() -> bool:
 
 
 def _is_oneshot() -> bool:
-    """Return True if running in an ephemeral one-shot environment."""
-    # uvx
-    if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
-        return True
-    # pipx run
-    from pathlib import Path
-
-    exe_path = str(Path(sys.executable).resolve())
-    pipx_home = os.environ.get("PIPX_HOME", str(Path.home() / ".local" / "pipx"))
-    pipx_cache = str(Path(pipx_home) / ".cache")
-    return bool(exe_path.startswith(pipx_cache))
+    """Return True for a one-shot run (uvx, pipx run, npx): nothing to update."""
+    return channel.is_oneshot()
 
 
 def _opted_out() -> bool:
