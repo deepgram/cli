@@ -294,3 +294,150 @@ class TestProbeUpstreamRedirect:
             " ".join(text.split())
         )
         assert "fa1ce0" not in text
+
+
+class _CountingSession:
+    """Stands in for aiohttp.ClientSession; counts upstream connect attempts."""
+
+    connects = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def ws_connect(self, *args, **kwargs):
+        type(self).connects += 1
+        raise aiohttp.ClientError("no upstream in tests")
+
+
+def _handshake(headers: list[tuple[str, str]] | None, host: str | None = None):
+    """Start a real proxy on 127.0.0.1, send one upgrade request, return
+    (status line, response bytes, upstream connects, console text).
+
+    host is a format string; {port} becomes the listener's port.
+    """
+
+    async def run():
+        proxy = ProbeProxy(api_key="fa1ce0000000000000000000000000000000000d")
+        app = web.Application()
+        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            lines = [
+                "GET /v1/listen?encoding=linear16 HTTP/1.1",
+                "Host: " + (host or "127.0.0.1:{port}").format(port=port),
+                "Upgrade: websocket",
+                "Connection: Upgrade",
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                "Sec-WebSocket-Version: 13",
+            ]
+            lines += [f"{k}: {v}" for k, v in (headers or [])]
+            writer.write(("\r\n".join(lines) + "\r\n\r\n").encode())
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(4096), 5)
+            # Let an accepted handler reach the upstream connect.
+            for _ in range(50):
+                if _CountingSession.connects or not data.startswith(b"HTTP/1.1 101"):
+                    break
+                await asyncio.sleep(0.01)
+            writer.close()
+            return data
+        finally:
+            await runner.cleanup()
+
+    _CountingSession.connects = 0
+    out = io.StringIO()
+    with (
+        patch("deepctl_cmd_debug_probe.proxy.aiohttp.ClientSession", _CountingSession),
+        patch(
+            "deepctl_cmd_debug_probe.proxy.console",
+            Console(file=out, force_terminal=False, width=200),
+        ),
+    ):
+        data = asyncio.run(run())
+    status = data.split(b"\r\n", 1)[0].decode()
+    return status, data, _CountingSession.connects, out.getvalue()
+
+
+class TestProbeConnectionChecks:
+    """Only local pages and native clients may use the proxy."""
+
+    def test_foreign_origin_refused_before_upstream(self):
+        status, data, connects, text = _handshake([("Origin", "https://evil.example")])
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+        assert b"evil" not in data
+        assert "[conn] refused: origin not allowed" in text
+        assert "evil" not in text
+
+    def test_null_origin_refused(self):
+        status, _, connects, _ = _handshake([("Origin", "null")])
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "http://localhost:5173",
+            "https://127.0.0.1",
+            "http://[::1]:8080",
+            "HTTP://LOCALHOST:3000",
+        ],
+    )
+    def test_loopback_origin_allowed(self, origin):
+        status, _, connects, text = _handshake([("Origin", origin)])
+        assert status == "HTTP/1.1 101 Switching Protocols"
+        assert connects == 1
+        assert "refused" not in text
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "http://localhost.evil.example",
+            "http://127.0.0.1.evil.example:80",
+            "http://evil.example#http://localhost",
+            "file://",
+            "",
+        ],
+    )
+    def test_lookalike_origin_refused(self, origin):
+        status, _, connects, _ = _handshake([("Origin", origin)])
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+
+    def test_two_origins_refused(self):
+        status, _, connects, _ = _handshake(
+            [("Origin", "http://localhost:5173"), ("Origin", "https://evil.example")]
+        )
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+
+    def test_no_origin_allowed(self):
+        status, _, connects, _ = _handshake([])
+        assert status == "HTTP/1.1 101 Switching Protocols"
+        assert connects == 1
+
+    def test_localhost_host_allowed_any_case(self):
+        status, _, connects, _ = _handshake([], host="LocalHost:{port}")
+        assert status == "HTTP/1.1 101 Switching Protocols"
+        assert connects == 1
+
+    @pytest.mark.parametrize(
+        "host", ["evil.example:3100", "evil.example", "localhost", "127.0.0.1:1"]
+    )
+    def test_foreign_host_refused(self, host):
+        status, data, connects, text = _handshake([], host=host)
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+        assert b"evil" not in data
+        assert "[conn] refused: host not allowed" in text
