@@ -1000,17 +1000,20 @@ def _save_refusal(st: os.stat_result | None) -> str | None:
 
 class ConfigSaveRefused(OSError):
     """An explicit save refused in an AI agent session; ``hint`` says who
-    fixes it."""
+    fixes it, ``why`` is the cause (a W_CFG_UNTRUSTED_WHY key)."""
 
     hint = msg.W_CFG_UNTRUSTED_FILE_HINT
+    why: str = ""
 
 
 def _save_refused(why: str, config_path: Path) -> ConfigSaveRefused:
-    return ConfigSaveRefused(
+    exc = ConfigSaveRefused(
         errno.EPERM,
         msg.W_CFG_SAVE_UNTRUSTED.format(why=msg.W_CFG_UNTRUSTED_WHY[why]),
         str(config_path),
     )
+    exc.why = why
+    return exc
 
 
 @contextmanager
@@ -1309,7 +1312,10 @@ class Config:
         """Get the default configuration path for the current platform."""
         # Use platformdirs for cross-platform config directory
         config_dir = Path(platformdirs.user_config_dir("deepctl", "deepgram"))
-        _private_mkdir(config_dir)
+        # A home dg can't write (a read-only mount) still runs every command;
+        # a save reports the error, and dg login stops with state_unwritable.
+        with suppress(OSError):
+            _private_mkdir(config_dir)
 
         # Migrate from old location if needed
         self._migrate_config_if_needed(config_dir)
@@ -1333,14 +1339,17 @@ class Config:
         # If old config exists and new doesn't, migrate it
         if old_config_path.exists() and not new_config_path.exists():
             try:
-                print(f"Migrating config from {old_config_path} to {new_config_path}")
+                print(
+                    f"Migrating config from {old_config_path} to {new_config_path}",
+                    file=sys.stderr,
+                )
                 text = old_config_path.read_text(encoding="utf-8")
                 # Written like any save: 0600, atomic, never via the source's mode.
                 with _directory_lock(new_config_dir):
                     self._replace_or_rewrite(new_config_path, text)
-                print("✓ Config migrated successfully")
+                print("✓ Config migrated successfully", file=sys.stderr)
             except Exception as e:
-                print(f"Warning: Could not migrate config: {e}")
+                print(f"Warning: Could not migrate config: {e}", file=sys.stderr)
 
     def _get_project_config_path(self) -> Path:
         """Get the project-specific configuration path."""

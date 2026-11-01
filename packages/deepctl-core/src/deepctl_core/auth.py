@@ -3,17 +3,19 @@
 import os
 import time
 import webbrowser
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from . import hosts, output
 from . import messages as msg
 from .client import _split_base_url
 from .config import Config
 from .hosts import check_credential_host, check_identity_host
+from .login_state import MIN_POLL_INTERVAL
 from .models import ProfileInfo, ProfilesResult
 from .output import stderr_console
 
@@ -66,6 +68,21 @@ CLIENT_ID = "deepgram-cli"
 # Keyring service identifier using reverse domain notation
 KEYRING_SERVICE = "com.deepgram.dx.deepctl"
 
+# Sent where the identity provider asks for a device name: a fixed value,
+# never this machine's hostname.
+DEVICE_NAME = "deepctl"
+DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+
+
+def _https_or_loopback(url: str | None) -> str | None:
+    """``url`` when it is https, or http to a loopback host; else ValueError."""
+    if url is None:
+        return None
+    origin = hosts.parse_origin(url)
+    if origin is None or not (origin.secure or hosts.is_loopback(origin.host)):
+        raise ValueError("the login link must use https")
+    return url
+
 
 class DeviceCodeResponse(BaseModel):
     """Response from device code request."""
@@ -75,16 +92,45 @@ class DeviceCodeResponse(BaseModel):
     verification_uri: str
     verification_uri_complete: str | None = None
     expires_in: int
-    interval: int
+    interval: int = 5
+
+    _check_uris = field_validator("verification_uri", "verification_uri_complete")(
+        _https_or_loopback
+    )
 
 
 class TokenResponse(BaseModel):
-    """Response from token request."""
+    """Response from token request (``pid`` is the RFC 8628 path's name for
+    the project ID)."""
 
     access_token: str
-    project_id: str
+    project_id: str | None = None
+    pid: str | None = None
     dg_token: str | None = None
     dg_expires_in: int | None = None
+
+
+@dataclass(frozen=True)
+class DevicePoll:
+    """One answer from the token endpoint.
+
+    ``state`` is ``token`` (``token`` is set), ``pending``, ``slow_down``,
+    ``denied``, ``expired`` or ``error`` (``detail`` says why).
+    """
+
+    state: str
+    token: TokenResponse | None = None
+    detail: str = ""
+    retry_after: int | None = None
+
+
+def _retry_after(response: "httpx.Response") -> int | None:
+    """The server's Retry-After in whole seconds (delta form only), or None."""
+    value = response.headers.get("Retry-After")
+    if not isinstance(value, str) or not value.strip().isdigit():
+        return None
+    value = value.strip()
+    return min(int(value), 3600)
 
 
 def _insecure_allowed() -> bool:
@@ -137,10 +183,26 @@ def _warn_if_verified(request: "httpx.Request") -> None:
         output.print_hint(escape(msg.W_INSECURE_REMOTE_HINT))
 
 
+def escape(text: str) -> str:
+    """rich.markup.escape, imported on first use (no rich at import)."""
+    from rich.markup import escape as rich_escape
+
+    return rich_escape(text)
+
+
 class AuthenticationError(Exception):
     """Authentication related errors."""
 
     pass
+
+
+class DeviceCodeUnreadable(AuthenticationError):
+    """The device-code answer from ``host`` couldn't be read (not a JSON
+    object with the expected fields): ``network_unavailable``."""
+
+    def __init__(self, host: str) -> None:
+        super().__init__(f"unreadable device code response from {host}")
+        self.host = host
 
 
 class AuthManager:
@@ -587,13 +649,12 @@ class AuthManager:
             elif error_type == "project":
                 # Project ID is invalid, but the key might be fine — warn but
                 # still store the key so the user isn't locked out.
-                console.print(
-                    f"[yellow]Warning:[/yellow] {message}. "
-                    "API key will still be stored."
+                output.print_warning(
+                    escape(f"{message}. API key will still be stored."), stderr=True
                 )
                 console.print(
-                    "[dim]You can update the project ID later with: "
-                    "deepctl login --project-id <id>[/dim]"
+                    "[dim]You can set the project ID later with: "
+                    f"{transport.prog() or 'dg'} login --project-id <id>[/dim]"
                 )
                 # Clear the bad project_id so we don't store it
                 project_id = None
@@ -614,8 +675,13 @@ class AuthManager:
             console.print("[green]✓[/green] API key stored securely in system keyring")
             keyring_available = True
         except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
-            console.print("API key will be stored in config file instead")
+            output.print_warning(
+                escape(
+                    f"Could not store in keyring: {e}. "
+                    "The API key will be stored in the config file instead."
+                ),
+                stderr=True,
+            )
 
         # Update config with non-sensitive data
         # Only store API key in config if keyring is not available
@@ -631,7 +697,7 @@ class AuthManager:
         if project_id:
             console.print(f"[dim]Project ID:[/dim] {project_id}")
 
-    def login_with_device_flow(self) -> None:
+    def login_with_device_flow(self, open_browser: bool = True) -> None:
         """Login using device flow (interactive method)."""
         console.print("[blue]Starting device flow authentication...[/blue]")
 
@@ -639,9 +705,6 @@ class AuthManager:
         identity_url = check_identity_host(self.config)
 
         try:
-            # Get hostname for device identification
-            hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
-
             # Request device code from dx-id auth provider
             device_response = self._request_device_code(identity_url)
 
@@ -651,28 +714,37 @@ class AuthManager:
             )
 
             # Open browser immediately and start polling
-            console.print(
-                "\n[bold]Hello from Deepgram![/bold] Opening browser to "
-                "complete login..."
+            if open_browser:
+                console.print(
+                    "\n[bold]Hello from Deepgram![/bold] Opening browser to "
+                    "complete login..."
+                )
+            else:
+                console.print(
+                    "\n[bold]Hello from Deepgram![/bold] Open the link below to "
+                    "complete login."
+                )
+            output.print_info(
+                escape(
+                    msg.I_LOGIN_PENDING.format(
+                        verification_uri=msg.display(device_response.verification_uri),
+                        user_code=msg.display(device_response.user_code or ""),
+                    )
+                ),
+                stderr=True,
             )
-            if device_response.user_code:
-                console.print(f"[bold]Enter code:[/bold] {device_response.user_code}")
 
-            try:
-                webbrowser.open(verification_uri)
-                console.print("[green]✓[/green] Opened browser for authentication")
-            except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Could not open browser: {e}")
-
-            console.print(
-                f"[dim]If the browser didn't open, visit:[/dim] "
-                f"[dim]{verification_uri}[/dim]\n"
-            )
+            if open_browser:
+                try:
+                    webbrowser.open(verification_uri)
+                    console.print("[green]✓[/green] Opened browser for authentication")
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] Could not open browser: {e}"
+                    )
 
             # Poll for token (starts immediately — user may have clicked the link)
-            token_response = self._poll_for_token(
-                device_response, hostname, identity_url
-            )
+            token_response = self._poll_for_token(device_response, identity_url)
 
             # Store token and get user info
             self._store_token(token_response)
@@ -680,6 +752,8 @@ class AuthManager:
             console.print("\n[green]Key created and stored successfully.[/green]")
             console.print("\nYou are now logged in. Happy coding!")
 
+        except DeviceCodeUnreadable:
+            raise
         except Exception as e:
             console.print(f"[red]Error during device flow:[/red] {e}")
             raise AuthenticationError(f"Device flow failed: {e}")
@@ -692,11 +766,9 @@ class AuthManager:
         Returns:
             DeviceCodeResponse with device code and verification URI
         """
-        hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
-
         payload = {
             "client_id": CLIENT_ID,
-            "hostname": hostname,
+            "hostname": DEVICE_NAME,
             "scopes": "openid profile email",
         }
 
@@ -708,8 +780,18 @@ class AuthManager:
                 headers={"Content-Type": "application/json"},
             )
 
-            if response.status_code == 201:
-                return DeviceCodeResponse(**response.json())
+            if response.status_code in (200, 201):
+                host = urlsplit(base).hostname or base
+                try:
+                    body = response.json()
+                except ValueError:
+                    raise DeviceCodeUnreadable(host) from None
+                if not isinstance(body, dict):
+                    raise DeviceCodeUnreadable(host)
+                try:
+                    return DeviceCodeResponse(**body)
+                except (ValueError, TypeError):  # incl. pydantic ValidationError
+                    raise DeviceCodeUnreadable(host) from None
             else:
                 raise AuthenticationError(
                     f"Device code request failed: {response.status_code}"
@@ -718,25 +800,69 @@ class AuthManager:
         except httpx.RequestError as e:
             raise AuthenticationError(f"Network error during device code request: {e}")
 
+    def poll_device_token(
+        self, device_code: str, identity_url: str | None = None
+    ) -> DevicePoll:
+        """Ask the token endpoint once whether ``device_code`` was approved.
+
+        A POST (RFC 8628 §3.4), so the device code never lands in a URL,
+        and no device name is sent. Network errors are raised
+        (``httpx.RequestError``).
+        """
+        base = identity_url or check_identity_host(self.config)
+        response = self.client.post(
+            f"{base}/token",
+            data={
+                "grant_type": DEVICE_CODE_GRANT,
+                "device_code": device_code,
+                "client_id": CLIENT_ID,
+            },
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+        if response.status_code in (200, 201):
+            try:
+                return DevicePoll("token", token=TokenResponse(**body))
+            except ValueError:
+                return DevicePoll("error", detail="unusable token response")
+        if response.status_code == 429:
+            return DevicePoll("slow_down", retry_after=_retry_after(response))
+        error = body.get("error")
+        if response.status_code >= 500 or error == "temporarily_unavailable":
+            # A transient server problem: back off and ask again.
+            return DevicePoll(
+                "unavailable",
+                detail=f"HTTP {response.status_code}",
+                retry_after=_retry_after(response),
+            )
+        state = {
+            "authorization_pending": "pending",
+            "slow_down": "slow_down",
+            "access_denied": "denied",
+            "expired_token": "expired",
+        }.get(error if isinstance(error, str) else "")
+        if state is not None:
+            return DevicePoll(state)
+        reason = error if isinstance(error, str) else "unknown error"
+        return DevicePoll(
+            "error", detail=f"HTTP {response.status_code}: {msg.display(reason)[:80]}"
+        )
+
     def _poll_for_token(
         self,
         device_response: DeviceCodeResponse,
-        hostname: str,
         identity_url: str | None = None,
     ) -> TokenResponse:
-        """Poll for token using device code."""
+        """Poll for token using device code until approved, denied or expired."""
         console.print("\n[blue]Waiting for authentication...[/blue]")
 
         start_time = time.time()
-
-        query_params = {
-            "device_code": device_response.device_code,
-            "client_id": CLIENT_ID,
-            "hostname": hostname,
-        }
-
+        interval = max(MIN_POLL_INTERVAL, device_response.interval)
         base = identity_url or check_identity_host(self.config)
-        poll_url = f"{base}/device/token?{urlencode(query_params)}"
 
         from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -750,28 +876,26 @@ class AuthManager:
 
             while time.time() - start_time < device_response.expires_in:
                 try:
-                    # Use GET request like Go implementation
-                    response = self.client.get(poll_url)
-
-                    if response.status_code == 201:
-                        response_data = response.json()
-                        return TokenResponse(**response_data)
-                    elif response.status_code == 404:
-                        # Still pending - this is the expected status code from
-                        # Go implementation
-                        time.sleep(device_response.interval)
-                        continue
-                    else:
-                        error_data = response.json()
-                        raise AuthenticationError(
-                            f"Token request failed: "
-                            f"{error_data.get('error', 'Unknown error')}"
-                        )
-
+                    poll = self.poll_device_token(device_response.device_code, base)
                 except httpx.RequestError as e:
                     console.print(f"[red]Network error:[/red] {e}")
-                    time.sleep(device_response.interval)
+                    time.sleep(interval)
                     continue
+                if poll.state == "token" and poll.token is not None:
+                    return poll.token
+                if poll.state == "pending":
+                    time.sleep(interval)
+                    continue
+                if poll.state in ("slow_down", "unavailable"):
+                    interval = max(interval + 5, poll.retry_after or 0)
+                    left = device_response.expires_in - (time.time() - start_time)
+                    time.sleep(max(0.0, min(interval, left)))
+                    continue
+                if poll.state == "denied":
+                    raise AuthenticationError(msg.E_AUTH_DENIED)
+                if poll.state == "expired":
+                    break
+                raise AuthenticationError(str(poll.detail))
 
         raise AuthenticationError("Authentication timed out")
 
@@ -804,10 +928,13 @@ class AuthManager:
                 )
                 keyring_available = True
             except Exception as e:
-                console.print(
-                    f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
+                output.print_warning(
+                    escape(
+                        f"Could not store in keyring: {e}. "
+                        "The API key will be stored in the config file instead."
+                    ),
+                    stderr=True,
                 )
-                console.print("API key will be stored in config file instead")
 
             for keyring_key in (f"jwt.{profile_name}", f"refresh-token.{profile_name}"):
                 self._delete_keyring_credential(keyring_key)
@@ -815,7 +942,7 @@ class AuthManager:
             self.config.create_profile(
                 profile_name,
                 api_key=api_key if not keyring_available else None,
-                project_id=token_response.project_id,
+                project_id=token_response.project_id or token_response.pid,
             )
             profile = self.config.get_profile(profile_name)
             profile.dg_token_expires_at = expires_at
@@ -823,10 +950,6 @@ class AuthManager:
             if keyring_available:
                 console.print(
                     "[green]✓[/green] API key stored securely in system keyring"
-                )
-            else:
-                console.print(
-                    "[yellow]Warning:[/yellow] API key stored in the config file fallback"
                 )
             return
 
