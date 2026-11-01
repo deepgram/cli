@@ -114,12 +114,12 @@ deepctl = "deepctl.main:main"
 deepgram = "deepctl.main:main"
 dg = "deepctl.main:main"
 
-# Entry points are now provided by individual command packages
-# [project.entry-points."deepctl.commands"]
-# transcribe = "deepctl.commands.transcribe:TranscribeCommand"
-# projects = "deepctl.commands.projects:ProjectsCommand"
-# usage = "deepctl.commands.usage:UsageCommand"
-# login = "deepctl.commands.login:LoginCommand"
+# Most commands come from the command packages; the help topics ship here.
+[project.entry-points."deepctl.commands"]
+help = "deepctl.help_topics:HelpCommand"
+
+[project.entry-points."deepctl.subcommands.help"]
+agent-mode = "deepctl.help_topics.agent_mode:AgentModeCommand"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
