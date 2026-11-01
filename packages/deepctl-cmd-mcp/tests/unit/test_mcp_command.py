@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from deepctl_cmd_mcp.command import McpCommand
-from deepctl_cmd_mcp.models import MCPServerResult, TransportType
+from deepctl_cmd_mcp.models import MCPServerResult
 
 
 class TestMcpCommand:
@@ -36,23 +38,21 @@ class TestMcpCommand:
         }
         assert expected_args.issubset(arg_names)
 
-    def test_handle_invalid_transport(self):
-        """Test handling invalid transport type."""
-        command = McpCommand()
-        config = MagicMock()
+    @patch("deepctl_cmd_mcp.command.asyncio.run")
+    @patch("signal.signal")
+    def test_handle_invalid_transport(self, mock_signal, mock_asyncio_run, capsys):
+        """An unknown transport exits 1 on stderr; nothing runs."""
         auth_manager = MagicMock()
-        client = MagicMock()
-
-        result = command.handle(
-            config,
-            auth_manager,
-            client,
-            transport="invalid",
-        )
-
-        assert isinstance(result, MCPServerResult)
-        assert result.status == "error"
-        assert "Invalid transport type" in result.message
+        with pytest.raises(SystemExit) as exc:
+            McpCommand().handle(
+                MagicMock(), auth_manager, MagicMock(), transport="invalid"
+            )
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "supports only the stdio transport, not invalid" in captured.err
+        mock_asyncio_run.assert_not_called()
+        auth_manager.get_api_key.assert_not_called()
 
     def test_handle_no_api_key(self):
         """Test handling missing API key (guard runs before handle, but assert catches it)."""
@@ -61,8 +61,6 @@ class TestMcpCommand:
         auth_manager = MagicMock()
         auth_manager.get_api_key.return_value = None
         client = MagicMock()
-
-        import pytest
 
         with pytest.raises(AssertionError):
             command.handle(
@@ -102,32 +100,76 @@ class TestMcpCommand:
         mock_asyncio_run.assert_called_once()
         assert result is None
 
+    @pytest.mark.parametrize("transport", ["sse", "SSE"])
     @patch("deepctl_cmd_mcp.command.asyncio.run")
     @patch("signal.signal")
-    def test_handle_sse_transport(self, mock_signal, mock_asyncio_run):
-        """Test handling SSE transport."""
-        command = McpCommand()
-        config = MagicMock()
+    def test_handle_sse_transport_exits_1(
+        self, mock_signal, mock_asyncio_run, capsys, transport
+    ):
+        """--transport sse exits 1 with a pointer to stdio, before reading
+        the key and without starting a listener."""
         auth_manager = MagicMock()
-        client = MagicMock()
+        with pytest.raises(SystemExit) as exc:
+            McpCommand().handle(
+                MagicMock(),
+                auth_manager,
+                MagicMock(),
+                transport=transport,
+                port=8080,
+                host="localhost",
+            )
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "supports only the stdio transport, not sse" in captured.err
+        assert "Use stdio" in captured.err
+        mock_asyncio_run.assert_not_called()
+        mock_signal.assert_not_called()
+        auth_manager.get_api_key.assert_not_called()
 
-        mock_asyncio_run.return_value = None
+    def test_sse_refused_before_the_credential_check(self, capsys):
+        """Through execute(): no auth guard (which would send the key to
+        verify it) runs for --transport sse."""
+        import click
+        from deepctl_core import AuthManager
 
-        result = command.handle(
-            config,
-            auth_manager,
-            client,
-            transport="sse",
-            port=8080,
-            host="localhost",
-            api_key="test-key",
-        )
+        ctx = click.Context(click.Command("mcp"), obj={"config": MagicMock()})
+        with (
+            patch.object(AuthManager, "guard", side_effect=AssertionError("no")),
+            patch("deepctl_cmd_mcp.command.asyncio.run") as run,
+            pytest.raises(SystemExit) as exc,
+        ):
+            McpCommand().execute(ctx, transport="sse", port=8000, host="127.0.0.1")
+        assert exc.value.code == 1
+        run.assert_not_called()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "supports only the stdio transport, not sse" in captured.err
 
-        assert isinstance(result, MCPServerResult)
-        assert result.status == "success"
-        assert result.transport == TransportType.SSE
-        assert result.port == 8080
-        assert result.host == "localhost"
+    def test_pre_auth_check_allows_stdio(self):
+        assert McpCommand().pre_auth_check(MagicMock(), transport="stdio") is None
+        assert McpCommand().pre_auth_check(MagicMock()) is None
+
+    @patch("deepctl_cmd_mcp.command.asyncio.run")
+    @patch("signal.signal")
+    def test_stdio_ignores_port_and_host(self, mock_signal, mock_asyncio_run):
+        """--port/--host still parse (old configs) but only stdio runs."""
+        with patch("deepctl_cmd_mcp.command.run_proxy") as run_proxy:
+            McpCommand().handle(
+                MagicMock(),
+                MagicMock(),
+                MagicMock(),
+                transport="stdio",
+                port=8080,
+                host="0.0.0.0",
+            )
+        assert run_proxy.call_args.kwargs["transport"] == "stdio"
+        assert run_proxy.call_args.kwargs["host"] == "127.0.0.1"
+
+    def test_sse_not_in_examples_or_help(self):
+        command = McpCommand()
+        assert not any("sse" in e.lower() for e in command.examples)
+        assert "sse" not in command.agent_help.lower()
 
     @patch("os._exit")
     def test_handle_shutdown_signal(self, mock_exit):

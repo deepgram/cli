@@ -240,8 +240,6 @@ dg api /v1/projects/PROJECT_ID/usage/requests | jq '.requests[].path'
 
 ```bash
 dg mcp                               # Start MCP server (stdio transport)
-dg mcp --transport sse               # SSE transport
-dg mcp --transport streamable-http   # HTTP transport
 ```
 
 Used with Claude Code, Cursor, VS Code Copilot, and other MCP-compatible editors.

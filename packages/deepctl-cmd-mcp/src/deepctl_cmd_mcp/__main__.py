@@ -28,13 +28,17 @@ def main() -> None:
     parser.add_argument(
         "--transport",
         default="stdio",
-        choices=["stdio", "sse"],
-        help="Transport mode",
+        # Matched case-insensitively, like dg mcp.
+        type=str.lower,
+        choices=["stdio", "sse", "streamable-http"],
+        help="Transport: stdio (the only one supported)",
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port for HTTP transports"
+        "--port", type=int, default=8000, help="Ignored: only stdio is supported."
     )
-    parser.add_argument("--host", default="127.0.0.1", help="Host for HTTP transports")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Ignored: only stdio is supported."
+    )
     parser.add_argument(
         "--base-url",
         default=None,
@@ -48,6 +52,17 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
+
+    # Only stdio runs. "sse", which 0.4.0 served, and "streamable-http",
+    # which no version served, are accepted here so a config that names
+    # either gets this message instead of an argparse error. Nothing is
+    # started.
+    if args.transport != "stdio":
+        from .messages import E_MCP_TRANSPORT, E_MCP_TRANSPORT_HINT
+
+        text = E_MCP_TRANSPORT.format(transport=args.transport)
+        print(f"Error: {text}\n  {E_MCP_TRANSPORT_HINT}", file=sys.stderr)
+        sys.exit(1)
 
     if not args.api_key:
         print(
@@ -104,7 +119,7 @@ def main() -> None:
     try:
         asyncio.run(
             run_proxy(
-                transport=args.transport,
+                transport="stdio",
                 host=args.host,
                 port=args.port,
                 api_key=args.api_key,

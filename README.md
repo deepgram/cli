@@ -158,7 +158,7 @@ dg requests --status failed --endpoint listen   # Debug failed requests
 dg api /v1/projects --jq '.projects[0].name'
 
 # MCP server for AI editors (Claude Code, Cursor, etc.)
-dg mcp --transport sse --port 8000
+dg mcp
 ```
 
 ## Features
@@ -272,7 +272,6 @@ Connect Deepgram tools to AI coding assistants (Claude Code, Cursor, etc.).
 
 ```bash
 dg mcp                                    # Start MCP server (stdio)
-dg mcp --transport sse --port 8000        # SSE transport
 ```
 
 Add to your editor's MCP config:
