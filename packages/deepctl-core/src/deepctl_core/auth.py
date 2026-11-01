@@ -10,6 +10,7 @@ import httpx
 import keyring
 from keyring.errors import PasswordDeleteError
 from pydantic import BaseModel
+from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import hosts, output
@@ -56,14 +57,51 @@ class TokenResponse(BaseModel):
 
 
 def _insecure_allowed() -> bool:
-    """Whether DEEPGRAM_CLI_INSECURE turns off TLS verification."""
-    if not os.getenv("DEEPGRAM_CLI_INSECURE"):
+    """Whether DEEPGRAM_CLI_INSECURE may turn off TLS verification.
+
+    Only ``1`` or ``true`` count (``0``, ``false`` or anything else keeps
+    verification on), and never in an AI agent session. Even then it only
+    applies to localhost, 127.0.0.1 and [::1]: see ``_insecure_mounts``.
+    """
+    value = os.getenv("DEEPGRAM_CLI_INSECURE", "").strip().lower()
+    if value not in ("1", "true"):
         return False
     if output.is_ai_agent():
         if hosts._first_time(("W-INSECURE-AGENT", "")):
             output.print_security_warning(msg.W_INSECURE_AGENT)
         return False
     return True
+
+
+#: Hosts DEEPGRAM_CLI_INSECURE applies to: local dev servers only. Other
+#: 127.0.0.0/8 addresses keep verification (mounts match exact hosts).
+_INSECURE_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _insecure_mounts() -> dict[str, httpx.BaseTransport]:
+    """Unverified transports for the loopback hosts only.
+
+    Host-specific mounts take precedence over the scheme-wide proxy mounts
+    httpx builds from HTTPS_PROXY/ALL_PROXY/NO_PROXY, so every other host
+    keeps both certificate verification and the proxy settings.
+    """
+    unverified = httpx.HTTPTransport(verify=False)
+    return {
+        f"all://{'[::1]' if host == '::1' else host}": unverified
+        for host in _INSECURE_HOSTS
+    }
+
+
+def _warn_if_verified(request: httpx.Request) -> None:
+    """Say once per host that DEEPGRAM_CLI_INSECURE did not apply to it."""
+    host = request.url.host
+    if host in _INSECURE_HOSTS:
+        return
+    if hosts._first_time(("W-INSECURE-REMOTE", host)):
+        output.print_security_warning(
+            escape(msg.W_INSECURE_REMOTE.format(host=msg.display(host)))
+        )
+        output.print_hint(escape(msg.W_INSECURE_REMOTE_HINT))
 
 
 class AuthenticationError(Exception):
@@ -91,10 +129,19 @@ class AuthManager:
         self.config = config
         self.explicit_api_key = explicit_api_key
         self.explicit_project_id = explicit_project_id
-        # Disable SSL verification for local dev (DEEPGRAM_CLI_INSECURE=1),
-        # but never in an AI agent session: the agent may have set it.
-        verify = not _insecure_allowed()
-        self.client = httpx.Client(timeout=30.0, verify=verify)
+        # DEEPGRAM_CLI_INSECURE=1 skips TLS verification for localhost,
+        # 127.0.0.1 and [::1] (local dev), never for any other host and never
+        # in an AI agent session: the agent may have set it. Proxy settings
+        # from the environment still apply to every other host.
+        if _insecure_allowed():
+            self.client = httpx.Client(
+                timeout=30.0,
+                verify=True,
+                mounts=_insecure_mounts(),
+                event_hooks={"request": [_warn_if_verified]},
+            )
+        else:
+            self.client = httpx.Client(timeout=30.0, verify=True)
 
     def check_base_url(self) -> str:
         """Return the base URL credentials may be sent to.
