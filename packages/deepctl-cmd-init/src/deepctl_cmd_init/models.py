@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from deepctl_core import BaseResult
+from deepctl_core.models import CodedErrorResult
 from pydantic import BaseModel, Field
 
 
@@ -77,3 +78,21 @@ class InitResult(BaseResult):
     directory: str | None = None
     installed: bool = False
     started: bool = False
+
+
+class InitCodedError(CodedErrorResult):
+    """A 0.5.0 coded error from ``dg init``.
+
+    ``next_step`` is always present (null when no command fixes it);
+    ``details`` is left out when there are none.
+    """
+
+    next_step: str | None = None
+    schema_version: int = 1
+    details: dict[str, Any] | None = None
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        data = super().model_dump(**kwargs)
+        if not data.get("details"):
+            data.pop("details", None)
+        return data

@@ -1,5 +1,14 @@
 """Strings for ``dg init``'s errors."""
 
+CODE_INVALID_ARGUMENT = "invalid_argument"
+
+# Rerun contract: a directory dg init can't resume in.
+E_INIT_DIR_IN_USE = "Directory already exists: {dest}"
+E_INIT_DIR_OTHER_TEMPLATE = (
+    'Directory {dest} holds the template "{other}", not "{template}".'
+)
+H_INIT_DIR = "Choose another directory with --dir, or remove this one."
+
 # The template service sent a name that isn't plain.
 E_INIT_NAME_REFUSED = (
     'Not using template "{template}": the template service sent a name that '

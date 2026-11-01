@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -155,6 +156,15 @@ def is_template_repo(url: str) -> bool:
     return org in TEMPLATE_ORGS and valid_name(repo)
 
 
+def directory_in_use(target_dir: Path) -> bool:
+    """Whether ``target_dir`` exists as anything but an empty directory."""
+    if target_dir.is_symlink() or (target_dir.exists() and not target_dir.is_dir()):
+        return True
+    if not target_dir.exists():
+        return False
+    return any(target_dir.iterdir())
+
+
 def clone_template(github_url: str, target_dir: Path) -> None:
     """Clone a template repository, keeping the .git directory intact.
 
@@ -163,12 +173,13 @@ def clone_template(github_url: str, target_dir: Path) -> None:
 
     Args:
         github_url: Full GitHub URL to clone.
-        target_dir: Local directory to clone into (must not exist).
+        target_dir: Local directory to clone into (must not exist, or be
+            an empty directory).
 
     Raises:
-        RuntimeError: If the directory already exists or git clone fails.
+        RuntimeError: If the directory is in use or git clone fails.
     """
-    if target_dir.exists():
+    if directory_in_use(target_dir):
         raise RuntimeError(f"Directory already exists: {target_dir}")
 
     # "--" ends git's options: a server-supplied URL that starts with "-"
@@ -178,6 +189,94 @@ def clone_template(github_url: str, target_dir: Path) -> None:
         raise RuntimeError("git clone failed: git could not be run")
     if result.returncode != 0:
         raise RuntimeError(f"git clone failed:\n{result.stderr.strip()}")
+
+
+# ── The clone dg init made ────────────────────────────────────────────────────
+
+_COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _git_out(target_dir: Path, *args: str) -> str | None:
+    """Output of a git command in ``target_dir``, or None if it failed."""
+    result = run_git(*args, repo=target_dir)
+    if result is None or result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def head_commit(target_dir: Path) -> str | None:
+    """``HEAD`` of the repository dg just cloned into ``target_dir``."""
+    commit = _git_out(target_dir, "rev-parse", "--verify", "HEAD")
+    return commit if commit and _COMMIT.fullmatch(commit) else None
+
+
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+
+
+def same_directory(target_dir: Path, dev: int, ino: int) -> bool:
+    """Whether ``target_dir`` is still the directory dg cloned into.
+
+    Checked before any git command runs in it. The directory, opened
+    without following a symbolic link, must have the recorded device and
+    inode (a directory deleted and made again at the same path has another
+    inode), and it and its ``.git`` must be owned by this user, with
+    ``.git`` a real directory.
+
+    On Windows, where ``st_ino`` can be 0 or unstable and there are no
+    POSIX owners, only the path checks apply: no link, ``.git`` a real
+    directory.
+    """
+    if os.name == "nt":
+        try:
+            top = os.lstat(target_dir)
+            git = os.lstat(target_dir / ".git")
+        except OSError:
+            return False
+        return stat.S_ISDIR(top.st_mode) and stat.S_ISDIR(git.st_mode)
+    try:
+        fd = os.open(target_dir, os.O_RDONLY | _O_DIRECTORY | _NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        st = os.fstat(fd)
+        git = os.stat(".git", dir_fd=fd, follow_symlinks=False)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    uid = os.geteuid()
+    return (
+        stat.S_ISDIR(st.st_mode)
+        and stat.S_ISDIR(git.st_mode)
+        and (st.st_dev, st.st_ino) == (dev, ino)
+        and st.st_uid == uid
+        and git.st_uid == uid
+    )
+
+
+def directory_identity(target_dir: Path) -> tuple[int, int] | None:
+    """Device and inode of ``target_dir`` (not following a link), or None."""
+    try:
+        st = os.lstat(target_dir)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino) if stat.S_ISDIR(st.st_mode) else None
+
+
+def clone_matches(target_dir: Path, commit: str) -> bool:
+    """Whether ``target_dir`` is still at ``commit``, the clone dg recorded.
+
+    Only for a directory dg's own clone record names: git runs in it. Its
+    own ``.git`` directory (not a link, or a file pointing elsewhere) must
+    make it the top of a work tree, with ``HEAD`` at ``commit``.
+    """
+    git_dir = target_dir / ".git"
+    if git_dir.is_symlink() or not git_dir.is_dir():
+        return False
+    top = _git_out(target_dir, "rev-parse", "--show-toplevel")
+    if top is None or os.path.realpath(top) != os.path.realpath(target_dir):
+        return False
+    return head_commit(target_dir) == commit
 
 
 # ── .env injection ────────────────────────────────────────────────────────────
