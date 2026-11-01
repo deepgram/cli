@@ -243,7 +243,9 @@ class TestUserConfigOptOut:
         monkeypatch.chdir(repo)
 
         config = Config(config_path=str(user))
-        assert config.get("telemetry.enabled") is True  # the merged view
+        # The project file's telemetry key is ignored, so the merged view
+        # keeps the user's value too.
+        assert config.get("telemetry.enabled") is False
         assert is_enabled(config) is False
         assert "Telemetry is off" in render_notice(config)
 

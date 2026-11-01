@@ -68,6 +68,35 @@ def is_agentic() -> bool:
     return score >= 3
 
 
+# Environment markers set by AI coding agents themselves. Used, instead of
+# is_agentic(), wherever the CLI decides whom to trust with the API key: a
+# hard signal only. CI, a missing TTY or a missing TERM are never on this
+# list, so CI jobs, cron and containers keep the environment they were given.
+# An exact list; is_agentic() above is for output formatting and is broader.
+AI_AGENT_ENV_MARKERS: tuple[str, ...] = (
+    "AI_AGENT",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+)
+
+
+def is_ai_agent() -> bool:
+    """True only when an AI coding agent marked the environment.
+
+    Hard signals: any non-empty variable in ``AI_AGENT_ENV_MARKERS``, or
+    Aider (``OR_APP_NAME=Aider`` or "aider" in ``OR_SITE_URL``). Never
+    ``CI``, TTY state, ``TERM`` or command-line flags.
+    """
+    env = os.environ
+    if any(env.get(name) for name in AI_AGENT_ENV_MARKERS):
+        return True
+    return env.get("OR_APP_NAME") == "Aider" or "aider" in env.get("OR_SITE_URL", "")
+
+
 _agentic = is_agentic()
 
 # Global console instance — plain when agentic, rich when interactive
@@ -381,12 +410,31 @@ def print_security_warning(message: str) -> None:
         stderr_console.print(f"[yellow]⚠[/yellow] {message}", soft_wrap=True)
 
 
+# Hints already printed in this process (one run of dg).
+_hints_shown: set[str] = set()
+
+
 def print_hint(message: str) -> None:
-    """Print the hint line that follows an error or warning (always stderr)."""
+    """Print the hint line that follows an error or warning (always stderr).
+
+    A hint prints once per run: a later warning or error with the same hint
+    relies on the first one.
+    """
+    if message in _hints_shown:
+        return
+    _hints_shown.add(message)
     if _output_config["agentic"]:
         stderr_console.print(f"HINT: {message}", soft_wrap=True)
     else:
         stderr_console.print(f"  [dim]{message}[/dim]", soft_wrap=True)
+
+
+def print_error_hint(error: BaseException) -> None:
+    """Print the hint an error carries, if any (a refused config save says
+    who fixes the file)."""
+    hint = getattr(error, "hint", None)
+    if hint:
+        print_hint(str(hint))
 
 
 def print_warning(message: str, *, stderr: bool = False) -> None:

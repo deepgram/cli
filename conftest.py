@@ -14,6 +14,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _reset_shown_hints():
+    """A hint prints once per run (process); each test is its own run."""
+    from deepctl_core import output
+
+    output._hints_shown.clear()
+    yield
+    output._hints_shown.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_config_parse_cache():
     """Config files are parsed once per process; each test is its own run."""
     from deepctl_core import config
