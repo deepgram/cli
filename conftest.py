@@ -78,10 +78,11 @@ def _disable_telemetry(monkeypatch):
     """
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DISABLED", "1")
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DSN", "http://k@127.0.0.1:9/1")
-    # A developer's DO_NOT_TRACK must not change what telemetry's own tests
-    # see. (CI is cleared only by those tests:
+    # A developer's DO_NOT_TRACK or DEEPCTL_TELEMETRY=log must not change
+    # what telemetry's own tests see. (CI is cleared only by those tests:
     # other suites read it as an automation signal.)
     monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("DEEPCTL_TELEMETRY", raising=False)
 
 
 @pytest.fixture(autouse=True)
