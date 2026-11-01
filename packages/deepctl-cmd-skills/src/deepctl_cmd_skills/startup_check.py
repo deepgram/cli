@@ -153,12 +153,18 @@ def print_pending_notification() -> None:
     if thread is None or thread.is_alive():
         return
 
+    from deepctl_core.output import invoked_prog, stderr_color
+
     if _result.get("should_prompt"):
         try:
-            sys.stderr.write(
-                "\033[36mAI coding assistants detected. "
-                "Run 'deepctl skills install' to set up integration.\033[0m\n"
+            line = (
+                "Found AI coding agents on this computer. "
+                f"Run {invoked_prog()} skills install to add Deepgram skills "
+                "to them."
             )
+            if stderr_color():
+                line = f"\033[36m{line}\033[0m"
+            sys.stderr.write(line + "\n")
         except (BrokenPipeError, OSError, ValueError):
             # The output stream closed (e.g. an MCP host disconnected stdio
             # after `dg mcp` finished). The prompt is purely advisory.

@@ -117,7 +117,7 @@ body:
     attributes:
       label: CLI version
       description: Output of `dg --version`
-      placeholder: "deepctl, version 0.2.2"
+      placeholder: "dg, version 0.5.0"
     validations:
       required: true
 

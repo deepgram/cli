@@ -369,3 +369,30 @@ def detect(
             True, False, marker.agent_id, marker.reason, marker, soft, None
         )
     return Detection(False, soft is not None, None, soft, None, soft, None)
+
+
+def mode_notice(prog: str, env: Mapping[str, str] | None = None) -> str | None:
+    """The line telling a person why dg is in agent mode, or ``None``.
+
+    Only when a hard signal (not ``DG_AGENT``) turned agent mode on and
+    stdin and stderr are terminals: a person at a keyboard who may have the
+    variable set by accident. It names no shell command, so it reads the
+    same in every shell.
+    """
+    env = _environ(env)
+    if override(env) is not None:
+        return None
+    marker = hard_match(env)
+    if marker is None or not (_isatty(sys.stdin) and _isatty(sys.stderr)):
+        return None
+    if marker.session:
+        return (
+            "This shell looks like an AI agent session (detected via "
+            f"{marker.reason}). If you are a person, see {prog} help agent-mode. "
+            "AI agents: don't change this."
+        )
+    return (
+        f"Using agent mode because {marker.reason} is set. If you are a person, "
+        f"remove {marker.reason} from your environment and shell profile "
+        f"(see {prog} help agent-mode). AI agents: don't change this."
+    )

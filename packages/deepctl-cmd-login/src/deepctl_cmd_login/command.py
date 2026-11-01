@@ -1140,8 +1140,9 @@ class LoginCommand(BaseCommand):
             # The pending login was confirmed for its own profile.
             raise click.UsageError(
                 f'The pending login is for profile "{msg.display(pending.profile)}". '
-                "Run --complete without --profile, or start a new login for "
-                f'"{msg.display(explicit)}" with dg login --profile.'
+                f"Run {shown} login --complete without --profile, or start a new "
+                f'login for "{msg.display(explicit)}" with {shown} login --profile '
+                f"{msg.display(shlex.quote(explicit))}."
             )
         config.profile = pending.profile
         interval = pending.interval
