@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -958,6 +959,34 @@ class TestSkillsStartupCheck:
 
         startup_check.check_and_notify(quiet=False)
         assert startup_check._thread is None
+
+    @pytest.mark.parametrize(
+        "env", [{"AI_AGENT": "claude-code"}, {"CI": "true"}, {"DG_AGENT": "1"}]
+    )
+    def test_suppressed_in_agent_sessions(self, monkeypatch, env):
+        from deepctl_cmd_skills import startup_check
+
+        monkeypatch.setattr(startup_check, "_is_ci", lambda: False)
+        monkeypatch.setattr(startup_check, "_is_oneshot", lambda: False)
+        monkeypatch.setattr(startup_check, "_already_prompted", lambda: False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        startup_check.check_and_notify(quiet=False)
+        assert startup_check._thread is None
+
+    def test_nag_names_the_program_without_forced_colour(self, monkeypatch, capsys):
+        from deepctl_cmd_skills import startup_check
+
+        monkeypatch.setenv("DEEPCTL_PROG_NAME", "dg")
+        monkeypatch.setattr(startup_check, "_result", {"should_prompt": True})
+        thread = threading.Thread(target=lambda: None)
+        thread.start()
+        monkeypatch.setattr(startup_check, "_thread", thread)
+        startup_check.print_pending_notification()
+        assert capsys.readouterr().err == (
+            "Found AI coding agents on this computer. "
+            "Run dg skills install to add Deepgram skills to them.\n"
+        )
 
     def test_suppressed_when_quiet(self):
         from deepctl_cmd_skills import startup_check

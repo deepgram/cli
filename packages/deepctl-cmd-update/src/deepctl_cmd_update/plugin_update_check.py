@@ -249,22 +249,23 @@ def print_pending_plugin_notifications() -> None:
     if not updates:
         return
 
+    from deepctl_core.output import invoked_prog, stderr_color
+
+    prog = invoked_prog()
+    if len(updates) == 1:
+        u = updates[0]
+        lines = [
+            f"Plugin update available: {u['name']} {u['current']} → {u['latest']}"
+            f"  —  run {prog} plugin update {u['name']} to upgrade"
+        ]
+    else:
+        lines = ["Plugin updates available:"]
+        lines += [f"  {u['name']} {u['current']} → {u['latest']}" for u in updates]
+        lines.append(f"Run {prog} plugin update <name> to upgrade")
+    if stderr_color():
+        lines = [f"\033[33m{line}\033[0m" for line in lines]
     try:
-        if len(updates) == 1:
-            u = updates[0]
-            sys.stderr.write(
-                f"\033[33mPlugin update available: {u['name']} {u['current']} → {u['latest']}"
-                f"  —  run 'deepctl plugin update {u['name']}' to upgrade\033[0m\n"
-            )
-        else:
-            sys.stderr.write("\033[33mPlugin updates available:\033[0m\n")
-            for u in updates:
-                sys.stderr.write(
-                    f"\033[33m  {u['name']} {u['current']} → {u['latest']}\033[0m\n"
-                )
-            sys.stderr.write(
-                "\033[33mRun 'deepctl plugin update <name>' to upgrade\033[0m\n"
-            )
+        sys.stderr.write("".join(f"{line}\n" for line in lines))
     except (BrokenPipeError, OSError, ValueError):
         # The output stream closed (e.g. an MCP host disconnected stdio
         # after `dg mcp` finished). These notifications are purely advisory.

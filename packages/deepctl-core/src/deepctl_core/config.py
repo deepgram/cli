@@ -1338,18 +1338,31 @@ class Config:
             return
         # If old config exists and new doesn't, migrate it
         if old_config_path.exists() and not new_config_path.exists():
+            # Queued like every config notice: stderr, once, in the run's
+            # output mode.
+            old_shown = msg.display(str(old_config_path))
+            new_shown = msg.display(str(new_config_path))
             try:
-                print(
-                    f"Migrating config from {old_config_path} to {new_config_path}",
-                    file=sys.stderr,
-                )
                 text = old_config_path.read_text(encoding="utf-8")
                 # Written like any save: 0600, atomic, never via the source's mode.
                 with _directory_lock(new_config_dir):
                     self._replace_or_rewrite(new_config_path, text)
-                print("✓ Config migrated successfully", file=sys.stderr)
+                _queue_notice(
+                    "I-CFG-MIGRATED",
+                    str(new_config_path),
+                    f"Copied the config from {old_shown} to {new_shown}.",
+                    None,
+                    quiet_ok=True,
+                )
             except Exception as e:
-                print(f"Warning: Could not migrate config: {e}", file=sys.stderr)
+                _queue_notice(
+                    "W-CFG-MIGRATE",
+                    str(new_config_path),
+                    f"Could not migrate config from {old_shown} to {new_shown}: "
+                    f"{msg.display(str(e))}",
+                    None,
+                    quiet_ok=False,
+                )
 
     def _get_project_config_path(self) -> Path:
         """Get the project-specific configuration path."""

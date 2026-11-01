@@ -274,6 +274,45 @@ class TestSoft:
         assert agents.soft_reason(_env(TERM="dumb"), []) == "no terminal"
 
 
+class TestNotice:
+    SHELL_WORDS = ("unset", "export ", "set -e", "Remove-Item", "$env:", "DG_AGENT")
+
+    @pytest.fixture
+    def person(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.setattr("sys.stderr.isatty", lambda: True)
+
+    def test_variable_row(self, person):
+        line = agents.mode_notice("dg", _env(CLAUDECODE="1"))
+        assert line == (
+            "Using agent mode because CLAUDECODE is set. If you are a person, "
+            "remove CLAUDECODE from your environment and shell profile "
+            "(see dg help agent-mode). AI agents: don't change this."
+        )
+        assert not any(word in line for word in self.SHELL_WORDS)
+
+    def test_session_row(self, person):
+        line = agents.mode_notice("deepctl", {"PATH": "/h/.pi/agent:/usr/bin"})
+        assert line == (
+            "This shell looks like an AI agent session (detected via a .pi/agent "
+            "entry in PATH). If you are a person, see deepctl help agent-mode. "
+            "AI agents: don't change this."
+        )
+        assert not any(word in line for word in self.SHELL_WORDS)
+
+    @pytest.mark.parametrize("value", ["0", "1"])
+    def test_never_when_dg_agent_decides(self, person, value):
+        assert agents.mode_notice("dg", _env(DG_AGENT=value, CLAUDECODE="1")) is None
+
+    def test_never_without_a_person_at_a_terminal(self, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.setattr("sys.stderr.isatty", lambda: True)
+        assert agents.mode_notice("dg", _env(CLAUDECODE="1")) is None
+
+    def test_never_for_people(self, person):
+        assert agents.mode_notice("dg", _env()) is None
+
+
 def test_stdlib_only():
     """Detection runs before anything heavy loads; it imports only stdlib."""
     code = (

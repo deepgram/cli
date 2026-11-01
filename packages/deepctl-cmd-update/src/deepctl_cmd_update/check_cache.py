@@ -2,8 +2,8 @@
 
 Each check has one small JSON file there, ``update-check.json`` for dg itself
 and ``plugin-update-check.json`` for plugins, holding ``checked_at`` (Unix
-time), ``ok``, ``latest`` and ``source``, plus ``notified_at`` once a notice
-was shown. A check writes its file just before it sends its request and again
+time), ``ok``, ``latest`` and ``source``, plus ``notified_at`` and
+``notified_latest`` once a notice was shown (``claim_notice``). A check writes its file just before it sends its request and again
 when it gets an answer, so a check that fails or never finishes still waits a
 full interval before the next attempt, while a run that ends before the
 request goes out doesn't use up the interval.
@@ -113,19 +113,107 @@ def _save(name: str, state: dict[str, Any]) -> None:
 
 
 def write(name: str, *, ok: bool, latest: str | None, source: str) -> None:
-    """Save the state of a check that ran now. Never raises."""
-    _save(
-        name,
-        {"checked_at": time.time(), "ok": ok, "latest": latest, "source": source},
-    )
-
-
-def mark_notified(name: str) -> None:
-    """Record that the notice for the saved state was shown now."""
-    state = read(name)
-    if state is not None:
-        state["notified_at"] = time.time()
+    """Save the state of a check that ran now. Never raises. When the
+    last notice was shown (``notified_at``, ``notified_latest``) carries
+    over, so a check that finishes right after another process showed the
+    notice doesn't make it show again. The read and save run under the
+    ``claim_notice`` lock, so a claim can't land in between and be lost;
+    if the lock stays taken for ``WRITE_LOCK_WAIT_SECONDS`` (a process
+    that died holding it), the state is saved without it."""
+    directory = _directory()
+    lock = None
+    if directory is not None:
+        path = os.path.join(directory, f".{name}.lock")
+        give_up = time.monotonic() + WRITE_LOCK_WAIT_SECONDS
+        while (taken := _take_lock(path)) is False and time.monotonic() < give_up:
+            time.sleep(0.01)
+        lock = path if taken else None
+    try:
+        state: dict[str, Any] = {
+            "checked_at": time.time(),
+            "ok": ok,
+            "latest": latest,
+            "source": source,
+        }
+        previous = read(name) or {}
+        for key in ("notified_at", "notified_latest"):
+            if key in previous:
+                state[key] = previous[key]
         _save(name, state)
+    finally:
+        if lock is not None:
+            _release_lock(lock)
+
+
+def notice_due(state: dict[str, Any] | None, latest: str, interval: float) -> bool:
+    """Whether the notice for ``latest`` may show: it wasn't shown for
+    that version within ``interval``."""
+    if (state or {}).get("notified_latest") != latest:
+        return True
+    return elapsed(notified_at(state), interval)
+
+
+LOCK_STALE_SECONDS = 60.0
+WRITE_LOCK_WAIT_SECONDS = 0.5
+
+
+def _take_lock(lock: str) -> bool | None:
+    """Create ``lock`` (``O_EXCL``): True if this process now holds it,
+    False if another does, None if it can't be created at all."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        os.close(os.open(lock, flags, 0o600))
+    except FileExistsError:
+        return False
+    except OSError:
+        return None
+    return True
+
+
+def _release_lock(lock: str) -> None:
+    try:
+        os.unlink(lock)
+    except OSError:
+        pass
+
+
+def claim_notice(name: str, latest: str, interval: float) -> bool:
+    """Whether this process shows the notice for ``latest`` now; if so,
+    it is recorded as shown. Of several dg processes that finish together,
+    at most one gets True.
+
+    The claim is a lock file next to the state file (``.<name>.lock``,
+    created with ``O_EXCL``), held while the state is read again and the
+    notice recorded. A process that finds the lock taken shows nothing.
+    A lock older than a minute was left by a process that died: it is
+    removed, and this run shows nothing. With no usable cache directory,
+    or a lock that can't be created there, there is nothing to coordinate
+    with, and the notice shows."""
+    directory = _directory()
+    if directory is None:
+        return True
+    lock = os.path.join(directory, f".{name}.lock")
+    taken = _take_lock(lock)
+    if taken is None:
+        return True  # no lock can be made here: showing twice beats never
+    if not taken:
+        try:
+            if time.time() - os.lstat(lock).st_mtime > LOCK_STALE_SECONDS:
+                os.unlink(lock)
+        except OSError:
+            pass
+        return False
+    try:
+        state = read(name)
+        if not notice_due(state, latest, interval):
+            return False
+        if state is not None:
+            state["notified_at"] = time.time()
+            state["notified_latest"] = latest
+            _save(name, state)
+        return True
+    finally:
+        _release_lock(lock)
 
 
 def _time(state: dict[str, Any] | None, key: str) -> float:

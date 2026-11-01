@@ -29,8 +29,11 @@ def test_legacy_migration_prints_to_stderr_only(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.setattr("deepctl_core.output.is_ai_agent", lambda: False)
     monkeypatch.chdir(tmp_path)
+    from deepctl_core import config as config_module
+
     Config()
+    config_module.flush_config_notices()
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Migrating config" in captured.err
+    assert captured.err.count("Copied the config from") == 1
     assert os.path.exists(home / ".config" / "deepctl" / "config.yaml")
