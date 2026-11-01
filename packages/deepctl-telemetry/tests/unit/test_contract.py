@@ -1,12 +1,14 @@
 """The telemetry runtime contract.
 
 Cross-tool opt-outs (DO_NOT_TRACK, CI), the DEEPCTL_TELEMETRY=log mode, the
-flush that only waits for a queued event. Reports go to a local sink on loopback, never further.
+flush that only waits for a queued event, and the published field schema in
+docs/telemetry.md. Reports go to a local sink on loopback, never further.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import socket
 import sys
 import tempfile
@@ -22,6 +24,11 @@ from unittest.mock import patch
 import pytest
 import sentry_sdk
 from deepctl_telemetry import client
+from sentry_sdk.transport import Transport
+
+REPO = Path(__file__).resolve().parents[4]
+DOC = REPO / "docs" / "telemetry.md"
+
 
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
@@ -231,11 +238,15 @@ class TestFlush:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
+        # A 4 s flush timeout and budget: returning well before them shows
+        # the flush ended with the failed send.
+        monkeypatch.setattr(client, "FLUSH_TIMEOUT_SECONDS", 4.0)
+        monkeypatch.setattr(client, "REPORT_BUDGET_SECONDS", 4.0)
         monkeypatch.setenv(client.DSN_ENV_VAR, f"http://k@127.0.0.1:{port}/1")
         client.init_telemetry(_config())
         started = time.monotonic()
         assert _fail() is True
-        assert time.monotonic() - started < client.FLUSH_TIMEOUT_SECONDS
+        assert time.monotonic() - started < 2.5
 
     def test_unanswered_send_is_held_to_the_budget(
         self, monkeypatch: pytest.MonkeyPatch
@@ -245,9 +256,90 @@ class TestFlush:
             hole.bind(("127.0.0.1", 0))
             hole.listen(8)
             port = hole.getsockname()[1]
+            # The budget (1.5 s) is under the flush timeout (6 s): the
+            # call ends at the budget, not the timeout.
+            monkeypatch.setattr(client, "FLUSH_TIMEOUT_SECONDS", 6.0)
+            monkeypatch.setattr(client, "REPORT_BUDGET_SECONDS", 1.5)
             monkeypatch.setenv(client.DSN_ENV_VAR, f"http://k@127.0.0.1:{port}/1")
             client.init_telemetry(_config())
             started = time.monotonic()
             assert _fail() is True
             elapsed = time.monotonic() - started
-        assert elapsed < client.REPORT_BUDGET_SECONDS + 0.25
+        assert elapsed < 1.5 + 2.0
+
+
+# ── Published schema ─────────────────────────────────────────────────
+
+
+def _paths(value: Any, prefix: str = "") -> set[str]:
+    """Every leaf of `value` as a dotted path; list items as `[]`."""
+    if isinstance(value, dict):
+        found: set[str] = set()
+        for key, child in value.items():
+            found |= _paths(child, f"{prefix}.{key}" if prefix else key)
+        return found
+    if isinstance(value, list):
+        found = set()
+        for child in value:
+            found |= _paths(child, f"{prefix}[]")
+        return found
+    return {prefix}
+
+
+def _documented() -> set[str]:
+    text = DOC.read_text(encoding="utf-8")
+    start = text.index("<!-- fields:start -->")
+    end = text.index("<!-- fields:end -->")
+    rows = [ln for ln in text[start:end].splitlines() if ln.startswith("| `")]
+    return {re.match(r"\| `([^`]+)`", row).group(1) for row in rows}  # type: ignore[union-attr]
+
+
+class _Capturing(Transport):
+    """Keeps the envelopes the SDK hands over; sends nothing."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[dict[str, Any]] = []
+
+    def capture_envelope(self, envelope: Any) -> None:
+        for item in envelope.items:
+            if item.type == "event":
+                self.events.append(json.loads(item.get_bytes()))
+
+
+def _raise_from() -> None:
+    try:
+        raise KeyError("inner")
+    except KeyError as inner:
+        raise ValueError("outer") from inner
+
+
+def test_documented_fields_equal_what_a_report_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real error path, with every source of fields filled in: what the
+    SDK is handed has exactly the fields docs/telemetry.md lists."""
+    assert DOC.is_file(), f"{DOC} is missing: the field schema must be published"
+    from deepctl_core import telemetry_context
+
+    monkeypatch.setattr(
+        telemetry_context,
+        "command_context",
+        lambda: {"command": "dg listen", "flags": "--model"},
+    )
+    capturing = _Capturing()
+    real_init = sentry_sdk.init
+
+    def init_with_capture(*args: Any, **kwargs: Any) -> Any:
+        kwargs["transport"] = capturing
+        return real_init(*args, **kwargs)
+
+    monkeypatch.setattr(sentry_sdk, "init", init_with_capture)
+    client.init_telemetry(_config())
+    try:
+        _raise_from()
+    except ValueError as exc:
+        assert client.report_exception(exc) is True
+    (event,) = capturing.events
+    assert len(event["exception"]["values"]) == 2
+    assert _paths(event) == _documented()

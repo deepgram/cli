@@ -9,6 +9,9 @@ The SDK is never imported on the success path. ``init_telemetry`` only
 records the enabled decision and installs stdlib exception hooks;
 ``report_exception`` imports and initializes the SDK when an error actually
 reaches it, sends one event, and flushes within a fixed time budget.
+
+The field schema is published in docs/telemetry.md; a test keeps the two
+in step.
 """
 
 from __future__ import annotations
