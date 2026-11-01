@@ -157,7 +157,7 @@ dg requests --status failed --endpoint listen   # Debug failed requests
 # Hit any endpoint directly
 dg api /v1/projects --jq '.projects[0].name'
 
-# MCP server for AI editors (Claude Code, Cursor, etc.)
+# MCP server (stdio) that lets AI editors search Deepgram's docs
 dg mcp
 ```
 
@@ -268,8 +268,11 @@ dg debug probe --port 3100                # Live stream audio analysis
 
 ### MCP Server
 
-Give AI coding assistants (Claude Code, Cursor, etc.) Deepgram documentation
-search over stdio.
+`dg mcp` runs a local MCP server over stdio for AI coding assistants (Claude
+Code, Cursor, etc.). It has one tool, `search_deepgram_knowledge_sources`,
+which searches Deepgram's documentation. It uses your API key from `dg login`
+or `DEEPGRAM_API_KEY`; don't put the key in the MCP config. SSE and HTTP
+transports aren't supported.
 
 ```bash
 dg mcp                                    # Start MCP server (stdio)
@@ -522,7 +525,7 @@ cli/
 │   ├── deepctl-cmd-keys/             # API keys management command for deepctl
 │   ├── deepctl-cmd-listen/           # Listen (live speech-to-text) command for deepctl
 │   ├── deepctl-cmd-login/            # Login command for deepctl
-│   ├── deepctl-cmd-mcp/              # MCP server for deepctl: Deepgram documentation search over stdio
+│   ├── deepctl-cmd-mcp/              # Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors
 │   ├── deepctl-cmd-members/          # Members management command for deepctl
 │   ├── deepctl-cmd-models/           # Models command for deepctl
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
@@ -563,7 +566,7 @@ cli/
 | `deepctl listen` | Listen (live speech-to-text) command for deepctl |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
-| `deepctl mcp` | MCP server for deepctl: Deepgram documentation search over stdio |
+| `deepctl mcp` | Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors |
 | `deepctl members` | Members management command for deepctl |
 | `deepctl models` | Models command for deepctl |
 | `deepctl plugin` | Plugin management command for deepctl |
@@ -598,7 +601,7 @@ cli/
 | [`deepctl-cmd-keys`](packages/deepctl-cmd-keys) | API keys management command for deepctl |
 | [`deepctl-cmd-listen`](packages/deepctl-cmd-listen) | Listen (live speech-to-text) command for deepctl |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
-| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server for deepctl: Deepgram documentation search over stdio |
+| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors |
 | [`deepctl-cmd-members`](packages/deepctl-cmd-members) | Members management command for deepctl |
 | [`deepctl-cmd-models`](packages/deepctl-cmd-models) | Models command for deepctl |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
