@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from typing import Any
 
@@ -17,6 +16,7 @@ from deepctl_core import (
     get_output_format,
     get_status_console,
 )
+from deepctl_core.tools import find_executable
 from deepctl_shared_utils import (
     get_ffprobe_path,
     print_ffprobe_install_instructions,
@@ -120,7 +120,8 @@ class FfprobeCommand(BaseCommand):
             status_console.print(f"[red]Error:[/red] File is not executable: {path}")
             return BaseResult(status="error", message=f"File is not executable: {path}")
 
-        # Store in config
+        # Store in config. Only absolute paths are used, so resolve it now.
+        path = os.path.abspath(path)
         config._config.tools.ffprobe_path = path
         config.save()
 
@@ -144,7 +145,7 @@ class FfprobeCommand(BaseCommand):
         config.save()
 
         # Show auto-detected path
-        auto_path = shutil.which("ffprobe")
+        auto_path = find_executable("ffprobe")
         if _human_output():
             console.print("[green]✓[/green] Stored ffprobe path cleared")
             if auto_path:
@@ -162,7 +163,7 @@ class FfprobeCommand(BaseCommand):
     def _handle_status(self, config: Config) -> BaseResult:
         """Show ffprobe status."""
         stored_path = config.get("tools.ffprobe_path")
-        auto_path = shutil.which("ffprobe")
+        auto_path = find_executable("ffprobe")
         effective_path = get_ffprobe_path(config)
 
         if _human_output():

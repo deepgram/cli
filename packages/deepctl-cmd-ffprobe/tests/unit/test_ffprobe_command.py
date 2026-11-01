@@ -59,6 +59,27 @@ class TestFfprobeCommand:
         assert result.available is True
         self.config.save.assert_called_once()
 
+    @patch("deepctl_cmd_ffprobe.command.subprocess.run")
+    @patch("deepctl_cmd_ffprobe.command.os.access")
+    @patch("deepctl_cmd_ffprobe.command.os.path.isfile")
+    def test_set_path_stores_absolute_path(
+        self, mock_isfile, mock_access, mock_run, tmp_path, monkeypatch
+    ):
+        """Only absolute stored paths are used, so a relative one is resolved."""
+        mock_isfile.return_value = True
+        mock_access.return_value = True
+        mock_run.return_value = Mock(returncode=0, stdout="ffprobe version 6.0\n")
+        monkeypatch.chdir(tmp_path)
+
+        result = self.cmd.handle(
+            self.config, self.auth, self.client, path="bin/ffprobe"
+        )
+
+        assert result.stored_path == str(tmp_path / "bin" / "ffprobe")
+        assert self.config._config.tools.ffprobe_path == str(
+            tmp_path / "bin" / "ffprobe"
+        )
+
     @patch("deepctl_cmd_ffprobe.command.os.path.isfile")
     def test_set_path_not_found(self, mock_isfile):
         mock_isfile.return_value = False
@@ -84,7 +105,7 @@ class TestFfprobeCommand:
 
         assert result.status == "error"
 
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     def test_reset(self, mock_which):
         mock_which.return_value = "/usr/bin/ffprobe"
 
@@ -99,7 +120,7 @@ class TestFfprobeCommand:
         self.config.save.assert_called_once()
 
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     @patch("deepctl_cmd_ffprobe.command.subprocess.run")
     def test_status_available(self, mock_run, mock_which, mock_get_path):
         mock_which.return_value = "/usr/bin/ffprobe"
@@ -116,7 +137,7 @@ class TestFfprobeCommand:
 
     @patch("deepctl_cmd_ffprobe.command.print_ffprobe_install_instructions")
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     def test_status_not_available(
         self, mock_which, mock_get_path, mock_print
     ):
@@ -176,7 +197,7 @@ class TestOutputChannels:
 
     @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="json")
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     @patch("deepctl_cmd_ffprobe.command.subprocess.run")
     def test_status_summary_is_suppressed_for_machines(
         self, mock_run, mock_which, mock_get_path, mock_format, capsys
@@ -193,7 +214,7 @@ class TestOutputChannels:
 
     @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="default")
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     @patch("deepctl_cmd_ffprobe.command.subprocess.run")
     def test_status_summary_still_prints_for_humans(
         self, mock_run, mock_which, mock_get_path, mock_format, capsys
