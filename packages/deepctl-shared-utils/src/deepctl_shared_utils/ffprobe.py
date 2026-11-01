@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 console = create_diagnostic_console()
 
 
+def ffprobe_input(file_path: str | os.PathLike[str]) -> str:
+    """Name ``file_path`` for ffprobe as an input file, never as an option.
+
+    ffprobe has no ``--`` end-of-options marker, so a file named ``-f lavfi``
+    would be read as options. The ``file:`` protocol prefix with an absolute
+    path makes ffprobe treat it as a plain file, whatever it is called.
+    """
+    return "file:" + os.path.abspath(os.fspath(file_path))
+
+
 def get_ffprobe_path(config: Config | None = None) -> str | None:
     """Get the ffprobe binary path.
 
@@ -190,7 +200,7 @@ def probe_file(file_path: str, config: Config | None = None) -> AudioProbeResult
             "json",
             "-show_format",
             "-show_streams",
-            file_path,
+            ffprobe_input(file_path),
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -237,7 +247,7 @@ def probe_buffer(
             "json",
             "-show_format",
             "-show_streams",
-            tmp_name,
+            ffprobe_input(tmp_name),
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)

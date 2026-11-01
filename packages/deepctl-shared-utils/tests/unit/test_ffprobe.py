@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import pytest
 from deepctl_shared_utils.ffprobe import (
     check_ffprobe,
+    ffprobe_input,
     get_ffprobe_path,
     probe_buffer,
     probe_file,
@@ -274,6 +275,46 @@ class TestProbeFile:
         assert result.format is not None
         assert result.format.format_name == "raw"
         assert result.streams == []
+
+
+class TestFfprobeInput:
+    """File names are never read as ffprobe options."""
+
+    def test_absolute_path_gets_file_protocol(self):
+        assert ffprobe_input("/tmp/test.wav") == "file:/tmp/test.wav"
+
+    def test_option_like_name_becomes_a_file_input(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert ffprobe_input("-f lavfi") == f"file:{tmp_path}{os.sep}-f lavfi"
+
+    @patch("subprocess.run")
+    @patch("deepctl_shared_utils.ffprobe.get_ffprobe_path")
+    def test_probe_file_passes_file_protocol(
+        self, mock_get_path, mock_run, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        mock_get_path.return_value = "/usr/bin/ffprobe"
+        mock_run.return_value = Mock(
+            returncode=0, stdout=json.dumps(SAMPLE_FFPROBE_OUTPUT)
+        )
+
+        probe_file("-f lavfi")
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[-1] == f"file:{tmp_path}{os.sep}-f lavfi"
+        assert "-f" not in cmd and "lavfi" not in cmd
+
+    @patch("subprocess.run")
+    @patch("deepctl_shared_utils.ffprobe.get_ffprobe_path")
+    def test_probe_buffer_passes_file_protocol(self, mock_get_path, mock_run):
+        mock_get_path.return_value = "/usr/bin/ffprobe"
+        mock_run.return_value = Mock(
+            returncode=0, stdout=json.dumps(SAMPLE_FFPROBE_OUTPUT)
+        )
+
+        probe_buffer(b"\x00" * 100, "test")
+
+        assert mock_run.call_args[0][0][-1].startswith("file:/")
 
 
 class TestProbeBuffer:

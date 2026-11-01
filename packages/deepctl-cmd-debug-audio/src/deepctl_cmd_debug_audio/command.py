@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 from typing import Any
@@ -24,6 +25,17 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .models import AudioDebugResult, AudioFormat, AudioInfo, AudioStream
+
+
+def _ffprobe_input(file_path: str) -> str:
+    """Name ``file_path`` for ffprobe as an input file, never as an option.
+
+    ffprobe has no ``--`` end-of-options marker, so a file named ``-f lavfi``
+    would be read as options. The ``file:`` protocol prefix with an absolute
+    path makes ffprobe treat it as a plain file, whatever it is called.
+    """
+    return "file:" + os.path.abspath(file_path)
+
 
 # Two channels, deliberately (#104):
 #   console        -> stdout, the human rendering of the analysis. Only
@@ -222,10 +234,11 @@ class AudioCommand(BaseCommand):
             raise Exception("Failed to probe file: ffprobe not found")
         try:
             if custom_args:
-                # Parse custom arguments and run ffprobe directly
+                # Split custom arguments like a POSIX shell on every OS, so a quoted
+                # value stays one argument, and run ffprobe directly
                 cmd = [ffprobe_bin, "-v", "quiet", "-print_format", "json"]
-                cmd.extend(custom_args.split())
-                cmd.append(file_path)
+                cmd.extend(shlex.split(custom_args))
+                cmd.append(_ffprobe_input(file_path))
 
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode != 0:
@@ -234,7 +247,7 @@ class AudioCommand(BaseCommand):
                 return dict(json.loads(result.stdout))
             else:
                 # Use python-ffmpeg for standard probe
-                probe = ffmpeg.probe(file_path, cmd=ffprobe_bin)
+                probe = ffmpeg.probe(_ffprobe_input(file_path), cmd=ffprobe_bin)
                 return dict(probe)
         except Exception as e:
             raise Exception(f"Failed to probe file: {e!s}")
