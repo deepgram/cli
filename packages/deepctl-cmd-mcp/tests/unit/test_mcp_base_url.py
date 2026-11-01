@@ -203,3 +203,28 @@ def test_proxy_url_keeps_its_path(monkeypatch):
             config, MagicMock(), MagicMock(), base_url="https://dx.proxy.example/mcp/"
         )
     assert seen["base_url"] == "https://dx.proxy.example/mcp"
+
+
+@pytest.mark.parametrize(
+    ("transport", "shown"),
+    [("sse", "sse"), ("SSE", "sse"), ("streamable-http", "streamable-http")],
+)
+def test_standalone_entrypoint_refuses_other_transports(
+    monkeypatch, capsys, transport, shown
+):
+    """`python -m deepctl_cmd_mcp --transport X` reports E_MCP_TRANSPORT, not
+    an argparse error, for every transport an old config may name."""
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "sk-USERKEY")
+    monkeypatch.setattr(sys, "argv", ["deepctl-cmd-mcp", "--transport", transport])
+    with (
+        patch("deepgram_mcp.run_proxy") as run_proxy,
+        patch("signal.signal"),
+        pytest.raises(SystemExit) as exc,
+    ):
+        mcp_main.main()
+    assert exc.value.code == 1
+    run_proxy.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"supports only the stdio transport, not {shown}." in captured.err
+    assert "Use stdio" in captured.err

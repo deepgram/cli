@@ -7,7 +7,7 @@ import os
 import signal
 from typing import TYPE_CHECKING, Any
 
-from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient, output
 from deepctl_core.hosts import (
     DX_API_HOSTS,
     SOURCE_FLAG,
@@ -16,10 +16,13 @@ from deepctl_core.hosts import (
     evaluate,
     report,
 )
+from deepctl_core.messages import display
 from deepctl_core.output import stderr_console
 from deepgram_mcp import TransportType, run_proxy
 from deepgram_mcp.proxy import DEFAULT_BASE_URL
+from rich.markup import escape
 
+from . import messages as mcp_msg
 from .models import MCPServerResult
 
 if TYPE_CHECKING:
@@ -46,6 +49,17 @@ def _report_error(exc: Exception) -> None:
         pass
 
 
+def _refuse_transport(transport: str) -> None:
+    """Report an unsupported --transport on stderr and exit 1.
+
+    stdout stays empty: an MCP host may be reading it as the protocol channel.
+    """
+    text = mcp_msg.E_MCP_TRANSPORT.format(transport=display(transport))
+    output.print_error(escape(text))
+    output.print_hint(escape(mcp_msg.E_MCP_TRANSPORT_HINT))
+    raise SystemExit(1)
+
+
 class McpCommand(BaseCommand):
     """MCP proxy that connects to Deepgram's developer tools."""
 
@@ -63,14 +77,12 @@ class McpCommand(BaseCommand):
 
     examples = [
         "dg mcp",
-        "dg mcp --transport sse --port 8000",
         "dg mcp --base-url https://api.dx.deepgram.com",
     ]
     agent_help = (
         "Run an MCP (Model Context Protocol) proxy that connects to Deepgram's "
         "developer API and exposes remote AI assistant tools locally. Configure "
-        "in your AI editor's MCP settings. Supports stdio, SSE, and "
-        "streamable-http transports."
+        "in your AI editor's MCP settings. It runs over stdio."
     )
 
     def __init__(self) -> None:
@@ -84,15 +96,17 @@ class McpCommand(BaseCommand):
         return [
             {
                 "names": ["--transport", "-t"],
-                "help": ("Transport mode: stdio (default) or sse"),
+                "help": "Transport: stdio (the only one supported)",
                 "type": str,
                 "default": "stdio",
                 "required": False,
                 "is_option": True,
             },
+            # --port and --host stay accepted so existing MCP configs that
+            # pass them still parse; only stdio runs, so they are unused.
             {
                 "names": ["--port", "-p"],
-                "help": "Port number for HTTP server (default: 8000)",
+                "help": "Ignored: dg mcp runs only over stdio.",
                 "type": int,
                 "default": 8000,
                 "required": False,
@@ -100,7 +114,7 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--host"],
-                "help": "Host address for HTTP server (default: 127.0.0.1)",
+                "help": "Ignored: dg mcp runs only over stdio.",
                 "type": str,
                 "default": "127.0.0.1",
                 "required": False,
@@ -122,6 +136,14 @@ class McpCommand(BaseCommand):
             },
         ]
 
+    def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
+        """Refuse a transport other than stdio before the credential check,
+        so a refused run sends no request and starts no listener."""
+        transport = (kwargs.get("transport") or "stdio").lower()
+        if transport != "stdio":
+            _refuse_transport(transport)
+        return None
+
     def _handle_shutdown(self, signum: int, frame: Any) -> None:
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
@@ -137,10 +159,14 @@ class McpCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle MCP proxy command."""
-        transport = kwargs.get("transport", "stdio").lower()
-        port = kwargs.get("port", 8000)
-        host = kwargs.get("host", "127.0.0.1")
+        transport = (kwargs.get("transport") or "stdio").lower()
         base_url = kwargs.get("base_url") or DEFAULT_BASE_URL
+
+        # Only stdio runs. pre_auth_check() refuses other transports before
+        # the credential check; this repeats it for direct callers, before
+        # the key is read and before anything listens.
+        if transport != "stdio":
+            _refuse_transport(transport)
 
         # The proxy sends the key to --base-url, so that host must be the
         # Deepgram developer API or one the user approved in their config.
@@ -161,16 +187,6 @@ class McpCommand(BaseCommand):
         assert api_key  # guaranteed by requires_auth = True
         debug = kwargs.get("debug", False)
 
-        valid_transports = ["stdio", "sse"]
-        if transport not in valid_transports:
-            console.print(
-                f"[red]Invalid transport type:[/red] {transport}. "
-                f"Must be one of: {', '.join(valid_transports)}"
-            )
-            return MCPServerResult(
-                status="error", message=f"Invalid transport type: {transport}"
-            )
-
         # Set up signal handling for graceful shutdown
         self._original_sigint_handler = signal.signal(
             signal.SIGINT, self._handle_shutdown
@@ -178,43 +194,27 @@ class McpCommand(BaseCommand):
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
         try:
-            if transport != "stdio":
-                console.print(
-                    f"[blue]Starting MCP proxy ({transport}) on {host}:{port}...[/blue]"
-                )
-
             asyncio.run(
                 run_proxy(
-                    transport=transport,
-                    host=host,
-                    port=port,
+                    transport="stdio",
+                    host="127.0.0.1",
+                    port=0,
                     api_key=api_key,
                     base_url=canonical_url(base_url),
                     debug=debug,
                 )
             )
 
-            if transport == "stdio":
-                # The MCP host owns stdout (JSON-RPC channel) and typically
-                # closes it on disconnect, so we return None to skip
-                # output_result rather than risk a write to a closed stream.
-                return None
-
-            return MCPServerResult(
-                status="success",
-                message="MCP proxy stopped",
-                transport=TransportType(transport),
-                port=port,
-                host=host,
-            )
+            # The MCP host owns stdout (JSON-RPC channel) and typically
+            # closes it on disconnect, so we return None to skip
+            # output_result rather than risk a write to a closed stream.
+            return None
 
         except KeyboardInterrupt:
             return MCPServerResult(
                 status="cancelled",
                 message="MCP proxy stopped by user",
-                transport=TransportType(transport),
-                port=port if transport != "stdio" else None,
-                host=host if transport != "stdio" else None,
+                transport=TransportType.STDIO,
             )
         except Exception as e:
             _report_error(e)
@@ -226,9 +226,7 @@ class McpCommand(BaseCommand):
             return MCPServerResult(
                 status="error",
                 message=str(e),
-                transport=TransportType(transport),
-                port=port if transport != "stdio" else None,
-                host=host if transport != "stdio" else None,
+                transport=TransportType.STDIO,
             )
         finally:
             if self._original_sigint_handler:

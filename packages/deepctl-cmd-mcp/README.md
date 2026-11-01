@@ -130,17 +130,15 @@ If running from a local clone of the repository:
 
 ### Transport modes
 
-By default the MCP server uses stdio (for editor integration). You can also
-run it as an HTTP server:
-
-```bash
-# SSE transport
-deepctl mcp --transport sse --port 8000
-```
+The MCP server runs over stdio: your editor starts `dg mcp` and talks to it over
+stdin and stdout. `--transport sse` was removed in deepctl 0.4.1. `--transport
+streamable-http` was never supported. Both exit with an error, so remove them
+from your MCP config.
 
 ## Dependencies
 
 - `deepgram-mcp>=0.1.0`
+- `mcp>=1.0.0,<2.0.0`
 - `rich>=13.9.4`
 - `click>=8.1.7`
 - `pydantic>=2.10.1`
