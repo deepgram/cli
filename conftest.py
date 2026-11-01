@@ -77,3 +77,14 @@ def _disable_telemetry(monkeypatch):
     """
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DISABLED", "1")
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DSN", "http://k@127.0.0.1:9/1")
+
+
+@pytest.fixture(autouse=True)
+def _restore_sigint():
+    """`main()` installs its own SIGINT handler; put pytest's back."""
+    import signal
+
+    before = signal.getsignal(signal.SIGINT)
+    yield
+    if before is not None:
+        signal.signal(signal.SIGINT, before)
