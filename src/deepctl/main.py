@@ -48,6 +48,37 @@ def _record_install_method_cb(
     ctx.exit()
 
 
+def _root_flag_opts() -> set[str]:
+    """Root options that take no value: flags, plus `--help`."""
+    opts = {"--help"}
+    for param in cli.params:
+        if isinstance(param, click.Option) and param.is_flag:
+            opts.update(param.opts)
+            opts.update(param.secondary_opts)
+    return opts
+
+
+def _takes_next_token(arg: str, flag_opts: set[str]) -> bool:
+    """Whether root option `arg` takes the following token as its value.
+
+    Mirrors click: flags take nothing, `--opt=value` and `-Xvalue` carry
+    their value, and a short cluster such as `-qv` or `-qpprod` is read
+    letter by letter until the first option that takes a value.
+    """
+    if arg in flag_opts or "=" in arg:
+        return False
+    if arg.startswith("--") or len(arg) <= 2:
+        return True
+    letters = arg[1:]
+    for index, letter in enumerate(letters):
+        if f"-{letter}" in flag_opts:
+            continue
+        # The first option that takes a value: anything after it is the
+        # attached value; nothing after it means the next token is.
+        return index == len(letters) - 1
+    return False
+
+
 def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     """Convert hyphenated commands to nested commands.
 
@@ -85,40 +116,38 @@ def preprocess_hyphenated_commands(args: list[str]) -> list[str]:
     except Exception:
         pass
 
-    # Process arguments
-    new_args = []
-    i = 0
+    flag_opts = _root_flag_opts()
 
+    # Walk the root options to find the command token. Only that token is
+    # expanded; everything after it belongs to the command and is kept
+    # verbatim (`dg listen debug-call.wav` must not be split).
+    new_args: list[str] = []
+    i = 0
     while i < len(args):
         arg = args[i]
-
-        # Skip if it's an option (starts with -)
+        if arg == "--":
+            break
         if arg.startswith("-"):
             new_args.append(arg)
             i += 1
-            # If it's an option with a value, include the next arg too
-            if i < len(args) and not args[i].startswith("-"):
+            # An option that takes a value consumes the next token too,
+            # unless the value is attached (`--opt=value`, `-Xvalue`).
+            if (
+                _takes_next_token(arg, flag_opts)
+                and i < len(args)
+                and not args[i].startswith("-")
+            ):
                 new_args.append(args[i])
                 i += 1
             continue
 
-        # Check if this could be a hyphenated command
-        if "-" in arg and not arg.startswith("-"):
-            parts = arg.split("-", 1)
-            if len(parts) == 2:
-                group_name, subcommand = parts
+        group_name, sep, subcommand = arg.partition("-")
+        if sep and group_name in group_commands:
+            new_args.extend([group_name, subcommand])
+            i += 1
+        break
 
-                # If the first part is a known group command, convert it
-                if group_name in group_commands:
-                    new_args.extend([group_name, subcommand])
-                    i += 1
-                    continue
-
-        # Otherwise, keep the argument as-is
-        new_args.append(arg)
-        i += 1
-
-    return new_args
+    return new_args + args[i:]
 
 
 # Create CLI group

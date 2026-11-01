@@ -336,3 +336,61 @@ class TestGlobalOptionHint:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "Error" in captured.err
+
+
+class TestHyphenatedCommands:
+    """`group-subcommand` is expanded only where the command name goes."""
+
+    @pytest.fixture
+    def expand(self):
+        from types import SimpleNamespace
+
+        from deepctl.main import preprocess_hyphenated_commands
+
+        def select(group):
+            if group == "deepctl.commands":
+                return [SimpleNamespace(name="debug"), SimpleNamespace(name="listen")]
+            if group == "deepctl.subcommands.debug":
+                return [SimpleNamespace(name="audio")]
+            return []
+
+        with patch("importlib.metadata.entry_points") as mock_eps:
+            mock_eps.return_value.select.side_effect = select
+            yield preprocess_hyphenated_commands
+
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            (["debug-audio", "--help"], ["debug", "audio", "--help"]),
+            (["--quiet", "debug-audio"], ["--quiet", "debug", "audio"]),
+            (["-qv", "debug-audio"], ["-qv", "debug", "audio"]),
+            (["--output=json", "debug-audio"], ["--output=json", "debug", "audio"]),
+            (
+                ["--profile", "debug-x", "debug-audio"],
+                ["--profile", "debug-x", "debug", "audio"],
+            ),
+            (["listen", "debug-call.wav"], ["listen", "debug-call.wav"]),
+            (
+                ["speak", "-v", "debug-voice", "hello"],
+                ["speak", "-v", "debug-voice", "hello"],
+            ),
+            (
+                ["debug-audio", "debug-audio.wav"],
+                ["debug", "audio", "debug-audio.wav"],
+            ),
+            (["--", "debug-audio"], ["--", "debug-audio"]),
+            (["-ojson", "debug-audio"], ["-ojson", "debug", "audio"]),
+            (["-pq", "debug-audio"], ["-pq", "debug", "audio"]),
+            (["-qpprod", "debug-audio"], ["-qpprod", "debug", "audio"]),
+            (["-cconfig.yaml", "debug-audio"], ["-cconfig.yaml", "debug", "audio"]),
+            (
+                ["-qp", "debug-x", "debug-audio"],
+                ["-qp", "debug-x", "debug", "audio"],
+            ),
+            (["-o", "json", "debug-audio"], ["-o", "json", "debug", "audio"]),
+            (["listen-now"], ["listen-now"]),
+            ([], []),
+        ],
+    )
+    def test_expansion(self, expand, args, expected):
+        assert expand(args) == expected
