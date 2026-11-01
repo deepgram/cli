@@ -232,6 +232,38 @@ class TestPluginCommand:
                 # Should call: venv creation, pip upgrade, deepctl-core install
                 assert mock_run.call_count == 3
 
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+    def test_ensure_plugin_environment_creates_an_owner_only_venv(
+        self, tmp_path: Path
+    ) -> None:
+        """Under umask 0002 the plugin dir and venv still come out 0700,
+        and an open plugin dir from an earlier version is narrowed."""
+        import stat
+
+        home = tmp_path / "home"
+        (home / ".deepctl" / "plugins").mkdir(parents=True)
+        (home / ".deepctl" / "plugins").chmod(0o775)
+        venv = home / ".deepctl" / "plugins" / "venv"
+        self.command._plugin_dir = venv.parent
+        self.command._plugin_venv = venv
+
+        def fake_run(args: list[str], **kwargs: object) -> MagicMock:
+            if args[1:3] == ["-m", "venv"]:
+                (Path(args[3]) / "bin").mkdir(parents=True, exist_ok=True)
+                (Path(args[3]) / "bin" / "python").write_text("")
+            return MagicMock(returncode=0)
+
+        old = os.umask(0o002)
+        try:
+            with patch("deepctl_cmd_plugin.command.subprocess.run", fake_run):
+                ok, _ = self.command._ensure_plugin_environment()
+        finally:
+            os.umask(old)
+        assert ok is True
+        assert stat.S_IMODE(venv.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.parent.stat().st_mode) & 0o022 == 0
+
     def test_ensure_plugin_environment_existing(self) -> None:
         """Test that existing plugin environment is used."""
         # Mock that venv exists
