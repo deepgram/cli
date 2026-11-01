@@ -1,9 +1,11 @@
 """Tests for the init command."""
 
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from deepctl_cmd_init import lifecycle
 from deepctl_cmd_init.command import InitCommand
 from deepctl_cmd_init.lifecycle import check_prereqs, inject_env
 from deepctl_cmd_init.models import (
@@ -203,6 +205,25 @@ class TestInjectEnv:
         inject_env(tmp_path, "sk-new-key")
         content = env_file.read_text()
         assert content == "DEEPGRAM_API_KEY=existing-key\n"
+
+
+class TestCloneTemplate:
+    def test_url_is_passed_after_end_of_options(self, tmp_path):
+        with patch.object(lifecycle.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=0)
+            lifecycle.clone_template("--upload-pack=touch /tmp/pwned", tmp_path / "d")
+        argv = run.call_args.args[0]
+        assert argv[:3] == ["git", "clone", "--"]
+        assert argv[3] == "--upload-pack=touch /tmp/pwned"
+
+    def test_option_like_url_is_not_run_as_an_option(self, tmp_path):
+        """With real git: an option-like URL fails as a repository name."""
+        if shutil.which("git") is None:
+            pytest.skip("git not installed")
+        marker = tmp_path / "pwned"
+        with pytest.raises(RuntimeError, match="git clone failed"):
+            lifecycle.clone_template(f"--upload-pack=touch {marker}", tmp_path / "d")
+        assert not marker.exists()
 
 
 # ---------------------------------------------------------------------------
