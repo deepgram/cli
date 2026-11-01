@@ -134,6 +134,34 @@ E_TOOL_PATH_AGENT = (
 E_PERSON_ONLY_AGENT_HINT = (
     "A person must run this command. If you are an AI agent, ask the user."
 )
+# A login prompt that can't be shown (catalogue strings). Hints:
+# H = person, A = AI agent, C = automation (CI, cron); *_NULL when next_step
+# is null. {prog} is the running executable.
+E_CONFIRM_ENVKEY = (
+    "DEEPGRAM_API_KEY is set, and logging in saves a profile that {prog} will "
+    "use instead of it."
+)
+A_CONFIRM_ENVKEY = (
+    "Run next_step only if the user agrees: the saved login will then take "
+    "precedence over DEEPGRAM_API_KEY."
+)
+A_CONFIRM_ENVKEY_NULL = (
+    "Ask the user whether to save a login profile; {prog} will then use it "
+    "instead of DEEPGRAM_API_KEY. Never put a key on the command line."
+)
+C_CONFIRM_ENVKEY_NULL = (
+    "This job's DEEPGRAM_API_KEY is used without a login. Drop the login step, "
+    "or add --yes if a saved profile is intended."
+)
+E_CONFIRM_RELOGIN = 'Profile "{profile}" already has a saved login.'
+H_CONFIRM_YES = "To go ahead, run the command again with --yes."
+A_CONFIRM_YES = "Run the command in next_step only if the user agrees."
+A_CONFIRM_YES_NULL = (
+    "Ask the user to rerun the command with --yes in their own terminal if they agree."
+)
+C_CONFIRM_YES_NULL = (
+    "Add --yes to this command in the job if replacing the saved login is intended."
+)
 E_SAVE_CUSTOM_CONFIG = (
     "--save-base-url can't be used with --config: only the default user "
     "config ({user_config}) can approve API hosts. Run the command without "

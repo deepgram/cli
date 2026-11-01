@@ -1,7 +1,11 @@
 """Login command for deepctl."""
 
+import os
+import shlex
+import shutil
 import sys
 from typing import Any
+from urllib.parse import urlsplit
 
 import click
 from deepctl_core import (
@@ -45,14 +49,127 @@ from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Prompt
 
-from .models import LoginResult, LogoutResult, WhoamiResult
+from .models import LoginCodedError, LoginResult, LogoutResult, WhoamiResult
 
 console = Console()
+
+_PROG_NAMES = ("dg", "deepgram", "deepctl")
+_YES_FLAG = "--yes"
+# Options whose value is a key.
+_SECRET_OPTIONS = ("--api-key", "-k")
 
 
 def _interactive_terminal() -> bool:
     """A person can answer a prompt: stdin and stderr are both terminals."""
     return sys.stdin.isatty() and sys.stderr.isatty()
+
+
+def _prog() -> str | None:
+    """``{prog}``: the running executable, as a command.
+
+    The bare name when ``which(name)`` is this same file; else the console
+    script's absolute path, quoted. ``None`` when neither applies (``python
+    -m``, an unknown launcher), which makes ``next_step`` null.
+    """
+    argv0 = sys.argv[0] if sys.argv else ""
+    name = os.path.basename(argv0)
+    if os.name == "nt" and name.lower().endswith(".exe"):
+        name = name[:-4]
+    if name not in _PROG_NAMES:
+        return None
+    found = shutil.which(name)
+    running = shutil.which(argv0) or argv0
+    try:
+        if found and os.path.samefile(found, running):
+            return name
+    except OSError:
+        pass
+    if not os.path.isfile(running):
+        return None
+    path = os.path.abspath(running)
+    if os.name == "nt":
+        return None if shlex.quote(path) != path else path
+    return shlex.quote(path)
+
+
+def _secret_in(argv: list[str]) -> bool:
+    """True when ``argv`` holds a key or a URL with userinfo or a query."""
+    after_option = False
+    for token in argv:
+        if after_option:
+            return True
+        if token in _SECRET_OPTIONS:
+            after_option = True
+            continue
+        if token.startswith("--api-key=") or (
+            token.startswith("-k") and not token.startswith("--") and len(token) > 2
+        ):
+            return True
+        if "://" in token:
+            try:
+                parts = urlsplit(token)
+            except ValueError:
+                return True
+            if "@" in parts.netloc or parts.query:
+                return True
+    return False
+
+
+def _rerun_with_yes(prog: str | None) -> str | None:
+    """``{prog} {argv} --yes`` as a runnable command, or None."""
+    argv = sys.argv[1:]
+    if prog is None or _secret_in(argv):
+        return None
+    tokens = [*argv, _YES_FLAG]
+    if any(token.startswith("=") for token in tokens):
+        return None  # zsh's EQUALS option would expand it
+    if os.name == "nt" and any(shlex.quote(token) != token for token in tokens):
+        return None
+    step = f"{prog} {shlex.join(tokens)}"
+    return step if shlex.join(shlex.split(step)) == step else None
+
+
+def _hint_for(
+    human: str,
+    agent: str,
+    next_step: str | None,
+    *,
+    agent_null: str | None = None,
+    automation_null: str | None = None,
+) -> str:
+    """The hint for this run's mode, null-aware."""
+    if is_ai_agent():
+        return agent_null if next_step is None and agent_null else agent
+    if _output_config["agentic"]:
+        if next_step is None:
+            return automation_null or agent_null or agent
+        return agent
+    return human
+
+
+def _coded_error(
+    error: str,
+    code: str,
+    hint: str,
+    next_step: str | None,
+    details: dict[str, Any] | None = None,
+) -> LoginCodedError:
+    """Report a coded error on stderr and return its payload."""
+    print_error(escape(error))
+    print_hint(escape(hint))
+    return LoginCodedError(
+        error=error, code=code, hint=hint, next_step=next_step, details=details
+    )
+
+
+def _confirmation_required(error: str, next_step: str | None, hint: str) -> Any:
+    return _coded_error(
+        error,
+        msg.CODE_CONFIRMATION_REQUIRED,
+        hint,
+        next_step,
+        {"flag": _YES_FLAG},
+    )
 
 
 class LoginCommand(BaseCommand):
@@ -103,8 +220,17 @@ class LoginCommand(BaseCommand):
                 "is_option": True,
             },
             {
+                "names": ["--yes", "-y"],
+                "help": (
+                    "Save without asking, even if DEEPGRAM_API_KEY is set or the "
+                    "profile already has a saved login (--save-base-url still asks)"
+                ),
+                "is_flag": True,
+                "is_option": True,
+            },
+            {
                 "names": ["--force-write", "-f"],
-                "help": ("Don't prompt for confirmation when providing credentials"),
+                "help": "Same as --yes",
                 "is_flag": True,
                 "is_option": True,
             },
@@ -136,7 +262,7 @@ class LoginCommand(BaseCommand):
         """Handle login command."""
         api_key = kwargs.get("api_key")
         project_id = kwargs.get("project_id")
-        force_write = kwargs.get("force_write", False)
+        force_write = bool(kwargs.get("yes") or kwargs.get("force_write"))
         profile = kwargs.get("profile")
         save_base_url = kwargs.get("save_base_url", False)
 
@@ -170,6 +296,23 @@ class LoginCommand(BaseCommand):
         has_env_key, has_env_project = auth_manager.has_env_credentials()
 
         if has_env_key and not force_write:
+            if not self._can_ask():
+                # Nobody can answer: say which flag does.
+                prog = _prog()
+                next_step = None if api_key else _rerun_with_yes(prog)
+                return _confirmation_required(
+                    msg.E_CONFIRM_ENVKEY.format(prog=prog or _PROG_NAMES[0]),
+                    next_step,
+                    _hint_for(
+                        msg.H_CONFIRM_YES,
+                        msg.A_CONFIRM_ENVKEY,
+                        next_step,
+                        agent_null=msg.A_CONFIRM_ENVKEY_NULL.format(
+                            prog=prog or _PROG_NAMES[0]
+                        ),
+                        automation_null=msg.C_CONFIRM_ENVKEY_NULL,
+                    ),
+                )
             console.print(
                 "[yellow]Environment variable DEEPGRAM_API_KEY is set.[/yellow]"
             )
@@ -205,6 +348,19 @@ class LoginCommand(BaseCommand):
         )
 
         if has_profile_key and not force_write:
+            if not self._can_ask():
+                next_step = _rerun_with_yes(_prog())
+                return _confirmation_required(
+                    msg.E_CONFIRM_RELOGIN.format(profile=msg.display(current_profile)),
+                    next_step,
+                    _hint_for(
+                        msg.H_CONFIRM_YES,
+                        msg.A_CONFIRM_YES,
+                        next_step,
+                        agent_null=msg.A_CONFIRM_YES_NULL,
+                        automation_null=msg.C_CONFIRM_YES_NULL,
+                    ),
+                )
             console.print(
                 f"[yellow]Already logged in to profile:[/yellow] {current_profile}"
             )
@@ -252,6 +408,10 @@ class LoginCommand(BaseCommand):
             self._maybe_prompt_skills_setup()
 
         return result
+
+    def _can_ask(self) -> bool:
+        """A person can answer login's confirmations here."""
+        return self.can_prompt() and _interactive_terminal() and not is_ai_agent()
 
     def _confirm_save_base_url(self, config: Config, profile: str) -> Any | None:
         """Ask a person to approve saving the base URL.
@@ -490,19 +650,8 @@ class LoginCommand(BaseCommand):
         """Handle CLI authentication with API key."""
         console.print("[blue]Configuring CLI with API key...[/blue]")
 
-        # Validate API key format
-        if not api_key.startswith(("sk-", "pk-")):
-            console.print(
-                "[yellow]Warning:[/yellow] API key format doesn't match "
-                "expected pattern"
-            )
-            if not force_write and not self.confirm("Continue anyway?", default=False):
-                return LoginResult(
-                    status="cancelled",
-                    message="Login cancelled by user",
-                    profile=config.profile or "default",
-                    api_key_masked=None,
-                )
+        # The key's format isn't checked: Deepgram keys have no fixed prefix,
+        # and login_with_api_key verifies the key with the API.
 
         # Validate project ID is provided with API key
         if not project_id:
