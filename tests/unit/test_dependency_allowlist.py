@@ -3,9 +3,9 @@
 Every distribution a plain `pip install deepctl` can pull in, on any
 platform or Python the lock covers, must be named in
 `dependency_allowlist.txt`. A new runtime dependency, direct or transitive,
-fails here until someone adds it on purpose. numpy, ffmpeg-python and future
-were dropped in 0.5.0 (the install diet) and must not come back, allowlisted
-or not.
+fails here until someone adds it on purpose. numpy, ffmpeg-python, future
+and aiohttp were dropped in 0.5.0 (the install diet) and must not come back,
+allowlisted or not.
 
 Two views of the closure are checked:
 
@@ -37,7 +37,7 @@ ALLOWLIST = Path(__file__).with_name("dependency_allowlist.txt")
 ROOT_NAME = "deepctl"
 # Versioned on its own, the way an outside plugin would be.
 NOT_LOCKSTEP = {"deepctl-plugin-example"}
-FORBIDDEN = {"numpy", "ffmpeg-python", "future"}
+FORBIDDEN = {"numpy", "ffmpeg-python", "future", "aiohttp"}
 
 
 def normalize(name: str) -> str:
