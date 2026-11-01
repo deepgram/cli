@@ -55,14 +55,15 @@ def _refuse_transport(transport: str) -> None:
 
 
 class McpCommand(BaseCommand):
-    """MCP server that serves Deepgram documentation search over stdio."""
+    """Local stdio MCP server that searches Deepgram's documentation."""
 
     name = "mcp"
     help = (
-        "Run an MCP server that exposes Deepgram documentation search to "
-        "your AI editor over stdio"
+        "Run a local MCP server over stdio that lets AI editors search "
+        "Deepgram's documentation, using your API key from dg login or "
+        "DEEPGRAM_API_KEY"
     )
-    short_help = "Serve Deepgram docs search over MCP"
+    short_help = "Run an MCP server that searches Deepgram's docs"
 
     # No credential check at startup: the server answers the handshake with
     # or without a key, and a missing or refused key is a tool error on the
@@ -77,9 +78,13 @@ class McpCommand(BaseCommand):
         "dg mcp --base-url https://api.dx.deepgram.com",
     ]
     agent_help = (
-        "Run an MCP (Model Context Protocol) server that exposes Deepgram "
-        "documentation search to your AI editor. Configure "
-        "in your AI editor's MCP settings. It runs over stdio."
+        "Run a local MCP (Model Context Protocol) server over stdio for AI "
+        "editors. It has one tool, search_deepgram_knowledge_sources, which "
+        "searches Deepgram's documentation through Deepgram's hosted search "
+        "and returns passages with their source URLs. Register it with "
+        'command "dg" and args ["mcp"]. The API key comes from dg login or '
+        "DEEPGRAM_API_KEY; don't put it in the MCP config's args. Without a "
+        "key the server still starts and each search returns a tool error."
     )
 
     def __init__(self) -> None:
@@ -119,7 +124,12 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--base-url"],
-                "help": "Base URL for Deepgram developer API",
+                "help": (
+                    "Base URL of Deepgram's documentation search service. It "
+                    "must use https unless the host is localhost, and any host "
+                    "other than Deepgram's must be in api.allowed_hosts in your "
+                    "user config"
+                ),
                 "type": str,
                 "default": DEFAULT_BASE_URL,
                 "required": False,
@@ -127,7 +137,7 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--debug"],
-                "help": "Enable debug logging",
+                "help": "Log each documentation search request to stderr",
                 "is_flag": True,
                 "is_option": True,
             },
@@ -153,7 +163,7 @@ class McpCommand(BaseCommand):
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
             self._shutdown_requested = True
-            console.print("\n[yellow]MCP server stopped by user[/yellow]")
+            console.print("\n[yellow]MCP server stopped.[/yellow]")
             os._exit(0)
 
     def handle(
@@ -220,7 +230,7 @@ class McpCommand(BaseCommand):
         except KeyboardInterrupt:
             return MCPServerResult(
                 status="cancelled",
-                message="MCP server stopped by user",
+                message="MCP server stopped.",
                 transport=TransportType.STDIO,
             )
         except Exception as e:
