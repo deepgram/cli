@@ -667,15 +667,15 @@ class ListenCommand(BaseCommand):
         # a header dump. Say so up front instead.
         if api_version >= 2 and mode in ("prerecorded_file", "prerecorded_url"):
             raise click.ClickException(
-                f"Flux STT ({model}) is streaming-only and cannot transcribe "
-                "a file or URL. Use a live source (--mic, stdin, or '-'), or "
-                "pick a v1 model (e.g. nova-3) for pre-recorded audio."
+                f"Flux models ({model}) are streaming-only and can't "
+                "transcribe a file or URL. Use a live source (--mic, or - for "
+                "stdin), or pick another model (e.g. nova-3) for recorded "
+                "audio."
             )
 
         if api_version >= 2 and channels != 1:
             raise click.ClickException(
-                f"--channels {channels} is not supported by Flux STT ({model}); "
-                "listen v2 accepts mono audio only (--channels 1)."
+                f"Flux models stream mono audio only: use --channels 1, not {channels}."
             )
 
         # Flux STT (listen v2) only accepts a narrow --redact vocabulary; the
@@ -686,8 +686,8 @@ class ListenCommand(BaseCommand):
             if bad:
                 allowed = " or ".join(f"'{v}'" for v in _FLUX_REDACT)
                 raise click.ClickException(
-                    f"--redact {', '.join(bad)} is not supported by Flux STT "
-                    f"({model}); listen v2 accepts only {allowed}."
+                    f"Flux models accept only {allowed} for --redact, not "
+                    f"{', '.join(bad)}."
                 )
 
         # ── Caption format ─────────────────────────────────────────────
