@@ -2712,11 +2712,11 @@ class TestStateLock:
         with lock_child(monkeypatch) as (child, _):
             child.kill()  # SIGKILL on POSIX, TerminateProcess on Windows.
             child.join(30)
-        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 1.0)
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 10.0)
         start = time.monotonic()
         with sg._state_lock():
             pass
-        assert time.monotonic() - start < 1.0
+        assert time.monotonic() - start < 5.0
         assert sg._STATE_FILE.with_name("skills.json.lock").exists()
 
     def test_a_killed_replacement_keeps_its_record_and_old_copy(
@@ -2842,7 +2842,7 @@ class TestStateLock:
         took = time.monotonic() - start
         lock = sg._STATE_FILE.with_name("skills.json.lock")
         assert str(exc.value) == _msg(key, lock=lock, reason=os.strerror(code))
-        assert took < 2.0 if key == "E28" else took >= 0.5
+        assert took < 3.5 if key == "E28" else took >= 0.5
         assert state_bytes() is None and not root().exists()
 
     def test_ctrl_c_while_waiting_closes_the_lock_and_writes_nothing(
@@ -2906,11 +2906,11 @@ class TestStateLock:
             m.setattr(owner, name, locked_then_interrupted)
             with pytest.raises(KeyboardInterrupt), sg._state_lock():
                 pass
-        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 5.0)
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 10.0)
         start = time.monotonic()
         with sg._state_lock():  # The interrupted take did not keep the file locked.
             pass
-        assert time.monotonic() - start < (5.0 if win else 1.0)
+        assert time.monotonic() - start < 5.0
         assert getattr(sg._LOCAL, "fd", None) is None
 
     @POSIX

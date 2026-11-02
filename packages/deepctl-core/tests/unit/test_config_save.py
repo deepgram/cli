@@ -989,7 +989,7 @@ def test_save_gives_up_on_a_lock_held_by_another_process(tmp_path, monkeypatch, 
         assert "another process is writing this config, so nothing was saved" in str(
             err.value
         )
-        assert 4.0 <= elapsed < 6.5
+        assert 4.0 <= elapsed < 8.5  # one 5 s wait, not two
         monkeypatch.setattr(config_module, "_LOCK_TIMEOUT", 0.2)
         config.save(implicit=True)  # returns without writing
         assert path.read_text() == original

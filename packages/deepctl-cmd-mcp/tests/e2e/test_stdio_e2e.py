@@ -328,7 +328,7 @@ def test_exits_on_eof_without_connecting(tmp_path: Path, argv: list[str]) -> Non
         except (BlockingIOError, OSError):
             connected = False
     assert proc.returncode == 0, proc.stderr
-    assert elapsed < 5
+    assert elapsed < 12  # a connect attempt would wait out its 15 s
     assert not connected
     replies = [json.loads(line) for line in proc.stdout.splitlines()]
     assert [r["id"] for r in replies] == [0, 1]

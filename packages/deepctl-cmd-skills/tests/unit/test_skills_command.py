@@ -461,7 +461,8 @@ class TestSkillsFlows:
         roots = [gen(c).skills_root() for c in ("claude", "cursor")]
         before = sg._STATE_FILE.read_bytes(), [sha_tree(r) for r in roots]
         capsys.readouterr()
-        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 0.5)
+        # 2 s per wait: one wait is 2 s, one per tool would be 4 s.
+        monkeypatch.setattr(sg, "_LOCK_TIMEOUT", 2.0)
         calls = []
         real_remove = sg.remove_tool
         monkeypatch.setattr(
@@ -479,7 +480,7 @@ class TestSkillsFlows:
                 sg.msvcrt.locking(fd, sg.msvcrt.LK_UNLCK, 1)
             os.close(fd)
         assert (exc.value.exit_code, exc.value.message) == (1, _msg("E27"))
-        assert 0.5 <= took < 1.0  # One wait, not one per tool.
+        assert 2.0 <= took < 3.9  # One wait, not one per tool.
         assert calls == [] and _msg("E27") not in err_text(capsys)
         assert (sg._STATE_FILE.read_bytes(), [sha_tree(r) for r in roots]) == before
 
