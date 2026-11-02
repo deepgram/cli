@@ -11,14 +11,11 @@ import io
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
-from deepctl.main import safe_output_streams
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from deepctl import main as dg_main
 
 
 def _stream(encoding: str, errors: str = "strict") -> io.TextIOWrapper:
@@ -40,7 +37,7 @@ def test_cp1252_stream_escapes_instead_of_raising(
     out, err = _stream("cp1252", errors), _stream("cp1252", errors)
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(sys, "stderr", err)
-    safe_output_streams()
+    dg_main.safe_output_streams()
     out.write("ok ✓ café █")
     err.write("✗")
     assert _written(out) == b"ok \\u2713 caf\xe9 \\u2588"
@@ -52,7 +49,7 @@ def test_cp1252_stream_escapes_instead_of_raising(
 def test_utf8_stream_is_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
     out = _stream("UTF-8")
     monkeypatch.setattr(sys, "stdout", out)
-    safe_output_streams()
+    dg_main.safe_output_streams()
     assert out.errors == "strict"
     assert out.encoding == "UTF-8"
 
@@ -60,7 +57,7 @@ def test_utf8_stream_is_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_chosen_error_handler_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     out = _stream("cp1252", "replace")
     monkeypatch.setattr(sys, "stdout", out)
-    safe_output_streams()
+    dg_main.safe_output_streams()
     assert out.errors == "replace"
 
 
@@ -70,24 +67,26 @@ def test_odd_streams_are_skipped(
 ) -> None:
     monkeypatch.setattr(sys, "stdout", stream)
     monkeypatch.setattr(sys, "stderr", stream)
-    safe_output_streams()  # no error
+    dg_main.safe_output_streams()  # no error
 
 
 def test_closed_stream_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     out = _stream("cp1252")
     out.close()
     monkeypatch.setattr(sys, "stdout", out)
-    safe_output_streams()
+    dg_main.safe_output_streams()
 
 
-@pytest.mark.parametrize("args", [["--help"], ["ffprobe", "--help"], ["--version"]])
+@pytest.mark.parametrize(
+    "args", [["--help"], ["ffprobe", "--help"], ["help", "agent-mode"]]
+)
 def test_redirected_cp1252_output_does_not_crash(
     tmp_path: Path, args: list[str]
 ) -> None:
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("DEEPCTL_", "DEEPGRAM_", "PYTHONIO", "PYTHONUTF8"))
+        if not k.startswith(("DEEPCTL_", "DEEPGRAM_", "PYTHONIO"))
     }
     env.update(
         HOME=str(tmp_path),
@@ -95,12 +94,11 @@ def test_redirected_cp1252_output_does_not_crash(
         XDG_CACHE_HOME=str(tmp_path / "cache"),
         XDG_STATE_HOME=str(tmp_path / "state"),
         PYTHONIOENCODING="cp1252",
-        PYTHONUTF8="0",
         DEEPCTL_TELEMETRY_DISABLED="1",
         NO_COLOR="1",
     )
     proc = subprocess.run(
-        [sys.executable, "-c", "from deepctl.main import main; main()", *args],
+        [sys.executable, "-m", "deepctl", *args],
         capture_output=True,
         env=env,
         cwd=tmp_path,
