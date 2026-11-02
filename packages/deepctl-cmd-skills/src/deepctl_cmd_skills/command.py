@@ -235,7 +235,7 @@ class SkillsCommand(BaseGroupCommand):
             for gen, paths, leftover in sg.install_for(plan, **recheck):
                 done = f"{gen.display_name}: installed {_n(len(paths), 'skill')} in {gen.skills_root()}."
                 print_success(escape(done))
-                if leftover:  # Only this run's staging (SF3).
+                if leftover:  # Only this run's staging.
                     print_warning(escape(sg._msg("E12", staging=leftover)))
                 count += len(paths)
                 done_refs[gen.cli_name] = refs[gen.cli_name]
