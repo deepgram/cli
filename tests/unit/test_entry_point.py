@@ -258,12 +258,29 @@ class TestHttpxCliGuard:
 
 
 class TestInterruptWhileLoading:
+    @pytest.mark.parametrize(
+        ("dg_agent", "expected"),
+        [
+            ("0", "\nCancelled.\n"),
+            (
+                "1",
+                "ERROR: Cancelled.\n"
+                "HINT: The user cancelled. Don't retry unless they ask.\n",
+            ),
+        ],
+    )
     def test_ctrl_c_while_the_cli_loads_is_cancelled_quietly(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        dg_agent: str,
+        expected: str,
     ) -> None:
         """A Ctrl-C before run() is entered is cancelled: exit 2, run()'s
-        cancel line, no traceback."""
+        cancel lines, no traceback."""
         from deepctl import main as entry
+
+        monkeypatch.setenv("DG_AGENT", dg_agent)
 
         class Interrupts:
             def find_spec(self, name: str, *args: object) -> None:
@@ -280,5 +297,5 @@ class TestInterruptWhileLoading:
         assert exc.value.code == 2
         captured = capsys.readouterr()
         assert "Traceback" not in captured.err
-        assert captured.err == "\nOperation cancelled by user\n"
+        assert captured.err == expected
         assert captured.out == ""
