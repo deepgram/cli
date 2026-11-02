@@ -1032,16 +1032,18 @@ class AuthManager:
         for profile_name in self.config.list_profiles():
             profile = self.config.get_profile(profile_name)
 
-            # Try to get API key from keyring first
-            api_key = None
+            # The keyring's key when it has one, else the config file's.
+            # Project ID is only stored in config, not keyring.
             project_id = profile.project_id
-
             try:
                 # Bounded off a terminal; a timeout falls back like an error.
                 api_key = credentials.keyring_read(f"api-key.{profile_name}")
-                # Project ID is only stored in config, not keyring
             except Exception:
-                # Fall back to config
+                api_key = None
+            if not api_key:
+                # No entry, as with a key saved only in the config file
+                # while a keyring backend (Windows Credential Manager, say)
+                # is present.
                 api_key = profile.api_key
 
             masked_key = None
