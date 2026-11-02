@@ -287,7 +287,14 @@ def _windows_folder(csidl: int) -> str | None:
 
 def _real_default_config_file() -> Path | None:
     """Where platformdirs puts the user config with no ``HOME`` or
-    ``XDG_CONFIG_HOME`` override: derived from the account itself."""
+    ``XDG_CONFIG_HOME`` override: derived from the account itself.
+
+    On macOS, platformdirs moves the config to ``$XDG_CONFIG_HOME`` when
+    that is set. Only the XDG default, ``~/.config`` under the account's
+    own home, is followed there: it is a fixed path, like the Linux one.
+    Any other value keeps ``~/Library/Application Support``, so a file
+    somewhere else (a repository, say) never counts in an agent session.
+    """
     if sys.platform == "win32":
         base = _windows_folder(0x1C)  # CSIDL_LOCAL_APPDATA
         if base is None:
@@ -296,11 +303,17 @@ def _real_default_config_file() -> Path | None:
     home = _real_home()
     if home is None:
         return None
+    xdg_default = Path(home) / ".config" / "deepctl" / "config.yaml"
     if sys.platform == "darwin":
+        xdg = os.environ.get("XDG_CONFIG_HOME", "")
+        if os.path.isabs(xdg) and os.path.normpath(xdg) == os.path.join(
+            os.path.normpath(home), ".config"
+        ):
+            return xdg_default
         return (
             Path(home) / "Library" / "Application Support" / "deepctl" / "config.yaml"
         )
-    return Path(home) / ".config" / "deepctl" / "config.yaml"
+    return xdg_default
 
 
 def _trust_root_location() -> tuple[Path, Path] | None:
