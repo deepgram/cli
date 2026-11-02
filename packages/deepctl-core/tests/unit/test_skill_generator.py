@@ -857,7 +857,7 @@ class TestOwnership:
         with pytest.raises(SkillOwnershipError) as exc:
             install(make_bundle(tmp_path))
         assert str(exc.value) == _msg("E1", paths=str(api))
-        assert state_bytes() is None  # No "installing" write happened (SF7).
+        assert state_bytes() is None  # No "installing" write happened.
         assert sha_tree(api) == before
         if target_before is not None:
             assert sha_tree(target) == target_before
@@ -894,7 +894,7 @@ class TestOwnership:
         symlink_or_skip(api, rel(mine, api), is_dir=True)
         assert (
             _fingerprint(mine) == records()["api"]["fingerprint"]
-        )  # A real install (SF7).
+        )  # A real install.
         before, saved = sha_tree(mine), state_bytes()
         with pytest.raises(SkillOwnershipError) as exc:
             install(make_bundle(tmp_path, body="v2"))
