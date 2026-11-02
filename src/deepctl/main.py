@@ -191,6 +191,26 @@ def safe_output_streams() -> None:
             continue  # an unknown encoding, or a closed stream
 
 
+def _write_cancelled() -> None:
+    """run()'s cancel lines, written without rich or Click."""
+    text = "\nCancelled.\n"
+    try:
+        from deepctl_core import messages as msg
+        from deepctl_core.agents import is_agentic
+
+        if is_agentic():
+            text = f"ERROR: {msg.E_CANCELLED}\nHINT: {msg.A_CANCELLED}\n"
+        else:
+            text = f"\n{msg.E_CANCELLED}\n"
+    except (Exception, KeyboardInterrupt):  # half-loaded: keep the default
+        pass
+    try:
+        sys.stderr.write(text)
+        sys.stderr.flush()
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def _print_version() -> None:
     if sys.stdout is None:  # started with stdout closed (`dg --version >&-`)
         return
@@ -246,12 +266,8 @@ def main(prog: "str | None" = None) -> None:
         from deepctl._cli import run
     except KeyboardInterrupt:
         # Ctrl-C while the CLI is still loading: cancelled, exit 2, the same
-        # line run() prints (rich may not be loaded yet), and no traceback.
-        try:
-            sys.stderr.write("\nOperation cancelled by user\n")
-            sys.stderr.flush()
-        except (AttributeError, OSError, ValueError):
-            pass
+        # lines run() prints (rich may not be loaded yet), and no traceback.
+        _write_cancelled()
         sys.exit(2)
 
     run(args, started_at, prog)

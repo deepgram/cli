@@ -235,6 +235,17 @@ E_SAVE_CUSTOM_CONFIG = (
     "--config."
 )
 
+# ── Cancelled and unexpected errors (the root handler) ───────────
+
+E_CANCELLED = "Cancelled."
+A_CANCELLED = "The user cancelled. Don't retry unless they ask."
+E_INTERNAL = "Command failed: {exception_message}"
+H_INTERNAL = (
+    "Run the command again with --verbose for details, and report it at "
+    "https://github.com/deepgram/cli/issues."
+)
+A_INTERNAL = "This is a bug in dg. Tell the user and include the command you ran."
+
 # ── Project file deepgram.yaml ───────────────────────────────────
 
 W_PF = "Ignored {key} in {project_file}: {reason}"

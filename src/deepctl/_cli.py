@@ -1011,6 +1011,41 @@ def _safe_console_print(message: str) -> None:
         pass
 
 
+def _agent_lines(error: str, hint: str) -> None:
+    """Agent mode: exactly two prefixed lines (ERROR:, HINT:) on stderr."""
+    try:
+        click.echo(f"ERROR: {error}\nHINT: {hint}", err=True, color=False)
+    except (OSError, ValueError):
+        pass
+
+
+def _print_cancelled() -> None:
+    """The line for Ctrl-C/Ctrl-D (exit 2): ``cancelled`` in the catalogue."""
+    from deepctl_core import messages as msg
+    from deepctl_core.output import is_agentic
+
+    if is_agentic():
+        _agent_lines(msg.E_CANCELLED, msg.A_CANCELLED)
+        return
+    _safe_console_print(f"\n[yellow]{msg.E_CANCELLED}[/yellow]")
+
+
+def _print_internal_error(exc: BaseException) -> None:
+    """The catch-all for an exception nothing else handled (exit 1)."""
+    from deepctl_core import messages as msg
+    from deepctl_core.output import is_agentic
+
+    message = msg.E_INTERNAL.format(exception_message=str(exc) or type(exc).__name__)
+    if is_agentic():
+        _agent_lines(message, msg.A_INTERNAL)
+        return
+    from rich.markup import escape
+
+    # The exception text can hold anything: text, not markup.
+    _safe_console_print(f"[red]Error: {escape(message)}[/red]")
+    _safe_console_print(f"  [dim]{escape(msg.H_INTERNAL)}[/dim]")
+
+
 def _print_usage(ctx: click.Context | None) -> None:
     """Click's usage line and "Try ... --help" before a usage error, so the
     program name a user typed (or ``DEEPCTL_PROG_NAME``) shows up.
@@ -1282,7 +1317,7 @@ def run(
         # Click wraps a Ctrl-C/Ctrl-D raised inside cli() in Abort when
         # standalone_mode=False, so a mid-command interrupt arrives here as
         # Abort, not KeyboardInterrupt. Both are user cancellation: exit 2.
-        _safe_console_print("\n[yellow]Operation cancelled by user[/yellow]")
+        _print_cancelled()
         sys.exit(2)
     except click.UsageError as e:
         # Keep the published exit-code contract (1 = error), but explain the
@@ -1320,6 +1355,6 @@ def run(
             pass
         sys.exit(e.exit_code)
     except Exception as e:
-        _safe_console_print(f"[red]Error: {e}[/red]")
+        _print_internal_error(e)
         _report_error(e)
         sys.exit(1)  # 1 = error; 2 is reserved for user interrupt

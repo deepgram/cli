@@ -434,6 +434,60 @@ class TestUsageErrorModes:
         )
 
 
+class TestRootHandlerMessages:
+    """Cancel and the catch-all print the catalogue's coded messages."""
+
+    def _run(self, capsys, error, *, agentic):
+        from deepctl.main import main
+
+        with (
+            patch("sys.argv", ["dg", "models"]),
+            patch("deepctl_core.output.is_agentic", return_value=agentic),
+            patch.object(_cli_mod, "cli", side_effect=error),
+            patch.object(_cli_mod, "_report_error"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        return exc_info.value.code, captured.err
+
+    def test_cancel_human(self, capsys):
+        code, err = self._run(capsys, click.exceptions.Abort(), agentic=False)
+        assert code == 2
+        assert err == "\nCancelled.\n"
+
+    def test_cancel_agent_mode_prints_two_prefixed_lines(self, capsys):
+        code, err = self._run(capsys, KeyboardInterrupt(), agentic=True)
+        assert code == 2
+        assert err.splitlines() == [
+            "ERROR: Cancelled.",
+            "HINT: The user cancelled. Don't retry unless they ask.",
+        ]
+
+    def test_unexpected_error_human_gives_next_step(self, capsys):
+        code, err = self._run(capsys, RuntimeError("boom [red]x"), agentic=False)
+        assert code == 1
+        flat = " ".join(err.split())
+        assert "Error: Command failed: boom [red]x" in flat
+        assert (
+            "Run the command again with --verbose for details, and report it "
+            "at https://github.com/deepgram/cli/issues."
+        ) in flat
+
+    def test_unexpected_error_agent_mode(self, capsys):
+        code, err = self._run(capsys, RuntimeError("boom"), agentic=True)
+        assert code == 1
+        assert err.splitlines() == [
+            "ERROR: Command failed: boom",
+            "HINT: This is a bug in dg. Tell the user and include the command you ran.",
+        ]
+
+    def test_unexpected_error_without_text_names_its_type(self, capsys):
+        _, err = self._run(capsys, RuntimeError(), agentic=True)
+        assert err.splitlines()[0] == "ERROR: Command failed: RuntimeError"
+
+
 class TestRichTraceback:
     """An uncaught exception gets a rich traceback, without frame locals.
 
