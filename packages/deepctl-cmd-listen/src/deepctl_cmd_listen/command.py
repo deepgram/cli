@@ -285,6 +285,26 @@ def _prog() -> str:
     return "dg"
 
 
+def _finish_keys() -> str:
+    """The keys that end typed input: Ctrl+D doesn't in a Windows console."""
+    return "Ctrl+Z, then Enter," if sys.platform == "win32" else "Ctrl+D"
+
+
+def _mic_denied_text() -> str:
+    """The microphone was refused: what happened, what to do, and where
+    that setting lives on this OS."""
+    hint = msg.A_MIC_DENIED if (_agentic or agent_mode()) else msg.H_MIC_DENIED
+    lines = [msg.E_MIC_DENIED.format(prog=_prog()), hint]
+    if sys.platform == "darwin":
+        lines.append("macOS: System Settings → Privacy & Security → Microphone")
+    elif sys.platform == "win32":
+        lines.append(
+            "Windows: Settings → Privacy & security → Microphone, and turn on "
+            "'Let desktop apps access your microphone'"
+        )
+    return "\n".join(lines)
+
+
 class ListenCommand(BaseCommand):
     """Unified speech-to-text command supporting files, URLs, mic, and streams."""
 
@@ -1140,17 +1160,13 @@ class ListenCommand(BaseCommand):
             raise
         except Exception as e:
             err = str(e)
-            msg_text = f"Microphone error: {err}"
             if (
                 "Invalid input device" in err
                 or "PortAudio" in err
                 or "No Default Input" in err
             ):
-                msg_text += (
-                    "\n\nOn macOS, make sure your terminal has microphone access:"
-                    "\n  System Settings → Privacy & Security → Microphone"
-                )
-            return BaseResult(status="error", message=msg_text)
+                return BaseResult(status="error", message=_mic_denied_text())
+            return BaseResult(status="error", message=f"Microphone error: {err}")
         finally:
             early.restore()
 
@@ -1321,7 +1337,7 @@ class ListenCommand(BaseCommand):
             note = f"Model: {model} · Language: {language}"
             if diarize:
                 note += " · Speaker labels enabled"
-            note += " · Ctrl+D to finish"
+            note += f" · {_finish_keys()} to finish"
             try:
                 caption_writer.print_header(
                     note=note if caption_format == "webvtt" else None
@@ -1330,7 +1346,8 @@ class ListenCommand(BaseCommand):
                 live.silence_stdout()
         else:
             status.print(
-                f"[green]✓[/green] Streaming stdin · {model} · send EOF (Ctrl+D) to finish"
+                f"[green]✓[/green] Streaming stdin · {model} · press "
+                f"{_finish_keys()} to finish"
             )
 
         _freeze_at_exit()

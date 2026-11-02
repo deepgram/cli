@@ -137,3 +137,15 @@ W_COMPACT_TEMP_REFUSED = (
     "Not using {path} for saved results: it isn't a private directory owned "
     "by you. Using a new temporary directory instead."
 )
+
+# The microphone was refused (a PortAudio "invalid input device" or "no
+# default input"). Catalogue mic_not_allowed; the code itself ships later.
+E_MIC_DENIED = "{prog} can't use the microphone: access was denied."
+H_MIC_DENIED = (
+    "Allow microphone access for your terminal app in your system privacy "
+    "settings, then try again."
+)
+A_MIC_DENIED = (
+    "Ask the user to allow microphone access for their terminal, or "
+    "transcribe a file instead."
+)
