@@ -48,7 +48,11 @@ def _isolated(tmp_path, monkeypatch):
         lambda: (tmp_path, tmp_path / "user" / "config.yaml"),
     )
     monkeypatch.setattr(hosts, "_reported", set())
+    # Each test gets fresh shared clients; monkeypatch puts back what was
+    # there before, and the ones a test made are closed below.
     monkeypatch.setattr(transport, "_client", None)
+    monkeypatch.setattr(transport, "_verified", None)
+    monkeypatch.setattr(transport, "_client_insecure", False)
     monkeypatch.setattr(output, "is_agentic", lambda: False)
     monkeypatch.setattr(output, "is_ai_agent", lambda: False)
     monkeypatch.setitem(output._output_config, "agentic", False)
@@ -65,6 +69,12 @@ def _isolated(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sdk_http.time, "sleep", lambda s: None)
     monkeypatch.setenv("DEEPGRAM_API_KEY", KEY)
+    yield
+    # A keep-alive connection to a test's fake server would otherwise stay
+    # open until the collector finds it, in some later test.
+    for client in (transport._client, transport._verified):
+        if client is not None:
+            client.close()
 
 
 def facade(handler) -> tuple[DeepgramClient, list[httpx.Request]]:
