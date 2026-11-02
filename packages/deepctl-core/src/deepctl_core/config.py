@@ -814,6 +814,14 @@ def _is_regular_fd(fd: int, st: os.stat_result | None = None) -> bool:
     return False
 
 
+# (st_dev, st_ino) of files whose shared lock stayed taken for a whole wait
+# in this process. A command reads the user config several times (load,
+# then auth and profile lookups); each later read of such a file tries the
+# lock once and gives up at once instead of waiting again, so a stuck
+# writer costs one bounded wait per run.
+_busy_files: set[tuple[int, int]] = set()
+
+
 def _flock_shared_bounded(fd: int) -> bool:
     """Take a shared flock on ``fd``, waiting about ``_LOCK_TIMEOUT`` s.
 
@@ -831,15 +839,24 @@ def _flock_shared_bounded(fd: int) -> bool:
         import fcntl
     except ImportError:
         return False
+    try:
+        st = os.fstat(fd)
+        key: tuple[int, int] | None = (st.st_dev, st.st_ino)
+    except OSError:
+        key = None
     deadline = time.monotonic() + _LOCK_TIMEOUT
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            if key is not None:
+                _busy_files.discard(key)
             return True
         except OSError as exc:
             if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
                 return False
-        if time.monotonic() >= deadline:
+        if key in _busy_files or time.monotonic() >= deadline:
+            if key is not None:
+                _busy_files.add(key)
             raise _ConfigBusy(errno.EWOULDBLOCK, _E_READ_BUSY)
         time.sleep(_LOCK_STEP / 5)
 
