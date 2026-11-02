@@ -160,6 +160,37 @@ def version_line() -> str:
     return f"{name}, version {__version__}"
 
 
+# Error handlers that never raise on a character the encoding lacks.
+# "strict" and "surrogateescape" (a C locale) both raise.
+_SAFE_ERRORS = frozenset(
+    {"backslashreplace", "replace", "ignore", "namereplace", "xmlcharrefreplace"}
+)
+
+
+def safe_output_streams() -> None:
+    """Have stdout and stderr escape what their encoding can't write.
+
+    A redirected stream on Windows uses the ANSI code page (cp1252, say),
+    which has no block art or check mark: writing one raised
+    UnicodeEncodeError and ended the command. Such a stream now writes
+    ``\\u2713`` instead. A UTF-8 stream is left as it is, and the encoding
+    never changes, so a real console keeps what Python chose for it.
+    """
+    import codecs
+    import io
+
+    for stream in (sys.stdout, sys.stderr):
+        if not isinstance(stream, io.TextIOWrapper):
+            continue  # None, or a stream that can't be reconfigured
+        try:
+            encoding = codecs.lookup(stream.encoding or "").name
+            if encoding == "utf-8" or stream.errors in _SAFE_ERRORS:
+                continue
+            stream.reconfigure(errors="backslashreplace")
+        except (LookupError, OSError, ValueError):
+            continue  # an unknown encoding, or a closed stream
+
+
 def _print_version() -> None:
     if sys.stdout is None:  # started with stdout closed (`dg --version >&-`)
         return
@@ -206,6 +237,7 @@ def main(prog: "str | None" = None) -> None:
         if args[0] == "mcp" and args[1:] in _FAST_MCP_ARGS:
             sys.exit(serve())
 
+    safe_output_streams()
     sys.excepthook = _rich_excepthook
     try:
         from deepctl_core.signals import install_interrupt_handler
