@@ -171,9 +171,9 @@ def safe_output_streams() -> None:
     """Have stdout and stderr escape what their encoding can't write.
 
     A redirected stream on Windows uses the ANSI code page (cp1252, say),
-    which has no block art: writing the --help banner raised
+    which has no block art or check mark: writing one raised
     UnicodeEncodeError and ended the command. Such a stream now writes
-    ``\\u2588`` instead. A UTF-8 stream is left as it is, and the encoding
+    ``\\u2713`` instead. A UTF-8 stream is left as it is, and the encoding
     never changes, so a real console keeps what Python chose for it.
     """
     import codecs
