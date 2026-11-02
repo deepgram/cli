@@ -919,10 +919,9 @@ class SpeakCommand(BaseCommand):
             {
                 "names": ["--model", "-m"],
                 "help": (
-                    "TTS model. flux-* = Flux TTS / Speak v2 (WebSocket "
-                    "streaming; default flux-alexis-en); aura-* = Speak v1 "
-                    "(REST batch, e.g. aura-2-asteria-en). "
-                    "See voices: dg speak --list-voices"
+                    "Voice model: flux-* voices stream as they speak "
+                    "(default flux-alexis-en); aura-* voices return the whole "
+                    "file. See voices: dg speak --list-voices"
                 ),
                 "type": str,
                 "is_option": True,
@@ -1237,9 +1236,8 @@ class SpeakCommand(BaseCommand):
         # so the failure exits non-zero in every output mode.
         if not is_flux and (speed is not None or expressivity is not None):
             raise click.ClickException(
-                "--speed and --expressivity are only supported for Flux TTS "
-                "(Speak v2) models (flux-*). They are not available for "
-                f"Speak v1 model '{model}'."
+                "--speed and --expressivity work only with Flux voices "
+                f"(flux-*), not '{model}'."
             )
         if speed is not None and speed not in _FLUX_SPEEDS:
             allowed = ", ".join(f"{s:.2f}" for s in _FLUX_SPEEDS)
