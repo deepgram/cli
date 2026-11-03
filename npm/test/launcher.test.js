@@ -551,9 +551,9 @@ describe('cache root ownership (POSIX)', () => {
     '/home/u': dirStat(1000, 0o755),
     '/home/u/.cache': dirStat(1000, 0o700),
   };
-  const check = (spec, stats, realpath = (d) => d, gid = 1000) => {
+  const check = (spec, stats, realpath = (d) => d) => {
     const all = { ...ancestors, ...stats };
-    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, gid, realpath, lstat: (d) => {
+    return launcher.rootTrusted(spec, { platform: 'linux', uid: 1000, realpath, lstat: (d) => {
       if (!(d in all)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       return all[d];
     } });
@@ -628,27 +628,20 @@ describe('cache root ownership (POSIX)', () => {
     assert.equal(launcher.rootTrusted(link), false);
   });
 
-  test('our own group-writable ~/.cache in our private group is accepted (umask 002)', () => {
+  test('a group-writable ancestor is rejected even when it is ours and its gid equals our uid', () => {
+    // The user-private-group convention (umask 002) proves nothing: an
+    // administrator can add another account to group 1000, which could then
+    // swap the cache between our check and our exec.
     const base = '/home/u/.cache/deepgram-cli';
     const ok = { [base]: dirStat(1000, 0o700), [`${base}/venvs`]: dirStat(1000, 0o700) };
-    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775) }), true);
-    assert.equal(check(home, { ...ok, '/home/u': dirStat(1000, 0o775) }), true);
-    // Group-writable with a shared group (staff, users): rejected.
-    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775, true, 50) }), false);
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775, true, 1000) }), false);
+    assert.equal(check(home, { ...ok, '/home/u': dirStat(1000, 0o775, true, 1000) }), false);
+    // A shared primary group (staff, users): rejected too.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775, true, 100) }), false);
     // Writable by everyone: rejected even when ours.
     assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o777) }), false);
-    // Group-writable, our gid, but owned by someone else: rejected.
-    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(2000, 0o775, true, 1000) }), false);
-  });
-
-  test('a group-writable ~/.cache in a shared primary group is rejected even though it is ours', () => {
-    // SUSE / Debian USERGROUPS=no: primary group `users` (100), shared with
-    // every other user, so gid matches ours but is not a private group.
-    const base = '/home/u/.cache/deepgram-cli';
-    const ok = { [base]: dirStat(1000, 0o700, true, 100), [`${base}/venvs`]: dirStat(1000, 0o700, true, 100) };
-    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o775, true, 100) }, (d) => d, 100), false);
-    // The same directory without group write is fine.
-    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o755, true, 100) }, (d) => d, 100), true);
+    // The same directory without group write is fine, whatever its group.
+    assert.equal(check(home, { ...ok, '/home/u/.cache': dirStat(1000, 0o755, true, 100) }), true);
   });
 
   test('prepareRoot creates missing parents 0700 even under umask 002', posixOnly, () => {
@@ -752,7 +745,7 @@ describe('no trusted cache root: a one-run venv instead', () => {
 
   test('roots owned by another user are not reused (lstat stand-in)', async () => {
     const st = (uid, mode = 0o40700) => ({ uid, gid: uid, mode, isDirectory: () => true, isSymbolicLink: () => false });
-    const opts = { platform: 'linux', uid: 1000, gid: 1000, realpath: (f) => f };
+    const opts = { platform: 'linux', uid: 1000, realpath: (f) => f };
     for (const shared of [false, true]) {
       const spec = { dir: '/h/.cache/deepgram-cli/venvs', shared };
       assert.equal(launcher.rootTrusted(spec, { ...opts, lstat: (d) => (d.startsWith('/h/.cache/deepgram-cli') ? st(2000) : st(0, 0o40755)) }), false);
@@ -761,7 +754,7 @@ describe('no trusted cache root: a one-run venv instead', () => {
 
   test('the temp directory must itself be safe from other users', () => {
     const st = (uid, mode) => ({ uid, gid: uid, mode, isDirectory: () => true, isSymbolicLink: () => false });
-    const base = { platform: 'linux', uid: 1000, gid: 1000, realpath: (f) => f, tmpdir: '/scratch' };
+    const base = { platform: 'linux', uid: 1000, realpath: (f) => f, tmpdir: '/scratch' };
     // World-writable without the sticky bit: anyone could rename our directory.
     assert.throws(() => launcher.oneRunBase('/h/.cache', { ...base, lstat: (d) => (d === '/scratch' ? st(0, 0o40777) : st(0, 0o40755)) }), /not safe/);
     // /tmp-style sticky 1777 is fine.
@@ -1329,6 +1322,35 @@ describe('bin/dg.js end to end', posixOnly, () => {
     assert.match(calls[1], new RegExp(`^pip install --no-config --quiet --cache-dir \\S+/deepgram-cli/uv-cache --python \\S+/bin/python --require-hashes --no-deps -r ${pkg.requirementsFile} --only-binary :all:$`));
     // The second run reuses the venv: uv is not called again.
     assert.equal(runCopy(pkg, env, ['x']).stdout, 'npm x\n');
+    assert.equal(readLog(log).length, 2);
+  });
+
+  test('a group-writable ~/.cache (umask 002) caches in the temp root instead, and reuses it', () => {
+    const home = tmpdir();
+    const bin = path.join(home, 'bin');
+    const log = path.join(home, 'uv.log');
+    fakeUv(bin, '#!/bin/sh\necho "ran $*"\n', log);
+    // macOS caches under ~/Library/Caches and ignores XDG_CACHE_HOME.
+    const cache = process.platform === 'darwin' ? path.join(home, 'Library', 'Caches') : path.join(home, 'c');
+    const tmp = path.join(home, 't');
+    fs.mkdirSync(cache, { recursive: true });
+    fs.chmodSync(cache, 0o775);
+    fs.mkdirSync(tmp, { mode: 0o700 });
+    const pkg = packageCopy();
+    const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, XDG_CACHE_HOME: cache, TMPDIR: tmp };
+    const r = runCopy(pkg, env, ['a']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, 'ran a\n');
+    assert.doesNotMatch(r.stderr, /for this run only/);
+    const calls = readLog(log);
+    assert.equal(calls.length, 2);
+    const root = path.join(tmp, `deepgram-cli-${process.getuid()}`);
+    assert.ok(calls[1].includes(`--cache-dir ${path.join(root, 'uv-cache')} `), calls[1]);
+    assert.equal(fs.readdirSync(path.join(root, 'venvs')).filter((e) => !e.endsWith('.lock')).length, 1);
+    // Nothing was built under the group-writable ~/.cache.
+    assert.deepEqual(fs.readdirSync(path.join(cache, 'deepgram-cli', 'venvs')), []);
+    // The second run reuses the temp root's venv: uv is not called again.
+    assert.equal(runCopy(pkg, env, ['b']).stdout, 'ran b\n');
     assert.equal(readLog(log).length, 2);
   });
 

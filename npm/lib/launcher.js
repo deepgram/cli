@@ -515,17 +515,16 @@ function rootTrusted(spec, opts = {}) {
   } catch {
     return false;
   }
-  const gid = opts.gid !== undefined ? opts.gid : process.getgid ? process.getgid() : null;
-  return ancestorsSafe(above, uid, gid, lstat, true) && ancestorsSafe(real, uid, gid, lstat, false);
+  return ancestorsSafe(above, uid, lstat, true) && ancestorsSafe(real, uid, lstat, false);
 }
 
-// Group-writable is trusted only for a directory we own whose group id
-// equals our uid: the user-private-group convention (Ubuntu, Fedora; umask
-// 002), where ~/.cache is 0775 with a group named after us. A shared
-// primary group (SUSE and Debian USERGROUPS=no use `users`, macOS uses
-// `staff`) has other members who could swap the cache during the first
-// build, so anything else group-writable fails closed.
-function ancestorsSafe(start, uid, gid, lstat, allowLinks) {
+// Group write counts as writable by others, even on a directory we own
+// whose group id equals our uid (the user-private-group convention, where
+// umask 002 leaves ~/.cache 0775): nothing guarantees that group has no
+// other members, and Node cannot list them reliably (primary-group members
+// and NSS sources such as LDAP are not in /etc/group). Such a ~/.cache
+// fails, and the venvs go to the $TMPDIR root instead (cacheRootSpecs).
+function ancestorsSafe(start, uid, lstat, allowLinks) {
   for (let dir = start; ; dir = path.posix.dirname(dir)) {
     let st;
     try {
@@ -536,9 +535,7 @@ function ancestorsSafe(start, uid, gid, lstat, allowLinks) {
     const link = st.isSymbolicLink ? st.isSymbolicLink() : false;
     if (link ? !allowLinks : !st.isDirectory()) return false;
     if (st.uid !== 0 && st.uid !== uid) return false;
-    const privateGroup = st.uid === uid && st.gid === gid && gid === uid;
-    const writableByOthers = (st.mode & 0o002) !== 0 || ((st.mode & 0o020) !== 0 && !privateGroup);
-    if (!link && writableByOthers && (st.mode & STICKY) === 0) return false;
+    if (!link && (st.mode & 0o022) !== 0 && (st.mode & STICKY) === 0) return false;
     if (dir === '/' || dir === '.') return true;
   }
 }
@@ -949,8 +946,7 @@ function oneRunBase(untrusted, opts = {}) {
   if (untrusted) {
     const tmp = (opts.realpath || fs.realpathSync)(opts.tmpdir || os.tmpdir());
     const uid = currentUid(opts);
-    const gid = opts.gid !== undefined ? opts.gid : process.getgid ? process.getgid() : null;
-    if (!ancestorsSafe(tmp, uid, gid, lstat, false)) throw new Error(`${tmp} is not safe from other users`);
+    if (!ancestorsSafe(tmp, uid, lstat, false)) throw new Error(`${tmp} is not safe from other users`);
     return { base: tmp, prefix: 'deepgram-cli-', prune: false };
   }
   const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;

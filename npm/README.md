@@ -58,9 +58,13 @@ working:
   `UV_CACHE_DIR`.
 
 The launcher reuses that cache only when you own it, nobody else can write to
-it, and it isn't a symlink. If no cache directory qualifies, each run builds a
-fresh environment in a private temporary directory and deletes it afterwards,
-and says why on stderr.
+it, and it isn't a symlink. The folders above it count too: on Linux, if
+your group can write to `~/.cache` (or `$XDG_CACHE_HOME`; umask 002 leaves it
+`0775`), the launcher keeps its cache in `$TMPDIR/deepgram-cli-<uid>`
+instead, until your temp directory is cleaned. `chmod g-w ~/.cache` brings it
+back to `~/.cache`. If no cache directory qualifies, each run builds a fresh
+environment in a private temporary directory and deletes it afterwards, and
+says why on stderr.
 
 On Windows, step 1 is skipped: the launcher can't verify who controls a cache
 directory there, so it never runs an environment left by an earlier run. Every
