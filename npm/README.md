@@ -52,10 +52,12 @@ working:
   `UV_CONFIG_FILE`, and one `uv.toml`: your user file
   (`~/.config/uv/uv.toml`, or `%APPDATA%\uv\uv.toml` on Windows) if it
   exists, otherwise the system file (`/etc/uv/uv.toml`, or
-  `%PROGRAMDATA%\uv\uv.toml`). uv's `cache-dir` setting is the exception:
-  the launcher gives uv a cache of its own next to its environments, since uv
-  installs cached files without re-checking them, unless you set
-  `UV_CACHE_DIR`.
+  `%PROGRAMDATA%\uv\uv.toml`). uv's cache settings (`cache-dir` in
+  `uv.toml` and `UV_CACHE_DIR`) are the exception: the launcher always
+  gives uv a cache of its own, since uv installs cached files without
+  re-checking them. It lives next to its environments, or, when the
+  launcher builds an environment for one run only (always on Windows),
+  inside that run's directory and is deleted afterwards.
 
 The launcher reuses that cache only when you own it, nobody else can write to
 it, and it isn't a symlink. The folders above it count too: on Linux, if
@@ -69,9 +71,11 @@ says why on stderr.
 On Windows, step 1 is skipped: the launcher can't verify who controls a cache
 directory there, so it never runs an environment left by an earlier run. Every
 run builds a fresh one under `%LOCALAPPDATA%\deepgram-cli` and deletes it
-afterwards. With uv that takes a few seconds; without it, about a minute each
-time, so install uv. The launcher needs a real `uv.exe` or `python.exe` on
-`PATH`: pyenv-win's `python.bat` shims and `uv.cmd` wrappers are skipped.
+afterwards, along with uv's cache, so each run downloads the packages again.
+With uv that takes a few seconds plus the download; without it, about a
+minute each time, so install uv. The launcher needs a real `uv.exe` or
+`python.exe` on `PATH`: pyenv-win's `python.bat` shims and `uv.cmd` wrappers
+are skipped.
 
 Launcher messages go to stderr, so stdout carries only the CLI's own output
 (`dg ... -o json`, `dg mcp`).

@@ -470,6 +470,47 @@ describe('Windows never reuses a cached venv', () => {
     assert.equal(fs.existsSync(path.join(r.cleanup, '.complete')), false);
     assert.equal(fs.existsSync(leaked), false, 'a leaked one-run venv was pruned');
   });
+
+  for (const viaEnv of [false, true]) test(`with uv, a pre-existing uv cache is never used${viaEnv ? ', even when UV_CACHE_DIR names it' : ''}: uv gets a cache for this run only`, posixOnly, async () => {
+    // As above: reuse off stands in for win32. A uv cache left beside the
+    // venvs (by an earlier version, or by someone else) must not be read,
+    // and neither must one UV_CACHE_DIR points at (setup-uv sets it in CI).
+    const home = tmpdir();
+    const cache = path.join(home, 'c');
+    const planted = path.join(cache, 'deepgram-cli', 'uv-cache');
+    fs.mkdirSync(planted, { recursive: true });
+    fs.writeFileSync(path.join(planted, 'marker'), 'planted');
+    const requirementsFile = path.join(home, 'requirements-1.0.0.txt');
+    fs.writeFileSync(requirementsFile, '');
+    const calls = [];
+    const spawn = fakeSpawn((command, args) => {
+      calls.push(args);
+      const cacheDir = args[args.indexOf('--cache-dir') + 1];
+      fs.mkdirSync(cacheDir, { recursive: true });
+      fs.writeFileSync(path.join(cacheDir, 'wheel'), '');
+      if (args[0] === 'venv') fs.mkdirSync(path.join(args[args.length - 1], 'bin'), { recursive: true });
+      if (args[0] === 'pip') for (const f of ['python', 'deepctl']) fs.writeFileSync(path.join(path.dirname(args[args.indexOf('--python') + 1]), f), '');
+      return 0;
+    });
+    const r = await launcher.resolveRunner(['x'], {
+      requirementsFile,
+      env: { PATH: '/bin', XDG_CACHE_HOME: cache, ...(viaEnv ? { UV_CACHE_DIR: planted } : {}) },
+      version: '1.0.0',
+      platform: 'linux',
+      home,
+      cacheReuse: false,
+      isExecutable: (f) => f === '/bin/uv',
+      realpath: (f) => f,
+      spawn,
+      stderr: { write: () => {} },
+    });
+    assert.ok(r.cleanup, 'a one-run venv');
+    assert.equal(calls.length, 2);
+    for (const c of calls) assert.equal(c[c.indexOf('--cache-dir') + 1], path.join(r.cleanup, '.setup-cache'));
+    // The run's cache is gone once setup is done; the planted one is untouched.
+    assert.equal(fs.existsSync(path.join(r.cleanup, '.setup-cache')), false);
+    assert.deepEqual(fs.readdirSync(planted), ['marker']);
+  });
 });
 
 describe("uv's own configuration", () => {
@@ -1173,7 +1214,9 @@ describe('resolveRunner', () => {
     assert.match(lines.join(''), new RegExp(`${escapeRegExp(uvCache)} isn't one\\.\\nHINT: Remove `));
   });
 
-  test('a UV_CACHE_DIR the user set is left to uv', posixOnly, async () => {
+  test("a UV_CACHE_DIR in the environment is overridden by the launcher's own cache", posixOnly, async () => {
+    // astral-sh/setup-uv and similar tools export UV_CACHE_DIR without the
+    // user choosing it; a cache the launcher didn't create can't be checked.
     const home = tmpdir();
     const requirementsFile = path.join(home, 'requirements-1.2.3.txt');
     fs.writeFileSync(requirementsFile, '');
@@ -1198,7 +1241,11 @@ describe('resolveRunner', () => {
       stderr: { write: () => {} },
     });
     assert.equal(calls.length, 2);
-    for (const c of calls) assert.equal(c.includes('--cache-dir'), false);
+    const own = path.join(home, 'c', 'deepgram-cli', 'uv-cache');
+    for (const c of calls) {
+      assert.equal(c[c.indexOf('--cache-dir') + 1], own);
+      assert.ok(!c.includes('/mine'));
+    }
   });
 
   test('a missing requirements file is refused before anything is installed', async () => {
