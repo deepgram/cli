@@ -11,16 +11,28 @@ On this branch, a clean `pip install` of the root wheel resolved
 deepctl-core 0.3.0 from PyPI, which has no `deepctl_core._launcher`.
 
 So before anything is published: for every package in the release-please
-manifest whose current version already has a release tag, `src/` and the
-package's dependencies must be unchanged since that tag. A version with no
-tag yet is about to be released from this tree, which is fine.
+manifest whose current version already has a release tag, everything the
+package ships must be unchanged since that tag. A version with no tag yet is
+about to be released from this tree, which is fine.
 
-Dependencies are compared parsed, not as text, so the release PR's own
-version edit does not count. Floors on other workspace packages
-(`deepctl-*>=X`) are left out of the comparison: the release sync job raises
-them mechanically in packages it is not bumping, and
+What a package ships: its `src/`, and what its pyproject.toml puts in the
+wheel (the [project] table, [build-system], [tool.setuptools], and the
+[tool.hatch.build] and [tool.hatch.metadata] tables that pick its files).
+The root package also ships the npm package, @deepgram/cli, which
+release.yml publishes at the root's version: every entry in the `files` of
+npm/package.json as committed at HEAD, and package.json itself. A `files`
+glob with no slash, like `requirements-*.txt`, matches at any depth under
+npm/, as npm matches it. npm/README.md and npm/LICENSE ship too but are left out, as the
+packages' READMEs are: a docs change should not force a release.
+
+pyproject.toml is compared parsed, not as text, so the release PR's own
+version edit does not count. Version specifiers on other workspace
+packages (`deepctl-*`) are left out of the comparison: the release sync job
+raises their floors mechanically in packages it is not bumping, and
 check_dependency_floors.py already governs them. Adding, removing or
-re-pinning any other dependency without a bump is caught.
+re-pinning any other dependency, or changing an entry point, without a bump
+is caught. npm/package.json is compared as text: release-please writes its
+version only on the release PR, when the new version has no tag yet.
 
 Tag names follow .github/release-please-config.json: `v<version>` for a
 package with `include-component-in-tag: false` (the root), otherwise
@@ -56,6 +68,16 @@ from packaging.requirements import Requirement
 REPO = Path(__file__).resolve().parent.parent
 CONFIG = REPO / ".github" / "release-please-config.json"
 MANIFEST = REPO / ".github" / ".release-please-manifest.json"
+NPM_PACKAGE = "npm/package.json"
+NPM_DIR = Path(NPM_PACKAGE).parent.as_posix()
+GLOB_CHARS = "*?["
+# The [tool.*] tables a build backend reads to decide what goes in the wheel:
+# a name maps to None to compare the whole table, or to the subtables that
+# count. [tool.hatch.envs] and the like are dev tooling and never ship.
+BUILD_TOOLS: dict[str, tuple[str, ...] | None] = {
+    "setuptools": None,
+    "hatch": ("build", "metadata"),
+}
 
 
 @dataclass(frozen=True)
@@ -63,6 +85,7 @@ class Package:
     path: str  # repo-relative, "." for the root
     version: str
     tag: str
+    npm: tuple[str, ...] = ()  # npm package paths it ships too (the root)
 
     @property
     def src(self) -> str:
@@ -71,6 +94,11 @@ class Package:
     @property
     def pyproject(self) -> str:
         return "pyproject.toml" if self.path == "." else f"{self.path}/pyproject.toml"
+
+    @property
+    def shipped(self) -> tuple[str, ...]:
+        """Repo-relative paths whose content ships; a trailing / is a directory."""
+        return (f"{self.src}/", *self.npm)
 
 
 def dependency_set(pyproject_text: str) -> list[str]:
@@ -91,6 +119,74 @@ def dependency_set(pyproject_text: str) -> list[str]:
                 req.specifier = type(req.specifier)()
             out.append(f"{group}:{req}")
     return sorted(out)
+
+
+def shipped_metadata(pyproject_text: str) -> dict[str, Any]:
+    """What a pyproject.toml puts in the wheel, normalized for comparison.
+
+    The [project] table without `version`, its dependencies as
+    dependency_set gives them, [build-system], and the build backend's own
+    tables. [tool.ruff], [tool.mypy] and the like never reach the wheel.
+    """
+    data = tomllib.loads(pyproject_text)
+    project = {
+        key: value
+        for key, value in data.get("project", {}).items()
+        if key not in ("version", "dependencies", "optional-dependencies")
+    }
+    tool = data.get("tool", {})
+    build_tools: dict[str, Any] = {}
+    for name, subtables in BUILD_TOOLS.items():
+        if name not in tool:
+            continue
+        table = tool[name]
+        if subtables is not None:
+            table = {key: table[key] for key in subtables if key in table}
+        build_tools[name] = table
+    return {
+        "project": project,
+        "dependencies": dependency_set(pyproject_text),
+        "build-system": data.get("build-system", {}),
+        "tool": build_tools,
+    }
+
+
+def npm_paths(repo: Path = REPO) -> tuple[str, ...]:
+    """The repo paths the npm package ships, from its package.json `files`.
+
+    Read from `files` rather than listed here, so an entry added there is
+    watched too, and read at HEAD, the commit compared against the tags.
+    npm always adds package.json itself. Entries keep the spelling they have
+    in `files`; git_pathspec turns a glob into what git should match.
+    """
+    listed = _git(repo, "ls-tree", "--name-only", "HEAD", "--", NPM_PACKAGE)
+    if listed.returncode != 0:
+        raise RuntimeError(f"git ls-tree HEAD failed: {listed.stderr.strip()}")
+    if not listed.stdout.strip():
+        return ()
+    shown = _git(repo, "show", f"HEAD:{NPM_PACKAGE}")
+    if shown.returncode != 0:
+        raise RuntimeError(
+            f"git show HEAD:{NPM_PACKAGE} failed: {shown.stderr.strip()}"
+        )
+    files = json.loads(shown.stdout).get("files", [])
+    return (*(f"{NPM_DIR}/{entry}" for entry in files), NPM_PACKAGE)
+
+
+def git_pathspec(path: str) -> str:
+    """The git pathspec for a shipped path.
+
+    A plain path is a literal prefix. A glob gets `:(glob)` magic, and an
+    npm `files` glob with no slash (`requirements-*.txt`) matches at any
+    depth, as it does for npm: `**/` in glob magic also matches no
+    directory, so the top level is still covered.
+    """
+    if not any(c in path for c in GLOB_CHARS):
+        return path
+    entry = path.removeprefix(f"{NPM_DIR}/")
+    if entry != path and "/" not in entry:
+        return f":(glob){NPM_DIR}/**/{entry}"
+    return f":(glob){path}"
 
 
 def tag_name(config: dict[str, Any], path: str, version: str) -> str:
@@ -115,7 +211,8 @@ def packages(repo: Path = REPO) -> list[Package]:
         version = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"][
             "version"
         ]
-        out.append(Package(path, version, tag_name(config, path, version)))
+        npm = npm_paths(repo) if path == "." else ()
+        out.append(Package(path, version, tag_name(config, path, version), npm))
     return out
 
 
@@ -123,23 +220,26 @@ def unbumped(
     pkgs: list[Package],
     tag_exists: Callable[[str], bool],
     changed_since: Callable[[str, str], bool],
-    deps_changed: Callable[[str, Package], bool] = lambda _tag, _pkg: False,
+    metadata_changed: Callable[[str, Package], bool] = lambda _tag, _pkg: False,
 ) -> list[str]:
-    """Problems for packages whose src/ or dependencies moved past their tag."""
+    """Problems for packages whose shipped files or metadata moved past their tag."""
     problems = []
     for pkg in pkgs:
         if not tag_exists(pkg.tag):
             continue  # This version has not been released yet.
-        if changed_since(pkg.tag, pkg.src):
+        for path in pkg.shipped:
+            if changed_since(pkg.tag, path):
+                registry = "npm" if path.startswith("npm/") else "PyPI"
+                problems.append(
+                    f"{pkg.path}: {path} changed since {pkg.tag}, but the version is"
+                    f" still {pkg.version}, so {registry} would keep serving the old code"
+                )
+        if metadata_changed(pkg.tag, pkg):
             problems.append(
-                f"{pkg.path}: {pkg.src}/ changed since {pkg.tag}, but the version is"
-                f" still {pkg.version}, so PyPI would keep serving the old code"
-            )
-        if deps_changed(pkg.tag, pkg):
-            problems.append(
-                f"{pkg.path}: dependencies in {pkg.pyproject} changed since {pkg.tag},"
-                f" but the version is still {pkg.version}, so PyPI would keep"
-                " serving the old dependency list"
+                f"{pkg.path}: packaging metadata in {pkg.pyproject} (dependencies,"
+                f" entry points or build settings) changed since {pkg.tag}, but the"
+                f" version is still {pkg.version}, so PyPI would keep serving the old"
+                " metadata"
             )
     return problems
 
@@ -172,7 +272,7 @@ def git_tag_exists(repo: Path) -> Callable[[str], bool]:
 
 def git_changed_since(repo: Path) -> Callable[[str, str], bool]:
     def changed(tag: str, path: str) -> bool:
-        result = _git(repo, "diff", "--quiet", tag, "HEAD", "--", path)
+        result = _git(repo, "diff", "--quiet", tag, "HEAD", "--", git_pathspec(path))
         if result.returncode not in (0, 1):
             raise RuntimeError(f"git diff {tag} failed: {result.stderr.strip()}")
         return result.returncode == 1
@@ -180,7 +280,7 @@ def git_changed_since(repo: Path) -> Callable[[str, str], bool]:
     return changed
 
 
-def git_deps_changed(repo: Path) -> Callable[[str, Package], bool]:
+def git_metadata_changed(repo: Path) -> Callable[[str, Package], bool]:
     def changed(tag: str, pkg: Package) -> bool:
         old = _git(repo, "show", f"{tag}:{pkg.pyproject}")
         new = _git(repo, "show", f"HEAD:{pkg.pyproject}")
@@ -189,7 +289,7 @@ def git_deps_changed(repo: Path) -> Callable[[str, Package], bool]:
                 raise RuntimeError(
                     f"git show {ref}:{pkg.pyproject} failed: {result.stderr.strip()}"
                 )
-        return dependency_set(old.stdout) != dependency_set(new.stdout)
+        return shipped_metadata(old.stdout) != shipped_metadata(new.stdout)
 
     return changed
 
@@ -199,7 +299,7 @@ def main(repo: Path = REPO) -> int:
         packages(repo),
         git_tag_exists(repo),
         git_changed_since(repo),
-        git_deps_changed(repo),
+        git_metadata_changed(repo),
     )
     if problems:
         print("release bump check FAILED:", file=sys.stderr)
@@ -212,7 +312,7 @@ def main(repo: Path = REPO) -> int:
         )
         return 1
     print(
-        "release bumps OK: no package ships changed code or dependencies under an old version"
+        "release bumps OK: no package ships changed code or metadata under an old version"
     )
     return 0
 
