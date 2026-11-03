@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from deepctl_core._launcher import launched_via_npm, npm_upgrade_command
+
 # Sentinel used when the background check is suppressed or has no result
 _NO_RESULT: dict[str, Any] = {}
 
@@ -42,8 +44,20 @@ def _is_ci() -> bool:
     return any(os.environ.get(v) for v in _CI_ENV_VARS)
 
 
+def upgrade_hint() -> str:
+    """Return the command a user should run to upgrade deepctl."""
+    if launched_via_npm():
+        return npm_upgrade_command()
+    return "dg update"
+
+
 def _is_oneshot() -> bool:
     """Return True if running in an ephemeral one-shot environment."""
+    # The npm launcher often runs deepctl through `uv tool run`, which looks
+    # one-shot, but the npm install itself persists and is pinned to one
+    # version, so its users do need to hear about updates.
+    if launched_via_npm():
+        return False
     # uvx
     if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
         return True
@@ -200,7 +214,7 @@ def print_pending_notification() -> None:
         try:
             sys.stderr.write(
                 f"\n\033[33m  Update available:  {current} → {latest}"
-                f"  —  run \033[1mdg update\033[0m\033[33m to upgrade\033[0m\n\n"
+                f"  —  run \033[1m{upgrade_hint()}\033[0m\033[33m to upgrade\033[0m\n\n"
             )
         except (BrokenPipeError, OSError, ValueError):
             # The output stream closed (e.g. an MCP host disconnected stdio

@@ -694,11 +694,16 @@ class PluginCommand(BaseGroupCommand):
         ]
 
     def _needs_isolated_venv(self, method: InstallMethod) -> bool:
-        """Check if this installation method needs the isolated plugin venv."""
+        """Check if this installation method needs the isolated plugin venv.
+
+        npm counts: the launcher's venv or uv environment is replaced on every
+        npm version bump, so plugins installed into it would vanish.
+        """
         return method in (
             InstallMethod.HOMEBREW,
             InstallMethod.SYSTEM,
             InstallMethod.UNKNOWN,
+            InstallMethod.NPM,
         )
 
     def _get_strategy(

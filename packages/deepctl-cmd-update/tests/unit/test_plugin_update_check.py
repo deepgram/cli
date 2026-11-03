@@ -365,7 +365,7 @@ class TestPrintPendingPluginNotifications:
         assert "deepctl-plugin-whisper" in output
         assert "0.1.0" in output
         assert "0.2.0" in output
-        assert "deepctl plugin update deepctl-plugin-whisper" in output
+        assert "dg plugin update deepctl-plugin-whisper" in output
 
     def test_multiple_plugin_format(self):
         import deepctl_cmd_update.plugin_update_check as mod
@@ -392,7 +392,7 @@ class TestPrintPendingPluginNotifications:
         assert "Plugin updates available:" in output
         assert "deepctl-plugin-whisper" in output
         assert "deepctl-plugin-asr" in output
-        assert "deepctl plugin update <name>" in output
+        assert "dg plugin update <name>" in output
 
     @pytest.mark.parametrize(
         "error",

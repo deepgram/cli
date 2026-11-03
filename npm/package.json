@@ -1,0 +1,43 @@
+{
+  "name": "@deepgram/cli",
+  "version": "0.4.0",
+  "description": "The official Deepgram CLI: speech-to-text, text-to-speech, voice agents and audio intelligence from your terminal",
+  "type": "commonjs",
+  "bin": {
+    "dg": "bin/dg.js",
+    "deepgram": "bin/dg.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "requirements-*.txt"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/launcher.test.js"
+  },
+  "keywords": [
+    "deepgram",
+    "cli",
+    "speech-to-text",
+    "text-to-speech",
+    "transcription",
+    "voice-agent"
+  ],
+  "homepage": "https://github.com/deepgram/cli#readme",
+  "bugs": {
+    "url": "https://github.com/deepgram/cli/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepgram/cli.git",
+    "directory": "npm"
+  },
+  "license": "MIT",
+  "author": "Deepgram <devrel@deepgram.com>",
+  "publishConfig": {
+    "access": "public"
+  }
+}

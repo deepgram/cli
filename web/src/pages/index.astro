@@ -1,12 +1,6 @@
 ---
 import '../styles/global.css';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-// Read version from root pyproject.toml at build time — always in sync,
-// no manual updates needed. process.cwd() is web/ during `npm run build`.
-const _toml = readFileSync(join(process.cwd(), '..', 'pyproject.toml'), 'utf-8');
-const cliVersion = _toml.match(/^version = "([^"]+)"/m)?.[1] ?? '0.0.0';
+import { cliVersion } from '../utils/cliVersion';
 
 // ── Command showcase cards ────────────────────────────────────────────────
 const ICONS = {
