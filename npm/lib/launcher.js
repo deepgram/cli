@@ -966,14 +966,10 @@ async function buildPrivateVenv({ installer, key, spec, locked, version, untrust
   const stderr = opts.stderr || fdStderr;
   const p = isWindows(opts.platform || process.platform) ? path.win32 : path.posix;
   let dir;
-  let uvCache;
   try {
     const { base, prefix, prune } = oneRunBase(untrusted, opts);
     if (prune) pruneOneRunVenvs(base, p);
     dir = fs.mkdtempSync(p.join(base, `${prefix}${key}-`));
-    // Windows: a uv cache kept beside the one-run venvs, held to the same
-    // plain-directory check (oneRunBase), so runs after the first are quick.
-    if (!untrusted && installer.uv) uvCache = ownedDir(p.join(p.dirname(base), 'uv-cache'), opts);
   } catch (err) {
     throw new LauncherError(`No safe, writable directory to set up the Deepgram CLI in: ${err.message}`, untrusted ? 'Point TMPDIR at a directory only you can write to.' : 'Point LOCALAPPDATA at a directory only you can write to.');
   }
@@ -984,11 +980,16 @@ async function buildPrivateVenv({ installer, key, spec, locked, version, untrust
     stderr.write(hint ? `HINT: ${hint}\n` : `HINT: Make it yours and not group- or world-writable (chmod go-w)${elsewhere}.\n`);
   } else if (installer.uv) stderr.write(`Setting up Deepgram CLI ${version} for this run...\n`);
   else stderr.write(`Setting up Deepgram CLI ${version} for this run (~1 min each time; install uv to speed it up: ${UV_INSTALL_WINDOWS})...\n`);
-  // No trusted root: uv's cache for this run lives inside the run's own
-  // directory and goes once setup is done; pip runs without a cache.
-  const privateCache = untrusted ? p.join(dir, '.setup-cache') : undefined;
+  // uv's cache for this run lives inside the run's own directory and goes
+  // once setup is done: uv reuses what it extracted into a cache without
+  // hashing it again, so a cache that outlives the run would have to be
+  // checked like a venv, and on Windows it cannot be (see cacheReuse). Each
+  // run downloads its wheels again. With no trusted root, pip runs without a
+  // cache too; otherwise pip keeps its own, which is safe because with
+  // --require-hashes pip hashes every file it installs, cached or not.
+  const privateCache = installer.uv ? p.join(dir, '.setup-cache') : undefined;
   try {
-    await installInto(installer, layout, spec, locked, opts, { cwd: dir, uvCache: privateCache || uvCache, noPipCache: Boolean(untrusted) });
+    await installInto(installer, layout, spec, locked, opts, { cwd: dir, uvCache: privateCache, noPipCache: Boolean(untrusted) });
     if (privateCache) fs.rmSync(privateCache, { recursive: true, force: true });
   } catch (err) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1075,8 +1076,10 @@ async function installInto(installer, layout, spec, locked, opts, where = {}) {
     // uv installs the files it extracted into its cache without hashing them
     // again, so its cache must be as private as the venv: never uv's default
     // ($XDG_CACHE_HOME/uv may be group-writable), always one the launcher
-    // owns, unless the user chose one with UV_CACHE_DIR.
-    const cache = where.uvCache && !env.UV_CACHE_DIR ? ['--cache-dir', where.uvCache] : [];
+    // owns. UV_CACHE_DIR is ignored for setup (--cache-dir wins over it): a
+    // cache the launcher didn't create can't be checked, and tools such as
+    // astral-sh/setup-uv set it without the user choosing to.
+    const cache = where.uvCache ? ['--cache-dir', where.uvCache] : [];
     const config = uvConfigArgs(env, opts);
     const uv = (sub) => [...sub, '--no-config', ...config, '--quiet', ...cache];
     await runStep(installer.uv, [...uv(['venv']), '--allow-existing', '--python', PYTHON_RANGE, layout.dir], 'Creating the Python venv', UV_VENV_HINT, opts, where.cwd);

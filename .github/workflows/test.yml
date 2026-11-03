@@ -281,6 +281,13 @@ jobs:
           python npm/scripts/write_requirements.py --index-url http://127.0.0.1:8765 --dist dist
           VERSION="$(node -p 'require("./npm/package.json").version')"
           export UV_INDEX_URL=http://127.0.0.1:8765/simple PIP_INDEX_URL=http://127.0.0.1:8765/simple
+          # Windows never reuses a uv cache: plant one where earlier versions
+          # kept it, and check below that uv neither read nor wrote it.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            PLANTED="$(cygpath "${LOCALAPPDATA}")/deepgram-cli/uv-cache"
+            mkdir -p "${PLANTED}"
+            echo planted > "${PLANTED}/marker"
+          fi
           for runner in uvx venv; do
             # A fresh HOME per runner, so the venv run cannot reuse the venv
             # the uv run cached (macOS keeps it under ~/Library/Caches).
@@ -294,6 +301,8 @@ jobs:
           if [ "${RUNNER_OS}" = "Windows" ]; then
             LEFT="$(ls -A "$(cygpath "${LOCALAPPDATA}")/deepgram-cli/venvs")"
             [ -z "${LEFT}" ] || { echo "::error::one-run venv left behind: ${LEFT}"; exit 1; }
+            CACHED="$(ls -A "${PLANTED}")"
+            [ "${CACHED}" = "marker" ] || { echo "::error::the uv cache in ${PLANTED} was used: ${CACHED}"; exit 1; }
           fi
 
   # The release PR's bump gate (scripts/check_release_bumps.py), for commits
