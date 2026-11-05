@@ -10,16 +10,14 @@ from __future__ import annotations
 import sys
 import time
 import tracemalloc
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 from deepctl_core import config as config_module
 from deepctl_core import output
 from deepctl_core.config import Config
 from deepctl_telemetry import client, is_enabled
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX locks")
 
@@ -171,8 +169,9 @@ def test_rewrite_lock_that_stays_taken_is_opted_out(
     assert is_enabled(Config(config_path=str(path))) is True
 
 
-linux_only = pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="XDG layout (Linux)"
+# Where the user config lives under the home directory (platformdirs).
+_CFG = (
+    Path("Library/Application Support") if sys.platform == "darwin" else Path(".config")
 )
 
 
@@ -185,7 +184,7 @@ def real_home_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setattr(output, "is_ai_agent", lambda: True)
-    directory = home / ".config" / "deepctl"
+    directory = home / _CFG / "deepctl"
     directory.mkdir(parents=True)
     directory.chmod(0o700)
     default = directory / "config.yaml"
@@ -193,7 +192,7 @@ def real_home_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return default
 
 
-@linux_only
+@posix_only
 @pytest.mark.parametrize("mode", [0o600, 0o666])
 def test_agent_default_file_opt_out_follows_trust(
     tmp_path: Path, real_home_config: Path, mode: int
@@ -206,7 +205,7 @@ def test_agent_default_file_opt_out_follows_trust(
     assert is_enabled(Config(config_path=str(path))) is (mode == 0o600)
 
 
-@linux_only
+@posix_only
 @pytest.mark.parametrize("mode", [0o600, 0o666])
 def test_agent_loaded_default_file_opt_out_follows_trust(
     real_home_config: Path, mode: int
@@ -218,7 +217,7 @@ def test_agent_loaded_default_file_opt_out_follows_trust(
     assert is_enabled(config) is (mode == 0o600)
 
 
-@linux_only
+@posix_only
 def test_agent_default_file_away_from_real_home_is_opted_out(
     tmp_path: Path, real_home_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
