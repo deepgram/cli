@@ -34,6 +34,20 @@ def _reset_config_parse_cache():
 
 
 @pytest.fixture(autouse=True)
+def _clean_ai_agent_env(monkeypatch):
+    """Run as a person would, even when an AI coding agent launched pytest.
+
+    Agent markers (AI_AGENT_ENV_MARKERS, Aider's OR_*) switch dg into its
+    agent trust mode. Tests that cover that mode set them, or patch
+    is_ai_agent, themselves.
+    """
+    from deepctl_core.output import AI_AGENT_ENV_MARKERS
+
+    for key in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL"):
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _clean_deepgram_env(monkeypatch):
     """Remove all DEEPGRAM_* environment variables for test isolation."""
     for key in list(os.environ):
