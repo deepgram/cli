@@ -1,0 +1,13 @@
+{
+  "note": "Vendored verbatim from deepgram/deepgram-docs so cli.deepgram.com matches developers.deepgram.com. Do not edit by hand; re-copy both files from the same docs commit.",
+  "repo": "https://github.com/deepgram/deepgram-docs",
+  "commit": "b807ab4613f9b138c761a7f21339975108c2e00b",
+  "files": {
+    "web/src/consent/ketch.js": "fern/assets/ketch.js",
+    "web/public/consent/dg-consent.js": "fern/assets/dg-consent.js (built from tools/consent-banner)"
+  },
+  "sha256": {
+    "ketch.js": "00348a71e084e22ca2096d50f5d9179f572b7a753220436203c2c2590224f2b0",
+    "dg-consent.js": "a9ba240426d3299fde1bc365897c677dfde1cf7403ac11e5ae5a56fb6d30eee0"
+  }
+}
