@@ -1,7 +1,7 @@
 # Deepgram CLI — Full Reference
 
 > The official command-line interface for Deepgram's speech AI platform.
-> Version: 0.2.4 | License: MIT | Python 3.10+ required
+> License: MIT | Python 3.10+ required
 > GitHub: https://github.com/deepgram/cli
 
 ---
@@ -412,7 +412,7 @@ A project's `deepgram.yaml` can't set credentials, a project ID, a profile or a
 non-Deepgram `base_url`, and can't approve hosts.
 
 Environment variables:
-- `DEEPGRAM_API_KEY` — API key (overrides profile)
+- `DEEPGRAM_API_KEY` — API key (used when there's no `--api-key` and no key that `dg login` saved in the system keyring)
 - `DEEPGRAM_PROJECT_ID` — Project ID (overrides profile)
 - `DEEPGRAM_CLI_BASE_URL` — Custom auth endpoint
 

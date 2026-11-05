@@ -446,7 +446,13 @@ pass to that command, including API keys.
 
 ## Configuration
 
-**Priority:** CLI flags > environment variables > profile config > project config
+**Priority:** CLI flags > environment variables > project `deepgram.yaml` > user
+config. A project `deepgram.yaml` is read after the user config, but it can set
+only `output.*` settings and a regional Deepgram `base_url` (see below).
+
+The API key is the exception: dg uses `--api-key`, then the key `dg login` saved
+in your system keyring, then `DEEPGRAM_API_KEY`, then an `api_key` in the config
+file (where `dg login` saves it when no keyring is available).
 
 dg sends your API key only to Deepgram API hosts, to hosts you list in
 `api.allowed_hosts` in your own `config.yaml`, or to `DEEPGRAM_BASE_URL` (not in
