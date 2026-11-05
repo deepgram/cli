@@ -15,6 +15,11 @@ from deepctl_core import config as config_module
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths")
 
+# Where the user config lives under the home directory (platformdirs).
+_CFG = (
+    Path("Library/Application Support") if sys.platform == "darwin" else Path(".config")
+)
+
 SENTINEL = "sk-SNIPPETSENTINEL123"
 BROKEN = f"profiles:\n  default:\n    api_key: {SENTINEL} project_id: [oops\n"
 
@@ -44,14 +49,13 @@ def _run(tmp_path, args, *, agent):
     )
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG layout")
 @pytest.mark.parametrize("where", ["default", "--config"])
 @pytest.mark.parametrize("fmt", [[], ["-o", "json"]])
 @pytest.mark.parametrize("agent", [False, True])
 def test_broken_config_never_echoes_its_content(tmp_path, where, fmt, agent):
     (tmp_path / "home").mkdir()
     if where == "default":
-        path = tmp_path / "home" / ".config" / "deepctl" / "config.yaml"
+        path = tmp_path / "home" / _CFG / "deepctl" / "config.yaml"
         path.parent.mkdir(parents=True)
         extra = []
     else:
@@ -160,7 +164,6 @@ def test_size_check_is_bounded_and_rejects_a_bomb():
     config_module._check_config_size({"profiles": {"default": {"api_key": "k"}}})
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG layout")
 @pytest.mark.parametrize("where", ["api", "tools", "top"])
 @pytest.mark.parametrize("placement", ["project", "--config"])
 @pytest.mark.parametrize("agent", [False, True])
@@ -327,7 +330,6 @@ def test_bomb_in_every_placement_loads_quickly_with_one_warning(
     assert "it's too large or too deeply nested" in err
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG layout")
 @pytest.mark.parametrize("name", ["merge", "omap_output", "deep10k_flow_seq"])
 @pytest.mark.parametrize("placement", ["project", "--config"])
 @pytest.mark.parametrize("agent", [False, True])
@@ -500,7 +502,6 @@ def test_fifo_config_files_never_block(tmp_path, monkeypatch, capsys):
     assert err.count("not a regular file") == 2, err
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="FIFO + XDG layout")
 @pytest.mark.parametrize("agent", [False, True])
 def test_fifo_project_file_never_hangs_dg(tmp_path, agent):
     (tmp_path / "home").mkdir()
@@ -664,11 +665,10 @@ def test_save_never_writes_a_config_that_would_not_load(tmp_path, monkeypatch, t
     assert config_module.Config(config_path=str(path)).get_profile().api_key == KEY
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="XDG layout")
 @pytest.mark.parametrize("text", [HEX_CFG, MERGE_CFG], ids=["hex", "merge"])
 def test_record_install_method_never_breaks_the_config(tmp_path, text):
     """The same check through the CLI: the install hook's implicit save."""
-    path = tmp_path / "home" / ".config" / "deepctl" / "config.yaml"
+    path = tmp_path / "home" / _CFG / "deepctl" / "config.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(text)
     path.chmod(0o600)

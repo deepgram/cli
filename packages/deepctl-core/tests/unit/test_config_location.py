@@ -14,13 +14,19 @@ import pytest
 import yaml
 from deepctl_core import config as config_module
 from deepctl_core import hosts, output
+from deepctl_core import messages as msg
 from deepctl_core.config import Config
 
 _REAL_HOME = config_module._real_home
 
-pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="XDG layout (Linux)"
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX layout")
+
+# Where the user config lives under the home directory (platformdirs).
+_CFG = (
+    Path("Library/Application Support") if sys.platform == "darwin" else Path(".config")
 )
+# This process's open file descriptors.
+_FD_DIR = "/dev/fd" if sys.platform == "darwin" else "/proc/self/fd"
 
 TRUST_CONFIG = {
     "api": {"allowed_hosts": ["127.0.0.1:8000"]},
@@ -91,7 +97,7 @@ def assert_filtered(config: Config) -> None:
 def test_agent_real_config_honored_with_cwd_home(real_home, monkeypatch):
     agent(monkeypatch, True)
     monkeypatch.chdir(real_home)
-    plant(real_home / ".config" / "deepctl")
+    plant(real_home / _CFG / "deepctl")
     assert_trusted(Config())
 
 
@@ -108,7 +114,7 @@ def test_agent_fake_home_filtered(real_home, tmp_path, monkeypatch):
     agent(monkeypatch, True)
     fake = tmp_path / "repo" / "fakehome"
     monkeypatch.setenv("HOME", str(fake))
-    plant(fake / ".config" / "deepctl")
+    plant(fake / _CFG / "deepctl")
     assert_filtered(Config())
 
 
@@ -123,7 +129,7 @@ def test_real_default_ignores_env(real_home, monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     assert config_module._real_default_config_file() == (
-        real_home / ".config" / "deepctl" / "config.yaml"
+        real_home / _CFG / "deepctl" / "config.yaml"
     )
 
 
@@ -144,8 +150,8 @@ def test_flipping_link_never_trusts_the_other_file(real_home, tmp_path, monkeypa
 
     agent(monkeypatch, True)
     monkeypatch.chdir(real_home)
-    plant(real_home / ".config" / "deepctl")
-    real_cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    plant(real_home / _CFG / "deepctl")
+    real_cfg = real_home / _CFG / "deepctl" / "config.yaml"
     real_cfg.write_text(yaml.safe_dump({"profiles": {"default": {"api_key": "k"}}}))
     evil = tmp_path / "repo" / "evil.yaml"
     evil.parent.mkdir()
@@ -213,7 +219,7 @@ def test_agent_no_notice_when_nothing_ignored(real_home, tmp_path, monkeypatch, 
 
 
 def link_config_to(real_home, target):
-    cfg_dir = real_home / ".config" / "deepctl"
+    cfg_dir = real_home / _CFG / "deepctl"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "config.yaml").symlink_to(target)
 
@@ -249,8 +255,8 @@ def test_symlinked_config_folder_filtered(real_home, tmp_path, monkeypatch):
     """~/.config/deepctl -> /repo/dotfiles/deepctl."""
     agent(monkeypatch, True)
     plant(tmp_path / "repo" / "dotfiles" / "deepctl")
-    (real_home / ".config").mkdir()
-    (real_home / ".config" / "deepctl").symlink_to(
+    (real_home / _CFG).mkdir(parents=True)
+    (real_home / _CFG / "deepctl").symlink_to(
         tmp_path / "repo" / "dotfiles" / "deepctl", target_is_directory=True
     )
     assert_filtered(Config())
@@ -259,23 +265,24 @@ def test_symlinked_config_folder_filtered(real_home, tmp_path, monkeypatch):
 def test_symlinked_dot_config_filtered(real_home, tmp_path, monkeypatch):
     agent(monkeypatch, True)
     plant(tmp_path / "x" / "deepctl")
-    (real_home / ".config").symlink_to(tmp_path / "x", target_is_directory=True)
+    (real_home / _CFG).parent.mkdir(parents=True, exist_ok=True)
+    (real_home / _CFG).symlink_to(tmp_path / "x", target_is_directory=True)
     assert_filtered(Config())
 
 
 def test_hardlinked_config_filtered(real_home, tmp_path, monkeypatch):
     """One inode shared with a repo copy the agent can edit."""
     agent(monkeypatch, True)
-    plant(real_home / ".config" / "deepctl")
+    plant(real_home / _CFG / "deepctl")
     (tmp_path / "repo").mkdir()
-    os.link(real_home / ".config" / "deepctl" / "config.yaml", tmp_path / "repo" / "dg.yaml")
+    os.link(real_home / _CFG / "deepctl" / "config.yaml", tmp_path / "repo" / "dg.yaml")
     assert_filtered(Config())
 
 
 def test_group_writable_config_filtered(real_home, monkeypatch):
     agent(monkeypatch, True)
-    plant(real_home / ".config" / "deepctl")
-    (real_home / ".config" / "deepctl" / "config.yaml").chmod(0o664)
+    plant(real_home / _CFG / "deepctl")
+    (real_home / _CFG / "deepctl" / "config.yaml").chmod(0o664)
     assert_filtered(Config())
 
 
@@ -340,8 +347,8 @@ def test_untrusted_root_not_used_for_custom_config_allowlist(
     other = tmp_path / "other.yaml"
     other.write_text("{}\n")
     assert Config(config_path=str(other)).allowed_hosts() == []
-    (real_home / ".config" / "deepctl" / "config.yaml").unlink()
-    plant(real_home / ".config" / "deepctl")
+    (real_home / _CFG / "deepctl" / "config.yaml").unlink()
+    plant(real_home / _CFG / "deepctl")
     assert Config(config_path=str(other)).allowed_hosts() == ["127.0.0.1:8000"]
 
 
@@ -370,7 +377,7 @@ def reasons() -> list[str]:
 )
 def test_untrusted_real_config_names_the_cause(real_home, tmp_path, monkeypatch, setup, why):
     agent(monkeypatch, True)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     if setup == "symlink":
         plant(real_home / "dotfiles")
         link_config_to(real_home, real_home / "dotfiles" / "config.yaml")
@@ -392,7 +399,7 @@ def test_untrusted_real_config_names_the_cause(real_home, tmp_path, monkeypatch,
 
 
 def plant_with_key(real_home, mode):
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text(yaml.safe_dump({**TRUST_CONFIG, "profiles": {"default": {
         "api_key": "k", "base_url": "http://127.0.0.1:8000"}}}))
@@ -427,7 +434,7 @@ def test_writable_config_with_key_left_alone_and_untrusted_in_agent_mode(
     assert "I-PERM-FIXED" not in ids()
     perm = [(t, h) for i, t, h, _ in config_module._pending_notices if i == "W-PERM-AGENT"]
     assert perm == [
-        (f"~/.config/deepctl/config.yaml {W_PERM_AGENT_TAIL.format(octal=f'{mode:04o}')}",
+        (f"{msg.display_path(cfg)} {W_PERM_AGENT_TAIL.format(octal=f'{mode:04o}')}",
          FILE_HINT)
     ]
     lines = reasons()
@@ -499,7 +506,7 @@ def test_config_with_key_tightened_outside_agent_mode(real_home, monkeypatch, mo
 def test_dir_fd_unavailable_falls_back_to_path_walk(real_home, monkeypatch):
     agent(monkeypatch, True)
     monkeypatch.setattr(config_module.os, "supports_dir_fd", set())
-    plant(real_home / ".config" / "deepctl")
+    plant(real_home / _CFG / "deepctl")
     assert_trusted(Config())
 
 
@@ -517,8 +524,8 @@ def test_replace_between_open_and_checks_never_untrusts(real_home, monkeypatch, 
     checked, forced on every load: the open copy has no
     links left, and the load looks again instead of distrusting it."""
     agent(monkeypatch, True)
-    plant(real_home / ".config" / "deepctl")
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    plant(real_home / _CFG / "deepctl")
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     text = cfg.read_text()
     real_checked_parse = config_module._checked_parse
     budget = {"left": 0, "done": 0}
@@ -551,8 +558,8 @@ def test_concurrent_replace_never_untrusts_a_normal_config(real_home, monkeypatc
     import time
 
     agent(monkeypatch, True)
-    plant(real_home / ".config" / "deepctl")
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    plant(real_home / _CFG / "deepctl")
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     text = cfg.read_text()
     stop = threading.Event()
     armed = threading.Event()
@@ -602,7 +609,7 @@ def test_concurrent_replace_never_untrusts_a_normal_config(real_home, monkeypatc
 
 
 def _legacy(real_home, target_text, symlink_to=None):
-    old_dir = real_home / ".config" / "deepgram"
+    old_dir = real_home / _CFG / "deepgram"
     old_dir.mkdir(parents=True)
     if symlink_to is not None:
         symlink_to.write_text(target_text)
@@ -617,7 +624,7 @@ def test_legacy_migration_skipped_in_agent_sessions(real_home, tmp_path, monkeyp
     agent(monkeypatch, True)
     _legacy(real_home, yaml.safe_dump(TRUST_CONFIG), symlink_to=tmp_path / "legacy.yaml")
     config = Config()
-    assert not (real_home / ".config" / "deepctl" / "config.yaml").exists()
+    assert not (real_home / _CFG / "deepctl" / "config.yaml").exists()
     assert config.allowed_hosts() == []
 
 
@@ -626,7 +633,7 @@ def test_legacy_migration_writes_a_private_copy(real_home, tmp_path, monkeypatch
     _legacy(real_home, yaml.safe_dump(TRUST_CONFIG), symlink_to=tmp_path / "legacy.yaml")
     (tmp_path / "legacy.yaml").chmod(0o644)
     Config()
-    new = real_home / ".config" / "deepctl" / "config.yaml"
+    new = real_home / _CFG / "deepctl" / "config.yaml"
     assert not new.is_symlink()
     assert (new.stat().st_mode & 0o777) == 0o600
     assert yaml.safe_load(new.read_text()) == TRUST_CONFIG
@@ -660,7 +667,7 @@ def test_agent_never_saves_over_a_writable_config(real_home, monkeypatch, mode, 
 
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     agent(monkeypatch, True)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     if with_key:
         plant_with_key(real_home, mode)
     else:
@@ -718,7 +725,7 @@ def test_agent_saves_an_own_0644_config_as_before(real_home, monkeypatch):
 @pytest.mark.parametrize("mode", [0o666, 0o664])
 def test_writable_config_saved_outside_agent_mode(real_home, monkeypatch, mode):
     agent(monkeypatch, False)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     plant(cfg.parent)
     cfg.chmod(mode)
     config = Config()
@@ -774,8 +781,9 @@ def test_missing_key_after_untrusted_file_key_says_so(real_home, monkeypatch, ca
             AuthManager(Config()).guard()
     finally:
         output._output_config.update(agentic=False)
+    cfg = msg.display_path(real_home / _CFG / "deepctl" / "config.yaml")
     expected = (
-        "dg didn't use the API key in ~/.config/deepctl/config.yaml (see the warning "
+        f"dg didn't use the API key in {cfg} (see the warning "
         "above), and no other API key is set."
     )
     assert str(err.value) == expected
@@ -794,7 +802,7 @@ def test_missing_key_outside_untrusted_case_unchanged(real_home, monkeypatch, ca
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     _no_keyring(monkeypatch)
     agent(monkeypatch, True)
-    plant(real_home / ".config" / "deepctl")
+    plant(real_home / _CFG / "deepctl")
     with pytest.raises(AuthenticationError, match="DEEPGRAM_API_KEY is not set"):
         AuthManager(Config()).guard()
 
@@ -838,7 +846,7 @@ def test_agent_writable_keyless_file_expiry_never_deletes_keyring_key(
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     kr = _dict_keyring(monkeypatch, {"api-key.default": "sk-PERSONKEY"})
     agent(monkeypatch, True)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text(yaml.safe_dump({"profiles": {"default": {"dg_token_expires_at": expiry}}}))
     cfg.chmod(0o666)
@@ -866,7 +874,7 @@ def test_trusted_file_expiry_still_deletes_keyring_key(real_home, monkeypatch):
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     kr = _dict_keyring(monkeypatch, {"api-key.default": "sk-PERSONKEY"})
     agent(monkeypatch, True)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     cfg.parent.mkdir(parents=True)
     cfg.write_text(yaml.safe_dump({"profiles": {"default": {"dg_token_expires_at": EXPIRED}}}))
     cfg.chmod(0o600)
@@ -934,7 +942,7 @@ def test_untrusted_file_hint_prints_once_per_run(real_home, monkeypatch, capsys,
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     _no_keyring(monkeypatch)
     agent(monkeypatch, True)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     cfg.parent.mkdir(parents=True)
     profiles = {"default": {"api_key": "k"}}
     if case == "foreign_0666_two":
@@ -987,7 +995,7 @@ def test_keyless_untrusted_file_gives_the_usual_missing_key_error(
     monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     _no_keyring(monkeypatch)
     agent(monkeypatch, True)
-    cfg = real_home / ".config" / "deepctl" / "config.yaml"
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
     plant(cfg.parent)
     if owner == "own_0666":
         cfg.chmod(0o666)
@@ -1007,7 +1015,7 @@ def test_keyless_untrusted_file_gives_the_usual_missing_key_error(
 def test_broken_real_config_never_drops_a_custom_config(real_home, tmp_path, monkeypatch):
     """--config in an agent session while the real config is unparseable."""
     agent(monkeypatch, True)
-    real = real_home / ".config" / "deepctl" / "config.yaml"
+    real = real_home / _CFG / "deepctl" / "config.yaml"
     real.parent.mkdir(parents=True)
     real.write_text("profiles:\n  default:\n    api_key: x project_id: [oops\n")
     real.chmod(0o600)
@@ -1038,7 +1046,7 @@ def test_unreadable_real_config_never_drops_a_custom_config(
 ):
     """A real config that is a directory or nests too deeply."""
     agent(monkeypatch, True)
-    real = real_home / ".config" / "deepctl" / "config.yaml"
+    real = real_home / _CFG / "deepctl" / "config.yaml"
     real.parent.mkdir(parents=True)
     if shape == "directory":
         real.mkdir()
@@ -1048,7 +1056,7 @@ def test_unreadable_real_config_never_drops_a_custom_config(
     custom = tmp_path / "custom.yaml"
     custom.write_text(yaml.safe_dump({"profiles": {"default": {"project_id": "p-custom"}}}))
     custom.chmod(0o600)
-    before = len(os.listdir("/proc/self/fd"))
+    before = len(os.listdir(_FD_DIR))
     config = Config(config_path=str(custom))
     assert config._load_failed is False
     assert config.get_profile().project_id == "p-custom"
@@ -1057,7 +1065,7 @@ def test_unreadable_real_config_never_drops_a_custom_config(
     import gc
 
     gc.collect()
-    assert len(os.listdir("/proc/self/fd")) <= before  # no fd left open
+    assert len(os.listdir(_FD_DIR)) <= before  # no fd left open
 
 
 @pytest.mark.parametrize(
@@ -1069,11 +1077,11 @@ def test_agent_non_regular_config_warns_like_outside_agent_mode(
     """W-CFG-LOAD once, and an explicit save says why."""
     agent(monkeypatch, True)
     if kind == "fifo_root":
-        path = real_home / ".config" / "deepctl" / "config.yaml"
+        path = real_home / _CFG / "deepctl" / "config.yaml"
         path.parent.mkdir(parents=True)
         os.mkfifo(path)
     elif kind == "device_link_root":
-        path = real_home / ".config" / "deepctl" / "config.yaml"
+        path = real_home / _CFG / "deepctl" / "config.yaml"
         path.parent.mkdir(parents=True)
         path.symlink_to("/dev/null")
     elif kind == "fifo_custom":
@@ -1105,9 +1113,9 @@ def test_default_config_never_trusted_while_rewrite_lock_stays_taken(
     import fcntl
 
     agent(monkeypatch, on)
-    plant(real_home / ".config" / "deepctl")
+    plant(real_home / _CFG / "deepctl")
     monkeypatch.setattr(config_module, "_LOCK_TIMEOUT", 0.2)
-    fd = os.open(real_home / ".config" / "deepctl" / "config.yaml", os.O_RDWR)
+    fd = os.open(real_home / _CFG / "deepctl" / "config.yaml", os.O_RDWR)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         config = Config()
