@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import shutil
 import struct
@@ -23,6 +24,12 @@ from deepctl_core import (
     DeepgramClient,
     get_output_format,
     get_status_console,
+)
+from deepctl_core.sagemaker import (
+    SageMakerTransportError,
+    create_sagemaker_client,
+    endpoint_name,
+    region_name,
 )
 from rich.console import Console
 from rich.markup import escape
@@ -301,6 +308,16 @@ def _streaming_wav_header(
     )
 
 
+@contextmanager
+def _sagemaker_output_file(path: str | None) -> Iterator[IO[bytes] | None]:
+    """Open an optional raw-audio output without leaking a partial file handle."""
+    if path is None:
+        yield None
+        return
+    with Path(path).open("wb") as output:
+        yield output
+
+
 class _StreamProgress:
     """Scrolling stderr progress for a Flux audio stream.
 
@@ -439,6 +456,22 @@ class SpeakCommand(BaseCommand):
                 "default": _DEFAULT_MODEL,
             },
             {
+                "names": ["--sagemaker-endpoint"],
+                "help": (
+                    "Stream Aura speech through this Amazon SageMaker endpoint "
+                    "using AWS credentials (or set SAGEMAKER_ENDPOINT_NAME). "
+                    "Requires Python 3.12+ and deepctl[sagemaker]."
+                ),
+                "type": str,
+                "is_option": True,
+            },
+            {
+                "names": ["--sagemaker-region"],
+                "help": "AWS region for --sagemaker-endpoint (default: AWS_REGION or us-west-2)",
+                "type": str,
+                "is_option": True,
+            },
+            {
                 "names": ["--encoding"],
                 "help": (
                     "Audio encoding. Aura (v1): mp3, linear16, flac, mulaw, alaw, "
@@ -505,6 +538,10 @@ class SpeakCommand(BaseCommand):
             },
         ]
 
+    def uses_external_auth(self, **kwargs: Any) -> bool:
+        """SageMaker signs streams with AWS credentials, not a Deepgram key."""
+        return endpoint_name(kwargs.get("sagemaker_endpoint")) is not None
+
     def handle(
         self,
         config: Config,
@@ -514,7 +551,11 @@ class SpeakCommand(BaseCommand):
     ) -> BaseResult | None:
         text = kwargs.get("text")
         output_path = kwargs.get("output")
-        model = kwargs.get("model") or _DEFAULT_MODEL
+        sagemaker_endpoint = endpoint_name(kwargs.get("sagemaker_endpoint"))
+        sagemaker_region = region_name(kwargs.get("sagemaker_region"))
+        model = kwargs.get("model") or (
+            "aura-2-asteria-en" if sagemaker_endpoint else _DEFAULT_MODEL
+        )
         encoding = kwargs.get("encoding")
         container = kwargs.get("container")
         sample_rate = kwargs.get("sample_rate")
@@ -526,6 +567,11 @@ class SpeakCommand(BaseCommand):
 
         # --list-voices: discover voices and exit before any TTS generation.
         if list_voices:
+            if sagemaker_endpoint:
+                raise click.ClickException(
+                    "--list-voices is not available through SageMaker. SageMaker "
+                    "endpoints serve one deployed Aura model."
+                )
             return self._list_voices(client)
 
         # Resolve text input: arg > --file > stdin
@@ -569,7 +615,7 @@ class SpeakCommand(BaseCommand):
         # A player that cannot decode what we are about to request should say
         # so now, before the API call, rather than emit silence or a decoder
         # error after synthesis.
-        if player is not None:
+        if player is not None and not sagemaker_endpoint:
             unplayable = _check_playable(
                 player, is_flux=is_flux, encoding=encoding, container=container
             )
@@ -603,6 +649,38 @@ class SpeakCommand(BaseCommand):
             console.print(
                 "[yellow]Note:[/yellow] --play sends the audio to your player, "
                 "so stdout stays empty. Add -o to save a file too."
+            )
+
+        if sagemaker_endpoint:
+            if is_flux:
+                raise click.ClickException(
+                    "SageMaker supports Aura Speak v1 streaming only. Flux Speak "
+                    "v2 models must use the Deepgram Cloud transport."
+                )
+            if not model.lower().startswith("aura-"):
+                raise click.ClickException(
+                    f"SageMaker Speak supports Aura models only (got '{model}')."
+                )
+            if container:
+                raise click.ClickException(
+                    "--container is not available for SageMaker Aura streaming. "
+                    "The transport returns audio chunks rather than a REST container."
+                )
+            sagemaker_encoding = encoding or "linear16"
+            if sagemaker_encoding != "linear16":
+                raise click.ClickException(
+                    "SageMaker Aura streaming currently supports linear16 output "
+                    "only. Raw companded audio cannot be played safely."
+                )
+            return self._speak_sagemaker(
+                endpoint=sagemaker_endpoint,
+                region=sagemaker_region,
+                text=text,
+                model=model,
+                encoding=sagemaker_encoding,
+                sample_rate=sample_rate or 24000.0,
+                output_path=output_path,
+                player=player,
             )
 
         if is_flux:
@@ -909,6 +987,156 @@ class SpeakCommand(BaseCommand):
             # still exits 0. Reachable now that unknown models (e.g. a bare
             # "flux" typo) route here instead of the raising v2 path.
             raise click.ClickException(f"Error generating speech: {e}")
+
+    def _speak_sagemaker(
+        self,
+        *,
+        endpoint: str,
+        region: str,
+        text: str,
+        model: str,
+        encoding: str,
+        sample_rate: float,
+        output_path: str | None,
+        player: str | None,
+    ) -> SpeakResult | None:
+        """Generate Aura audio via the SageMaker HTTP/2 streaming transport."""
+        raw_audio = bytearray()
+        stdout_buffer = None if output_path or player else sys.stdout.buffer
+        wrote_header = False
+        total = 0
+
+        with _sagemaker_output_file(output_path) as output_file:
+
+            def receive(chunk: bytes) -> None:
+                nonlocal wrote_header, total
+                if not chunk:
+                    return
+                total += len(chunk)
+                if player:
+                    raw_audio.extend(chunk)
+                sink = output_file or stdout_buffer
+                if sink is None:
+                    return
+                if encoding == "linear16" and not wrote_header:
+                    sink.write(_streaming_wav_header(sample_rate=int(sample_rate)))
+                    wrote_header = True
+                sink.write(chunk)
+                if stdout_buffer is not None:
+                    sink.flush()
+
+            try:
+                asyncio.run(
+                    self._sagemaker_speak_stream(
+                        endpoint=endpoint,
+                        region=region,
+                        text=text,
+                        model=model,
+                        encoding=encoding,
+                        sample_rate=sample_rate,
+                        receive=receive,
+                    )
+                )
+            except SageMakerTransportError as exc:
+                raise click.ClickException(str(exc)) from exc
+
+        if total == 0:
+            raise click.ClickException("SageMaker Aura streaming returned no audio.")
+
+        if player:
+            audio = bytes(raw_audio)
+            if encoding == "linear16":
+                audio = _pcm_to_wav(audio, sample_rate=int(sample_rate))
+            suffix = _play_suffix(
+                is_flux=False,
+                encoding=encoding,
+                container="wav" if encoding == "linear16" else "none",
+            )
+            console.print(f"[blue]Playing audio ({player})...[/blue]")
+            _play_audio(player, audio, suffix=suffix)
+
+        if output_path:
+            size = Path(output_path).stat().st_size
+            console.print(
+                f"[green]Audio saved to {output_path}[/green] ({size:,} bytes)"
+            )
+            return SpeakResult(
+                status="success",
+                message=f"Audio saved to {output_path}",
+                output_path=output_path,
+                model=model,
+                bytes_written=size,
+                played=bool(player),
+            )
+
+        if player:
+            console.print(f"[green]✓ Played {total:,} bytes[/green]")
+            return SpeakResult(
+                status="success",
+                message=f"Played {total:,} bytes",
+                model=model,
+                bytes_written=total,
+                played=True,
+            )
+
+        console.print(f"[green]✓ Streamed {total:,} bytes to stdout[/green]")
+        # Audio already occupies stdout; returning a structured result would
+        # append JSON/YAML/CSV bytes and corrupt the stream.
+        return None
+
+    async def _sagemaker_speak_stream(
+        self,
+        *,
+        endpoint: str,
+        region: str,
+        text: str,
+        model: str,
+        encoding: str,
+        sample_rate: float,
+        receive: Any,
+    ) -> None:
+        """Drive Speak v1's streaming connection and pass audio chunks to ``receive``."""
+        from deepgram.core.events import EventType
+        from deepgram.speak.v1.types import SpeakV1Close, SpeakV1Flush, SpeakV1Text
+
+        client = create_sagemaker_client(endpoint, region)
+        errors: list[str] = []
+        finished = asyncio.Event()
+
+        def on_message(message: Any) -> None:
+            if isinstance(message, (bytes, bytearray)):
+                receive(bytes(message))
+
+        def on_error(error: Any) -> None:
+            errors.append(str(error))
+            finished.set()
+
+        def on_close(_: Any) -> None:
+            finished.set()
+
+        async with client.speak.v1.connect(
+            model=model,
+            encoding=encoding,
+            sample_rate=str(int(sample_rate)),
+        ) as connection:
+            connection.on(EventType.MESSAGE, on_message)
+            connection.on(EventType.ERROR, on_error)
+            connection.on(EventType.CLOSE, on_close)
+            listen_task = asyncio.create_task(connection.start_listening())
+            try:
+                await asyncio.sleep(0)
+                await connection.send_text(SpeakV1Text(type="Speak", text=text))
+                await connection.send_flush(SpeakV1Flush(type="Flush"))
+                await connection.send_close(SpeakV1Close(type="Close"))
+                await asyncio.wait_for(finished.wait(), timeout=30)
+            finally:
+                if not listen_task.done():
+                    listen_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await listen_task
+
+        if errors:
+            raise click.ClickException(f"SageMaker Speak error: {errors[-1]}")
 
     def _list_voices(self, client: DeepgramClient) -> BaseResult:
         """List available TTS voices as a table (mirrors `dg models`)."""

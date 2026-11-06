@@ -76,6 +76,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+sagemaker = [
+    "deepgram-sdk>=7.8.1,<8",
+    "deepgram-sagemaker>=0.4.0; python_version >= '3.12'",
+]
 dev = [
     # Testing
     "pytest>=7.0.0",

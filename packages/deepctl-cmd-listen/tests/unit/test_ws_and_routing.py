@@ -3,8 +3,9 @@ and caption/srt mutual exclusivity — the critical piping paths."""
 
 from __future__ import annotations
 
+import asyncio
 import json
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import click
 import pytest
@@ -326,6 +327,99 @@ class TestFluxModelAutoVersion:
             command, mock_config, mock_auth_manager, mock_client, model="enhanced"
         )
         assert mock_pre.call_args.kwargs["api_version"] == 1
+
+    def test_sagemaker_file_uses_flux_streaming(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        """A local Flux file uses the SageMaker streaming transport, never REST."""
+        with patch.object(
+            command, "_stream_sagemaker", return_value=ListenResult(status="success")
+        ) as stream:
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                source="audio.wav",
+                mic=False,
+                model="flux-general-en",
+                sagemaker_endpoint="flux-endpoint",
+            )
+
+        assert stream.call_args.kwargs["api_version"] == 2
+        assert stream.call_args.kwargs["mode"] == "prerecorded_file"
+        assert stream.call_args.kwargs["endpoint"] == "flux-endpoint"
+
+    def test_sagemaker_url_is_rejected(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        with pytest.raises(click.ClickException, match="local file, stdin, or --mic"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                source="https://example.com/audio.wav",
+                mic=False,
+                sagemaker_endpoint="stt-endpoint",
+            )
+
+    def test_sagemaker_batch_features_are_rejected(
+        self, command, mock_config, mock_auth_manager, mock_client
+    ):
+        with pytest.raises(click.ClickException, match="pre-recorded REST features"):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                source="audio.wav",
+                mic=False,
+                summarize=True,
+                sagemaker_endpoint="stt-endpoint",
+            )
+
+    def test_sagemaker_uses_aws_auth(self, command):
+        assert command.uses_external_auth(sagemaker_endpoint="stt-endpoint")
+
+    def test_sagemaker_container_file_omits_raw_audio_params(self, command, tmp_path):
+        """WAV files are sent as self-describing streams, not mislabeled PCM."""
+        connection = MagicMock()
+        connection.start_listening = AsyncMock()
+        connection.send_media = AsyncMock()
+        connection.send_close_stream = AsyncMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=connection)
+        context.__aexit__ = AsyncMock(return_value=False)
+        client = MagicMock()
+        client.listen.v1.connect.return_value = context
+        audio = tmp_path / "audio.wav"
+        audio.write_bytes(b"RIFFfake")
+
+        with patch("deepctl_cmd_listen.command.create_sagemaker_client", return_value=client):
+            asyncio.run(
+                command._sagemaker_listen(
+                    endpoint="stt-endpoint",
+                    region="us-west-2",
+                    source=str(audio),
+                    mode="prerecorded_file",
+                    model="nova-3",
+                    language="en-US",
+                    api_version=1,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    encoding=None,
+                    sample_rate=16000,
+                    channels=1,
+                    caption_format=None,
+                )
+            )
+
+        params = client.listen.v1.connect.call_args.kwargs
+        assert "encoding" not in params
+        assert "sample_rate" not in params
+        assert "channels" not in params
 
 
 # ── --webvtt / --srt mutual exclusivity ───────────────────────────────────────
