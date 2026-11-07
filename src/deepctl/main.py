@@ -438,8 +438,40 @@ def _safe_console_print(message: str) -> None:
         pass
 
 
+# Error handlers that never raise on a character the encoding lacks.
+# "strict" and "surrogateescape" (a C locale) both raise.
+_SAFE_ERRORS = frozenset(
+    {"backslashreplace", "replace", "ignore", "namereplace", "xmlcharrefreplace"}
+)
+
+
+def safe_output_streams() -> None:
+    """Have stdout and stderr escape what their encoding can't write.
+
+    A redirected stream on Windows uses the ANSI code page (cp1252, say),
+    which has no block art: writing the --help banner raised
+    UnicodeEncodeError and ended the command. Such a stream now writes
+    ``\\u2588`` instead. A UTF-8 stream is left as it is, and the encoding
+    never changes, so a real console keeps what Python chose for it.
+    """
+    import codecs
+    import io
+
+    for stream in (sys.stdout, sys.stderr):
+        if not isinstance(stream, io.TextIOWrapper):
+            continue  # None, or a stream that can't be reconfigured
+        try:
+            encoding = codecs.lookup(stream.encoding or "").name
+            if encoding == "utf-8" or stream.errors in _SAFE_ERRORS:
+                continue
+            stream.reconfigure(errors="backslashreplace")
+        except (LookupError, OSError, ValueError):
+            continue  # an unknown encoding, or a closed stream
+
+
 def main() -> None:
     """Main entry point for the CLI."""
+    safe_output_streams()
     try:
         # Check if timing was requested and enable it early
         args = sys.argv[1:]  # Skip the program name
