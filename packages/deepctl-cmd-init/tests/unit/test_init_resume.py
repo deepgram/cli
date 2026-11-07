@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from deepctl_cmd_init import clones, lifecycle
+from deepctl_core import login_state
 from deepctl_cmd_init.models import InitResult
 
 # The shared harness, loaded by path under its own name: a relative import
@@ -164,6 +165,7 @@ class TestRecordedDirectoryReplaced:
         self._refused(run, calls, install=True)
         assert not (run.dest / ".env").exists()
 
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX owners")
     def test_owned_by_someone_else(
         self, run: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -356,10 +358,28 @@ class TestForgedClone:
         assert not [c for c in calls if str(run.dest) in " ".join(c)], calls
 
 
+def _windows_directories(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows' rules on any OS: a directory can't be opened (os.open raises
+    PermissionError, as on Windows) and there is no O_NOFOLLOW."""
+    real_open = os.open
+
+    def open_(path: Any, flags: int, mode: int = 0o777, *, dir_fd: Any = None) -> int:
+        assert dir_fd is None, "no directory descriptors on Windows"
+        if os.path.isdir(path):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(login_state, "DIR_FDS", False)
+    monkeypatch.setattr(login_state, "_O_NOFOLLOW", 0)
+    monkeypatch.setattr(clones, "_NOFOLLOW", 0)
+    monkeypatch.setattr(os, "open", open_)
+
+
 class TestRecord:
     @pytest.fixture(autouse=True)
     def _home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
     def _record(self, path: str = "/x/app") -> Any:
         return clones.CloneRecord(
@@ -479,3 +499,25 @@ class TestRecord:
         clones.save(self._record())
         self._file().write_text(json.dumps(data))
         assert clones.load("/x/app") is None
+
+
+class TestRecordWithoutDirectoryHandles(TestRecord):
+    """The same contract where a directory can't be opened (Windows)."""
+
+    @pytest.fixture(autouse=True)
+    def _windows(self, _home: None, monkeypatch: pytest.MonkeyPatch) -> None:
+        _windows_directories(monkeypatch)
+
+    @pytest.mark.skip(reason="Windows has no POSIX directory modes to check")
+    def test_loose_directory_is_ignored(self) -> None:
+        pass
+
+
+@needs_git
+class TestResumeWithoutDirectoryHandles(TestResume):
+    """A rerun resumes where a directory can't be opened (Windows): the
+    record is written and read by path."""
+
+    @pytest.fixture(autouse=True)
+    def _windows(self, run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        _windows_directories(monkeypatch)

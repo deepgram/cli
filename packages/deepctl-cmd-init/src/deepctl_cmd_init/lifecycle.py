@@ -222,11 +222,13 @@ def same_directory(target_dir: Path, dev: int, ino: int) -> bool:
     inode), and it and its ``.git`` must be owned by this user, with
     ``.git`` a real directory.
 
-    On Windows, where ``st_ino`` can be 0 or unstable and there are no
-    POSIX owners, only the path checks apply: no link, ``.git`` a real
-    directory.
+    On Windows, where a directory can't be opened, ``st_ino`` can be 0 or
+    unstable and there are no POSIX owners, only the path checks apply: no
+    link, ``.git`` a real directory.
     """
-    if os.name == "nt":
+    from deepctl_core import login_state
+
+    if not login_state.DIR_FDS:
         try:
             top = os.lstat(target_dir)
             git = os.lstat(target_dir / ".git")

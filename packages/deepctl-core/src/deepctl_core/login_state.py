@@ -32,6 +32,7 @@ _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _O_BINARY = getattr(os, "O_BINARY", 0)
+_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 # Why a pending file fails the agent-session trust test; the
 # values are msg.W_CFG_UNTRUSTED_WHY keys.
@@ -145,12 +146,47 @@ def _from_json(data: object) -> PendingLogin | None:
     return pending
 
 
-def _open_dir(directory: Path, *, create: bool) -> int:
+# Whether a directory can be opened for a descriptor. Windows can't open a
+# directory with os.open (always PermissionError), so there dg checks the
+# directory by path and works with paths only.
+DIR_FDS = sys.platform != "win32"
+
+
+def close_dir(fd: int | None) -> None:
+    """Close a descriptor from ``_open_dir`` (None on Windows)."""
+    if fd is not None:
+        os.close(fd)
+
+
+def open_nofollow(path: str | Path, flags: int, *, dir_fd: int | None = None) -> int:
+    """``os.open`` that refuses a symbolic link (OSError ELOOP).
+
+    With O_NOFOLLOW the kernel refuses it. Where there is none (Windows),
+    a link or other reparse point is refused by ``lstat`` first, and the
+    file opened must be the one ``lstat`` saw.
+    """
+    if _O_NOFOLLOW:
+        return os.open(path, flags | _O_NOFOLLOW, dir_fd=dir_fd)
+    before = os.lstat(path, dir_fd=dir_fd)
+    attributes = getattr(before, "st_file_attributes", 0)
+    if stat.S_ISLNK(before.st_mode) or attributes & _REPARSE_POINT:
+        raise OSError(errno.ELOOP, "is a symbolic link", str(path))
+    fd = os.open(path, flags, dir_fd=dir_fd)
+    after = os.fstat(fd)
+    if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+        os.close(fd)
+        raise OSError(errno.ELOOP, "replaced while opening", str(path))
+    return fd
+
+
+def _open_dir(directory: Path, *, create: bool) -> int | None:
     """Open ``directory`` (made 0700 when ``create``) and check it.
 
     It must be a directory owned by this user; one the user can't keep
     private is refused. Group or other bits on the user's own directory are
-    removed, so the pending file is in a 0700 directory.
+    removed, so the pending file is in a 0700 directory. Where directories
+    can't be opened (``DIR_FDS`` false: Windows) it is checked by path and
+    None is returned; close the result with ``close_dir``.
     """
     if create:
         try:
@@ -158,6 +194,11 @@ def _open_dir(directory: Path, *, create: bool) -> int:
             os.mkdir(directory, 0o700)
         except FileExistsError:
             pass
+    if not DIR_FDS:
+        st = os.stat(directory)
+        if not stat.S_ISDIR(st.st_mode):
+            raise StateDirError(errno.ENOTDIR, "not a directory", str(directory))
+        return None
     fd = os.open(directory, os.O_RDONLY | _O_DIRECTORY)
     try:
         st = os.fstat(fd)
@@ -190,7 +231,7 @@ def save_pending(pending: PendingLogin) -> Path:
     data = (json.dumps(asdict(pending), indent=2) + "\n").encode("utf-8")
     tmp_name = f".{PENDING_NAME}.{secrets.token_hex(8)}.tmp"
     dir_fd = _open_dir(directory, create=True)
-    use_dir_fd = sys.platform != "win32" and os.open in os.supports_dir_fd
+    use_dir_fd = dir_fd is not None and os.open in os.supports_dir_fd
     try:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW | _O_BINARY
         if use_dir_fd:
@@ -221,7 +262,7 @@ def save_pending(pending: PendingLogin) -> Path:
                 pass
             raise
     finally:
-        os.close(dir_fd)
+        close_dir(dir_fd)
     return target
 
 
@@ -246,7 +287,7 @@ def load_pending(*, agent: bool) -> LoadedPending:
     """
     path = state_dir() / PENDING_NAME
     try:
-        fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK | _O_BINARY)
+        fd = open_nofollow(path, os.O_RDONLY | _O_NONBLOCK | _O_BINARY)
     except FileNotFoundError:
         return LoadedPending(None, path)
     except OSError as exc:
