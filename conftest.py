@@ -38,8 +38,10 @@ def _clean_ai_agent_env(monkeypatch):
     """Run as a person would, even when an AI coding agent launched pytest.
 
     Agent markers (AI_AGENT_ENV_MARKERS, Aider's OR_*) switch dg into its
-    agent trust mode. Tests that cover that mode set them, or patch
-    is_ai_agent, themselves.
+    agent trust mode and its agent output rules, and a developer's own shell
+    may set them (CLAUDECODE=1). Tests that cover agent mode set them, or
+    patch is_ai_agent or agent_mode, themselves. DG_AGENT is cleared with
+    the DEEPGRAM_* variables below.
     """
     from deepctl_core.output import AI_AGENT_ENV_MARKERS, AI_AGENT_ENV_VALUES
 
@@ -56,19 +58,6 @@ def _clean_deepgram_env(monkeypatch):
         if key.startswith("DEEPGRAM_"):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("DG_AGENT", raising=False)
-
-
-@pytest.fixture(autouse=True)
-def _speak_tests_run_as_a_person(request, monkeypatch):
-    """Speak tests run as a person by default: the agent rules key off hard
-    agent markers, which a developer's own shell may set (CLAUDECODE=1).
-    Tests that need agent mode patch ``agent_mode`` themselves."""
-    if "deepctl-cmd-speak" not in request.path.parts:
-        return
-    from deepctl_core.output import AI_AGENT_ENV_MARKERS
-
-    for name in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL", "DG_AGENT"):
-        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)
