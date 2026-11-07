@@ -157,7 +157,7 @@ MCP config.
 
 ## Dependencies
 
-- `mcp>=1.22.0,<2.0.0`
+- `mcp>=1.23.1,<2.0.0`
 - `rich>=13.9.4,<16`
 - `click>=8.2.0,<9`
 - `pydantic>=2.10.1,<3`

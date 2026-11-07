@@ -18,8 +18,10 @@ dependencies = [
     # script. 1.22 is the oldest mcp that runs dg mcp with current pydantic
     # (1.19-1.21 fail on import with pydantic 2.14), passes a returned
     # CallToolResult through whole and takes httpx_client_factory, which
-    # dg mcp uses to refuse redirects. mcp 2.0 removed streamablehttp_client.
-    "mcp>=1.22.0,<2.0.0",
+    # dg mcp uses to refuse redirects. 1.23.1 is the first that speaks MCP
+    # 2025-11-25, which dg mcp's fast start offers before the proxy loads.
+    # mcp 2.0 removed streamablehttp_client.
+    "mcp>=1.23.1,<2.0.0",
     "rich>=13.9.4,<16",
     "click>=8.2.0,<9",
     "pydantic>=2.10.1,<3",
