@@ -3,10 +3,14 @@
 Each check has one small JSON file there, ``update-check.json`` for dg itself
 and ``plugin-update-check.json`` for plugins, holding ``checked_at`` (Unix
 time), ``ok``, ``latest`` and ``source``, plus ``notified_at`` and
-``notified_latest`` once a notice was shown (``claim_notice``). A check writes its file just before it sends its request and again
-when it gets an answer, so a check that fails or never finishes still waits a
-full interval before the next attempt, while a run that ends before the
-request goes out doesn't use up the interval.
+``notified_latest`` once a notice was shown (``claim_notice``). A check writes
+its file (``ok`` false) just before it sends its request, and again when it
+gets an answer. A check that got its answer waits a full interval before the
+next one; one that failed, or never finished because dg exited first (the
+check runs in a daemon thread and is never waited for), is tried again after
+``RETRY_SECONDS``, or the interval if that is shorter. So short commands
+don't use up the interval without a check ever completing, and an unreachable
+index isn't asked on every run.
 
 The user config file is never written here. The directory is 0700 and must be
 a real directory owned by this user: :func:`usable` tightens one this user
@@ -27,6 +31,8 @@ import time
 from typing import Any
 
 UPDATE_FILE = "update-check.json"
+# How long after a check that failed or never finished the next one runs.
+RETRY_SECONDS = 3600.0
 PLUGIN_FILE = "plugin-update-check.json"
 
 
@@ -242,6 +248,15 @@ def elapsed(since: float, interval: float) -> bool:
     return not 0 <= gone < interval
 
 
+def check_due(state: dict[str, Any] | None, interval: float) -> bool:
+    """Whether the next check is due: ``interval`` after one that got its
+    answer, ``RETRY_SECONDS`` (at most ``interval``) after one that didn't."""
+    wait = interval
+    if (state or {}).get("ok") is not True:
+        wait = min(interval, RETRY_SECONDS)
+    return elapsed(checked_at(state), wait)
+
+
 def due(name: str, interval: float) -> bool:
-    """Whether at least ``interval`` seconds passed since the last check."""
-    return elapsed(checked_at(read(name)), interval)
+    """Whether the next check of ``name`` is due (:func:`check_due`)."""
+    return check_due(read(name), interval)
