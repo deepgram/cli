@@ -725,10 +725,24 @@ class TestHelpFromSpec:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """A built-in whose package is gone still shows its help; running it
-        reports dependency_missing."""
+        reports dependency_missing.
+
+        The manifest and the built-in module table plugin_manager reads from
+        it at import both name the missing module, as they do when a
+        package is uninstalled. (With only the manifest patched, the module
+        wouldn't be the built-in's own, and the check before import would
+        refuse it as a plugin replacing a built-in, which is right for a
+        module that isn't the built-in's.)"""
+        from deepctl_core import plugin_manager
+
         gone = dict(_manifest.commands()["models"], module="deepctl_cmd_gone.command")
         commands = dict(_manifest.commands(), models=gone)
         monkeypatch.setattr(_manifest, "commands", lambda: commands)
+        monkeypatch.setattr(
+            plugin_manager,
+            "BUILTIN_COMMAND_MODULES",
+            {**plugin_manager.BUILTIN_COMMAND_MODULES, "models": gone["module"]},
+        )
         _cli.run(["models", "--help"], prog="dg")
         out = capsys.readouterr()
         assert out.out.startswith("Usage: dg models [OPTIONS]")
