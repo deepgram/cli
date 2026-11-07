@@ -57,6 +57,9 @@ HELP_ENV_VARS = (
     "DEEPCTL_TELEMETRY_DISABLED",
     "DO_NOT_TRACK",
     "DEEPCTL_TELEMETRY",
+    # A loopback sink turns the closing "sends no telemetry" line into
+    # "Telemetry is on".
+    "DEEPCTL_TELEMETRY_DSN",
     "CI",
     "DEEPCTL_EAGER_LOAD",
     "XDG_CONFIG_HOME",
@@ -64,6 +67,9 @@ HELP_ENV_VARS = (
     "OR_APP_NAME",
     "OR_SITE_URL",
 )
+# Not the locale or PYTHON* variables: an entry is written only when stdout
+# is UTF-8, and the launcher applies Python's encoding rule itself
+# (docs/contracts/help-cache.md).
 
 
 # Plugin command names (the 0.4.1 rule; plugin_manager._VALID_PLUGIN_NAME).
