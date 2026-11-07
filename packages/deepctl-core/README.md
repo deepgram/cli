@@ -39,6 +39,7 @@ pipx run deepctl --help
 - `pyyaml>=6.0.0`
 - `platformdirs>=3.0.0,<5`
 - `packaging>=21.0`
+- `websockets>=13.1,<18`
 
 ## License
 
