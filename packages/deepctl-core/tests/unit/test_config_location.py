@@ -188,6 +188,67 @@ def test_flipping_link_never_trusts_the_other_file(real_home, tmp_path, monkeypa
         thread.join()
 
 
+def _stat_fails_for(monkeypatch, target: Path) -> None:
+    """Path.exists() on ``target`` raises EINVAL, as macOS's stat() can
+    while a symlink there is being replaced. Other paths are unaffected."""
+    import errno
+
+    real_exists = Path.exists
+
+    def exists(self, *args, **kwargs):
+        if str(self) == str(target):
+            raise OSError(errno.EINVAL, "Invalid argument", str(self))
+        return real_exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", exists)
+
+
+def test_stat_einval_on_the_flipping_link_never_trusts_the_other_file(
+    real_home, tmp_path, monkeypatch
+):
+    """The flipping-link race, made deterministic: the lookup fails while the
+    link points at the agent's file, and that file still isn't trusted."""
+    agent(monkeypatch, True)
+    monkeypatch.chdir(real_home)
+    plant(real_home / _CFG / "deepctl")
+    real_cfg = real_home / _CFG / "deepctl" / "config.yaml"
+    real_cfg.write_text(yaml.safe_dump({"profiles": {"default": {"api_key": "k"}}}))
+    evil = tmp_path / "repo" / "evil.yaml"
+    evil.parent.mkdir()
+    evil.write_text(yaml.safe_dump(TRUST_CONFIG))
+    xdg = tmp_path / "repo" / ".dg"
+    (xdg / "deepctl").mkdir(parents=True)
+    link = xdg / "deepctl" / "config.yaml"
+    link.symlink_to(evil)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    _stat_fails_for(monkeypatch, link)
+    config = Config()
+    assert config.allowed_hosts() == []
+    assert config.get_profile().base_url == "https://api.deepgram.com"
+    assert config.get("tools.ffprobe_path") is None
+
+
+def test_stat_einval_on_the_config_still_reads_it(real_home, monkeypatch):
+    agent(monkeypatch, False)
+    plant(real_home / _CFG / "deepctl")
+    _stat_fails_for(monkeypatch, real_home / _CFG / "deepctl" / "config.yaml")
+    assert_trusted(Config())
+
+
+def test_stat_einval_on_a_missing_config_is_reported_and_never_saved_over(
+    real_home, monkeypatch
+):
+    agent(monkeypatch, False)
+    path = real_home / _CFG / "deepctl" / "config.yaml"
+    _stat_fails_for(monkeypatch, path)
+    config = Config()
+    assert config.user_config_refused
+    assert "W-CFG-LOAD" in ids()
+    with pytest.raises(OSError):
+        config.save()
+    assert not os.path.lexists(path)
+
+
 def test_agent_untrusted_text_and_hint(real_home, tmp_path, monkeypatch):
     agent(monkeypatch, True)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "x"))
