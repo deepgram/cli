@@ -691,6 +691,17 @@ class TestKeyTrustAndAgentState:
         monkeypatch.setenv("PATH", "/home/x/.pi/agent:/usr/bin:/bin")
         assert _cache.key_inputs()["env"] != before["env"]
 
+    def test_telemetry_sink_changes_the_key(
+        self, homes: Homes, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a loopback telemetry sink, root --help ends "Telemetry is
+        on" instead of "This version of dg sends no telemetry"."""
+        monkeypatch.delenv("DEEPCTL_TELEMETRY_DSN", raising=False)
+        assert _cache.key_inputs()["env"]["DEEPCTL_TELEMETRY_DSN"] is None
+        monkeypatch.setenv("DEEPCTL_TELEMETRY_DSN", "http://k@127.0.0.1:9/1")
+        env = _cache.key_inputs()["env"]
+        assert env["DEEPCTL_TELEMETRY_DSN"] == "http://k@127.0.0.1:9/1"
+
     def test_key_validates_against_the_schema(
         self, homes: Homes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
