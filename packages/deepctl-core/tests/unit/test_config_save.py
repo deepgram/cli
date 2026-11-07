@@ -872,9 +872,21 @@ def test_concurrent_in_place_writers_never_interleave(tmp_path, monkeypatch):
 
 def _run_in_child(target, *args):
     import multiprocessing as mp
+    from pathlib import Path
 
-    proc = mp.get_context("fork").Process(target=target, args=args)
-    proc.start()
+    if "fork" in mp.get_all_start_methods():
+        proc = mp.get_context("fork").Process(target=target, args=args)
+        proc.start()
+    else:
+        # Windows: spawn imports this module by name, so the child needs
+        # its package root on sys.path (pytest's importlib mode skips that).
+        root = str(Path(__file__).parents[__name__.count(".")])
+        sys.path.insert(0, root)
+        try:
+            proc = mp.get_context("spawn").Process(target=target, args=args)
+            proc.start()
+        finally:
+            sys.path.remove(root)
     proc.join(30)
     assert proc.exitcode == 0
 

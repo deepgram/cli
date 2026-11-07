@@ -281,7 +281,8 @@ class TestUserConfigText:
     def test_text_is_kept(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         path = tmp_path / "config.yaml"
-        path.write_text("telemetry:\n  enabled: false\n", encoding="utf-8")
+        # bytes: write_text would write \r\n on Windows
+        path.write_bytes(b"telemetry:\n  enabled: false\n")
         config = Config(config_path=str(path))
         assert config.user_config_text == "telemetry:\n  enabled: false\n"
 
