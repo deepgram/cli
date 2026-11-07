@@ -1111,6 +1111,12 @@ class LoginCommand(BaseCommand):
         stop = _preflight(config)
         if stop is not None:
             return stop
+        # The approved key is saved for this profile's base URL: refuse an
+        # untrusted one before polling, as a new login does.
+        try:
+            auth_manager.check_base_url()
+        except CredentialHostError as e:
+            return CodedErrorResult(error=e.error, code=e.code, hint=e.hint)
         prog = _prog()
         shown = _shown_prog(prog)
         loaded = load_pending(agent=is_ai_agent())
