@@ -453,7 +453,10 @@ def test_foreign_owner_scenarios_warn_per_key(
         assert person["notices"] == []
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any directory")
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0,
+    reason="POSIX directory modes; root can read any directory",
+)
 def test_unreadable_home_raises_the_same(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

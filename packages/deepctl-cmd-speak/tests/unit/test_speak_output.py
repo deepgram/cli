@@ -11,6 +11,7 @@ import os
 import shlex
 import stat
 import threading
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,13 @@ from deepctl_cmd_speak import sinks
 from deepctl_cmd_speak.command import SpeakCommand
 from deepctl_cmd_speak.models import SpeakCodedError, SpeakResult
 from deepctl_core import AuthManager, Config, DeepgramClient
+
+# POSIX files and signals throughout (SIGHUP, FIFOs, sockets, modes, and
+# os.kill on this process, which ends it on Windows). The Windows paths are
+# in test_speak_windows.py.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX files and signals"
+)
 
 
 class _Cut(Exception):
@@ -143,7 +151,10 @@ class TestPlanTarget:
         refusal = sinks.plan_target(str(tmp_path / "f" / "a.wav"), overwrite=False)
         assert refusal.reason == "unwritable"
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permissions")
+    @pytest.mark.skipif(
+        os.name != "posix" or os.geteuid() == 0,
+        reason="POSIX directory modes; root ignores them",
+    )
     def test_unwritable_parent_is_unwritable(self, tmp_path):
         d = tmp_path / "ro"
         d.mkdir()

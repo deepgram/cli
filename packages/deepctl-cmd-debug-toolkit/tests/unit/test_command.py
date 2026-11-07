@@ -1,8 +1,10 @@
 """Tests for API-key handling in support-toolkit commands."""
 
+import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
 from click.testing import CliRunner
 from deepctl_core import AuthenticationError
 
@@ -39,6 +41,7 @@ def test_expired_credential_warning_is_visible_to_toolkit_script() -> None:
     assert "Run `dg login` again" in result.output
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
 def test_unreadable_cache_counts_as_no_cache(tmp_path: Path, monkeypatch) -> None:
     """Loading the debug group reads the toolkit cache; a HOME the user
     can't read must not fail it (every `dg debug <sub> --help` loads it)."""

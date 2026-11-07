@@ -495,6 +495,7 @@ class TestPluginAttemptRecording:
             mod._thread.join(timeout=5.0)
         assert not (check_allowed / "plugin-update-check.json").exists()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners")
     def test_unusable_cache_dir_skips(self, check_allowed, monkeypatch):
         import os
 

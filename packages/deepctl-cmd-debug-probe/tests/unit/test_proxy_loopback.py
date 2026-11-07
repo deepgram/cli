@@ -13,6 +13,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+import sys
+
 import pytest
 from deepctl_cmd_debug_probe.proxy import ProbeProxy
 from websockets.asyncio.client import connect
@@ -546,6 +548,7 @@ class _DeafUpstream:
         self.server.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake ffprobe is a #! script")
 def test_snapshots_do_not_block_the_loop_and_stop_waits_for_summaries(
     monkeypatch, capsys, tmp_path
 ):
@@ -657,6 +660,7 @@ def test_abort_during_upstream_handshake():
     assert proxy.connections[0].duration_seconds is not None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake ffprobe is a #! script")
 def test_second_stop_kills_a_running_ffprobe_and_skips_the_final_probe(
     monkeypatch, capsys, tmp_path
 ):

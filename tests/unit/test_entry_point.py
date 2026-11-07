@@ -71,6 +71,7 @@ class TestVersion:
             assert proc.returncode == 0, proc.stderr
             assert proc.stdout == f"deepctl, version {__version__}\n"
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="preexec_fn and EPIPE")
     def test_closed_pipe_and_closed_stdout_exit_quietly(self, tmp_path: Path) -> None:
         """`dg --version | true` and `dg --version >&-`: exit 0, no traceback."""
         code = (

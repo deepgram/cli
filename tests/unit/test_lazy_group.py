@@ -696,6 +696,7 @@ class TestHelpFromSpec:
             '{"stamp": "other", "builtin_only": ["debug"]}',
         ],
     )
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes and cache location")
     def test_builtin_only_cache_ignores_a_changed_file(
         self, fresh_cli: _cli.LazyGroup, content: str
     ) -> None:

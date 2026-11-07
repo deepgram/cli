@@ -187,6 +187,7 @@ def test_help_from_spec_matches_eager(
     assert spec[1].startswith("Usage: ")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="XDG config location and POSIX modes")
 def test_matrix_reaches_the_notices(tmp_path: Path) -> None:
     """The fixtures print what they're there for on the spec path, and each
     deepgram.yaml warning prints exactly once, with its real text."""

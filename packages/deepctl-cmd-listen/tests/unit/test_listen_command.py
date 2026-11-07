@@ -3,6 +3,8 @@
 from unittest.mock import Mock, patch
 
 import click
+import sys
+
 import pytest
 from click.testing import CliRunner
 from deepctl_cmd_listen.command import ListenCommand
@@ -1184,6 +1186,7 @@ class TestFluxV2TurnHandling:
         assert _json.loads(ws.sent[-1]) == {"type": "CloseStream"}
         assert opened["stream"].events == ["start", "stop", "close"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill of SIGINT ends the whole process on Windows")
     def test_sigint_during_mic_capture_stops_cleanly(self, command, monkeypatch):
         """A real SIGINT while frames are flowing stops the capture: the
         stream is stopped and closed, CloseStream is sent, and the transcript
@@ -1488,6 +1491,7 @@ class TestFluxV2TurnHandling:
         assert result.code == "server_error"
         assert "INVALID_AUDIO" in result.error
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill of SIGINT ends the whole process on Windows")
     def test_stream_stdin_ctrl_c_preserves_transcript_and_save_to(
         self, command, monkeypatch, tmp_path
     ):
