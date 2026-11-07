@@ -78,6 +78,7 @@ class Run:
         self.home = tmp_path / "home"
         self.home.mkdir()
         monkeypatch.setenv("HOME", str(self.home))
+        monkeypatch.setenv("USERPROFILE", str(self.home))  # Path.home() on Windows
         self.makefile = False
         self.clones = 0
         self.setup_runs: list[Any] = []

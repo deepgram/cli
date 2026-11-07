@@ -22,7 +22,8 @@ import sys
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from deepctl_core.login_state import StateDirError, _open_dir, state_dir
+from deepctl_core import login_state
+from deepctl_core.login_state import StateDirError, _open_dir, close_dir, state_dir
 
 DIR_NAME = "init-clones"
 _MAX_BYTES = 16 * 1024
@@ -49,13 +50,27 @@ def _name(real_path: str) -> str:
 
 
 def _use_dir_fd() -> bool:
-    return sys.platform != "win32" and os.open in os.supports_dir_fd
+    return login_state.DIR_FDS and os.open in os.supports_dir_fd
 
 
-def _open_records(*, create: bool) -> int:
+def _open_records(*, create: bool) -> int | None:
     """Open the records directory inside the state directory, both checked:
-    real directories owned by this user, the records directory 0700."""
+    real directories owned by this user, the records directory 0700.
+
+    None where directories can't be opened (Windows): both are then checked
+    by path, and the records are read and written by path.
+    """
     parent = _open_dir(state_dir(), create=create)
+    if parent is None:
+        if create:
+            try:
+                os.mkdir(state_dir() / DIR_NAME, 0o700)
+            except FileExistsError:
+                pass
+        st = os.stat(state_dir() / DIR_NAME)
+        if not stat.S_ISDIR(st.st_mode):
+            raise StateDirError(errno.ENOTDIR, "not a directory", DIR_NAME)
+        return None
     try:
         if create:
             try:
@@ -71,7 +86,7 @@ def _open_records(*, create: bool) -> int:
         else:
             fd = os.open(state_dir() / DIR_NAME, flags)
     finally:
-        os.close(parent)
+        close_dir(parent)
     try:
         st = os.fstat(fd)
         if not stat.S_ISDIR(st.st_mode):
@@ -120,13 +135,13 @@ def load(real_path: str) -> CloneRecord | None:
         return None
     name = _name(real_path) + ".json"
     try:
-        flags = os.O_RDONLY | _NOFOLLOW | _NONBLOCK | _BINARY
+        flags = os.O_RDONLY | _NONBLOCK | _BINARY
         if _use_dir_fd():
-            fd = os.open(name, flags, dir_fd=dir_fd)
+            fd = login_state.open_nofollow(name, flags, dir_fd=dir_fd)
         else:
-            fd = os.open(state_dir() / DIR_NAME / name, flags)
+            fd = login_state.open_nofollow(state_dir() / DIR_NAME / name, flags)
     except OSError:
-        os.close(dir_fd)
+        close_dir(dir_fd)
         return None
     try:
         st = os.fstat(fd)
@@ -143,7 +158,7 @@ def load(real_path: str) -> CloneRecord | None:
         return None
     finally:
         os.close(fd)
-        os.close(dir_fd)
+        close_dir(dir_fd)
     try:
         return _valid(json.loads(raw.decode("utf-8")), real_path)
     except ValueError:
@@ -189,4 +204,4 @@ def save(record: CloneRecord) -> None:
                 pass
             raise
     finally:
-        os.close(dir_fd)
+        close_dir(dir_fd)

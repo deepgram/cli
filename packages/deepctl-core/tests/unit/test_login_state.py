@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -19,6 +20,23 @@ from deepctl_core.login_state import (
 )
 
 posix = pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+
+
+@pytest.fixture
+def windows_dirs(monkeypatch):
+    """Windows' rules on any OS: a directory can't be opened (os.open raises
+    PermissionError, as on Windows) and there is no O_NOFOLLOW."""
+    real_open = os.open
+
+    def open_(path, flags, mode=0o777, *, dir_fd=None):
+        assert dir_fd is None, "no directory descriptors on Windows"
+        if os.path.isdir(path):
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(login_state, "DIR_FDS", False)
+    monkeypatch.setattr(login_state, "_O_NOFOLLOW", 0)
+    monkeypatch.setattr(os, "open", open_)
 
 
 @pytest.fixture
@@ -184,3 +202,57 @@ def test_unreadable_file_of_someone_else_is_reported(state, monkeypatch):
 def test_interval_below_the_floor_is_raised_on_read(state):
     save_pending(pending(interval=1))
     assert load_pending(agent=True).pending.interval == login_state.MIN_POLL_INTERVAL
+
+
+def test_without_directory_handles_save_load_and_remove(state, windows_dirs):
+    """Windows can't open a directory: the pending login is still saved,
+    replaced, read and removed, by path."""
+    save_pending(pending(device_code="one"))
+    save_pending(pending(device_code="two"))
+    loaded = load_pending(agent=True)
+    assert loaded.pending == pending(device_code="two")
+    assert loaded.ignored_why is None
+    assert [p.name for p in state.iterdir()] == ["login-pending.json"]
+    remove_pending(loaded)
+    assert not loaded.path.exists()
+
+
+def test_without_directory_handles_a_file_in_place_of_the_dir(state, windows_dirs):
+    state.parent.mkdir(exist_ok=True)
+    state.write_text("x")
+    with pytest.raises(login_state.StateDirError):
+        save_pending(pending())
+
+
+def _symlink_or_skip(link, target):
+    try:
+        link.symlink_to(target)
+    except OSError as exc:  # Windows without the symlink privilege
+        pytest.skip(f"can't make a symlink: {exc}")
+
+
+@pytest.mark.parametrize("emulate", [False, True], ids=["native", "no_o_nofollow"])
+def test_load_never_follows_a_link(state, tmp_path, request, emulate):
+    if emulate:
+        request.getfixturevalue("windows_dirs")
+    path = save_pending(pending())
+    real = tmp_path / "real.json"
+    path.rename(real)
+    _symlink_or_skip(path, real)
+    loaded = load_pending(agent=True)
+    assert loaded.pending is None and loaded.ignored_why == "symlink"
+
+
+def test_open_nofollow_refuses_a_file_swapped_after_lstat(tmp_path, monkeypatch):
+    """Without O_NOFOLLOW the file opened must be the one lstat saw."""
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.write_text("a")
+    second.write_text("b")
+    monkeypatch.setattr(login_state, "_O_NOFOLLOW", 0)
+    real_lstat = os.lstat
+    monkeypatch.setattr(
+        login_state.os, "lstat", lambda p, **kw: real_lstat(second, **kw)
+    )
+    with pytest.raises(OSError) as excinfo:
+        login_state.open_nofollow(first, os.O_RDONLY)
+    assert excinfo.value.errno == errno.ELOOP
