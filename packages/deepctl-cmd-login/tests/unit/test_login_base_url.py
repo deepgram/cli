@@ -16,6 +16,9 @@ from deepctl_core import AuthManager, Config, DeepgramClient, hosts, output
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # On Windows tmp_path sits under the real home, so paths would show as "~\...".
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     # This test's user config is the one at the default location.
     monkeypatch.setattr(
         "deepctl_core.config._default_config_file",
