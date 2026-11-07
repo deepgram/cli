@@ -33,6 +33,20 @@ def telemetry_on(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv(client.DSN_ENV_VAR, DEAD_DSN)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    if sys.platform == "win32":
+        # platformdirs ignores HOME and XDG_CONFIG_HOME on Windows.
+        # WIN_PD_OVERRIDE_* needs platformdirs >= 4.8.0.
+        monkeypatch.setenv("WIN_PD_OVERRIDE_LOCAL_APPDATA", str(tmp_path / ".config"))
+    # The startup checks cache under the real home (resolved at import) and
+    # query PyPI.
+    for module, names in (
+        ("deepctl_cmd_update.startup_check", ("check_and_notify",)),
+        ("deepctl_cmd_update.plugin_update_check", ("check_plugins_and_notify",)),
+        ("deepctl_cmd_skills.startup_check", ("check_and_notify",)),
+    ):
+        mod = pytest.importorskip(module)
+        for name in names:
+            monkeypatch.setattr(mod, name, lambda **kwargs: None)
     monkeypatch.setattr(client, "_state", client._fresh_state())
     monkeypatch.setattr(sys, "excepthook", sys.excepthook)
     monkeypatch.setattr(threading, "excepthook", threading.excepthook)
@@ -195,11 +209,12 @@ class TestWhatIsReported:
     def test_default_opt_out_survives_config_flag(
         self, telemetry_on, boom_command, tmp_path: Path, explicit: str | None
     ) -> None:
-        default = tmp_path / ".config" / "deepctl" / "config.yaml"
+        layout = ("deepgram", "deepctl") if sys.platform == "win32" else ("deepctl",)
+        default = tmp_path.joinpath(".config", *layout, "config.yaml")
         default.parent.mkdir(parents=True)
         default.write_text("telemetry:\n  enabled: false\n")
         if explicit is None:
-            config = "/dev/null"
+            config = os.devnull
         else:
             config_file = tmp_path / "other.yaml"
             config_file.write_text(explicit)
@@ -236,6 +251,7 @@ class TestReadOnceConfigSources:
         mock_init.assert_not_called()
         assert telemetry_on._state["opt_out"] == "config"
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="no /dev/stdin on Windows")
     @pytest.mark.timeout(120)
     def test_dev_stdin(self, tmp_path: Path) -> None:
         probe, _ = _probe(
@@ -245,6 +261,9 @@ class TestReadOnceConfigSources:
         assert probe["opt_out"] == "config"
         assert probe["sdk_loaded"] is False
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="bash process substitution is POSIX-only"
+    )
     @pytest.mark.timeout(120)
     def test_process_substitution(self, tmp_path: Path) -> None:
         import shutil
@@ -411,6 +430,10 @@ def _probe_env(tmp_path: Path, dsn: str | None = DEAD_DSN) -> dict[str, str]:
             "SHELL": "/bin/bash",
         }
     )
+    if sys.platform == "win32":
+        env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = str(tmp_path / ".config")
+        # Path.home(), and so the startup checks' cache, reads USERPROFILE.
+        env["USERPROFILE"] = str(tmp_path)
     return env
 
 

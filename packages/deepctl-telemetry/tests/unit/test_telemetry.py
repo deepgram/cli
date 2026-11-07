@@ -181,7 +181,7 @@ class TestUserConfigOptOut:
         _default_file(fresh_state).write_text(
             "telemetry:\n  enabled: false\n", encoding="utf-8"
         )
-        assert is_enabled(SimpleNamespace(config_path=Path("/dev/null"))) is False
+        assert is_enabled(SimpleNamespace(config_path=Path(os.devnull))) is False
 
     def test_config_flag_opt_out_wins_over_default_file(
         self, fresh_state: Any
@@ -205,7 +205,7 @@ class TestUserConfigOptOut:
         assert is_enabled(SimpleNamespace(config_path=fifo)) is False
 
     def test_device_without_text_is_off(self) -> None:
-        assert is_enabled(SimpleNamespace(config_path=Path("/dev/null"))) is False
+        assert is_enabled(SimpleNamespace(config_path=Path(os.devnull))) is False
 
     @pytest.mark.parametrize(
         ("text", "enabled"),
