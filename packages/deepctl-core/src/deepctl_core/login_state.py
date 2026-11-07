@@ -44,7 +44,22 @@ WHY_LINKS = "links"
 
 
 def state_dir() -> Path:
-    """dg's state directory (``~/.deepctl`` in 0.5.0)."""
+    """dg's state directory (``~/.deepctl`` in 0.5.0).
+
+    In an AI agent session the home is the account's own, from the OS, and
+    never ``$HOME``, as for the trust root, the plugin venv and the caches:
+    an agent that pointed ``HOME`` at a directory it filled could otherwise
+    have ``dg init`` resume in a clone it forged, or ``dg login --complete``
+    poll with a device code it planted. Where the OS can't say, ``$HOME``.
+    """
+    from . import output
+
+    if output.is_ai_agent():
+        from .config import _real_home
+
+        home = _real_home()
+        if home is not None:
+            return Path(home) / ".deepctl"
     return Path.home() / ".deepctl"
 
 

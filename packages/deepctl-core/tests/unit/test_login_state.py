@@ -256,3 +256,22 @@ def test_open_nofollow_refuses_a_file_swapped_after_lstat(tmp_path, monkeypatch)
     with pytest.raises(OSError) as excinfo:
         login_state.open_nofollow(first, os.O_RDONLY)
     assert excinfo.value.errno == errno.ELOOP
+
+
+def test_agent_session_uses_the_real_home(state, tmp_path, monkeypatch):
+    """An agent can point HOME at a directory it filled: in its sessions
+    the pending login lives under the account's own home."""
+    from deepctl_core import config as config_module
+    from deepctl_core import output
+
+    real = tmp_path / "real-home"
+    real.mkdir()
+    monkeypatch.setattr(config_module, "_real_home", lambda: str(real))
+    assert login_state.state_dir() == state  # a person: HOME
+    monkeypatch.setattr(output, "is_ai_agent", lambda: True)
+    assert login_state.state_dir() == real / ".deepctl"
+    path = save_pending(pending())
+    assert path.parent == real / ".deepctl"
+    assert not state.exists()
+    monkeypatch.setattr(config_module, "_real_home", lambda: None)
+    assert login_state.state_dir() == state  # the OS can't say: HOME
