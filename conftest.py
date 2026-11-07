@@ -3,6 +3,9 @@
 Ensures tests run in a clean environment by stripping DEEPGRAM_*
 environment variables before each test. Tests that need specific
 env vars should use @patch.dict("os.environ", {"DEEPGRAM_API_KEY": "..."}).
+
+Telemetry is disabled for every test so a test that drives `main()` never
+initializes the real telemetry client. Telemetry's own tests opt back in.
 """
 
 import os
@@ -11,8 +14,53 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _reset_shown_hints():
+    """A hint prints once per run (process); each test is its own run."""
+    from deepctl_core import output
+
+    output._hints_shown.clear()
+    yield
+    output._hints_shown.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_parse_cache():
+    """Config files are parsed once per process; each test is its own run."""
+    from deepctl_core import config
+
+    config._parse_cache.clear()
+    yield
+    config._parse_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _clean_ai_agent_env(monkeypatch):
+    """Run as a person would, even when an AI coding agent launched pytest.
+
+    Agent markers (AI_AGENT_ENV_MARKERS, Aider's OR_*) switch dg into its
+    agent trust mode. Tests that cover that mode set them, or patch
+    is_ai_agent, themselves.
+    """
+    from deepctl_core.output import AI_AGENT_ENV_MARKERS
+
+    for key in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL"):
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _clean_deepgram_env(monkeypatch):
     """Remove all DEEPGRAM_* environment variables for test isolation."""
     for key in list(os.environ):
         if key.startswith("DEEPGRAM_"):
             monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _disable_telemetry(monkeypatch):
+    """Keep tests that call `main()` from initializing real telemetry.
+
+    The destination also points at a closed loopback port, so a test that
+    re-enables telemetry can never reach a real endpoint.
+    """
+    monkeypatch.setenv("DEEPCTL_TELEMETRY_DISABLED", "1")
+    monkeypatch.setenv("DEEPCTL_TELEMETRY_DSN", "http://k@127.0.0.1:9/1")

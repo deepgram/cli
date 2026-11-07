@@ -1,18 +1,37 @@
-"""MCP proxy command for Deepgram — bridges remote MCP tools to local editors."""
+"""dg mcp: an MCP server that serves Deepgram documentation search over stdio."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import signal
+import sys
 from typing import TYPE_CHECKING, Any
 
-from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient, output
+from deepctl_core.hosts import (
+    DX_API_HOSTS,
+    SOURCE_FLAG,
+    CredentialHostError,
+    canonical_url,
+    evaluate,
+    report,
+)
+from deepctl_core.messages import display
 from deepctl_core.output import stderr_console
-from deepgram_mcp import TransportType, run_proxy
-from deepgram_mcp.proxy import DEFAULT_BASE_URL
+from rich.markup import escape
 
-from .models import MCPServerResult
+from . import messages as mcp_msg
+from .models import MCPServerResult, TransportType
+from .proxy import (
+    CANT_START,
+    DEFAULT_BASE_URL,
+    NO_KEY,
+    isolate_stdout,
+    reason,
+    report_error,
+    run_proxy,
+)
 
 if TYPE_CHECKING:
     pass
@@ -23,30 +42,67 @@ if TYPE_CHECKING:
 console = stderr_console
 
 
+def key_or_error(config: Any, auth_manager: Any) -> str:
+    """The API key, or RuntimeError with the complete text for the client."""
+    from contextlib import redirect_stdout
+
+    from deepctl_core import messages as msg
+
+    try:
+        with redirect_stdout(sys.stderr):
+            api_key = auth_manager.get_api_key()
+    except Exception as exc:
+        raise RuntimeError(CANT_START.format(reason=reason(exc))) from exc
+    if api_key:
+        return str(api_key)
+    if getattr(config, "api_key_untrusted", False) is True:
+        # The config file's key was left unused (W-PERM-AGENT /
+        # W-CFG-UNTRUSTED): send the agent to a person, never to dg login.
+        raise RuntimeError(
+            msg.E_KEY_UNTRUSTED.format(user_config=msg.display_path(config.config_path))
+            + " "
+            + msg.W_CFG_UNTRUSTED_FILE_HINT
+        )
+    raise RuntimeError(CANT_START.format(reason=NO_KEY))
+
+
+def _refuse_transport(transport: str) -> None:
+    """Report an unsupported --transport on stderr and exit 1.
+
+    stdout stays empty: an MCP host may be reading it as the protocol channel.
+    """
+    text = mcp_msg.E_MCP_TRANSPORT.format(transport=display(transport))
+    output.print_error(escape(text))
+    output.print_hint(escape(mcp_msg.E_MCP_TRANSPORT_HINT))
+    raise SystemExit(1)
+
+
 class McpCommand(BaseCommand):
-    """MCP proxy that connects to Deepgram's developer tools."""
+    """MCP server that serves Deepgram documentation search over stdio."""
 
     name = "mcp"
     help = (
-        "Run an MCP proxy that connects to Deepgram's developer API and "
-        "exposes remote tools locally for AI editors"
+        "Run an MCP server that exposes Deepgram documentation search to "
+        "your AI editor over stdio"
     )
-    short_help = "Run MCP proxy for Deepgram AI"
+    short_help = "Serve Deepgram docs search over MCP"
 
-    requires_auth = True
+    # No credential check at startup: the server answers the handshake with
+    # or without a key, and a missing or refused key is a tool error on the
+    # first call (stdout belongs to the MCP client from the first byte).
+    requires_auth = False
     requires_project = False
     ci_friendly = True
+    stdout_is_protocol = True
 
     examples = [
         "dg mcp",
-        "dg mcp --transport sse --port 8000",
         "dg mcp --base-url https://api.dx.deepgram.com",
     ]
     agent_help = (
-        "Run an MCP (Model Context Protocol) proxy that connects to Deepgram's "
-        "developer API and exposes remote AI assistant tools locally. Configure "
-        "in your AI editor's MCP settings. Supports stdio, SSE, and "
-        "streamable-http transports."
+        "Run an MCP (Model Context Protocol) server that exposes Deepgram "
+        "documentation search to your AI editor. Configure "
+        "in your AI editor's MCP settings. It runs over stdio."
     )
 
     def __init__(self) -> None:
@@ -60,15 +116,17 @@ class McpCommand(BaseCommand):
         return [
             {
                 "names": ["--transport", "-t"],
-                "help": ("Transport mode: stdio (default) or sse"),
+                "help": "Transport: stdio (the only one supported)",
                 "type": str,
                 "default": "stdio",
                 "required": False,
                 "is_option": True,
             },
+            # --port and --host stay accepted so existing MCP configs that
+            # pass them still parse; only stdio runs, so they are unused.
             {
                 "names": ["--port", "-p"],
-                "help": "Port number for HTTP server (default: 8000)",
+                "help": "Ignored: dg mcp runs only over stdio.",
                 "type": int,
                 "default": 8000,
                 "required": False,
@@ -76,7 +134,7 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--host"],
-                "help": "Host address for HTTP server (default: 127.0.0.1)",
+                "help": "Ignored: dg mcp runs only over stdio.",
                 "type": str,
                 "default": "127.0.0.1",
                 "required": False,
@@ -98,11 +156,27 @@ class McpCommand(BaseCommand):
             },
         ]
 
+    def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
+        """Refuse a transport other than stdio before the credential check,
+        so a refused run sends no request and starts no listener."""
+        transport = (kwargs.get("transport") or "stdio").lower()
+        if transport != "stdio":
+            _refuse_transport(transport)
+        return None
+
+    def output_result(self, result: Any, config: Config) -> None:
+        """Write nothing: stdout belongs to the MCP client.
+
+        A failure was already reported on stderr; the result only sets the
+        exit code.
+        """
+        return None
+
     def _handle_shutdown(self, signum: int, frame: Any) -> None:
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
             self._shutdown_requested = True
-            console.print("\n[yellow]MCP proxy stopped by user[/yellow]")
+            console.print("\n[yellow]MCP server stopped by user[/yellow]")
             os._exit(0)
 
     def handle(
@@ -112,24 +186,32 @@ class McpCommand(BaseCommand):
         client: DeepgramClient,
         **kwargs: Any,
     ) -> Any:
-        """Handle MCP proxy command."""
-        transport = kwargs.get("transport", "stdio").lower()
-        port = kwargs.get("port", 8000)
-        host = kwargs.get("host", "127.0.0.1")
-        api_key = auth_manager.get_api_key()
-        assert api_key  # guaranteed by requires_auth = True
-        base_url = kwargs.get("base_url", DEFAULT_BASE_URL)
-        debug = kwargs.get("debug", False)
+        """Handle the MCP server command."""
+        transport = (kwargs.get("transport") or "stdio").lower()
+        base_url = kwargs.get("base_url") or DEFAULT_BASE_URL
 
-        valid_transports = ["stdio", "sse"]
-        if transport not in valid_transports:
-            console.print(
-                f"[red]Invalid transport type:[/red] {transport}. "
-                f"Must be one of: {', '.join(valid_transports)}"
-            )
-            return MCPServerResult(
-                status="error", message=f"Invalid transport type: {transport}"
-            )
+        # Only stdio runs. pre_auth_check() refuses other transports before
+        # the credential check; this repeats it for direct callers, before
+        # the key is read and before anything listens.
+        if transport != "stdio":
+            _refuse_transport(transport)
+
+        # The proxy sends the key to --base-url, so that host must be the
+        # Deepgram developer API or one the user approved in their config.
+        # Refuse at startup, on stderr only: stdout is the protocol channel.
+        if base_url != DEFAULT_BASE_URL:
+            try:
+                evaluate(
+                    base_url,
+                    SOURCE_FLAG,
+                    config.allowed_hosts(),
+                    trusted_hosts=DX_API_HOSTS,
+                )
+            except CredentialHostError as err:
+                report(err)
+                raise SystemExit(1) from err
+
+        debug = kwargs.get("debug", False)
 
         # Set up signal handling for graceful shutdown
         self._original_sigint_handler = signal.signal(
@@ -137,57 +219,42 @@ class McpCommand(BaseCommand):
         )
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
-        try:
-            if transport != "stdio":
-                console.print(
-                    f"[blue]Starting MCP proxy ({transport}) on {host}:{port}...[/blue]"
-                )
+        # From here on only JSON-RPC reaches the client: anything else
+        # written to stdout (fd 1) goes to stderr.
+        protocol = isolate_stdout()
 
+        try:
             asyncio.run(
                 run_proxy(
-                    transport=transport,
-                    host=host,
-                    port=port,
-                    api_key=api_key,
-                    base_url=base_url,
+                    base_url=canonical_url(base_url),
+                    api_key=lambda: key_or_error(config, auth_manager),
                     debug=debug,
+                    stdout=protocol,
                 )
             )
 
-            if transport == "stdio":
-                # The MCP host owns stdout (JSON-RPC channel) and typically
-                # closes it on disconnect, so we return None to skip
-                # output_result rather than risk a write to a closed stream.
-                return None
-
-            return MCPServerResult(
-                status="success",
-                message="MCP proxy stopped",
-                transport=TransportType(transport),
-                port=port,
-                host=host,
-            )
+            # The MCP host owns stdout (JSON-RPC channel) and typically
+            # closes it on disconnect, so we return None to skip
+            # output_result rather than risk a write to a closed stream.
+            return None
 
         except KeyboardInterrupt:
             return MCPServerResult(
                 status="cancelled",
-                message="MCP proxy stopped by user",
-                transport=TransportType(transport),
-                port=port if transport != "stdio" else None,
-                host=host if transport != "stdio" else None,
+                message="MCP server stopped by user",
+                transport=TransportType.STDIO,
             )
         except Exception as e:
+            report_error(e)
             msg = str(e)
             if hasattr(e, "exceptions"):
                 for sub in e.exceptions:
                     msg += f"\n  Caused by: {sub!r}"
-            console.print(f"[red]Error running MCP proxy:[/red] {msg}")
+            console.print(f"[red]Error running MCP server:[/red] {msg}")
             return MCPServerResult(
                 status="error",
                 message=str(e),
-                transport=TransportType(transport),
-                port=port if transport != "stdio" else None,
-                host=host if transport != "stdio" else None,
+                transport=TransportType.STDIO,
             )
         finally:
             if self._original_sigint_handler:

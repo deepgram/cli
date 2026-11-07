@@ -5,17 +5,40 @@ import shutil
 import subprocess
 import sys
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient
+from deepctl_core import (
+    AuthManager,
+    BaseCommand,
+    Config,
+    DeepgramClient,
+    is_agentic,
+    is_ai_agent,
+)
+from deepctl_core import messages as core_msg
+from deepctl_core.hosts import (
+    DEFAULT_BASE_URL,
+    UrlOrigin,
+    is_allowlisted,
+    is_loopback,
+    is_regional,
+    parse_origin,
+    same_origin,
+)
+from deepctl_core.output import (
+    print_error,
+    print_hint,
+    print_security_warning,
+)
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
-from .models import ApiResult
+from . import messages as msg
+from .models import ApiErrorResult, ApiResult
 
 console = Console()
-
-DEFAULT_BASE_URL = "https://api.deepgram.com"
 
 
 class ApiCommand(BaseCommand):
@@ -91,25 +114,170 @@ class ApiCommand(BaseCommand):
                 "is_flag": True,
                 "is_option": True,
             },
+            {
+                "names": ["--allow-foreign-host"],
+                "help": (
+                    "Send your API key to this non-Deepgram host (must equal "
+                    "the request URL's host)"
+                ),
+                "type": str,
+                "is_option": True,
+            },
         ]
 
-    def _resolve_url(self, endpoint: str) -> str:
-        """Resolve endpoint to full URL."""
+    def _resolve_url(self, endpoint: str, base_url: str = DEFAULT_BASE_URL) -> str:
+        """Resolve endpoint to full URL, relative to the profile's base URL."""
         if endpoint.startswith("http://") or endpoint.startswith("https://"):
             return endpoint
-        base = DEFAULT_BASE_URL.rstrip("/")
+        base = base_url.rstrip("/")
         path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
         return f"{base}{path}"
 
+    @staticmethod
+    def _display_url(url: str) -> str:
+        """The URL without userinfo, query or fragment."""
+        try:
+            parts = urlsplit(url)
+            netloc = parts.hostname or ""
+            if ":" in netloc:
+                netloc = f"[{netloc}]"
+            if parts.port is not None:
+                netloc = f"{netloc}:{parts.port}"
+            return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+        except ValueError:
+            return ""
+
+    def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
+        """Refuse a disallowed --allow-foreign-host before any request."""
+        endpoint = kwargs.get("endpoint") or ""
+        allow_host = kwargs.get("allow_foreign_host")
+        if not allow_host or not endpoint.startswith(("http://", "https://")):
+            return None
+        method = (kwargs.get("method") or "GET").upper()
+        base_url = config.get_profile().base_url or DEFAULT_BASE_URL
+        _, refusal = self._authorize(
+            endpoint, base_url, config, allow_host, method, warn=False
+        )
+        return refusal
+
+    def _authorize(
+        self,
+        url: str,
+        base_url: str,
+        config: Config,
+        allow_host: str | None,
+        method: str,
+        warn: bool = True,
+    ) -> tuple[bool, ApiErrorResult | None]:
+        """Decide whether the request to ``url`` may carry the API key.
+
+        Returns ``(attach, error)``; with an error, nothing is sent.
+        """
+        target = parse_origin(url)
+        configured = parse_origin(base_url)
+        allowed = config.allowed_hosts()
+        if target is None:
+            return False, None
+
+        trusted = (
+            (configured is not None and same_origin(target, configured))
+            or is_regional(target)
+            or is_allowlisted(target, allowed)
+        )
+        host = core_msg.display(target.host)
+
+        if not trusted:
+            if not allow_host:
+                if not warn:
+                    return False, None
+                print_security_warning(escape(msg.W_API_NOAUTH.format(host=host)))
+                # The hint names the override flag: never in agent mode.
+                if not is_agentic() and not is_ai_agent():
+                    print_hint(escape(msg.W_API_NOAUTH_HINT.format(host=host)))
+                return False, None
+            # Refuse the command-line override under a hard AI-agent signal
+            # (never CI or TTY state); api.allowed_hosts is the real control.
+            if is_ai_agent():
+                return False, self._refuse(
+                    msg.E_API_AGENT.format(host=host),
+                    msg.E_API_AGENT_HINT.format(host=host),
+                    core_msg.CODE_FOREIGN_HOST,
+                    method,
+                    url,
+                )
+            if not self._flag_matches(allow_host, target):
+                return False, self._refuse(
+                    msg.E_API_MISMATCH.format(
+                        given=core_msg.display(allow_host), host=host
+                    ),
+                    msg.E_API_MISMATCH_HINT.format(host=host),
+                    core_msg.CODE_FOREIGN_HOST,
+                    method,
+                    url,
+                )
+
+        # Plain http only to a loopback host the user configured or
+        # allowlisted; the command-line override is https only.
+        if not target.secure and (not trusted or not is_loopback(target.host)):
+            hint = msg.E_API_INSECURE_HINT
+            return False, self._refuse(
+                msg.E_API_INSECURE.format(origin=core_msg.display(target.origin)),
+                hint,
+                core_msg.CODE_INSECURE_BASE_URL,
+                method,
+                url,
+            )
+        return True, None
+
+    @staticmethod
+    def _flag_matches(given: str, target: UrlOrigin) -> bool:
+        """``--allow-foreign-host`` names exactly the request host."""
+        value = given.strip().lower()
+        parsed = parse_origin(f"https://{value}") if value else None
+        if parsed is None or parsed.host != target.host:
+            return False
+        return parsed.port is None or parsed.port == target.effective_port
+
+    def _refuse(
+        self, error: str, hint: str, code: str, method: str, url: str
+    ) -> ApiErrorResult:
+        print_error(escape(error))
+        print_hint(escape(hint))
+        return ApiErrorResult(
+            status="error",
+            message=error,
+            method=method,
+            url=self._display_url(url),
+            code=code,
+            hint=hint,
+        )
+
+    def _warn_redirect(
+        self, response: httpx.Response, target: UrlOrigin | None
+    ) -> None:
+        """Note a redirect that wasn't followed."""
+        location = response.headers.get("location")
+        if not location or target is None:
+            return
+        dest = parse_origin(str(response.url.join(location)))
+        print_security_warning(
+            escape(
+                msg.W_API_REDIRECT.format(
+                    origin=core_msg.display(target.origin),
+                    location_origin=core_msg.display(dest.origin if dest else "?"),
+                )
+            )
+        )
+
     def _build_headers(
         self,
-        api_key: str,
+        api_key: str | None,
         custom_headers: tuple[str, ...] | list[str] | None,
     ) -> dict[str, str]:
-        """Build request headers with auth and custom headers."""
-        headers: dict[str, str] = {
-            "Authorization": f"Token {api_key}",
-        }
+        """Build request headers with auth (when given) and custom headers."""
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Token {api_key}"
         if custom_headers:
             for header in custom_headers:
                 if ":" in header:
@@ -197,9 +365,16 @@ class ApiCommand(BaseCommand):
         custom_headers = kwargs.get("header") or ()
         jq_filter = kwargs.get("jq")
         raw_output = kwargs.get("raw", False)
+        allow_host = kwargs.get("allow_foreign_host")
 
-        # Resolve URL
-        url = self._resolve_url(endpoint)
+        # Resolve URL against the profile's base URL. check_base_url raises
+        # (already reported) when that host isn't trusted with the key.
+        base_url = auth_manager.check_base_url()
+        url = self._resolve_url(endpoint, base_url)
+
+        attach, refusal = self._authorize(url, base_url, config, allow_host, method)
+        if refusal is not None:
+            return refusal
 
         # Get API key
         api_key = auth_manager.get_api_key()
@@ -212,8 +387,8 @@ class ApiCommand(BaseCommand):
                 url=url,
             )
 
-        # Build headers
-        headers = self._build_headers(api_key, custom_headers)
+        # Build headers (the key only goes to a host that may receive it)
+        headers = self._build_headers(api_key if attach else None, custom_headers)
 
         # Build body
         try:
@@ -242,7 +417,8 @@ class ApiCommand(BaseCommand):
 
         # Make request
         try:
-            with httpx.Client(timeout=30.0) as http_client:
+            # Never follow redirects: a 3xx could point the key elsewhere.
+            with httpx.Client(timeout=30.0, follow_redirects=False) as http_client:
                 response = http_client.request(**request_kwargs)
         except httpx.RequestError as e:
             console.print(f"[red]Request failed: {e}[/red]")
@@ -254,6 +430,8 @@ class ApiCommand(BaseCommand):
             )
 
         elapsed_ms = response.elapsed.total_seconds() * 1000
+        if response.is_redirect:
+            self._warn_redirect(response, parse_origin(url))
 
         # Handle response
         response_text = response.text

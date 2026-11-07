@@ -208,7 +208,7 @@ class InitCommand(BaseCommand):
             api_key = auth_manager.get_api_key()
             if api_key:
                 lifecycle.inject_env(dest, api_key)
-        except AuthenticationError as exc:
+        except (AuthenticationError, OSError) as exc:
             console.print(
                 f"[yellow]Could not inject Deepgram credentials:[/yellow] {exc}"
             )

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import platform
-import shutil
 import subprocess
 import tempfile
 from typing import TYPE_CHECKING
@@ -26,22 +25,61 @@ if TYPE_CHECKING:
 console = create_diagnostic_console()
 
 
+def ffprobe_input(file_path: str | os.PathLike[str]) -> str:
+    """Name ``file_path`` for ffprobe as an input file, never as an option.
+
+    ffprobe has no ``--`` end-of-options marker, so a file named ``-f lavfi``
+    would be read as options. The ``file:`` protocol prefix with an absolute
+    path makes ffprobe treat it as a plain file, whatever it is called.
+    """
+    return "file:" + os.path.abspath(os.fspath(file_path))
+
+
 def get_ffprobe_path(config: Config | None = None) -> str | None:
     """Get the ffprobe binary path.
 
-    Checks stored config path first, then falls back to auto-detection
-    via shutil.which().
+    Checks the stored config path first, then falls back to a PATH lookup.
+    A stored path is used only when it is absolute, and the PATH lookup
+    skips relative and empty entries and the current directory itself (on
+    every OS), so a binary inside the current directory is never picked up
+    implicitly. The result is always an absolute path.
     """
     if config is not None:
         stored_path = config.get("tools.ffprobe_path")
         if (
-            stored_path
+            isinstance(stored_path, str)
+            and os.path.isabs(stored_path)
             and os.path.isfile(stored_path)
             and os.access(stored_path, os.X_OK)
         ):
-            return str(stored_path)
+            return stored_path
+    return _find_on_path("ffprobe")
 
-    return shutil.which("ffprobe")
+
+def _find_on_path(name: str) -> str | None:
+    """Absolute path of ``name`` from PATH, never from the current directory.
+
+    Mirrors ``deepctl_core.tools.find_executable`` (this package does not
+    depend on deepctl-core).
+    """
+    try:
+        cwd: str | None = os.path.realpath(os.getcwd())
+    except OSError:
+        cwd = None
+    names = [name]
+    if platform.system() == "Windows" and not os.path.splitext(name)[1]:
+        exts = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
+        names = [name + ext for ext in exts if ext]
+    for entry in os.environ.get("PATH", os.defpath).split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        if cwd is not None and os.path.realpath(entry) == cwd:
+            continue
+        for candidate in names:
+            path = os.path.join(entry, candidate)
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+    return None
 
 
 def check_ffprobe(config: Config | None = None) -> bool:
@@ -162,7 +200,7 @@ def probe_file(file_path: str, config: Config | None = None) -> AudioProbeResult
             "json",
             "-show_format",
             "-show_streams",
-            file_path,
+            ffprobe_input(file_path),
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -209,7 +247,7 @@ def probe_buffer(
             "json",
             "-show_format",
             "-show_streams",
-            tmp_name,
+            ffprobe_input(tmp_name),
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)

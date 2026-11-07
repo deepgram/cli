@@ -2,7 +2,7 @@
 
 import json
 import os
-import shutil
+import shlex
 import subprocess
 import tempfile
 from typing import Any
@@ -19,11 +19,23 @@ from deepctl_core import (
     get_output_format,
     get_status_console,
 )
+from deepctl_core.tools import resolve_tool
 from rich import box
 from rich.panel import Panel
 from rich.table import Table
 
 from .models import AudioDebugResult, AudioFormat, AudioInfo, AudioStream
+
+
+def _ffprobe_input(file_path: str) -> str:
+    """Name ``file_path`` for ffprobe as an input file, never as an option.
+
+    ffprobe has no ``--`` end-of-options marker, so a file named ``-f lavfi``
+    would be read as options. The ``file:`` protocol prefix with an absolute
+    path makes ffprobe treat it as a plain file, whatever it is called.
+    """
+    return "file:" + os.path.abspath(file_path)
+
 
 # Two channels, deliberately (#104):
 #   console        -> stdout, the human rendering of the analysis. Only
@@ -97,7 +109,14 @@ class AudioCommand(BaseCommand):
 
     def check_ffmpeg_installed(self) -> bool:
         """Check if ffmpeg/ffprobe is installed."""
-        return shutil.which("ffprobe") is not None
+        return self._ffprobe_bin() is not None
+
+    def _ffprobe_bin(self) -> str | None:
+        """Absolute ffprobe path: the user config's, or one found on PATH
+        (never in the current directory)."""
+        return resolve_tool(
+            getattr(self, "_config", None), "ffprobe", "tools.ffprobe_path"
+        )
 
     def _is_url(self, path: str) -> bool:
         """Check if the path is a URL."""
@@ -210,12 +229,16 @@ class AudioCommand(BaseCommand):
         self, file_path: str, custom_args: str | None = None
     ) -> dict[str, Any]:
         """Run ffprobe on the given file."""
+        ffprobe_bin = self._ffprobe_bin()
+        if ffprobe_bin is None:
+            raise Exception("Failed to probe file: ffprobe not found")
         try:
             if custom_args:
-                # Parse custom arguments and run ffprobe directly
-                cmd = ["ffprobe", "-v", "quiet", "-print_format", "json"]
-                cmd.extend(custom_args.split())
-                cmd.append(file_path)
+                # Split custom arguments like a POSIX shell on every OS, so a quoted
+                # value stays one argument, and run ffprobe directly
+                cmd = [ffprobe_bin, "-v", "quiet", "-print_format", "json"]
+                cmd.extend(shlex.split(custom_args))
+                cmd.append(_ffprobe_input(file_path))
 
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode != 0:
@@ -224,7 +247,7 @@ class AudioCommand(BaseCommand):
                 return dict(json.loads(result.stdout))
             else:
                 # Use python-ffmpeg for standard probe
-                probe = ffmpeg.probe(file_path)
+                probe = ffmpeg.probe(_ffprobe_input(file_path), cmd=ffprobe_bin)
                 return dict(probe)
         except Exception as e:
             raise Exception(f"Failed to probe file: {e!s}")
@@ -409,6 +432,7 @@ class AudioCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle audio debug command execution."""
+        self._config = config
         audio_file = kwargs.get("file")
         verbose = kwargs.get("verbose", False)
         extra_verbose = kwargs.get("extra_verbose", False)

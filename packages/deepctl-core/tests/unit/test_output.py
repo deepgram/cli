@@ -352,7 +352,7 @@ class TestPrintFunctions:
         print_error("Something went wrong")
 
         mock_console.print.assert_called_once_with(
-            "[red]✗[/red] Something went wrong"
+            "[red]✗[/red] Something went wrong", soft_wrap=True
         )
 
     @patch("deepctl_core.output.stderr_console")
@@ -362,7 +362,7 @@ class TestPrintFunctions:
         print_error("Something went wrong")
 
         mock_console.print.assert_called_once_with(
-            "ERROR: Something went wrong"
+            "ERROR: Something went wrong", soft_wrap=True
         )
 
     @patch("deepctl_core.output.console")
@@ -372,7 +372,7 @@ class TestPrintFunctions:
         print_warning("Be careful")
 
         mock_console.print.assert_called_once_with(
-            "[yellow]⚠[/yellow] Be careful"
+            "[yellow]⚠[/yellow] Be careful", soft_wrap=True
         )
 
     @patch("deepctl_core.output.console")
@@ -381,7 +381,7 @@ class TestPrintFunctions:
         """Test printing info message."""
         print_info("FYI")
 
-        mock_console.print.assert_called_once_with("[blue]ℹ[/blue] FYI")
+        mock_console.print.assert_called_once_with("[blue]ℹ[/blue] FYI", soft_wrap=True)
 
 
 class TestPrintOutput:

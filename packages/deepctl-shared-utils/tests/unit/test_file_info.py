@@ -9,7 +9,7 @@ This test demonstrates the pytest suite capabilities including:
 - Custom assertions
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -202,7 +202,7 @@ class TestFileInfo:
         assert file_info.modified == timestamp
 
         # Verify timestamp represents expected date
-        dt = datetime.fromtimestamp(timestamp)
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         assert dt.year == 2024
         assert dt.month == 1
         assert dt.day == 1

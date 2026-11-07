@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from typing import Any
 
@@ -11,12 +10,17 @@ from deepctl_core import (
     AuthManager,
     BaseCommand,
     BaseResult,
+    CodedErrorResult,
     Config,
     DeepgramClient,
     get_console,
     get_output_format,
     get_status_console,
+    is_ai_agent,
 )
+from deepctl_core import messages as msg
+from deepctl_core.output import print_error, print_hint
+from deepctl_core.tools import find_executable
 from deepctl_shared_utils import (
     get_ffprobe_path,
     print_ffprobe_install_instructions,
@@ -87,7 +91,7 @@ class FfprobeCommand(BaseCommand):
         auth_manager: AuthManager,
         client: DeepgramClient,
         **kwargs: Any,
-    ) -> BaseResult:
+    ) -> BaseResult | CodedErrorResult:
         """Handle ffprobe command."""
         path = kwargs.get("path")
         reset = kwargs.get("reset", False)
@@ -105,6 +109,17 @@ class FfprobeCommand(BaseCommand):
             return self._handle_reset(config)
 
         if path:
+            # A stored tool path is run by later commands: an AI agent
+            # session never sets it. Scripts and CI without an agent marker
+            # still can.
+            if is_ai_agent():
+                print_error(msg.E_TOOL_PATH_AGENT)
+                print_hint(msg.E_PERSON_ONLY_AGENT_HINT)
+                return CodedErrorResult(
+                    error=msg.E_TOOL_PATH_AGENT,
+                    code=msg.CODE_CONFIRMATION_REQUIRED,
+                    hint=msg.E_PERSON_ONLY_AGENT_HINT,
+                )
             return self._handle_set_path(config, path)
 
         return self._handle_status(config)
@@ -120,7 +135,8 @@ class FfprobeCommand(BaseCommand):
             status_console.print(f"[red]Error:[/red] File is not executable: {path}")
             return BaseResult(status="error", message=f"File is not executable: {path}")
 
-        # Store in config
+        # Store in config. Only absolute paths are used, so resolve it now.
+        path = os.path.abspath(path)
         config._config.tools.ffprobe_path = path
         config.save()
 
@@ -144,7 +160,7 @@ class FfprobeCommand(BaseCommand):
         config.save()
 
         # Show auto-detected path
-        auto_path = shutil.which("ffprobe")
+        auto_path = find_executable("ffprobe")
         if _human_output():
             console.print("[green]✓[/green] Stored ffprobe path cleared")
             if auto_path:
@@ -162,7 +178,7 @@ class FfprobeCommand(BaseCommand):
     def _handle_status(self, config: Config) -> BaseResult:
         """Show ffprobe status."""
         stored_path = config.get("tools.ffprobe_path")
-        auto_path = shutil.which("ffprobe")
+        auto_path = find_executable("ffprobe")
         effective_path = get_ffprobe_path(config)
 
         if _human_output():

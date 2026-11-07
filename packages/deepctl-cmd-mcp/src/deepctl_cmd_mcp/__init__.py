@@ -1,4 +1,4 @@
-"""MCP proxy command for deepctl."""
+"""MCP server command for deepctl."""
 
 from .command import McpCommand
 from .models import MCPServerResult, TransportType

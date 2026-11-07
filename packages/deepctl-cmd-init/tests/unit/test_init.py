@@ -1,9 +1,14 @@
 """Tests for the init command."""
 
+import os
+import shutil
+import stat
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from deepctl_cmd_init import lifecycle
 from deepctl_cmd_init.command import InitCommand
 from deepctl_cmd_init.lifecycle import check_prereqs, inject_env
 from deepctl_cmd_init.models import (
@@ -203,6 +208,225 @@ class TestInjectEnv:
         inject_env(tmp_path, "sk-new-key")
         content = env_file.read_text()
         assert content == "DEEPGRAM_API_KEY=existing-key\n"
+
+
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+
+
+def _git(repo, *args):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True
+    )
+
+
+def _repo(tmp_path, files=None, track=()):
+    """A cloned-template stand-in: a git repo with ``files`` committed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    for name, data in (files or {}).items():
+        (repo / name).write_bytes(data.encode() if isinstance(data, str) else data)
+    for name in track:
+        _git(repo, "add", "-f", name)
+    if track:
+        _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "t")
+    return repo
+
+
+def _status_lists_env(repo) -> bool:
+    out = _git(repo, "status", "--porcelain", "--untracked-files=all").stdout
+    return any(line[3:] == ".env" for line in out.splitlines())
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+class TestEnvFileHardening:
+    """.env is 0600 and kept out of git."""
+
+    def test_new_env_is_owner_only_whatever_the_umask(self, tmp_path):
+        old = os.umask(0o000)
+        try:
+            inject_env(tmp_path, "sk-test-key")
+        finally:
+            os.umask(old)
+        assert stat.S_IMODE((tmp_path / ".env").stat().st_mode) == 0o600
+
+    @pytest.mark.parametrize(
+        "existing", ["OTHER_VAR=value\n", "DEEPGRAM_API_KEY=$DG\n", "A=1"]
+    )
+    def test_existing_env_is_narrowed_to_owner_only(self, tmp_path, existing):
+        env_file = tmp_path / ".env"
+        env_file.write_text(existing)
+        env_file.chmod(0o644)
+        inject_env(tmp_path, "sk-test-key")
+        assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+        assert "DEEPGRAM_API_KEY=sk-test-key\n" in env_file.read_text()
+
+    def test_append_keeps_existing_lines(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("A=1")
+        inject_env(tmp_path, "sk-test-key")
+        assert env_file.read_text() == "A=1\nDEEPGRAM_API_KEY=sk-test-key\n"
+
+    def test_env_with_key_already_set_is_narrowed(self, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("DEEPGRAM_API_KEY=existing-key\n")
+        env_file.chmod(0o644)
+        inject_env(tmp_path, "sk-new-key")
+        assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
+        assert ".env" in (tmp_path / ".gitignore").read_text().splitlines()
+
+    def test_env_symlink_is_not_written_through(self, tmp_path, capsys):
+        outside = tmp_path / "outside.txt"
+        outside.write_text("")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".env").symlink_to(outside)
+        inject_env(repo, "sk-test-key")
+        assert outside.read_text() == ""
+        err = capsys.readouterr().err
+        assert "Not writing your API key to .env: it is a symbolic link." in err
+        assert "add DEEPGRAM_API_KEY there yourself" in err
+
+    def test_gitignore_symlink_is_not_written_through(self, tmp_path, capsys):
+        outside = tmp_path / "outside.txt"
+        outside.write_text("x\n")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".gitignore").symlink_to(outside)
+        inject_env(repo, "sk-test-key")
+        assert outside.read_text() == "x\n"
+        assert stat.S_IMODE((repo / ".env").stat().st_mode) == 0o600
+        assert "Did not add .env to .gitignore: it is a symbolic link." in (
+            capsys.readouterr().err
+        )
+
+
+@needs_git
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+class TestEnvKeptOutOfGit:
+    """Decided by git itself (check-ignore / ls-files), not by matching lines."""
+
+    def test_plain_repo_gets_env_ignored(self, tmp_path, capsys):
+        repo = _repo(tmp_path)
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_text() == ".env\n"
+        assert _git(repo, "check-ignore", "-q", ".env").returncode == 0
+        assert not _status_lists_env(repo)
+        assert "Added .env to .gitignore to keep your API key out of git." in (
+            capsys.readouterr().err
+        )
+
+    @pytest.mark.parametrize(
+        "gitignore", [".env*\n!.env\n", ".env\n!.env\n", "!.env\n"]
+    )
+    def test_negated_env_is_overridden_by_a_last_line(self, tmp_path, gitignore):
+        repo = _repo(tmp_path, {".gitignore": gitignore}, track=[".gitignore"])
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_text() == gitignore + ".env\n"
+        assert _git(repo, "check-ignore", "-q", ".env").returncode == 0
+        assert not _status_lists_env(repo)
+
+    @pytest.mark.parametrize("pattern", [".env*", "/.env", "*.env", ".env"])
+    def test_already_ignored_gitignore_left_alone(self, tmp_path, pattern, capsys):
+        gitignore = f"node_modules\n{pattern}\n"
+        repo = _repo(tmp_path, {".gitignore": gitignore}, track=[".gitignore"])
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_text() == gitignore
+        assert not _status_lists_env(repo)
+        assert "Added .env" not in capsys.readouterr().err
+
+    def test_crlf_gitignore_gets_a_crlf_line(self, tmp_path):
+        repo = _repo(tmp_path, {".gitignore": b"node_modules\r\n"}, track=[".gitignore"])
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_bytes() == b"node_modules\r\n.env\r\n"
+        assert _git(repo, "check-ignore", "-q", ".env").returncode == 0
+
+    def test_missing_trailing_newline(self, tmp_path):
+        repo = _repo(tmp_path, {".gitignore": "node_modules"}, track=[".gitignore"])
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_text() == "node_modules\n.env\n"
+        assert _git(repo, "check-ignore", "-q", ".env").returncode == 0
+
+    def test_tracked_env_warns_and_claims_nothing(self, tmp_path, capsys):
+        repo = _repo(
+            tmp_path, {".env": "DEEPGRAM_API_KEY=$DEEPGRAM_API_KEY\n"}, track=[".env"]
+        )
+        inject_env(repo, "sk-test-key")
+        err = capsys.readouterr().err
+        assert (
+            "This template tracks .env in git, so a commit would include your API key."
+            in err
+        )
+        assert "Before you commit, run: git rm --cached .env" in err
+        assert "Added .env to .gitignore" not in err
+        assert _git(repo, "ls-files", ".env").stdout.strip() == ".env"  # index untouched
+        assert not (repo / ".gitignore").exists()  # no line that wouldn't help
+        assert stat.S_IMODE((repo / ".env").stat().st_mode) == 0o600
+
+    def test_tracked_env_leaves_a_tracked_gitignore_alone(self, tmp_path):
+        repo = _repo(
+            tmp_path,
+            {".gitignore": "node_modules\n", ".env": "DEEPGRAM_API_KEY=$X\n"},
+            track=[".gitignore", ".env"],
+        )
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_text() == "node_modules\n"
+        status = _git(repo, "status", "--porcelain").stdout.splitlines()
+        assert " M .gitignore" not in status
+
+    def test_inherited_git_dir_is_ignored(self, tmp_path, monkeypatch):
+        """An exported GIT_DIR/GIT_WORK_TREE must not point the check at
+        another repository."""
+        other = tmp_path / "other"
+        other.mkdir()
+        _git(other, "init", "-q")
+        (other / ".gitignore").write_text(".env\n")
+        monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(other))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(other / ".git" / "index"))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "-C", str(repo), "init", "-q"],
+            check=True,
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        )
+        inject_env(repo, "sk-test-key")
+        assert (repo / ".gitignore").read_text() == ".env\n"
+        out = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        ).stdout
+        assert "?? .env" not in out.splitlines()
+
+    def test_without_git_falls_back_to_pattern_check(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(lifecycle.shutil, "which", lambda name: None)
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("node_modules")
+        inject_env(tmp_path, "sk-test-key")
+        inject_env(tmp_path, "sk-test-key")
+        assert gitignore.read_text() == "node_modules\n.env\n"
+
+
+class TestCloneTemplate:
+    def test_url_is_passed_after_end_of_options(self, tmp_path):
+        with patch.object(lifecycle.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=0)
+            lifecycle.clone_template("--upload-pack=touch /tmp/pwned", tmp_path / "d")
+        argv = run.call_args.args[0]
+        assert argv[:3] == ["git", "clone", "--"]
+        assert argv[3] == "--upload-pack=touch /tmp/pwned"
+
+    def test_option_like_url_is_not_run_as_an_option(self, tmp_path):
+        """With real git: an option-like URL fails as a repository name."""
+        if shutil.which("git") is None:
+            pytest.skip("git not installed")
+        marker = tmp_path / "pwned"
+        with pytest.raises(RuntimeError, match="git clone failed"):
+            lifecycle.clone_template(f"--upload-pack=touch {marker}", tmp_path / "d")
+        assert not marker.exists()
 
 
 # ---------------------------------------------------------------------------

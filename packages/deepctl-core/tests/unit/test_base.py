@@ -13,6 +13,7 @@ from deepctl_core import (
     Config,
     DeepgramClient,
 )
+from deepctl_core.base_command import UnexpectedCommandError
 
 # Mirrors the full key set of deepctl_core.output._output_config so a patched
 # stand-in can't drift from the real global. Spread with a format override,
@@ -424,6 +425,67 @@ class TestBaseCommand:
 
         # Verify error was printed to stderr via print_error
         mock_print_error.assert_called_once_with("Command failed: Something went wrong")
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.print_error")
+    def test_execute_click_exception_passes_through_unchanged(
+        self,
+        mock_print_error,
+        mock_client_class,
+        mock_auth_class,
+        mock_command_class,
+        mock_context,
+    ):
+        """A ClickException from handle() is the command's message to the user."""
+        raised = click.ClickException("File not found: recording.wav")
+
+        class UserErrorCommand(BaseCommand):
+            name = "user_error_test"
+            help = "Test user error command"
+
+            def handle(self, config, auth_manager, client, **kwargs) -> Any:
+                try:
+                    raise FileNotFoundError("recording.wav")
+                except FileNotFoundError:
+                    raise raised
+
+        with pytest.raises(click.ClickException) as exc_info:
+            UserErrorCommand().execute(mock_context)
+
+        assert exc_info.value is raised
+        assert not isinstance(exc_info.value, UnexpectedCommandError)
+        mock_print_error.assert_not_called()
+
+    @pytest.mark.unit
+    @patch("deepctl_core.base_command.AuthManager")
+    @patch("deepctl_core.base_command.DeepgramClient")
+    @patch("deepctl_core.base_command.print_error")
+    def test_execute_unexpected_error_is_wrapped_with_its_cause(
+        self,
+        mock_print_error,
+        mock_client_class,
+        mock_auth_class,
+        mock_command_class,
+        mock_context,
+    ):
+        """Any other exception becomes UnexpectedCommandError from the original."""
+        original = KeyError("missing")
+
+        class BugCommand(BaseCommand):
+            name = "bug_test"
+            help = "Test bug command"
+
+            def handle(self, config, auth_manager, client, **kwargs) -> Any:
+                raise original
+
+        with pytest.raises(UnexpectedCommandError) as exc_info:
+            BugCommand().execute(mock_context)
+
+        assert exc_info.value.__cause__ is original
+        assert isinstance(exc_info.value, click.ClickException)
+        mock_print_error.assert_called_once_with("Command failed: 'missing'")
 
     @pytest.mark.unit
     @patch("deepctl_core.base_command.AuthManager")
@@ -1370,11 +1432,71 @@ class TestIsGuided:
             assert command.is_guided(ctx) is False
 
 
-class TestTelemetryTagging:
-    """Verify _tag_telemetry_start and _tag_telemetry_status emit usage signal."""
+class TestTelemetryContext:
+    """BaseCommand records the command path and flag names, never values."""
 
-    @pytest.fixture
-    def command(self):
+    @pytest.fixture(autouse=True)
+    def _reset(self):
+        from deepctl_core.telemetry_context import reset_command_context
+
+        reset_command_context()
+        yield
+        reset_command_context()
+
+    @staticmethod
+    def _invoke(args):
+        """Run a real root -> group -> leaf Click tree and record from the leaf."""
+        from deepctl_core.telemetry_context import command_context
+
+        class MockCommand(BaseCommand):
+            name = "listen"
+            help = "Test command"
+
+            def handle(self, *args, **kwargs):
+                return None
+
+        command = MockCommand()
+
+        @click.group()
+        @click.option("--api-key")
+        @click.option("--output", "-o")
+        def root(api_key, output):
+            pass
+
+        @root.command()
+        @click.argument("source", required=False)
+        @click.option("--model")
+        @click.option("--language")
+        @click.pass_context
+        def listen(ctx, source, model, language):
+            command._record_telemetry_context(ctx)
+
+        result = CliRunner().invoke(root, args, prog_name="/home/someone/bin/dg")
+        assert result.exit_code == 0, result.output
+        return command_context()
+
+    @pytest.mark.unit
+    def test_records_command_path_with_fixed_program_name(self):
+        context = self._invoke(["listen"])
+        assert context["command"] == "dg listen"
+
+    @pytest.mark.unit
+    def test_records_flag_names_from_every_level_but_no_values(self):
+        context = self._invoke(
+            ["--api-key", "VALUE-SENTINEL", "-o", "json", "listen",
+             "ARG-SENTINEL.wav", "--model", "nova-3"]
+        )
+        assert context["flags"] == "--api-key,--model,--output"
+        assert "SENTINEL" not in repr(context)
+        assert "nova-3" not in repr(context)
+        assert "json" not in repr(context)
+
+    @pytest.mark.unit
+    def test_no_flags_records_empty(self):
+        assert self._invoke(["listen"])["flags"] == ""
+
+    @pytest.mark.unit
+    def test_record_swallows_exceptions(self):
         class MockCommand(BaseCommand):
             name = "test"
             help = "Test command"
@@ -1382,84 +1504,11 @@ class TestTelemetryTagging:
             def handle(self, *args, **kwargs):
                 return None
 
-        return MockCommand()
-
-    @staticmethod
-    def _ctx_with_flags(
-        used_flags, defaulted_flags, output="json", path="deepctl listen"
-    ):
-        ctx = Mock(spec=click.Context)
-        ctx.command_path = path
-        ctx.params = {"output": output}
-        ctx.command = Mock()
-        ctx.command.params = [
-            *(_param(n) for n in used_flags),
-            *(_param(n) for n in defaulted_flags),
-        ]
-        used = set(used_flags)
-
-        def get_source(name):
-            src = Mock()
-            src.name = "COMMANDLINE" if name in used else "DEFAULT"
-            return src
-
-        ctx.get_parameter_source = get_source
-        return ctx
-
-    @pytest.mark.unit
-    def test_start_renames_transaction_to_command_path(self, command):
-        ctx = self._ctx_with_flags(["diarize"], ["model"])
-        scope = Mock()
-        scope.transaction = Mock()
-        with patch("sentry_sdk.get_current_scope", return_value=scope):
-            command._tag_telemetry_start(ctx)
-        assert scope.transaction.name == "deepctl listen"
-
-    @pytest.mark.unit
-    def test_start_records_only_user_provided_flags(self, command):
-        ctx = self._ctx_with_flags(["diarize", "summarize"], ["model", "language"])
-        scope = Mock()
-        scope.transaction = Mock()
-        with patch("sentry_sdk.get_current_scope", return_value=scope):
-            command._tag_telemetry_start(ctx)
-        scope.set_tag.assert_any_call("cmd.flags", "diarize,summarize")
-        scope.set_tag.assert_any_call("cmd.output_format", "json")
-
-    @pytest.mark.unit
-    def test_start_no_flags_records_none_sentinel(self, command):
-        ctx = self._ctx_with_flags([], [], output=None, path="deepctl whoami")
-        scope = Mock()
-        scope.transaction = Mock()
-        with patch("sentry_sdk.get_current_scope", return_value=scope):
-            command._tag_telemetry_start(ctx)
-        scope.set_tag.assert_any_call("cmd.flags", "(none)")
-        scope.set_tag.assert_any_call("cmd.output_format", "default")
-
-    @pytest.mark.unit
-    def test_start_swallows_exceptions(self, command):
-        ctx = self._ctx_with_flags(["diarize"], [])
-        with patch("sentry_sdk.get_current_scope", side_effect=RuntimeError("boom")):
-            command._tag_telemetry_start(ctx)
-
-    @pytest.mark.unit
-    def test_status_sets_cmd_status(self, command):
-        scope = Mock()
-        with patch("sentry_sdk.get_current_scope", return_value=scope):
-            command._tag_telemetry_status("ok")
-        scope.set_tag.assert_called_with("cmd.status", "ok")
-
-    @pytest.mark.unit
-    @pytest.mark.parametrize("status", ["ok", "error", "cancelled", "partial"])
-    def test_status_passes_through_status_string(self, command, status):
-        scope = Mock()
-        with patch("sentry_sdk.get_current_scope", return_value=scope):
-            command._tag_telemetry_status(status)
-        scope.set_tag.assert_called_with("cmd.status", status)
-
-    @pytest.mark.unit
-    def test_status_swallows_exceptions(self, command):
-        with patch("sentry_sdk.get_current_scope", side_effect=RuntimeError("boom")):
-            command._tag_telemetry_status("error")
+        with patch(
+            "deepctl_core.telemetry_context.record_command",
+            side_effect=RuntimeError("boom"),
+        ):
+            MockCommand()._record_telemetry_context(Mock())
 
 
 def _param(name):

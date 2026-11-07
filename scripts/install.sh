@@ -45,11 +45,54 @@ has() {
     command -v "$1" >/dev/null 2>&1
 }
 
+sha256_of() {
+    if has sha256sum; then
+        sha256sum "$1" | cut -d ' ' -f 1
+    elif has shasum; then
+        shasum -a 256 "$1" | cut -d ' ' -f 1
+    elif has openssl; then
+        openssl dgst -sha256 "$1" | sed 's/^.*= *//'
+    else
+        return 1
+    fi
+}
+
 # --- Install uv if no Python tooling found ---
 
+# The uv installer is pinned to one release and its sha256: it is downloaded,
+# verified, and only then run, so a changed installer never runs. When
+# sha256sum is available, that installer also checks the sha256 of the uv
+# archive it downloads, which pins uv itself too.
+# Bump all three together (the sha256 is the release's uv-installer.sh asset).
+UV_VERSION="0.12.24"
+UV_INSTALLER_SHA256="e8c19f8dbfaafcbeddc8d17bf9227505d918220eba2aeb543d6922bdc5bb9625"
+# A mirror may serve the same file; it must still match UV_INSTALLER_SHA256.
+UV_INSTALLER_URL="${DEEPCTL_UV_INSTALLER_URL:-https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-installer.sh}"
+UV_MANUAL="install uv yourself (https://docs.astral.sh/uv/), then run this script again."
+
 install_uv() {
-    say "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    say "Installing uv ${UV_VERSION}..."
+    UV_INSTALLER="$(mktemp "${TMPDIR:-/tmp}/uv-installer.XXXXXX")" \
+        || err "Could not create a temporary file for the uv installer. Check that ${TMPDIR:-/tmp} is writable, or ${UV_MANUAL}"
+    trap 'rm -f "$UV_INSTALLER"' EXIT
+    trap 'rm -f "$UV_INSTALLER"; exit 130' INT TERM
+    if ! curl -fsSL -o "$UV_INSTALLER" "$UV_INSTALLER_URL"; then
+        rm -f "$UV_INSTALLER"
+        err "Could not download the uv installer from ${UV_INSTALLER_URL}. Check your connection, or ${UV_MANUAL}"
+    fi
+    if ! UV_ACTUAL_SHA256="$(sha256_of "$UV_INSTALLER")"; then
+        rm -f "$UV_INSTALLER"
+        err "Found no sha256 tool (sha256sum, shasum or openssl) to check the uv installer, so it was not run. Install one, or ${UV_MANUAL}"
+    fi
+    if [ "$UV_ACTUAL_SHA256" != "$UV_INSTALLER_SHA256" ]; then
+        rm -f "$UV_INSTALLER"
+        err "The uv installer from ${UV_INSTALLER_URL} does not match the sha256 pinned for uv ${UV_VERSION}, so it was not run. If you set DEEPCTL_UV_INSTALLER_URL, check that it serves uv ${UV_VERSION}'s uv-installer.sh; otherwise ${UV_MANUAL}"
+    fi
+    UV_INSTALLER_RC=0
+    sh "$UV_INSTALLER" || UV_INSTALLER_RC=$?
+    rm -f "$UV_INSTALLER"
+    trap - EXIT INT TERM
+    [ "$UV_INSTALLER_RC" -eq 0 ] || err "The uv installer failed (exit ${UV_INSTALLER_RC}). See its output above, or ${UV_MANUAL}"
     # Source the env so uv is available in this session
     if [ -f "$HOME/.local/bin/env" ]; then
         . "$HOME/.local/bin/env"
@@ -104,7 +147,8 @@ PIP_FLAGS=""
 if [ "$FORCE" = "1" ]; then
     UV_FLAGS="--force"
     PIPX_FLAGS="--force"
-    PIP_FLAGS="--force-reinstall"
+    # -U makes the upgrade explicit (pip >= 20.3 already upgrades with --force-reinstall).
+    PIP_FLAGS="-U --force-reinstall"
 fi
 
 # Try install methods in order of preference
@@ -118,10 +162,12 @@ elif has pipx; then
     METHOD="pipx"
 elif has pip3; then
     say "Found pip3, installing ${SPEC}..."
+    # shellcheck disable=SC2086 # flags are split on purpose
     pip3 install --user $PIP_FLAGS "$SPEC"
     METHOD="pip"
 elif has pip; then
     say "Found pip, installing ${SPEC}..."
+    # shellcheck disable=SC2086 # flags are split on purpose
     pip install --user $PIP_FLAGS "$SPEC"
     METHOD="pip"
 else

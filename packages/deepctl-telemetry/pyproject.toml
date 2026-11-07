@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deepctl-telemetry"
 version = "0.0.7" # x-release-please-version
-description = "Opt-out phone-home telemetry for deepctl"
+description = "Error reporting for deepctl; this version sends no telemetry"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
@@ -21,8 +21,8 @@ classifiers = [
 keywords = ["deepgram", "cli", "telemetry", "sentry"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10",
-    "sentry-sdk>=2.0.0",
+    "deepctl-core>=0.3.0",
+    "sentry-sdk>=2.35.0,<3",
     "click>=8.0.0",
     "rich>=13.0.0",
 ]

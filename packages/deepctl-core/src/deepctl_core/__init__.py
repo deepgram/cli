@@ -5,8 +5,10 @@ from .base_command import BaseCommand
 from .base_group_command import BaseGroupCommand
 from .client import DeepgramClient
 from .config import Config
+from .hosts import CredentialHostError
 from .models import (
     BaseResult,
+    CodedErrorResult,
     ErrorResult,
     PluginInfo,
     ProfileInfo,
@@ -18,6 +20,7 @@ from .output import (
     get_output_format,
     get_status_console,
     is_agentic,
+    is_ai_agent,
     print_error,
     print_info,
     print_output,
@@ -41,7 +44,9 @@ __all__ = [
     "BaseCommand",
     "BaseGroupCommand",
     "BaseResult",
+    "CodedErrorResult",
     "Config",
+    "CredentialHostError",
     "DeepgramClient",
     "ErrorResult",
     "OutputFormatter",
@@ -56,6 +61,7 @@ __all__ = [
     "get_status_console",
     "get_timing_summary",
     "is_agentic",
+    "is_ai_agent",
     "is_timing_enabled",
     "print_error",
     "print_info",
