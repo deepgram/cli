@@ -338,7 +338,8 @@ class PluginManager:
     ) -> bool:
         """Whether an entry point is refused by its own name, before loading.
 
-        An entry point named like a built-in or reserved command must not be
+        An entry point named like a built-in or reserved command, or (at the
+        top level) like a built-in alias such as ``debug-audio``, must not be
         imported unless ``_admit`` would register it under that name. Only a
         taken name is checked here: an entry point's name isn't always its
         command's name (``my_tool`` may register ``my-tool``), so the full
@@ -347,7 +348,8 @@ class PluginManager:
         name = getattr(entry_point, "name", None)
         if type(name) is not str or _VALID_PLUGIN_NAME.fullmatch(name) is None:
             return False
-        if name not in builtin_modules and name not in reserved:
+        alias = not path_prefix and name in BUILTIN_ALIASES
+        if name not in builtin_modules and name not in reserved and not alias:
             return False
         kind = self._admit(name, entry_point, builtin_modules, reserved, path_prefix)
         return kind is None

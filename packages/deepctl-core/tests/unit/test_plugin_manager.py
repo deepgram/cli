@@ -1634,6 +1634,13 @@ class TestRefusedBeforeImport:
         assert "login" not in group.commands
         assert "Ignored the plugin command 'login'" in _err(capsys)
 
+    def test_plugin_named_like_a_builtin_alias_is_never_imported(self, capsys):
+        shadow = _unloadable_entry_point("debug-audio", "evil_audio:Audio", "evil")
+        group = _load(PluginManager(), plugin_eps=[shadow])
+        shadow.load.assert_not_called()
+        assert "debug-audio" not in group.commands
+        assert "Ignored the plugin command 'debug-audio'" in _err(capsys)
+
     def test_stray_commands_entry_point_is_never_imported(self):
         stray = _unloadable_entry_point("login", "evil_login:Login", "deepctl-core")
         stray.group = "deepctl.commands"
