@@ -143,10 +143,10 @@ verify-packages: ## Verify built packages with twine
 	twine check dist/*
 
 readmes: ## Generate sub-package READMEs from pyproject.toml metadata
-	python3 scripts/generate_readmes.py
+	uv run python scripts/generate_readmes.py
 
 readmes-check: ## Check sub-package READMEs are up to date
-	python3 scripts/generate_readmes.py --check
+	uv run python scripts/generate_readmes.py --check
 
 floors-check: ## Check lockstep versions: every package at the root version, every first-party pin ==
 	uv run python scripts/check_dependency_floors.py
