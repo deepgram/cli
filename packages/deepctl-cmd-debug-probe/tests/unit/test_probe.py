@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from unittest.mock import Mock, patch
 
 import pytest
@@ -364,6 +365,10 @@ class TestInterrupt:
         assert seen == []
         assert "Stopping: open connections can finish" in capsys.readouterr().err
 
+    @pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="reads the SigIgn mask from /proc/self/status (Linux only)",
+    )
     def test_ignored_sigint_stays_ignored(self):
         """A background job in a script starts with SIGINT ignored: kill -INT
         must not stop the proxy, and SIGINT stays ignored afterwards."""
@@ -394,8 +399,8 @@ print(json.dumps({{
         out = json.loads(proc.stdout.strip().splitlines()[-1])
         assert out["status"] == "success"
         assert out["ignored"] is True
-        if out["sigign"] is not None:  # Linux: the SIGINT bit is still set
-            assert int(out["sigign"], 16) & (1 << (2 - 1))
+        assert out["sigign"] is not None
+        assert int(out["sigign"], 16) & (1 << (2 - 1))  # the SIGINT bit is still set
         assert "Stopping: open connections can finish" not in proc.stderr
 
     def test_keyboard_interrupt_path_first_and_second_press(self, capsys):
