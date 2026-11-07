@@ -66,7 +66,7 @@ HELP_ENV_VARS = (
 )
 
 
-# Plugin command names (the 0.4.2 rule; plugin_manager._VALID_PLUGIN_NAME).
+# Plugin command names (the 0.4.1 rule; plugin_manager._VALID_PLUGIN_NAME).
 VALID_PLUGIN_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 # Format characters a cached row may carry: ZWNJ and ZWJ, which Persian,
 # Indic scripts and emoji sequences need. Every other Cf character (bidi

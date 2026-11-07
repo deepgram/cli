@@ -42,7 +42,7 @@ FRAGMENT_DIR_NAME = "_manifest.d"
 MANIFEST_NAME = "_manifest.json"
 HELP_DIR_NAME = "_help"
 
-# Command, alias and tool names: the plugin name rule (0.4.2), so a built-in
+# Command, alias and tool names: the plugin name rule (0.4.1), so a built-in
 # name is always one a plugin could also try to claim.
 NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 TOOL_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")

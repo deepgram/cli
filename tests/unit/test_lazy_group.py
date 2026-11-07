@@ -382,7 +382,7 @@ class TestAliasesAreReserved:
 
 class TestHyphenatedSubcommands:
     """``dg <group>-<x>`` runs ``dg <group> <x>`` for any subcommand of a
-    built-in group, a plugin's included (0.4.2 parity)."""
+    built-in group, a plugin's included (0.4.1 parity)."""
 
     @pytest.fixture
     def debug_with_extra(

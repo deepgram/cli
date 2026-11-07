@@ -261,7 +261,7 @@ class LazyGroup(click.Group):
 
     Discovery (``PluginManager.discover_plugins``) runs for a name that
     isn't built in, for root ``--help``, for ``dg plugin list`` and for a
-    built-in name listed in ``plugins.allow_override``. Every 0.4.2 plugin
+    built-in name listed in ``plugins.allow_override``. Every 0.4.1 plugin
     rule applies unchanged there: reserved built-in names,
     ``W-PLUGIN-BADNAME``, ``plugins.allow_override`` and the trust root.
     Built-ins are never loaded through an entry point: their module comes
@@ -501,7 +501,7 @@ class LazyGroup(click.Group):
         unless ``plugins.allow_override`` lists the alias. Any other
         ``<group>-<x>`` runs ``<group> <x>`` when ``<group>`` is a built-in
         group and ``<x>`` is one of its subcommands, a plugin's included
-        (0.4.2 parity); otherwise argv is left for unknown-name discovery.
+        (0.4.1 parity); otherwise argv is left for unknown-name discovery.
         """
         word = args[0]
         if word in _manifest.top_level():
