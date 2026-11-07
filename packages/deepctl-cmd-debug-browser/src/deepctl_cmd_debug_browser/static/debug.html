@@ -232,8 +232,8 @@
     </div>
 
     <script>
-        const WS_PORT = window.location.port;
-        const WS_URL = `ws://localhost:${WS_PORT}/ws`;
+        const WS_TOKEN = new URLSearchParams(window.location.search).get('t') || '';
+        const WS_URL = `ws://${window.location.host}/ws?t=${encodeURIComponent(WS_TOKEN)}`;
 
         let ws = null;
         let checkResults = {};

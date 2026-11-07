@@ -1,13 +1,13 @@
 """API command for deepctl."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
-import httpx
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -37,6 +37,20 @@ from rich.panel import Panel
 
 from . import messages as msg
 from .models import ApiErrorResult, ApiResult
+
+if TYPE_CHECKING:
+    import httpx
+
+
+# httpx (and with it ssl) loads only when a request is sent, so `dg api
+# --help` doesn't import it.
+def __getattr__(name: str) -> Any:
+    if name == "httpx":
+        import httpx
+
+        return httpx
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 console = Console()
 
@@ -253,7 +267,7 @@ class ApiCommand(BaseCommand):
         )
 
     def _warn_redirect(
-        self, response: httpx.Response, target: UrlOrigin | None
+        self, response: "httpx.Response", target: UrlOrigin | None
     ) -> None:
         """Note a redirect that wasn't followed."""
         location = response.headers.get("location")
@@ -275,14 +289,22 @@ class ApiCommand(BaseCommand):
         custom_headers: tuple[str, ...] | list[str] | None,
     ) -> dict[str, str]:
         """Build request headers with auth (when given) and custom headers."""
+        from deepctl_core.transport import request_headers
+
         headers: dict[str, str] = {}
         if api_key:
-            headers["Authorization"] = f"Token {api_key}"
+            # The key's host passed the check; the session ID goes only
+            # where the key goes.
+            headers = request_headers(api_key)
         if custom_headers:
             for header in custom_headers:
                 if ":" in header:
                     key, value = header.split(":", 1)
-                    headers[key.strip()] = value.strip()
+                    key = key.strip()
+                    # A -H header replaces one of the same name, in any case.
+                    for name in [k for k in headers if k.lower() == key.lower()]:
+                        del headers[name]
+                    headers[key] = value.strip()
         return headers
 
     def _build_body(
@@ -350,6 +372,25 @@ class ApiCommand(BaseCommand):
             raise RuntimeError(f"jq error: {result.stderr.strip()}")
         return result.stdout.strip()
 
+    @staticmethod
+    def _insecure_ignored(url: str, error: BaseException) -> bool:
+        """A TLS failure on a loopback host while DEEPGRAM_CLI_INSECURE would
+        have skipped verification for the SDK: say it doesn't reach dg api."""
+        from deepctl_core import auth, output, transport
+
+        if output.is_ai_agent():
+            return False
+        value = os.environ.get("DEEPGRAM_CLI_INSECURE", "").strip().lower()
+        origin = parse_origin(url)
+        if value not in ("1", "true") or origin is None:
+            return False
+        if origin.host not in auth._INSECURE_HOSTS:
+            return False
+        mapped = transport.map_exception(error)
+        return (
+            mapped is not None and mapped.details.get("reason") == transport.REASON_TLS
+        )
+
     def handle(
         self,
         config: Config,
@@ -358,6 +399,8 @@ class ApiCommand(BaseCommand):
         **kwargs: Any,
     ) -> Any:
         """Handle API command execution."""
+        import httpx
+
         endpoint = kwargs.get("endpoint", "")
         method = (kwargs.get("method") or "GET").upper()
         fields = kwargs.get("field") or ()
@@ -367,9 +410,14 @@ class ApiCommand(BaseCommand):
         raw_output = kwargs.get("raw", False)
         allow_host = kwargs.get("allow_foreign_host")
 
-        # Resolve URL against the profile's base URL. check_base_url raises
-        # (already reported) when that host isn't trusted with the key.
-        base_url = auth_manager.check_base_url()
+        from deepctl_core import transport
+
+        # Resolve URL against the profile's base URL. The Transport's host
+        # check raises (already reported) when that host isn't trusted with
+        # the key.
+        base_url = transport.Transport(
+            config, check_host=auth_manager.check_base_url
+        ).rest_base()
         url = self._resolve_url(endpoint, base_url)
 
         attach, refusal = self._authorize(url, base_url, config, allow_host, method)
@@ -417,11 +465,17 @@ class ApiCommand(BaseCommand):
 
         # Make request
         try:
-            # Never follow redirects: a 3xx could point the key elsewhere.
-            with httpx.Client(timeout=30.0, follow_redirects=False) as http_client:
-                response = http_client.request(**request_kwargs)
+            # The process's one client (one connection), with TLS verified
+            # for every host as in 0.4.1: DEEPGRAM_CLI_INSECURE doesn't reach
+            # dg api. Never follow redirects: a 3xx could point the key
+            # elsewhere.
+            response = transport.verified_client().request(
+                **request_kwargs, follow_redirects=False, timeout=30.0
+            )
         except httpx.RequestError as e:
             console.print(f"[red]Request failed: {e}[/red]")
+            if self._insecure_ignored(url, e):
+                print_hint(msg.H_API_INSECURE_IGNORED)
             return ApiResult(
                 status="error",
                 message=f"Request failed: {e}",

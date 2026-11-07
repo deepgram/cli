@@ -2,7 +2,10 @@
 
 Discovers community plugins (excluding first-party packages) and checks
 PyPI for newer versions.  Runs in a daemon thread alongside the core
-update check and prints notifications to stderr after CLI execution.
+update check, under the same rules: skipped when the core check is,
+at most once per interval with its state in
+``<cache>/plugin-update-check.json``, and its notice prints after CLI
+execution only if the thread already finished (dg never waits for it).
 """
 
 from __future__ import annotations
@@ -10,18 +13,16 @@ from __future__ import annotations
 import importlib.metadata
 import sys
 import threading
-import time
-from pathlib import Path
 from typing import Any
 
-from .startup_check import _get_check_interval_seconds, _is_ci, _is_oneshot
+from . import check_cache
+from .startup_check import _get_check_interval_seconds, suppressed
+
+THREAD_NAME = "deepctl-plugin-update-check"
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_CACHE_DIR = Path.home() / ".cache" / "deepctl"
-_PLUGIN_CACHE_FILE = _CACHE_DIR / "last_plugin_version_check"
 
 # First-party packages are version-locked to deepctl — never check these.
 _EXCLUDED_PREFIXES = ("deepctl-cmd-", "deepctl-core", "deepctl-shared-")
@@ -40,27 +41,6 @@ def _is_excluded(name: str) -> bool:
     if name in _EXCLUDED_EXACT:
         return True
     return any(name.startswith(prefix) for prefix in _EXCLUDED_PREFIXES)
-
-
-def _read_plugin_cache_timestamp() -> float:
-    """Read the last plugin-check timestamp from the cache file.
-
-    Returns:
-        Unix timestamp of the last check, or ``0.0`` if not available.
-    """
-    try:
-        return float(_PLUGIN_CACHE_FILE.read_text().strip())
-    except (FileNotFoundError, ValueError, OSError):
-        return 0.0
-
-
-def _write_plugin_cache_timestamp() -> None:
-    """Persist the current time to the plugin cache file."""
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _PLUGIN_CACHE_FILE.write_text(str(time.time()))
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +111,12 @@ def _discover_community_plugins() -> dict[str, str]:
 
 def _check_pypi_versions(
     plugins: dict[str, str],
+    record: bool = False,
 ) -> list[dict[str, str]]:
     """Query PyPI for each plugin and return those with available updates.
+
+    With ``record``, the attempt is saved once the client is built, just
+    before the first request goes out.
 
     Returns:
         List of ``{"name": ..., "current": ..., "latest": ...}`` dicts
@@ -148,6 +132,10 @@ def _check_pypi_versions(
         from packaging import version as pkg_version
 
         with httpx.Client(timeout=5.0) as client:
+            if record:
+                check_cache.write(
+                    check_cache.PLUGIN_FILE, ok=False, latest=None, source="pypi"
+                )
             for name, current_ver in list(plugins.items())[:_MAX_PLUGINS_TO_CHECK]:
                 try:
                     resp = client.get(f"https://pypi.org/pypi/{name}/json")
@@ -177,19 +165,21 @@ def _check_pypi_versions(
 
 
 def _background_plugin_check(result: dict[str, Any]) -> None:
-    """Run plugin discovery + PyPI check (called inside a daemon thread)."""
+    """Run plugin discovery + PyPI check (called inside a daemon thread).
+
+    The attempt is saved just before the first request goes out (see
+    :func:`_check_pypi_versions`), so one that fails or never finishes is
+    tried again after ``check_cache.RETRY_SECONDS``, while a run that ends
+    before then doesn't count at all.
+    """
     try:
         plugins = _discover_community_plugins()
-        if not plugins:
-            return
-
-        updates = _check_pypi_versions(plugins)
-        if updates:
-            result["updates"] = updates
-
-        _write_plugin_cache_timestamp()
+        updates = _check_pypi_versions(plugins, record=True) if plugins else []
     except Exception:
-        pass
+        return
+    check_cache.write(check_cache.PLUGIN_FILE, ok=True, latest=None, source="pypi")
+    if updates:
+        result["updates"] = updates
 
 
 # ---------------------------------------------------------------------------
@@ -216,22 +206,27 @@ def check_plugins_and_notify(quiet: bool = False) -> None:
         quiet: If True, suppress the check entirely.
     """
     global _thread, _result
+    _thread = None
     _result = {}
 
-    if quiet or _is_ci() or _is_oneshot():
+    if suppressed(quiet):
         return
 
     interval = _get_check_interval_seconds(quiet)
     if interval is None:
         return
 
-    last_check = _read_plugin_cache_timestamp()
-    if time.time() - last_check < interval:
+    # A cache directory that can't be made private: no check, no state.
+    if not check_cache.usable():
+        return
+
+    if not check_cache.due(check_cache.PLUGIN_FILE, interval):
         return
 
     _thread = threading.Thread(
         target=_background_plugin_check,
         args=(_result,),
+        name=THREAD_NAME,
         daemon=True,
     )
     _thread.start()
@@ -240,38 +235,37 @@ def check_plugins_and_notify(quiet: bool = False) -> None:
 def print_pending_plugin_notifications() -> None:
     """Print plugin update notifications if any are pending.
 
-    Call this **after** CLI execution completes.  It joins the background
-    thread (with a short timeout) and, if updates were found, prints
-    ANSI-colored lines to stderr.
+    Call this **after** CLI execution completes.  It never waits: if the
+    thread already finished and found updates, it prints ANSI-colored
+    lines to stderr; a check that is still running is dropped.
     """
     global _thread
 
-    if _thread is None:
+    thread, _thread = _thread, None
+    if thread is None or thread.is_alive():
         return
-
-    _thread.join(timeout=3.0)
-    _thread = None
 
     updates = _result.get("updates")
     if not updates:
         return
 
+    from deepctl_core.output import invoked_prog, stderr_color
+
+    prog = invoked_prog()
+    if len(updates) == 1:
+        u = updates[0]
+        lines = [
+            f"Plugin update available: {u['name']} {u['current']} → {u['latest']}"
+            f"  —  run {prog} plugin update {u['name']} to upgrade"
+        ]
+    else:
+        lines = ["Plugin updates available:"]
+        lines += [f"  {u['name']} {u['current']} → {u['latest']}" for u in updates]
+        lines.append(f"Run {prog} plugin update <name> to upgrade")
+    if stderr_color():
+        lines = [f"\033[33m{line}\033[0m" for line in lines]
     try:
-        if len(updates) == 1:
-            u = updates[0]
-            sys.stderr.write(
-                f"\033[33mPlugin update available: {u['name']} {u['current']} → {u['latest']}"
-                f"  —  run 'deepctl plugin update {u['name']}' to upgrade\033[0m\n"
-            )
-        else:
-            sys.stderr.write("\033[33mPlugin updates available:\033[0m\n")
-            for u in updates:
-                sys.stderr.write(
-                    f"\033[33m  {u['name']} {u['current']} → {u['latest']}\033[0m\n"
-                )
-            sys.stderr.write(
-                "\033[33mRun 'deepctl plugin update <name>' to upgrade\033[0m\n"
-            )
+        sys.stderr.write("".join(f"{line}\n" for line in lines))
     except (BrokenPipeError, OSError, ValueError):
         # The output stream closed (e.g. an MCP host disconnected stdio
         # after `dg mcp` finished). These notifications are purely advisory.

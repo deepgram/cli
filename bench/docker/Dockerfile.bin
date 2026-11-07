@@ -1,0 +1,18 @@
+# A competitor shipped as a release tarball (sha256-verified).
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+ARG HYPERFINE_VERSION
+ARG HYPERFINE_SHA_ARM64
+ARG HYPERFINE_SHA_AMD64
+ARG NAME
+ARG URL
+ARG SHA256
+ARG VERSION
+COPY tools.sh /tmp/tools.sh
+RUN sh /tmp/tools.sh "$HYPERFINE_VERSION" "$HYPERFINE_SHA_ARM64" "$HYPERFINE_SHA_AMD64" && rm /tmp/tools.sh
+RUN curl -fsSL -o /tmp/a.tgz "$URL" \
+ && echo "$SHA256  /tmp/a.tgz" | sha256sum -c - >/dev/null \
+ && mkdir -p "/opt/$NAME" && tar xzf /tmp/a.tgz -C "/opt/$NAME" && rm /tmp/a.tgz \
+ && printf '{"install_mb": %s, "version": "%s"}\n' "$(du -sm /opt/$NAME | cut -f1)" "$VERSION" > /opt/bench/meta.json
+USER u
+WORKDIR /home/u

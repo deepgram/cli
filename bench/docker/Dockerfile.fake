@@ -1,0 +1,27 @@
+# Self-test subject: a fake `dg` with the same layout as the real image.
+ARG PY_IMAGE
+FROM ${PY_IMAGE}
+ARG HYPERFINE_VERSION
+ARG HYPERFINE_SHA_ARM64
+ARG HYPERFINE_SHA_AMD64
+ARG DELAY_MS=0
+ARG EGRESS=false
+ARG VERSION=0.0.0
+ARG FAIL=false
+ARG IMPORTS=
+ARG NOPYC=false
+ARG NOPYC_WRITABLE=false
+COPY tools.sh /tmp/tools.sh
+RUN sh /tmp/tools.sh "$HYPERFINE_VERSION" "$HYPERFINE_SHA_ARM64" "$HYPERFINE_SHA_AMD64" && rm /tmp/tools.sh
+COPY --from=fakectx fakecli.py /home/u/.local/share/uv/tools/deepctl/fakecli.py
+RUN d=/home/u/.local/share/uv/tools/deepctl && mkdir -p $d/bin /home/u/.local/bin \
+ && printf '{"delay_ms": %s, "egress": %s, "version": "%s", "fail": %s, "imports": "%s", "nopyc": %s, "nopyc_writable": %s}\n' \
+      "$DELAY_MS" "$EGRESS" "$VERSION" "$FAIL" "$IMPORTS" "$NOPYC" "$NOPYC_WRITABLE" > $d/fake_config.json \
+ && mkdir -p /home/u/fakemods && echo "Y = 1" > /home/u/fakemods/fake_nopyc_w.py \
+ && mkdir -p /opt/fakemods && echo "X = 1" > /opt/fakemods/fake_nopyc.py && chmod 555 /opt/fakemods \
+ && ln -s /usr/local/bin/python3 $d/bin/python \
+ && printf '#!/usr/local/bin/python3\nimport runpy\nrunpy.run_path("%s/fakecli.py", run_name="__main__")\n' "$d" > /home/u/.local/bin/dg \
+ && chmod +x /home/u/.local/bin/dg && chown -R u:u /home/u/.local /home/u/fakemods \
+ && printf '{"install_mb": %s, "dists": 0, "version": "%s"}\n' "$(du -sm $d | cut -f1)" "$VERSION" > /opt/bench/meta.json
+USER u
+WORKDIR /home/u

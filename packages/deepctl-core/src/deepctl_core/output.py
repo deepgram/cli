@@ -1,116 +1,125 @@
 """Output formatting utilities for deepctl."""
 
-import json
-import os
-import sys
-from io import StringIO
-from typing import Any
+from __future__ import annotations
 
-import yaml
-from rich.console import Console
-from rich.json import JSON
-from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
-from rich.syntax import Syntax
-from rich.table import Table
+import json
+from io import StringIO
+from typing import TYPE_CHECKING, Any, cast
+
+from . import agents
+
+if TYPE_CHECKING:
+    from rich.console import Console
+    from rich.progress import Progress
 
 # ── Agentic / non-TTY detection ──────────────────────────────────
+# deepctl_core.agents holds the table; these names stay importable from here.
+# is_agentic(): agent or automation, for output, prompts and notices (honors
+# DG_AGENT). is_ai_agent(): a raw AI-agent marker, for trust decisions.
+is_agentic = agents.is_agentic
+is_ai_agent = agents.is_ai_agent
+AI_AGENT_ENV_MARKERS: tuple[str, ...] = agents.HARD_ENV_VARS
 
 
-def is_agentic() -> bool:
-    """Detect if running inside an AI coding tool or non-interactive context.
-
-    Uses a layered signal approach:
-    - Hard signals: known AI-tool environment variables (high confidence)
-    - Soft signals: score-based TTY/CI heuristics (3+ = probable agent)
-
-    Returns True when the context is likely non-interactive or AI-driven.
-    """
-    env = os.environ
-
-    # Hard signals: explicit non-interactive intent or known AI tool env vars
-    if "--non-interactive" in sys.argv:
-        return True
-    if "--agent-friendly" in sys.argv:
-        return True
-    if env.get("CI") in ("true", "1"):
-        return True
-    if env.get("CLAUDECODE"):
-        return True
-    if env.get("CLAUDE_CODE_ENTRYPOINT"):
-        return True
-    if env.get("CODEX_SANDBOX"):
-        return True
-    if env.get("CODEX_SANDBOX_NETWORK_DISABLED"):
-        return True
-    if env.get("OR_APP_NAME") == "Aider":
-        return True
-    if "aider" in env.get("OR_SITE_URL", ""):
-        return True
-
-    # Soft signals — score-based; none is conclusive alone
-    score = 0
-    if not sys.stdin.isatty():
-        score += 1
-    if not sys.stdout.isatty():
-        score += 1
-    if not env.get("TERM") or env.get("TERM") == "dumb":
-        score += 1
-    if "NO_COLOR" in env:
-        score += 1
-
-    return score >= 3
-
-
-# Environment markers set by AI coding agents themselves. Used, instead of
-# is_agentic(), wherever the CLI decides whom to trust with the API key: a
-# hard signal only. CI, a missing TTY or a missing TERM are never on this
-# list, so CI jobs, cron and containers keep the environment they were given.
-# An exact list; is_agentic() above is for output formatting and is broader.
-AI_AGENT_ENV_MARKERS: tuple[str, ...] = (
-    "AI_AGENT",
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CODEX_SANDBOX",
-    "CODEX_SANDBOX_NETWORK_DISABLED",
-    "CURSOR_AGENT",
-    "GEMINI_CLI",
-)
-
-
-def is_ai_agent() -> bool:
-    """True only when an AI coding agent marked the environment.
-
-    Hard signals: any non-empty variable in ``AI_AGENT_ENV_MARKERS``, or
-    Aider (``OR_APP_NAME=Aider`` or "aider" in ``OR_SITE_URL``). Never
-    ``CI``, TTY state, ``TERM`` or command-line flags.
-    """
-    env = os.environ
-    if any(env.get(name) for name in AI_AGENT_ENV_MARKERS):
-        return True
-    return env.get("OR_APP_NAME") == "Aider" or "aider" in env.get("OR_SITE_URL", "")
+def agent_mode() -> bool:
+    """Hard agent mode for presentation, prompts and login: ``DG_AGENT``
+    when it is 0 or 1, else :func:`is_ai_agent`. Never for trust."""
+    forced = agents.override()
+    if forced is not None:
+        return forced == "1"
+    return is_ai_agent()
 
 
 _agentic = is_agentic()
 
+
+class _LazyConsole:
+    """A rich ``Console`` that is built, and rich imported, on first use.
+
+    Importing rich costs every command, including ``--help``; most runs
+    print through a console only on some paths. Attribute reads, writes and
+    deletes go to the real console, so ``console.print(...)``,
+    ``console.quiet = True`` and ``mock.patch.object(console, "print")``
+    behave as before, and the module-level identity of ``console`` and
+    ``stderr_console`` never changes.
+    """
+
+    __slots__ = ("_deepctl_console", "_deepctl_kwargs", "_deepctl_quiet")
+
+    def __init__(self, **kwargs: Any) -> None:
+        object.__setattr__(self, "_deepctl_kwargs", kwargs)
+        object.__setattr__(self, "_deepctl_console", None)
+        # ``quiet`` set before the console exists: applied when it's built,
+        # so setup_output() doesn't import rich for a run that prints nothing.
+        object.__setattr__(self, "_deepctl_quiet", None)
+
+    def _deepctl_real(self) -> Console:
+        real = object.__getattribute__(self, "_deepctl_console")
+        if real is None:
+            from rich.console import Console
+
+            real = Console(**object.__getattribute__(self, "_deepctl_kwargs"))
+            object.__setattr__(self, "_deepctl_console", real)
+            quiet = object.__getattribute__(self, "_deepctl_quiet")
+            if quiet is not None:
+                real.quiet = quiet
+        return cast("Console", real)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._deepctl_real(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if (
+            name == "quiet"
+            and object.__getattribute__(self, "_deepctl_console") is None
+        ):
+            object.__setattr__(self, "_deepctl_quiet", value)
+            return
+        setattr(self._deepctl_real(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(self._deepctl_real(), name)
+
+    def __enter__(self) -> Console:
+        return self._deepctl_real().__enter__()
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self._deepctl_real().__exit__(*exc_info)
+
+    def __repr__(self) -> str:
+        return f"<lazy {object.__getattribute__(self, '_deepctl_kwargs')!r} console>"
+
+
 # Global console instance — plain when agentic, rich when interactive
-console = Console(no_color=_agentic, highlight=not _agentic)
-stderr_console = Console(stderr=True, no_color=_agentic, highlight=not _agentic)
+# Plain text (no colour and no bold or dim either) in agent mode and when
+# NO_COLOR is set: rich's own NO_COLOR handling still writes styles. Never
+# no_color=False, which would override NO_COLOR; otherwise rich reads
+# FORCE_COLOR and TERM itself.
+_plain = _agentic or agents.no_color()
+_console_kwargs: dict[str, Any] = {"highlight": not _agentic}
+if _plain:
+    _console_kwargs.update(no_color=True, color_system=None)
+console = cast("Console", _LazyConsole(**_console_kwargs))
+stderr_console = cast("Console", _LazyConsole(stderr=True, **_console_kwargs))
 
 # Global output configuration
 _output_config: dict[str, Any] = {
     "format": "default",
     "quiet": False,
     "verbose": False,
-    "color": not _agentic,
+    "color": not _plain,
     "agentic": _agentic,
+    "format_source": "default",
 }
+
+
+def _format_source(requested: str) -> str:
+    """Why the output format is what it is; see format_source()."""
+    if requested != "default":
+        return "explicit"
+    if not _output_config["agentic"]:
+        return "default"
+    return "hard_agent" if agent_mode() else "soft"
 
 
 def setup_output(
@@ -122,6 +131,7 @@ def setup_output(
     requested (format_type == "default"), auto-switch to JSON for
     machine-friendly output.
     """
+    _output_config["format_source"] = _format_source(format_type)
     # Auto-default to JSON in agentic mode when user didn't pick a format
     if format_type == "default" and _output_config["agentic"]:
         format_type = "json"
@@ -146,6 +156,7 @@ def update_output(
     verbose state the root group already applied.
     """
     if format_type is not None:
+        _output_config["format_source"] = _format_source(format_type)
         if format_type == "default" and _output_config["agentic"]:
             format_type = "json"
         _output_config["format"] = format_type
@@ -205,6 +216,8 @@ class OutputFormatter:
 
     def _format_yaml(self, data: Any) -> str:
         """Format as YAML."""
+        import yaml
+
         try:
             if isinstance(data, str):
                 # Try to parse as JSON first
@@ -286,6 +299,8 @@ class OutputFormatter:
 
     def _create_table_from_dict_list(self, data: list[dict[str, Any]]) -> str:
         """Create table from list of dictionaries."""
+        from rich.table import Table
+
         table = Table(show_header=True, header_style="bold blue")
 
         # Add columns
@@ -312,6 +327,8 @@ class OutputFormatter:
 
     def _create_table_from_dict(self, data: dict[str, Any]) -> str:
         """Create table from dictionary."""
+        from rich.table import Table
+
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("Key")
         table.add_column("Value")
@@ -331,6 +348,8 @@ class OutputFormatter:
 
     def _create_simple_table(self, data: list[Any]) -> str:
         """Create simple table from list."""
+        from rich.table import Table
+
         table = Table(show_header=True, header_style="bold blue")
         table.add_column("Value")
 
@@ -358,6 +377,25 @@ def print_output(data: Any, format_type: str | None = None) -> None:
     formatter = OutputFormatter(format_type)
 
     if format_type == "json":
+        if not console.is_terminal:
+            # A pipe or file: plain JSON in one write, as rich would print
+            # it but without its renderer's cost on a large result.
+            stream = console.file
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    stream.write(data + "\n")
+                    stream.flush()
+                    return
+            stream.write(
+                json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n"
+            )
+            stream.flush()
+            return
+
+        from rich.json import JSON
+
         # Use Rich's JSON formatter for better display
         if isinstance(data, str):
             try:
@@ -369,6 +407,8 @@ def print_output(data: Any, format_type: str | None = None) -> None:
             console.print(JSON.from_data(data))
     elif format_type == "yaml":
         # Use Rich's syntax highlighting for YAML
+        from rich.syntax import Syntax
+
         yaml_str = formatter.format(data)
         syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=False)
         console.print(syntax)
@@ -437,9 +477,16 @@ def print_error_hint(error: BaseException) -> None:
         print_hint(str(hint))
 
 
-def print_warning(message: str, *, stderr: bool = False) -> None:
-    """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too."""
-    if not _output_config["quiet"]:
+def print_warning(
+    message: str, *, stderr: bool = False, ignore_quiet: bool = False
+) -> None:
+    """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too.
+
+    ``ignore_quiet=True`` prints it under ``--quiet`` as well, for warnings
+    the caller needs to read the result (``--quiet`` hides only
+    INFO and OK lines).
+    """
+    if ignore_quiet or not _output_config["quiet"]:
         if _output_config["agentic"]:
             stderr_console.print(f"WARN: {message}", soft_wrap=True)
         else:
@@ -481,6 +528,14 @@ def create_progress_bar(description: str = "Processing...") -> Progress:
     Returns:
         Progress bar instance
     """
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        SpinnerColumn,
+        TaskProgressColumn,
+        TextColumn,
+    )
+
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -500,6 +555,8 @@ def create_spinner(description: str = "Processing...") -> Progress:
     Returns:
         Spinner instance
     """
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -517,6 +574,8 @@ def print_panel(content: str, title: str = "", border_style: str = "blue") -> No
         border_style: Border style
     """
     if not _output_config["quiet"]:
+        from rich.panel import Panel
+
         panel = Panel(content, title=title, border_style=border_style)
         console.print(panel)
 
@@ -594,6 +653,17 @@ def get_output_format() -> str:
     return str(_output_config["format"])
 
 
+def format_source() -> str:
+    """Why the output format is what it is.
+
+    ``"explicit"``: asked for with ``-o``. ``"hard_agent"``: JSON chosen
+    implicitly in hard agent mode (``agents.agent_mode()``).
+    ``"soft"``: JSON chosen implicitly by the TTY/CI heuristics alone.
+    ``"default"``: no format was chosen.
+    """
+    return str(_output_config.get("format_source", "default"))
+
+
 def get_console() -> Console:
     """Get the global console instance.
 
@@ -617,3 +687,46 @@ def get_status_console() -> Console:
         Console instance writing to stderr
     """
     return stderr_console
+
+
+def invoked_prog() -> str:
+    """The program name to show in notices and messages.
+
+    ``DEEPCTL_PROG_NAME`` when it is a plain program name (see
+    ``deepctl.main.prog_name_from_env``); else the running executable as a
+    command (``dg``, ``deepctl``, ``deepgram`` when that name runs this
+    same file, else its path); else ``dg``.
+    """
+    try:
+        from deepctl.main import prog_name_from_env
+    except ImportError:  # deepctl-core without the CLI: no launcher name
+        name = None
+    else:
+        name = prog_name_from_env()
+    if name:
+        return name
+    from .transport import prog
+
+    return prog() or "dg"
+
+
+def stderr_color() -> bool:
+    """Whether a raw notice written to stderr may use ANSI colour.
+
+    Only for a person's session (never agent or automation output), with
+    NO_COLOR unset or empty and TERM not ``dumb``; and only on a terminal,
+    unless FORCE_COLOR is set.
+    """
+    import os
+    import sys
+
+    if _output_config["agentic"] or os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("TERM") == "dumb":
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    try:
+        return bool(sys.stderr.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False

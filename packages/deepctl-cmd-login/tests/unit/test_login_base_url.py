@@ -68,6 +68,7 @@ def login(tmp_path, *, user=None, flag=None, **kwargs):
     path = tmp_path / "user" / "config.yaml"
     path.parent.mkdir(exist_ok=True)
     path.write_text(yaml.safe_dump(user or {}))
+    path.chmod(0o600)  # as dg writes it; any umask
     config = Config(config_path=str(path), base_url=flag)
     auth = AuthManager(config)
     kwargs.setdefault("api_key", "sk-LOGINKEY")

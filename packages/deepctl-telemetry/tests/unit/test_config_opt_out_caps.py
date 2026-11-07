@@ -53,6 +53,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Telemetry on in this process (env switch cleared), no SDK to send
     with, no agent session; returns the default config path (absent)."""
     monkeypatch.delenv(client.DISABLE_ENV_VAR, raising=False)
+    monkeypatch.delenv(client.CI_ENV_VAR, raising=False)
     monkeypatch.setattr(client, "_state", client._fresh_state())
     monkeypatch.setitem(sys.modules, "sentry_sdk", None)
     monkeypatch.setattr(output, "is_ai_agent", lambda: False, raising=False)

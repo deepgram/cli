@@ -1,6 +1,5 @@
 """Plain-text diagnostic output shared by utilities outside deepctl-core."""
 
-import os
 import sys
 from typing import TextIO
 
@@ -8,45 +7,30 @@ from rich.console import Console
 
 
 def is_non_interactive() -> bool:
-    """Mirror deepctl-core's agent and non-interactive output policy.
+    """Agent or automation, as ``deepctl_core.output.is_agentic`` decides.
 
-    Shared utilities intentionally do not depend on deepctl-core, so keep this
-    lightweight detection aligned with ``deepctl_core.output.is_agentic``.
+    ``deepctl_core.agents`` is stdlib only, so importing it here costs
+    nothing that core's console doesn't already pay.
     """
-    env = os.environ
+    from deepctl_core.agents import is_agentic
 
-    if "--non-interactive" in sys.argv or "--agent-friendly" in sys.argv:
-        return True
-    if env.get("CI") in ("true", "1"):
-        return True
-    if env.get("CLAUDECODE") or env.get("CLAUDE_CODE_ENTRYPOINT"):
-        return True
-    if env.get("CODEX_SANDBOX") or env.get("CODEX_SANDBOX_NETWORK_DISABLED"):
-        return True
-    if env.get("OR_APP_NAME") == "Aider" or "aider" in env.get("OR_SITE_URL", ""):
-        return True
-
-    score = 0
-    if not sys.stdin.isatty():
-        score += 1
-    if not sys.stdout.isatty():
-        score += 1
-    if not env.get("TERM") or env.get("TERM") == "dumb":
-        score += 1
-    if "NO_COLOR" in env:
-        score += 1
-
-    return score >= 3
+    return is_agentic()
 
 
 def create_diagnostic_console(
     *, file: TextIO | None = None, force_terminal: bool | None = None
 ) -> Console:
     """Create a stderr diagnostic console with the shared plain-text policy."""
+    from deepctl_core.agents import no_color
+
     non_interactive = is_non_interactive()
+    # Plain text for agents and under NO_COLOR (rich alone keeps bold and
+    # dim); never no_color=False, so rich honors FORCE_COLOR and TERM.
+    plain = non_interactive or no_color()
     return Console(
         file=file or sys.stderr,
         force_terminal=force_terminal,
-        no_color=non_interactive,
+        no_color=True if plain else None,
+        color_system=None if plain else "auto",
         highlight=not non_interactive,
     )

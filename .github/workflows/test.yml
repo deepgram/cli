@@ -36,9 +36,13 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-telemetry/tests packages/deepctl-cmd-api/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-debug-probe/tests packages/deepctl-cmd-ffprobe/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-cmd-skills/tests packages/deepctl-cmd-init/tests packages/deepctl-cmd-models/tests packages/deepctl-cmd-speak/tests packages/deepctl-cmd-keys/tests packages/deepctl-cmd-read/tests packages/deepctl-cmd-listen/tests packages/deepctl-cmd-requests/tests packages/deepctl-cmd-billing/tests packages/deepctl-cmd-members/tests packages/deepctl-cmd-completion/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v
+          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-telemetry/tests packages/deepctl-cmd-api/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-debug-toolkit/tests packages/deepctl-cmd-debug-probe/tests packages/deepctl-cmd-ffprobe/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-cmd-skills/tests packages/deepctl-cmd-init/tests packages/deepctl-cmd-models/tests packages/deepctl-cmd-speak/tests packages/deepctl-cmd-keys/tests packages/deepctl-cmd-read/tests packages/deepctl-cmd-listen/tests packages/deepctl-cmd-requests/tests packages/deepctl-cmd-billing/tests packages/deepctl-cmd-members/tests packages/deepctl-cmd-completion/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v
 
+      # Outside pytest, so conftest.py's telemetry opt-out doesn't apply.
       - name: Test CLI installation
+        env:
+          DEEPCTL_TELEMETRY_DISABLED: "1"
+          DEEPCTL_TELEMETRY_DSN: "http://k@127.0.0.1:9/1"
         run: |
           uv run python -c "from deepctl.main import main; print('Import successful')"
           uv run deepctl --version
@@ -69,8 +73,8 @@ jobs:
       - name: Type check
         run: uv run mypy src/ packages/*/src scripts/
 
-  floors:
-    name: Dependency floors
+  lockstep:
+    name: Lockstep versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
@@ -83,10 +87,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
 
-      # Root floors must equal workspace versions or `pip install --upgrade
-      # deepctl` (what `dg update` runs) silently skips the packages whose
-      # fixes the release advertises. See scripts/check_dependency_floors.py.
-      - name: Check dependency floors
+      # Every first-party package ships at the root's version: every version,
+      # every first-party pin `==` it, every package's `deepctl==` back-edge,
+      # and root lists every package. A mismatch lets pip pair packages from
+      # two releases. The release PR has to pass it like any other.
+      # See scripts/check_dependency_floors.py.
+      - name: Check lockstep versions and pins
         run: make floors-check
 
   build-test:
@@ -112,6 +118,39 @@ jobs:
       - name: Verify packages
         run: make verify-packages
 
+  lowest-direct:
+    name: Lowest direct dependencies / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          version: "0.13.6"
+
+      - name: Build every package
+        run: uv build --all-packages --wheel --out-dir dist
+
+      # One environment: the whole lockstep closure with every third-party
+      # dependency at the lowest version the 30 pyprojects together allow.
+      # The CLI's --help tree and the unit tests run in it; floors that sit
+      # below what the closure resolves are listed in the log.
+      - name: Install the closure at its floors, then run the CLI and unit tests
+        env:
+          DEEPCTL_TELEMETRY_DISABLED: "1"
+          DEEPCTL_TELEMETRY_DSN: "http://k@127.0.0.1:9/1"
+        run: tests/upgrade/lowest_direct.sh dist python
+
   # Single rollup so branch protection needs exactly one required check.
   # Requiring the matrix contexts directly means editing repo settings every
   # time a Python version or OS is added or dropped, and a required context
@@ -123,7 +162,7 @@ jobs:
   # cancelled and skipped prerequisites are failures here too.
   all-checks:
     name: All checks
-    needs: [test, lint, floors, build-test]
+    needs: [test, lint, lockstep, lowest-direct, build-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -131,7 +170,8 @@ jobs:
         run: |
           echo "test:       ${{ needs.test.result }}"
           echo "lint:       ${{ needs.lint.result }}"
-          echo "floors:     ${{ needs.floors.result }}"
+          echo "lockstep:   ${{ needs.lockstep.result }}"
+          echo "lowest-direct: ${{ needs.lowest-direct.result }}"
           echo "build-test: ${{ needs.build-test.result }}"
 
       - name: Fail unless every prerequisite succeeded

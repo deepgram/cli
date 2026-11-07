@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
+import stat
 import subprocess
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from deepctl_core.output import print_hint, print_info, print_warning
 from rich.console import Console
@@ -58,7 +61,108 @@ def check_prereqs() -> list[tuple[str, str, str]]:
     return missing
 
 
+# ── Running git ───────────────────────────────────────────────────────────────
+
+# Settings every git command dg runs gets on its command line, so that
+# configuration inside a repository can't run a program: no fsmonitor
+# daemon command, no hooks, no pager, no external diff. (The commands dg
+# runs in a repository, rev-parse, ls-files and check-ignore, apply no
+# filters and open no connection.)
+_NULL_DEVICE = "NUL" if os.name == "nt" else "/dev/null"
+GIT_SAFE_CONFIG = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    f"core.hooksPath={_NULL_DEVICE}",
+    "-c",
+    "core.pager=cat",
+    "-c",
+    "diff.external=",
+)
+
+
+def run_git(
+    *args: str, repo: Path | None = None, inherit_git_env: bool = False
+) -> subprocess.CompletedProcess[str] | None:
+    """Run ``git [-C repo] args`` with GIT_SAFE_CONFIG; None if git can't run.
+
+    Inherited GIT_* variables are dropped unless ``inherit_git_env`` (for a
+    clone, which works on no existing repository): GIT_DIR, GIT_WORK_TREE
+    or GIT_INDEX_FILE would point git at another repository. Call it with
+    ``repo`` only for a directory dg cloned itself.
+    """
+    if shutil.which("git") is None:
+        return None
+    env = None
+    if not inherit_git_env:
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    argv = ["git", "--no-pager", *GIT_SAFE_CONFIG]
+    if repo is not None:
+        argv += ["-C", str(repo)]
+    try:
+        return subprocess.run([*argv, *args], capture_output=True, text=True, env=env)
+    except OSError:
+        return None
+
+
 # ── Git clone ─────────────────────────────────────────────────────────────────
+
+#: The GitHub organizations dg clones templates from.
+TEMPLATE_ORGS = ("deepgram", "deepgram-starters")
+
+# A repository or template name: ASCII letters, digits, ".", "_" and "-",
+# not starting with "-" (git or a shell would read it as an option).
+_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def valid_name(name: object) -> bool:
+    """Whether ``name`` is a usable template or repository name."""
+    return (
+        isinstance(name, str)
+        and _NAME.fullmatch(name) is not None
+        and not name.startswith("-")
+        and name not in (".", "..")
+    )
+
+
+def is_template_repo(url: str) -> bool:
+    """Whether ``url`` is an https GitHub repository of a Deepgram organization.
+
+    The template service supplies the URL, so only
+    ``https://github.com/deepgram/<repo>`` and
+    ``https://github.com/deepgram-starters/<repo>`` are cloned: no other
+    host, scheme, port, user name, query or fragment, and the repository
+    name is plain (``valid_name``): no escapes, separators or option-like
+    leading ``-``.
+    """
+    if not url.isprintable() or any(c.isspace() for c in url):
+        return False  # urlsplit drops tabs and newlines; git wouldn't
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme != "https" or parts.netloc != "github.com" or port is not None:
+        return False
+    if parts.query or parts.fragment or "\\" in url:
+        return False
+    segments = parts.path.split("/")
+    # "", org, repo (and an optional trailing "")
+    if len(segments) == 4 and segments[3] == "":
+        segments = segments[:3]
+    if len(segments) != 3 or segments[0] != "":
+        return False
+    org, repo = segments[1], segments[2]
+    return org in TEMPLATE_ORGS and valid_name(repo)
+
+
+def directory_in_use(target_dir: Path) -> bool:
+    """Whether ``target_dir`` exists as anything but an empty directory."""
+    if target_dir.is_symlink() or (target_dir.exists() and not target_dir.is_dir()):
+        return True
+    if not target_dir.exists():
+        return False
+    return any(target_dir.iterdir())
 
 
 def clone_template(github_url: str, target_dir: Path) -> None:
@@ -69,23 +173,112 @@ def clone_template(github_url: str, target_dir: Path) -> None:
 
     Args:
         github_url: Full GitHub URL to clone.
-        target_dir: Local directory to clone into (must not exist).
+        target_dir: Local directory to clone into (must not exist, or be
+            an empty directory).
 
     Raises:
-        RuntimeError: If the directory already exists or git clone fails.
+        RuntimeError: If the directory is in use or git clone fails.
     """
-    if target_dir.exists():
+    if directory_in_use(target_dir):
         raise RuntimeError(f"Directory already exists: {target_dir}")
 
-    result = subprocess.run(
-        # "--" ends git's options: a server-supplied URL that starts with "-"
-        # is taken as the repository, never as a git option.
-        ["git", "clone", "--", github_url, str(target_dir)],
-        capture_output=True,
-        text=True,
-    )
+    # "--" ends git's options: a server-supplied URL that starts with "-"
+    # (say --upload-pack=...) is taken as the repository, never an option.
+    result = run_git("clone", "--", github_url, str(target_dir), inherit_git_env=True)
+    if result is None:
+        raise RuntimeError("git clone failed: git could not be run")
     if result.returncode != 0:
         raise RuntimeError(f"git clone failed:\n{result.stderr.strip()}")
+
+
+# ── The clone dg init made ────────────────────────────────────────────────────
+
+_COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _git_out(target_dir: Path, *args: str) -> str | None:
+    """Output of a git command in ``target_dir``, or None if it failed."""
+    result = run_git(*args, repo=target_dir)
+    if result is None or result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def head_commit(target_dir: Path) -> str | None:
+    """``HEAD`` of the repository dg just cloned into ``target_dir``."""
+    commit = _git_out(target_dir, "rev-parse", "--verify", "HEAD")
+    return commit if commit and _COMMIT.fullmatch(commit) else None
+
+
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+
+
+def same_directory(target_dir: Path, dev: int, ino: int) -> bool:
+    """Whether ``target_dir`` is still the directory dg cloned into.
+
+    Checked before any git command runs in it. The directory, opened
+    without following a symbolic link, must have the recorded device and
+    inode (a directory deleted and made again at the same path has another
+    inode), and it and its ``.git`` must be owned by this user, with
+    ``.git`` a real directory.
+
+    On Windows, where a directory can't be opened, ``st_ino`` can be 0 or
+    unstable and there are no POSIX owners, only the path checks apply: no
+    link, ``.git`` a real directory.
+    """
+    from deepctl_core import login_state
+
+    if not login_state.DIR_FDS:
+        try:
+            top = os.lstat(target_dir)
+            git = os.lstat(target_dir / ".git")
+        except OSError:
+            return False
+        return stat.S_ISDIR(top.st_mode) and stat.S_ISDIR(git.st_mode)
+    try:
+        fd = os.open(target_dir, os.O_RDONLY | _O_DIRECTORY | _NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        st = os.fstat(fd)
+        git = os.stat(".git", dir_fd=fd, follow_symlinks=False)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    uid = os.geteuid()
+    return (
+        stat.S_ISDIR(st.st_mode)
+        and stat.S_ISDIR(git.st_mode)
+        and (st.st_dev, st.st_ino) == (dev, ino)
+        and st.st_uid == uid
+        and git.st_uid == uid
+    )
+
+
+def directory_identity(target_dir: Path) -> tuple[int, int] | None:
+    """Device and inode of ``target_dir`` (not following a link), or None."""
+    try:
+        st = os.lstat(target_dir)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino) if stat.S_ISDIR(st.st_mode) else None
+
+
+def clone_matches(target_dir: Path, commit: str) -> bool:
+    """Whether ``target_dir`` is still at ``commit``, the clone dg recorded.
+
+    Only for a directory dg's own clone record names: git runs in it. Its
+    own ``.git`` directory (not a link, or a file pointing elsewhere) must
+    make it the top of a work tree, with ``HEAD`` at ``commit``.
+    """
+    git_dir = target_dir / ".git"
+    if git_dir.is_symlink() or not git_dir.is_dir():
+        return False
+    top = _git_out(target_dir, "rev-parse", "--show-toplevel")
+    if top is None or os.path.realpath(top) != os.path.realpath(target_dir):
+        return False
+    return head_commit(target_dir) == commit
 
 
 # ── .env injection ────────────────────────────────────────────────────────────
@@ -125,27 +318,16 @@ def _restrict_to_owner(path: Path) -> None:
 
 
 def _git(target_dir: Path, *args: str) -> int | None:
-    """Exit code of ``git -C target_dir args``, or None if git can't run."""
-    if shutil.which("git") is None:
-        return None
-    try:
-        # Only this project's repository: an inherited GIT_DIR, GIT_WORK_TREE
-        # or GIT_INDEX_FILE would point git at another one.
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        result = subprocess.run(
-            ["git", "-C", str(target_dir), *args],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-    except OSError:
-        return None
-    return result.returncode
+    """Exit code of a git command in ``target_dir``, or None if git can't run."""
+    result = run_git(*args, repo=target_dir)
+    return None if result is None else result.returncode
 
 
 def _env_ignored(target_dir: Path) -> bool | None:
     """git's answer to "is .env ignored?", or None when git can't say."""
-    rc = _git(target_dir, "check-ignore", "-q", ".env")
+    # No global excludes file: one that is a FIFO would block the check.
+    # The repository's own .gitignore is what keeps .env out of a commit.
+    rc = _git(target_dir, "-c", "core.excludesFile=", "check-ignore", "-q", ".env")
     if rc in (0, 1):
         return rc == 0
     return None

@@ -35,11 +35,11 @@ pipx run deepctl --help
 
 ## Dependencies
 
-- `click>=8.0.0`
-- `rich>=13.0.0`
-- `pydantic>=2.0.0`
-- `httpx>=0.24.0`
-- `aiohttp>=3.9.0`
+- `click>=8.2.0,<9`
+- `rich>=13.0.0,<16`
+- `pydantic>=2.0.0,<3`
+- `httpx>=0.24.0,<1`
+- `websockets>=13.1,<18`
 
 ## License
 

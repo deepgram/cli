@@ -30,6 +30,7 @@ def telemetry_on(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from deepctl_telemetry import client
 
     monkeypatch.delenv(client.DISABLE_ENV_VAR, raising=False)
+    monkeypatch.delenv(client.CI_ENV_VAR, raising=False)
     monkeypatch.setenv(client.DSN_ENV_VAR, DEAD_DSN)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
@@ -121,12 +122,21 @@ def mode_command():
 def _run_main(argv: list[str]) -> int:
     from deepctl.main import main
 
-    with patch("sys.argv", argv):
-        try:
-            main()
-        except SystemExit as exc:
-            return exc.code if isinstance(exc.code, int) else 0
-    return 0
+    # main() blocks httpx's CLI module; don't leave that to later tests.
+    missing = object()
+    saved = sys.modules.get("httpx._main", missing)
+    try:
+        with patch("sys.argv", argv):
+            try:
+                main()
+            except SystemExit as exc:
+                return exc.code if isinstance(exc.code, int) else 0
+        return 0
+    finally:
+        if saved is missing:
+            sys.modules.pop("httpx._main", None)
+        else:
+            sys.modules["httpx._main"] = saved  # type: ignore[assignment]
 
 
 def _opt_out_config(tmp_path: Path) -> str:
@@ -350,31 +360,32 @@ class TestHelpNotice:
         assert capsys.readouterr().out.rstrip().endswith("Telemetry is off.")
 
     def test_no_telemetry_keeps_hyphenated_commands(self) -> None:
-        from types import SimpleNamespace
+        import click
 
-        from deepctl.main import preprocess_hyphenated_commands
+        from deepctl._cli import cli
 
-        def select(group: str) -> list[Any]:
-            if group == "deepctl.commands":
-                return [SimpleNamespace(name="debug")]
-            if group == "deepctl.subcommands.debug":
-                return [SimpleNamespace(name="audio")]
-            return []
+        seen: list[list[str]] = []
 
-        with patch("importlib.metadata.entry_points") as mock_eps:
-            mock_eps.return_value.select.side_effect = select
-            assert preprocess_hyphenated_commands(
-                ["--no-telemetry", "debug-audio", "--help"]
-            ) == ["--no-telemetry", "debug", "audio", "--help"]
-            assert preprocess_hyphenated_commands(["--quiet", "debug-audio"]) == [
-                "--quiet",
-                "debug",
-                "audio",
-            ]
+        def record(self: Any, ctx: Any, args: list[str]) -> Any:
+            seen.append(list(args))
+            raise click.exceptions.Exit(0)
+
+        for argv in (
+            ["--no-telemetry", "debug-audio", "--help"],
+            ["--quiet", "debug-audio"],
             # An option that takes a value still consumes the next token.
-            assert preprocess_hyphenated_commands(
-                ["--profile", "debug-audio", "debug-audio"]
-            ) == ["--profile", "debug-audio", "debug", "audio"]
+            ["--profile", "debug-audio", "debug-audio"],
+        ):
+            with patch.object(click.Group, "resolve_command", record):
+                try:
+                    cli.main(args=argv, prog_name="dg", standalone_mode=False)
+                except click.exceptions.Exit:
+                    pass
+        assert seen == [
+            ["debug", "audio", "--help"],
+            ["debug", "audio"],
+            ["debug", "audio"],
+        ]
 
     def test_root_help_default_is_on(
         self, telemetry_on, capsys: pytest.CaptureFixture[str]
@@ -418,7 +429,8 @@ def _probe_env(tmp_path: Path, dsn: str | None = DEAD_DSN) -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key not in ("DEEPCTL_TELEMETRY_DISABLED", "DEEPCTL_TELEMETRY_DSN")
+        if key
+        not in ("DEEPCTL_TELEMETRY_DISABLED", "DEEPCTL_TELEMETRY_DSN", "CI", "DO_NOT_TRACK")
         and not key.startswith("DEEPGRAM_")
     }
     if dsn is not None:

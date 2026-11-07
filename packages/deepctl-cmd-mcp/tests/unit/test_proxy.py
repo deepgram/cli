@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import deepctl_cmd_mcp.proxy as proxy
+from deepctl.mcp import _fast
 
 INIT = {
     "jsonrpc": "2.0",
@@ -115,13 +116,13 @@ def test_handshake_and_tool_list_are_local(monkeypatch: pytest.MonkeyPatch) -> N
 
     anyio.run(run)
     init, listed = [json.loads(line) for line in stdout.getvalue().splitlines()]
-    assert init["result"]["instructions"] == proxy.INSTRUCTIONS
+    assert init["result"]["instructions"] == _fast.INSTRUCTIONS
     assert init["result"]["serverInfo"]["name"] == "deepgram-mcp"
     assert [t["name"] for t in listed["result"]["tools"]] == [
         "search_deepgram_knowledge_sources"
     ]
     assert (
-        listed["result"]["tools"][0]["description"] == (proxy.TOOLS[0]["description"])
+        listed["result"]["tools"][0]["description"] == (_fast.TOOLS[0]["description"])
     )
     assert calls == []
 
@@ -286,22 +287,3 @@ def test_http_client_follows_no_redirects_and_keeps_no_cookies() -> None:
         assert not client.cookies.jar._policy.allowed_domains()
     finally:
         asyncio.run(client.aclose())
-
-
-def test_isolate_stdout_moves_fd1_to_stderr(tmp_path: Any) -> None:
-    """In a child process: stray stdout writes land on stderr."""
-    import subprocess
-    import sys
-
-    code = (
-        "import sys\n"
-        "from deepctl_cmd_mcp.proxy import isolate_stdout\n"
-        "out = isolate_stdout()\n"
-        "print('stray')\n"
-        "sys.stdout.flush()\n"
-        "out.write(b'protocol\\n'); out.flush()\n"
-    )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=60)
-    assert proc.returncode == 0, proc.stderr
-    assert proc.stdout == b"protocol\n"
-    assert b"stray" in proc.stderr

@@ -16,12 +16,13 @@ if TYPE_CHECKING:
 
 # Golden text, compared byte for byte with tests/golden/notice_*.txt.
 # NOTICE_ON shows only with a loopback DEEPCTL_TELEMETRY_DSN (tests and local
-# sinks). It names the three opt-outs that exist: the flag for one run, the env
-# var, and the config-file key.
+# sinks). It names every opt-out: the flag for one run, the env var, the
+# config-file key, and the cross-tool DO_NOT_TRACK and CI.
 NOTICE_ON = (
     "Telemetry is on: unexpected errors only, with no flag values, paths or "
     "keys. Turn off: --no-telemetry, DEEPCTL_TELEMETRY_DISABLED=1, or "
-    "telemetry.enabled: false in config.yaml."
+    "telemetry.enabled: false in config.yaml. DO_NOT_TRACK=1 and CI turn it "
+    "off too."
 )
 NOTICE_OFF = "Telemetry is off."
 # No destination (no loopback DEEPCTL_TELEMETRY_DSN), or the build switch is
@@ -99,7 +100,14 @@ def install_help_notice(fallback_config: Callable[[], Config]) -> None:
     original_get_help = click.Command.get_help
 
     def get_help_with_notice(self: click.Command, ctx: click.Context) -> str:
-        notice = render_notice(_config_for_help(ctx, _fallback[0]))
+        try:
+            notice = render_notice(_config_for_help(ctx, _fallback[0]))
+        except OSError:
+            # No readable config (an unreadable HOME): telemetry was never
+            # turned on for this run, so it is off. Help still prints.
+            notice = NOTICE_OFF
+            if not os.environ.get("NO_COLOR") and _stdout_is_tty():
+                notice = click.style(notice, dim=True)
         return original_get_help(self, ctx) + "\n\n" + notice
 
     click.Command.get_help = get_help_with_notice  # type: ignore[method-assign]

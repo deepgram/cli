@@ -1,5 +1,6 @@
 """Unit tests for update command."""
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -7,6 +8,55 @@ import pytest
 from deepctl_cmd_update.command import UpdateCommand
 from deepctl_cmd_update.installation import InstallationInfo, InstallMethod
 from deepctl_cmd_update.version_check import VersionInfo
+
+
+def _real_config(tmp_path, monkeypatch):
+    """The default user config (so update.* keys are honored), in tmp_path."""
+    from deepctl_core import Config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    path = tmp_path / "xdg" / "deepctl" / "config.yaml"
+    path.parent.mkdir(parents=True, mode=0o700)
+    path.write_text(
+        "profiles:\n  default:\n    project_id: P1\n"
+        "update:\n  installation_method: pipx\n  check_frequency: daily\n"
+    )
+    os.chmod(path, 0o600)
+    config = Config()
+    assert config.config_path == path
+    return config, path
+
+
+class TestConfigUntouched:
+    """dg update never writes the user config (no implicit save)."""
+
+    @pytest.mark.parametrize("returncode", [0, 1])
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector.detect")
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    def test_full_update_leaves_the_file_byte_identical(
+        self, run_check, detect, run, returncode, tmp_path, monkeypatch
+    ):
+        config, path = _real_config(tmp_path, monkeypatch)
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+        run_check.return_value = VersionInfo(
+            current_version="0.1.0", latest_version="0.2.0", update_available=True
+        )
+        detect.return_value = InstallationInfo(
+            method=InstallMethod.PIP,
+            path="/p",
+            virtual_env=True,
+            editable=False,
+            python_executable="/p/bin/python3",
+        )
+        run.return_value = subprocess.CompletedProcess([], returncode, "", "")
+        UpdateCommand().handle(
+            config=config, auth_manager=MagicMock(), client=MagicMock(), yes=True
+        )
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+        # The legacy key is still readable, and was not rewritten.
+        assert config.get("update.installation_method") == "pipx"
 
 
 class TestUpdateCommand:
@@ -537,3 +587,120 @@ class TestUpdateCommand:
         assert command.exit_code_for(result) == 1
         assert result.status == "error"
         assert "connection refused" in result.message
+
+
+class TestDryRun:
+    """`dg update --dry-run` reports the method and command, and nothing else."""
+
+    @pytest.mark.parametrize(
+        ("method", "expected"),
+        [
+            (InstallMethod.PIPX, "Run: pipx upgrade deepctl"),
+            (InstallMethod.UV_TOOL, "Run: uv tool install deepctl@latest"),
+            (InstallMethod.HOMEBREW, "Run: brew upgrade deepgram"),
+        ],
+    )
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector.detect")
+    def test_prints_the_command(
+        self, detect, run, checker, method, expected, capsys, monkeypatch
+    ):
+        from deepctl_core import output
+
+        monkeypatch.setitem(output._output_config, "format", "default")
+        monkeypatch.setitem(output._output_config, "quiet", False)
+        detect.return_value = InstallationInfo(
+            method=method,
+            path="/p",
+            virtual_env=True,
+            editable=False,
+            python_executable="/p/bin/python3",
+        )
+        config = MagicMock()
+        command = UpdateCommand()
+        result = command.handle(
+            config=config, auth_manager=MagicMock(), client=MagicMock(), dry_run=True
+        )
+        assert result["message"] == expected
+        assert result["installation_method"] == method.value
+        assert command.exit_code_for(result) == 0
+        out = capsys.readouterr().out
+        assert expected in out
+        assert f"Installation method: {method.value}" in out
+        checker.assert_not_called()
+        run.assert_not_called()
+        config.save.assert_not_called()
+        config._set_config_value.assert_not_called()
+
+    @patch("deepctl_cmd_update.command.InstallationDetector.detect")
+    def test_dry_run_leaves_the_config_byte_identical(
+        self, detect, tmp_path, monkeypatch
+    ):
+        config, path = _real_config(tmp_path, monkeypatch)
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+        detect.return_value = InstallationInfo(
+            method=InstallMethod.PIPX,
+            path="/p",
+            virtual_env=True,
+            editable=False,
+            python_executable="/p/bin/python3",
+        )
+        UpdateCommand().handle(
+            config=config, auth_manager=MagicMock(), client=MagicMock(), dry_run=True
+        )
+        assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+    @patch("deepctl_cmd_update.command.InstallationDetector.detect")
+    def test_json_keeps_stdout_for_the_payload(self, detect, capsys, monkeypatch):
+        from deepctl_core import output
+
+        monkeypatch.setitem(output._output_config, "format", "json")
+        detect.return_value = InstallationInfo(
+            method=InstallMethod.PIPX,
+            path="/p",
+            virtual_env=True,
+            editable=False,
+            python_executable="/p/bin/python3",
+        )
+        result = UpdateCommand().handle(
+            config=MagicMock(), auth_manager=MagicMock(), client=MagicMock(), dry_run=True
+        )
+        assert result["message"] == "Run: pipx upgrade deepctl"
+        assert capsys.readouterr().out == ""
+
+
+class TestUnreachableIndex:
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    def test_raises_update_check_failed(self, checker, run):
+        from deepctl_cmd_update.version_check import UpdateCheckError
+        from deepctl_core.transport import TransportError
+
+        run.side_effect = UpdateCheckError("pypi.org")
+        with pytest.raises(TransportError) as raised:
+            UpdateCommand().handle(
+                config=MagicMock(), auth_manager=MagicMock(), client=MagicMock()
+            )
+        err = raised.value
+        assert err.code == "update_check_failed"
+        assert err.details == {"host": "pypi.org"}
+        assert err.error == "Couldn't check for updates: couldn't reach pypi.org."
+
+    def test_renders_with_both_hints(self, monkeypatch):
+        from deepctl_core import output, transport
+
+        err = transport.TransportError(
+            "update_check_failed", values={"host": "pypi.org"}, details={"host": "pypi.org"}
+        )
+        monkeypatch.setitem(output._output_config, "agentic", False)
+        human = transport.render(err, command_path="update")
+        assert human.code == "update_check_failed"
+        assert human.hint.startswith("Check your network connection")
+        assert human.next_step is None
+        assert human.details == {"host": "pypi.org"}
+        monkeypatch.setitem(output._output_config, "agentic", True)
+        monkeypatch.setenv("AI_AGENT", "x")
+        agent = transport.render(err, command_path="update")
+        assert agent.hint.startswith("The update check needs network access")

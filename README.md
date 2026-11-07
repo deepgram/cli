@@ -157,7 +157,7 @@ dg requests --status failed --endpoint listen   # Debug failed requests
 # Hit any endpoint directly
 dg api /v1/projects --jq '.projects[0].name'
 
-# MCP server for AI editors (Claude Code, Cursor, etc.)
+# MCP server (stdio) that lets AI editors search Deepgram's docs
 dg mcp
 ```
 
@@ -268,8 +268,11 @@ dg debug probe --port 3100                # Live stream audio analysis
 
 ### MCP Server
 
-Give AI coding assistants (Claude Code, Cursor, etc.) Deepgram documentation
-search over stdio.
+`dg mcp` runs a local MCP server over stdio for AI coding assistants (Claude
+Code, Cursor, etc.). It has one tool, `search_deepgram_knowledge_sources`,
+which searches Deepgram's documentation. It uses your API key from `dg login`
+or `DEEPGRAM_API_KEY`; don't put the key in the MCP config. SSE and HTTP
+transports aren't supported.
 
 ```bash
 dg mcp                                    # Start MCP server (stdio)
@@ -406,9 +409,13 @@ CI=1 dg listen recording.wav
 ```
 
 Also recognised: `--agent-friendly` (alias intended for AI coding tools — same
-effect plus JSON metadata output), and the auto-detected env vars
-`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, and Aider's
-`OR_APP_NAME` / `OR_SITE_URL`.
+effect plus JSON metadata output). dg also detects AI coding agents from the
+variables they set (`AI_AGENT`, `CLAUDECODE`, `CODEX_SANDBOX`, `GEMINI_CLI`
+and others). `dg help agent-mode` prints the full table with its sources,
+what your shell matched, and how to turn it off. `DG_AGENT=1` forces agent
+mode and `DG_AGENT=0` turns it off for output and prompts; it doesn't change
+the config file rules for agent sessions (see `dg help agent-mode`).
+`NO_COLOR` only turns color off.
 
 ## Plugins
 
@@ -423,8 +430,11 @@ dg plugin remove <package>              # Remove
 
 Create your own — see the [plugin example](packages/deepctl-plugin-example).
 
-A plugin can't replace a built-in command such as `login` or `debug audio`.
-dg runs the built-in and prints a warning that names the plugin's package.
+A plugin can't replace a built-in command such as `login` or `debug audio`
+(or its hidden alias `debug-audio`). dg runs the built-in without loading the
+plugin. The warning that names the plugin's package shows whenever dg looks
+for plugins: on `dg --help`, `dg plugin list` and command names dg doesn't
+know. Use `dg plugin list` to see refused or shadowing plugins.
 A plugin whose entry point is named like a built-in command is skipped before
 it's imported, so none of its code runs; give the entry point a different name.
 To use a plugin's version anyway, list the command in the user config file
@@ -519,7 +529,7 @@ cli/
 │   ├── deepctl-cmd-keys/             # API keys management command for deepctl
 │   ├── deepctl-cmd-listen/           # Listen (live speech-to-text) command for deepctl
 │   ├── deepctl-cmd-login/            # Login command for deepctl
-│   ├── deepctl-cmd-mcp/              # MCP server for deepctl: Deepgram documentation search over stdio
+│   ├── deepctl-cmd-mcp/              # Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors
 │   ├── deepctl-cmd-members/          # Members management command for deepctl
 │   ├── deepctl-cmd-models/           # Models command for deepctl
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
@@ -560,7 +570,7 @@ cli/
 | `deepctl listen` | Listen (live speech-to-text) command for deepctl |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
-| `deepctl mcp` | MCP server for deepctl: Deepgram documentation search over stdio |
+| `deepctl mcp` | Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors |
 | `deepctl members` | Members management command for deepctl |
 | `deepctl models` | Models command for deepctl |
 | `deepctl plugin` | Plugin management command for deepctl |
@@ -595,7 +605,7 @@ cli/
 | [`deepctl-cmd-keys`](packages/deepctl-cmd-keys) | API keys management command for deepctl |
 | [`deepctl-cmd-listen`](packages/deepctl-cmd-listen) | Listen (live speech-to-text) command for deepctl |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
-| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server for deepctl: Deepgram documentation search over stdio |
+| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | Local stdio MCP server for deepctl: search Deepgram's documentation from AI editors |
 | [`deepctl-cmd-members`](packages/deepctl-cmd-members) | Members management command for deepctl |
 | [`deepctl-cmd-models`](packages/deepctl-cmd-models) | Models command for deepctl |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
@@ -617,8 +627,8 @@ cli/
 
 Merging [conventional commits](https://www.conventionalcommits.org/) to `main`
 triggers [release-please](https://github.com/googleapis/release-please) to open
-a release PR. Merging that PR creates tags and publishes all changed packages to
-PyPI. Each package is versioned independently.
+a release PR. Every first-party package is versioned in lockstep: merging that
+PR creates one tag and publishes every package at the same version to PyPI.
 
 ## Requirements
 

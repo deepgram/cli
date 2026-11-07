@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-debug-network"
-version = "0.1.12" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "Network debug subcommand for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,12 +21,12 @@ classifiers = [
 keywords = ["deepgram", "cli", "debug", "network", "diagnostics"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.1.10",
-    "click>=8.0.0",
-    "rich>=13.0.0",
-    "pydantic>=2.0.0",
-    "httpx>=0.24.0",
-    "requests>=2.31,<3.0",
+    "deepctl==0.4.1", # x-release-please-version
+    "deepctl-core==0.4.1", # x-release-please-version
+    "click>=8.2.0,<9",
+    "rich>=13.0.0,<16",
+    "pydantic>=2.0.0,<3",
+    "httpx>=0.24.0,<1",
 ]
 
 [project.scripts]
@@ -41,3 +41,7 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["deepctl_cmd_debug_network*"]
+
+[tool.uv.sources]
+deepctl = { workspace = true }
+deepctl-core = { workspace = true }

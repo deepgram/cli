@@ -10,160 +10,134 @@
       "component": "deepctl",
       "include-component-in-tag": false,
       "make-latest": true,
+      "exclude-paths": [
+        "packages/deepctl-plugin-example"
+      ],
       "extra-files": [
-        "src/deepctl/__init__.py"
+        "src/deepctl/__init__.py",
+        {
+          "type": "generic",
+          "path": "pyproject.toml"
+        },
+        "packages/deepctl-shared-utils/src/deepctl_shared_utils/__init__.py",
+        "packages/deepctl-telemetry/src/deepctl_telemetry/__init__.py",
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-api/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-billing/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-completion/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-debug/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-debug-audio/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-debug-browser/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-debug-network/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-debug-probe/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-debug-toolkit/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-ffprobe/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-init/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-keys/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-listen/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-login/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-mcp/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-members/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-models/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-plugin/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-projects/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-read/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-requests/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-skills/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-speak/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-transcribe/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-update/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-cmd-usage/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-core/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-shared-utils/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "packages/deepctl-telemetry/pyproject.toml"
+        }
       ]
-    },
-    "packages/deepctl-core": {
-      "component": "deepctl-core",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-shared-utils": {
-      "component": "deepctl-shared-utils",
-      "include-component-in-tag": true,
-      "make-latest": false,
-      "extra-files": [
-        "src/deepctl_shared_utils/__init__.py"
-      ]
-    },
-    "packages/deepctl-telemetry": {
-      "component": "deepctl-telemetry",
-      "include-component-in-tag": true,
-      "make-latest": false,
-      "extra-files": [
-        "src/deepctl_telemetry/__init__.py"
-      ]
-    },
-    "packages/deepctl-cmd-api": {
-      "component": "deepctl-cmd-api",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-login": {
-      "component": "deepctl-cmd-login",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-projects": {
-      "component": "deepctl-cmd-projects",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-transcribe": {
-      "component": "deepctl-cmd-transcribe",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-usage": {
-      "component": "deepctl-cmd-usage",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-debug": {
-      "component": "deepctl-cmd-debug",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-debug-audio": {
-      "component": "deepctl-cmd-debug-audio",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-debug-browser": {
-      "component": "deepctl-cmd-debug-browser",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-debug-network": {
-      "component": "deepctl-cmd-debug-network",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-debug-probe": {
-      "component": "deepctl-cmd-debug-probe",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-debug-toolkit": {
-      "component": "deepctl-cmd-debug-toolkit",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-ffprobe": {
-      "component": "deepctl-cmd-ffprobe",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-mcp": {
-      "component": "deepctl-cmd-mcp",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-update": {
-      "component": "deepctl-cmd-update",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-plugin": {
-      "component": "deepctl-cmd-plugin",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-skills": {
-      "component": "deepctl-cmd-skills",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-init": {
-      "component": "deepctl-cmd-init",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-models": {
-      "component": "deepctl-cmd-models",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-speak": {
-      "component": "deepctl-cmd-speak",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-keys": {
-      "component": "deepctl-cmd-keys",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-read": {
-      "component": "deepctl-cmd-read",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-listen": {
-      "component": "deepctl-cmd-listen",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-requests": {
-      "component": "deepctl-cmd-requests",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-billing": {
-      "component": "deepctl-cmd-billing",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-members": {
-      "component": "deepctl-cmd-members",
-      "include-component-in-tag": true,
-      "make-latest": false
-    },
-    "packages/deepctl-cmd-completion": {
-      "component": "deepctl-cmd-completion",
-      "include-component-in-tag": true,
-      "make-latest": false
     },
     "packages/deepctl-plugin-example": {
       "component": "deepctl-plugin-example",

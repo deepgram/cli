@@ -9,6 +9,9 @@ The SDK is never imported on the success path. ``init_telemetry`` only
 records the enabled decision and installs stdlib exception hooks;
 ``report_exception`` imports and initializes the SDK when an error actually
 reaches it, sends one event, and flushes within a fixed time budget.
+
+The field schema is published in docs/telemetry.md; a test keeps the two
+in step.
 """
 
 from __future__ import annotations
@@ -39,8 +42,18 @@ TELEMETRY_BUILD_ENABLED = True
 
 DSN_ENV_VAR = "DEEPCTL_TELEMETRY_DSN"
 DISABLE_ENV_VAR = "DEEPCTL_TELEMETRY_DISABLED"
+# Cross-tool opt-outs, honored like DEEPCTL_TELEMETRY_DISABLED: the
+# consoledonottrack.com convention, and the variable CI services set.
+DO_NOT_TRACK_ENV_VAR = "DO_NOT_TRACK"
+CI_ENV_VAR = "CI"
+# DEEPCTL_TELEMETRY=log prints the report that would be sent to stderr as
+# one JSON line, and sends nothing. The values in _MODE_OFF turn telemetry
+# off; any other value keeps the default.
+MODE_ENV_VAR = "DEEPCTL_TELEMETRY"
+LOG_MODE = "log"
+_MODE_OFF = frozenset({"off", "0", "false", "no", "disabled"})
 
-# Values of DEEPCTL_TELEMETRY_DISABLED that leave telemetry on. Any other
+# Values of the opt-out variables that leave telemetry on. Any other
 # non-empty value turns it off.
 _ENV_KEEPS_ON = frozenset({"0", "false", "no", "off"})
 
@@ -55,10 +68,10 @@ def _fresh_state() -> dict[str, Any]:
     """Per-run state, stdlib types only.
 
     `opt_out` names the switch that turned telemetry off ("build", "dsn"
-    when there is no destination, "flag", "env" or "config"); `config_path`
-    is the user config file the decision was read from; `reported` is set
-    once a report starts, `sent` once an event has been handed to the
-    transport.
+    when there is no destination, "flag", "env", "do_not_track", "ci" or
+    "config"); `config_path` is the user config file the decision was read
+    from; `reported` is set once a report starts, `sent` once an event has
+    been handed to the transport.
     """
     return {
         "enabled": False,
@@ -81,9 +94,22 @@ def disable_for_run() -> None:
     _state["enabled"] = False
 
 
-def _env_opts_out() -> bool:
-    value = os.environ.get(DISABLE_ENV_VAR, "").strip().lower()
+def _env_set(name: str) -> bool:
+    """Whether the variable `name` turns telemetry off (any non-empty value
+    except the ones in _ENV_KEEPS_ON)."""
+    value = os.environ.get(name, "").strip().lower()
     return bool(value) and value not in _ENV_KEEPS_ON
+
+
+def _env_opts_out() -> bool:
+    if _env_set(DISABLE_ENV_VAR):
+        return True
+    return os.environ.get(MODE_ENV_VAR, "").strip().lower() in _MODE_OFF
+
+
+def _log_mode() -> bool:
+    """DEEPCTL_TELEMETRY=log: print the report instead of sending it."""
+    return os.environ.get(MODE_ENV_VAR, "").strip().lower() == LOG_MODE
 
 
 # Keys whose repetition in a config file makes the telemetry setting
@@ -189,6 +215,10 @@ def _opt_out_source(config: Config) -> str | None:
         return "flag"
     if _env_opts_out():
         return "env"
+    if _env_set(DO_NOT_TRACK_ENV_VAR):
+        return "do_not_track"
+    if _env_set(CI_ENV_VAR):
+        return "ci"
     if _user_config_opts_out(config):
         return "config"
     return None
@@ -199,9 +229,10 @@ def is_enabled(config: Config) -> bool:
 
     Resolution order: the build switch, then whether there is a
     destination (a loopback DEEPCTL_TELEMETRY_DSN; without one telemetry is
-    off), then `--no-telemetry` for this run, then the env override
-    (DEEPCTL_TELEMETRY_DISABLED), then `telemetry.enabled` in the user's
-    config file (default on). The project's `deepgram.yaml` is never read.
+    off), then `--no-telemetry` for this run, then the env overrides
+    (DEEPCTL_TELEMETRY_DISABLED or DEEPCTL_TELEMETRY set to off,
+    DO_NOT_TRACK, CI), then `telemetry.enabled` in the user's config file
+    (default on). The project's `deepgram.yaml` is never read.
     """
     return _opt_out_source(config) is None
 
@@ -304,10 +335,12 @@ def report_exception(exc: BaseException | None) -> bool:
     DEEPCTL_TELEMETRY_DSN. Imports and initializes the SDK only here. At
     most one report per process. The flush waits at most
     FLUSH_TIMEOUT_SECONDS after init, and the whole call is held to
-    REPORT_BUDGET_SECONDS (but the flush always gets FLUSH_FLOOR_SECONDS).
-    Never raises an Exception; a KeyboardInterrupt during the flush
-    propagates to the caller. Returns whether an event was handed to the
-    SDK.
+    REPORT_BUDGET_SECONDS (but the flush always gets FLUSH_FLOOR_SECONDS);
+    there is no flush when no event was queued. With DEEPCTL_TELEMETRY=log
+    the event is printed to stderr instead and nothing is sent, not even to
+    the loopback DSN. Never raises an Exception; a KeyboardInterrupt during
+    the flush propagates to the caller. Returns whether an event was handed
+    to the SDK.
     """
     started = time.monotonic()
     with _report_lock:
@@ -329,8 +362,18 @@ def report_exception(exc: BaseException | None) -> bool:
         except Exception:
             cli_version = "unknown"
 
-        sentry_sdk.init(**_sdk_options(dsn, cli_version))
-        sentry_sdk.capture_exception(target)
+        if _log_mode():
+            options = _sdk_options(None, cli_version)
+            options["transport"] = _stderr_transport()
+        else:
+            options = _sdk_options(dsn, cli_version)
+        sentry_sdk.init(**options)
+        if sentry_sdk.capture_exception(target) is None:
+            # Dropped before it was queued (a closed-stream error, or no
+            # field left to send): there is nothing to wait for.
+            return False
+        if _log_mode():
+            return True
         left = REPORT_BUDGET_SECONDS - (time.monotonic() - started)
         timeout = max(FLUSH_FLOOR_SECONDS, min(FLUSH_TIMEOUT_SECONDS, left))
         sentry_sdk.flush(timeout=timeout)
@@ -345,7 +388,32 @@ def _read_cli_version() -> str:
     return importlib.metadata.version("deepctl")
 
 
-def _sdk_options(dsn: str, cli_version: str) -> dict[str, Any]:
+def _stderr_transport() -> Any:
+    """A transport that writes each event to stderr as one JSON line.
+
+    Used for DEEPCTL_TELEMETRY=log. It never opens a connection, and the
+    SDK gets no destination at all in that mode.
+    """
+    import json
+
+    from sentry_sdk.transport import Transport
+
+    class StderrTransport(Transport):
+        def capture_envelope(self, envelope: Any) -> None:
+            event = envelope.get_event()
+            if event is None:
+                return
+            try:
+                sys.stderr.write(json.dumps(event, sort_keys=True, default=str))
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+            except (OSError, ValueError, AttributeError):
+                pass
+
+    return StderrTransport()
+
+
+def _sdk_options(dsn: str | None, cli_version: str) -> dict[str, Any]:
     """Explicit SDK settings: one error event per failure and nothing else.
 
     No integrations at all (no argv, modules, logging, breadcrumbs, and none

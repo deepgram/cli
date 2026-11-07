@@ -1,14 +1,15 @@
 """Tests for the authentication module."""
 
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
-from urllib.parse import parse_qs, urlparse
 
 import httpx
 import keyring.errors
 import pytest
 from deepctl_core.auth import AuthenticationError, AuthManager
 from deepctl_core.config import Config
+from deepctl_core.transport import request_headers
 
 
 @pytest.fixture
@@ -70,7 +71,7 @@ class TestAuthManager:
         auth_manager.client.get.assert_called_once_with(
             "https://api.deepgram.com/v1/projects/test-project",
             headers={
-                "Authorization": "Token sk-test-key",
+                **request_headers("sk-test-key"),
                 "Content-Type": "application/json",
             },
         )
@@ -160,7 +161,7 @@ class TestAuthManager:
             auth_manager.client.get.assert_called_once_with(
                 "https://api.deepgram.com/v1/projects",
                 headers={
-                    "Authorization": "Token sk-test-key",
+                    **request_headers("sk-test-key"),
                     "Content-Type": "application/json",
                 },
             )
@@ -205,7 +206,7 @@ class TestAuthManager:
             auth_manager.client.get.assert_called_once_with(
                 "https://api.deepgram.com/v1/projects/stored-project",
                 headers={
-                    "Authorization": "Token sk-stored-key",
+                    **request_headers("sk-stored-key"),
                     "Content-Type": "application/json",
                 },
             )
@@ -237,7 +238,7 @@ class TestAuthManager:
         auth_manager.client.get.assert_called_once_with(
             "https://api.deepgram.com/v1/projects/env-project",
             headers={
-                "Authorization": "Token sk-env-key",
+                **request_headers("sk-env-key"),
                 "Content-Type": "application/json",
             },
         )
@@ -266,22 +267,19 @@ class TestAuthManager:
             ):
                 auth_manager.guard()
 
-    def test_guard_with_invalid_credentials(self, auth_manager):
-        """Test guard method with invalid credentials."""
-        # Set up API key
+    def test_guard_sends_nothing(self, auth_manager):
+        """guard() only checks that a key is there: no pre-flight request.
+
+        An invalid key is reported by the command's own request (401 ->
+        auth_invalid, deepctl_core.transport)."""
         with patch.object(
             auth_manager, "get_api_key", return_value="sk-test-key"
-        ):
-            # Mock failed key verification
-            with patch.object(
-                auth_manager,
-                "verify_api_key",
-                return_value=(False, "Invalid API key", "auth"),
-            ):
-                with pytest.raises(
-                    AuthenticationError, match="Invalid API key"
-                ):
-                    auth_manager.guard()
+        ), patch.object(auth_manager, "verify_api_key") as verify, patch.object(
+            auth_manager, "client"
+        ) as http:
+            auth_manager.guard()
+        verify.assert_not_called()
+        assert http.method_calls == []
 
     def test_guard_does_not_require_project_id(self, auth_manager):
         """Test that guard() only checks API key, not project_id."""
@@ -605,7 +603,10 @@ class TestFiniteCredentialFlow:
     def _make_auth(self, mock_config):
         with patch("deepctl_core.auth.httpx.Client"):
             with patch("deepctl_core.auth.keyring"):
-                return AuthManager(mock_config)
+                auth = AuthManager(mock_config)
+                # The client is built on first use; build it under the patch.
+                _ = auth.client
+                return auth
 
     # ------------------------------------------------------------------
     # _store_token — finite direct credential path
@@ -820,19 +821,21 @@ class TestFiniteCredentialFlow:
 
         assert auth.get_api_key() == "sk-explicit"
 
-    def test_poll_for_token_encodes_device_flow_parameters(self, mock_config):
+    def test_poll_for_token_posts_without_a_hostname(self, mock_config):
+        """RFC 8628 §3.4: the device code goes in a POST body, never a URL, and
+        no machine name is sent."""
         from deepctl_core.auth import DeviceCodeResponse
 
         auth = self._make_auth(mock_config)
         response = Mock()
-        response.status_code = 201
+        response.status_code = 200
         response.json.return_value = {
             "access_token": "jwt",
             "dg_token": "dg-finite-key",
             "dg_expires_in": 3600,
-            "project_id": "project",
+            "pid": "project",
         }
-        auth.client.get.return_value = response
+        auth.client.post.return_value = response
 
         token = auth._poll_for_token(
             DeviceCodeResponse(
@@ -841,16 +844,164 @@ class TestFiniteCredentialFlow:
                 expires_in=600,
                 interval=1,
             ),
-            "test-host",
+            "https://id.example.test",
         )
 
-        poll_url = auth.client.get.call_args.args[0]
-        assert parse_qs(urlparse(poll_url).query) == {
-            "device_code": ["device-code"],
-            "client_id": ["deepgram-cli"],
-            "hostname": ["test-host"],
+        auth.client.get.assert_not_called()
+        url = auth.client.post.call_args.args[0]
+        assert url == "https://id.example.test/token"
+        assert auth.client.post.call_args.kwargs["data"] == {
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "device_code": "device-code",
+            "client_id": "deepgram-cli",
         }
         assert token.dg_token == "dg-finite-key"
+        assert token.pid == "project"
+
+    @pytest.mark.parametrize(
+        ("status", "body", "state"),
+        [
+            (400, {"error": "authorization_pending"}, "pending"),
+            (400, {"error": "slow_down"}, "slow_down"),
+            (429, {}, "slow_down"),
+            (400, {"error": "access_denied"}, "denied"),
+            (400, {"error": "expired_token"}, "expired"),
+            (400, {"error": "invalid_grant"}, "error"),
+            (500, None, "unavailable"),
+            (503, {"error": "temporarily_unavailable"}, "unavailable"),
+            (400, {"error": "temporarily_unavailable"}, "unavailable"),
+        ],
+    )
+    def test_poll_device_token_maps_rfc8628_answers(
+        self, mock_config, status, body, state
+    ):
+        auth = self._make_auth(mock_config)
+        response = Mock()
+        response.status_code = status
+        if body is None:
+            response.json.side_effect = ValueError("not json")
+        else:
+            response.json.return_value = body
+        auth.client.post.return_value = response
+        assert auth.poll_device_token("dc", "https://id.example.test").state == state
+
+    @pytest.mark.parametrize(("status", "header", "want"), [(429, "30", 30), (503, "60", 60), (429, "Wed, 21 Oct 2026 07:28:00 GMT", None)])
+    def test_poll_reads_retry_after(self, mock_config, status, header, want):
+        auth = self._make_auth(mock_config)
+        response = Mock(status_code=status, headers={"Retry-After": header})
+        response.json.return_value = {}
+        auth.client.post.return_value = response
+        assert auth.poll_device_token("dc", "https://id.example.test").retry_after == want
+
+    def test_wait_polls_no_faster_than_6_s_and_backs_off(self, mock_config, monkeypatch):
+        from deepctl_core import auth as auth_module
+        from deepctl_core.auth import DeviceCodeResponse, DevicePoll, TokenResponse
+
+        auth = self._make_auth(mock_config)
+        slept = []
+        monkeypatch.setattr(auth_module.time, "sleep", slept.append)
+        answers = [
+            DevicePoll("pending"),
+            DevicePoll("unavailable", retry_after=20),
+            DevicePoll("slow_down"),
+            DevicePoll("token", token=TokenResponse(access_token="j", dg_token="k")),
+        ]
+        monkeypatch.setattr(auth, "poll_device_token", lambda *a: answers.pop(0))
+        auth._poll_for_token(
+            DeviceCodeResponse(
+                device_code="dc",
+                verification_uri="https://id.example.test/auth/cli",
+                expires_in=600,
+                interval=1,
+            ),
+            "https://id.example.test",
+        )
+        assert slept == [6, 20, 25]
+
+    def test_terminal_flow_prints_the_link_and_code_line(self, mock_config, monkeypatch, capsys):
+        """J2.3: the person's flow shows I-LOGIN-PENDING on stderr."""
+        from deepctl_core import auth as auth_module
+        from deepctl_core import output
+        from deepctl_core.auth import DeviceCodeResponse, TokenResponse
+
+        auth = self._make_auth(mock_config)
+        monkeypatch.setattr(auth_module, "check_identity_host", lambda c: "https://id.example.test")
+        monkeypatch.setattr(
+            auth,
+            "_request_device_code",
+            lambda url: DeviceCodeResponse(
+                device_code="dc",
+                user_code="WDJB-MJHT",
+                verification_uri="https://id.example.test/auth/cli",
+                expires_in=600,
+            ),
+        )
+        monkeypatch.setattr(auth, "_poll_for_token", lambda *a: TokenResponse(access_token="j"))
+        monkeypatch.setattr(auth, "_store_token", lambda t: None)
+        monkeypatch.setattr(auth_module.webbrowser, "open", lambda url: True)
+        monkeypatch.setitem(output._output_config, "agentic", False)
+        monkeypatch.setitem(output._output_config, "quiet", False)
+        monkeypatch.setattr(output.stderr_console, "_width", 400)
+        for open_browser in (True, False):
+            auth.login_with_device_flow(open_browser=open_browser)
+            err = capsys.readouterr().err
+            assert (
+                "To finish logging in, open https://id.example.test/auth/cli and "
+                "enter the code WDJB-MJHT." in err
+            )
+            assert "Enter code" not in err and "didn't open" not in err
+            assert ("Opening browser" in err) is open_browser
+            assert ("Open the link below" in err) is (not open_browser)
+
+    def test_device_code_request_sends_no_hostname(self, mock_config):
+        auth = self._make_auth(mock_config)
+        response = Mock()
+        response.status_code = 201
+        response.json.return_value = {
+            "device_code": "dc",
+            "user_code": "ABCD-EFGH",
+            "verification_uri": "https://id.example.test/auth/cli",
+            "expires_in": 300,
+            "interval": 5,
+        }
+        auth.client.post.return_value = response
+        auth._request_device_code("https://id.example.test")
+        sent = auth.client.post.call_args.kwargs["json"]
+        assert sent["hostname"] == "deepctl"
+        import os as _os
+
+        if hasattr(_os, "uname"):
+            assert _os.uname().nodename not in json.dumps(sent)
+
+    @pytest.mark.parametrize(
+        "uri",
+        ["http://id.example.test/auth/cli", "ftp://x/y", "javascript:alert(1)"],
+    )
+    def test_device_code_link_must_be_https(self, mock_config, uri):
+        from deepctl_core.auth import AuthenticationError
+
+        auth = self._make_auth(mock_config)
+        response = Mock()
+        response.status_code = 201
+        response.json.return_value = {
+            "device_code": "dc",
+            "user_code": "ABCD-EFGH",
+            "verification_uri": uri,
+            "expires_in": 300,
+        }
+        auth.client.post.return_value = response
+        with pytest.raises(AuthenticationError):
+            auth._request_device_code("https://id.example.test")
+
+    def test_device_code_link_may_be_loopback_http(self, mock_config):
+        from deepctl_core.auth import DeviceCodeResponse
+
+        d = DeviceCodeResponse(
+            device_code="dc",
+            verification_uri="http://127.0.0.1:8080/auth/cli",
+            expires_in=300,
+        )
+        assert d.interval == 5
 
     # ------------------------------------------------------------------
     # logout — clears JWT entries

@@ -206,7 +206,7 @@ def test_handshake_and_tool_list_are_fixed_local_text(
 ) -> None:
     from importlib.metadata import version
 
-    from deepctl_cmd_mcp.proxy import INSTRUCTIONS, TOOLS
+    from deepctl.mcp._fast import INSTRUCTIONS, TOOLS
 
     async def body(session: Any, init: Any) -> Any:
         return init, await session.list_tools()
@@ -328,7 +328,7 @@ def test_exits_on_eof_without_connecting(tmp_path: Path, argv: list[str]) -> Non
         except (BlockingIOError, OSError):
             connected = False
     assert proc.returncode == 0, proc.stderr
-    assert elapsed < 5
+    assert elapsed < 12  # a connect attempt would wait out its 15 s
     assert not connected
     replies = [json.loads(line) for line in proc.stdout.splitlines()]
     assert [r["id"] for r in replies] == [0, 1]

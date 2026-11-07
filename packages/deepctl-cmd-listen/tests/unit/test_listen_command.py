@@ -3,6 +3,8 @@
 from unittest.mock import Mock, patch
 
 import click
+import sys
+
 import pytest
 from click.testing import CliRunner
 from deepctl_cmd_listen.command import ListenCommand
@@ -17,6 +19,7 @@ from deepctl_core import (
 
 
 def _install_flux_error_websockets(monkeypatch, ready=None):
+    """A server that sends one Flux Error frame (after ``ready()``), then ends."""
     import asyncio
     import json
     import sys
@@ -31,10 +34,15 @@ def _install_flux_error_websockets(monkeypatch, ready=None):
     )
 
     class _FakeWS:
+        transport = None
+
         def __init__(self):
             self.messages = iter([error_frame])
 
         async def send(self, _data):
+            return None
+
+        async def close(self):
             return None
 
         def __aiter__(self):
@@ -48,17 +56,70 @@ def _install_flux_error_websockets(monkeypatch, ready=None):
             except StopIteration:
                 raise StopAsyncIteration from None
 
-    class _FakeConnect:
-        async def __aenter__(self):
-            return _FakeWS()
+    _install_websockets(monkeypatch, _FakeWS())
 
-        async def __aexit__(self, *_args):
-            return False
 
-    monkeypatch.setattr(
-        "deepctl_cmd_listen.command._live_connect",
-        lambda *_args, **_kwargs: _FakeConnect(),
-    )
+def _install_websockets(monkeypatch, ws):
+    """Make ``await websockets.connect(...)`` return ``ws``."""
+    import sys
+    import types
+
+    class _Connect:
+        def __await__(self):
+            async def _open():
+                return ws
+
+            return _open().__await__()
+
+    fake = types.ModuleType("websockets")
+    fake.connect = lambda *_args, **_kwargs: _Connect()
+    monkeypatch.setitem(sys.modules, "websockets", fake)
+    monkeypatch.setattr("deepctl_cmd_listen.live._open", fake.connect)
+
+
+def _stdin_pipe(monkeypatch, data=b"", *, close=True):
+    """Point the live stdin reader at a pipe holding ``data``.
+
+    Returns the write end when ``close`` is False (the pipe stays open, so
+    the reader blocks), else None.
+    """
+    import os
+
+    r, w = os.pipe()
+    if data:
+        os.write(w, data)
+    if close:
+        os.close(w)
+        w = None
+    monkeypatch.setattr("deepctl_cmd_listen.command._stdin_fd", lambda: r)
+    return w
+
+
+class _EndOnCloseStream:
+    """A server that ends the stream when CloseStream arrives."""
+
+    transport = None
+
+    def __init__(self):
+        import asyncio
+
+        self.sent = []
+        self.ended = asyncio.Event()
+
+    async def send(self, data):
+        self.sent.append(data)
+        if "CloseStream" in str(data):
+            self.ended.set()
+
+    async def close(self):
+        self.ended.set()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        await self.ended.wait()
+        raise StopAsyncIteration
 
 
 class TestListenCommand:
@@ -229,12 +290,14 @@ class TestListenCommand:
             assert call_kwargs["encoding"] == "linear16"
             assert result.source == "stdin"
 
+    @patch("deepctl_cmd_listen.command.print_warning")
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
     def test_handle_warns_diarize_ignored_on_flux(
         self,
         mock_sys,
         mock_status,
+        mock_warning,
         command,
         mock_config,
         mock_auth_manager,
@@ -261,20 +324,57 @@ class TestListenCommand:
                 diarize=True,
             )
 
-        printed = " ".join(
-            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
-        )
-        assert "not supported by Flux STT" in printed
+        # The note is a warning (WARN: in agent mode), not status chrome.
+        calls = mock_status.print.call_args_list + mock_warning.call_args_list
+        printed = " ".join(str(c.args[0]) for c in calls if c.args)
+        assert "Flux models don't support --diarize" in printed
         assert "Speaker labels enabled" not in printed
         assert mock_ws.call_args.kwargs["diarize"] is False
         assert result.diarized is False
 
     @patch("deepctl_cmd_listen.command.status")
     @patch("deepctl_cmd_listen.command.sys")
+    def test_diarize_warning_prints_under_quiet(
+        self,
+        mock_sys,
+        mock_status,
+        command,
+        mock_config,
+        mock_auth_manager,
+        mock_client,
+        monkeypatch,
+        capsys,
+    ):
+        """`dg -q listen ... --diarize`: --quiet hides INFO/OK lines, not this
+        WARN."""
+        from deepctl_core import output
+
+        monkeypatch.setitem(output._output_config, "quiet", True)
+        monkeypatch.setitem(output._output_config, "agentic", True)
+        mock_sys.stdin.isatty.return_value = True
+
+        async def fake_ws_mic(_client, **kwargs):
+            return ListenResult(status="success", source="mic", mode="live")
+
+        with patch.object(command, "_ws_mic", side_effect=fake_ws_mic):
+            command.handle(
+                config=mock_config,
+                auth_manager=mock_auth_manager,
+                client=mock_client,
+                mic=True,
+                model="flux-general-en",
+                diarize=True,
+            )
+        assert "WARN: Flux models don't support --diarize, so it was ignored." in capsys.readouterr().err
+
+    @patch("deepctl_cmd_listen.command.print_warning")
+    @patch("deepctl_cmd_listen.command.status")
+    @patch("deepctl_cmd_listen.command.sys")
     def test_handle_no_diarize_warning_on_v1(
         self,
         mock_sys,
         mock_status,
+        mock_warning,
         command,
         mock_config,
         mock_auth_manager,
@@ -294,10 +394,10 @@ class TestListenCommand:
                 diarize=True,
             )
 
-        printed = " ".join(
-            str(c.args[0]) for c in mock_status.print.call_args_list if c.args
-        )
-        assert "not supported by Flux STT" not in printed
+        # The note is a warning (WARN: in agent mode), not status chrome.
+        calls = mock_status.print.call_args_list + mock_warning.call_args_list
+        printed = " ".join(str(c.args[0]) for c in calls if c.args)
+        assert "don't support --diarize" not in printed
 
     @pytest.mark.parametrize("source", ["call.wav", "https://example.com/call.wav"])
     def test_click_flux_prerecorded_source_errors(self, source, command, mock_config):
@@ -326,6 +426,7 @@ class TestListenCommand:
     ):
         """A stdin Error frame propagates through the stream and Click boundary."""
         _install_flux_error_websockets(monkeypatch)
+        _stdin_pipe(monkeypatch)
 
         result = self.invoke_click(
             command,
@@ -922,46 +1023,39 @@ class TestFluxV2TurnHandling:
         assert "my account" in batch
         assert "00:00:01,000 --> 00:00:02,500" in batch
 
-    def test_ws_mic_flushes_final_turn_on_keyboard_interrupt(
-        self, command, monkeypatch
-    ):
-        """Ctrl-C during a Flux mic stream must still flush the in-flight turn.
-
-        The interrupt surfaces at the ``asyncio.gather`` await; ``_ws_mic`` has
-        to catch it, run ``_flush_v2``, and return the accumulated transcript
-        (rather than letting the final turn vanish)."""
+    def test_ws_mic_flushes_final_turn_on_ctrl_c(self, command, monkeypatch):
+        """Ctrl-C during a Flux mic stream must still flush the in-flight turn,
+        with CloseStream sent. Ctrl-C is how a mic session ends, so the
+        result is a success (exit 0), as in 0.4.0."""
         import asyncio as _asyncio
+        import signal
         import sys
         import types
         from unittest.mock import MagicMock
 
-        # _ws_mic imports these at call time; stub them so no hardware/net is hit.
-        for name in ("sounddevice", "numpy"):
-            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+        class _FakeInputStream:
+            def __init__(self, **_kwargs):
+                pass
 
-        class _FakeWS:
-            async def send(self, *a):
-                return None
+            def start(self):
+                pass
 
-            def __aiter__(self):
-                return self
+            def stop(self):
+                pass
 
-            async def __anext__(self):
-                raise StopAsyncIteration
+            def close(self):
+                pass
 
-        class _FakeConnect:
-            async def __aenter__(self):
-                return _FakeWS()
+        fake_sd = types.ModuleType("sounddevice")
+        fake_sd.RawInputStream = _FakeInputStream
+        fake_np = types.ModuleType("numpy")
+        fake_np.int16 = "int16"
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+        monkeypatch.setitem(sys.modules, "numpy", fake_np)
+        ws = _EndOnCloseStream()
+        _install_websockets(monkeypatch, ws)
 
-            async def __aexit__(self, *a):
-                return False
-
-        monkeypatch.setattr(
-            "deepctl_cmd_listen.command._live_connect",
-            lambda *a, **k: _FakeConnect(),
-        )
-
-        # A turn received but never finalized (no EndOfTurn before the interrupt).
+        # A turn received but never finalized (no EndOfTurn before Ctrl-C).
         seeded = {
             "turns": {
                 0: {
@@ -976,18 +1070,12 @@ class TestFluxV2TurnHandling:
         }
         monkeypatch.setattr(command, "_new_v2_state", lambda: seeded)
 
-        async def _interrupt(*a, **k):
-            raise KeyboardInterrupt
-
-        monkeypatch.setattr("deepctl_cmd_listen.command.asyncio.gather", _interrupt)
-
         client = MagicMock()
         client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
         client.auth_manager.get_api_key.return_value = "k"
 
-        # Drive on a plain loop (not asyncio.run) so the patched gather can't
-        # interfere with run()'s own shutdown machinery.
         loop = _asyncio.new_event_loop()
+        loop.call_later(0.1, signal.raise_signal, signal.SIGINT)
         try:
             result = loop.run_until_complete(
                 command._ws_mic(
@@ -1009,6 +1097,205 @@ class TestFluxV2TurnHandling:
             loop.close()
 
         assert result.transcript == "hello world"
+        assert result.status == "success"
+        assert command.exit_code_for(result) == 0
+        assert '{"type": "CloseStream"}' in ws.sent
+
+    def test_ws_mic_streams_raw_int16_frames_without_numpy(self, command, monkeypatch):
+        """The mic path opens a raw int16 stream and forwards each callback
+        buffer to the socket byte for byte, with numpy unimportable."""
+        import asyncio as _asyncio
+        import json as _json
+        import signal
+        import sys
+        import types
+        from array import array
+        from unittest.mock import MagicMock
+
+        from deepctl_cmd_listen import live
+
+        # Any `import numpy` now raises ImportError.
+        monkeypatch.setitem(sys.modules, "numpy", None)
+
+        # Fixed fixture: three 4-sample blocks of native-order int16, as
+        # PortAudio delivers them to the callback.
+        samples = [0, 1, -1, 32767, -32768, 1234, -1234, 7, 8, 9, -9, 0]
+        blocks = [array("h", samples[i : i + 4]).tobytes() for i in range(0, 12, 4)]
+
+        opened: dict = {}
+
+        class _FakeRawInputStream:
+            def __init__(self, **kwargs):
+                opened.update(kwargs)
+                self.events: list[str] = []
+                opened["stream"] = self
+
+            def start(self):
+                self.events.append("start")
+                for block in blocks:
+                    # sounddevice hands the callback a CFFI buffer; a
+                    # memoryview is the same buffer-protocol object.
+                    opened["callback"](memoryview(block), 4, None, None)
+
+            def stop(self):
+                self.events.append("stop")
+
+            def close(self):
+                self.events.append("close")
+
+        fake_sd = types.ModuleType("sounddevice")
+        fake_sd.RawInputStream = _FakeRawInputStream
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+        ws = _EndOnCloseStream()
+        _install_websockets(monkeypatch, ws)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        loop = _asyncio.new_event_loop()
+        # The user's Ctrl-C, once the three blocks are on the socket.
+        loop.call_later(0.2, signal.raise_signal, signal.SIGINT)
+        try:
+            loop.run_until_complete(
+                command._ws_mic(
+                    client,
+                    model="nova-3",
+                    language="en-US",
+                    api_version=1,
+                    diarize=False,
+                    smart_format=True,
+                    punctuate=True,
+                    interim=False,
+                    redact=(),
+                    numerals=False,
+                    sample_rate=16000,
+                    channels=1,
+                )
+            )
+        finally:
+            loop.close()
+
+        audio = [frame for frame in ws.sent if isinstance(frame, bytes)]
+        assert opened["dtype"] == "int16"
+        assert opened["samplerate"] == 16000
+        assert opened["channels"] == 1
+        assert opened["blocksize"] == live.frame_bytes("linear16", 16000, 1) // 2
+        assert audio == blocks
+        assert _json.loads(ws.sent[-1]) == {"type": "CloseStream"}
+        assert opened["stream"].events == ["start", "stop", "close"]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill of SIGINT ends the whole process on Windows")
+    def test_sigint_during_mic_capture_stops_cleanly(self, command, monkeypatch):
+        """A real SIGINT while frames are flowing stops the capture: the
+        stream is stopped and closed, CloseStream is sent, and the transcript
+        so far is kept on every Python version. Ctrl-C is how a mic session
+        ends, so the result is success, exit 0."""
+        import json as _json
+        import os
+        import signal
+        import sys
+        import threading
+        import time
+        import types
+        from unittest.mock import MagicMock
+
+        if signal.getsignal(signal.SIGINT) is not signal.default_int_handler:
+            pytest.skip("SIGINT is not Python's default handler here")
+        monkeypatch.setitem(sys.modules, "numpy", None)
+
+        events: list[str] = []
+
+        class _PacedStream:
+            def __init__(self, *, callback, blocksize, samplerate, **kwargs):
+                self._callback = callback
+                self._period = blocksize / samplerate
+                self._stop = threading.Event()
+                self._thread = threading.Thread(target=self._run, daemon=True)
+
+            def _run(self):
+                while not self._stop.wait(self._period):
+                    self._callback(memoryview(b"\x01\x00" * 800), 800, None, None)
+
+            def start(self):
+                events.append("start")
+                self._thread.start()
+
+            def stop(self):
+                events.append("stop")
+                self._stop.set()
+
+            def close(self):
+                events.append("close")
+
+        fake_sd = types.ModuleType("sounddevice")
+        fake_sd.RawInputStream = _PacedStream
+        monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+        class _OneResultThenEndOnClose(_EndOnCloseStream):
+            def __init__(self):
+                super().__init__()
+                self._said = False
+                self._pressed = False
+
+            async def send(self, data):
+                await super().send(data)
+                audio = [f for f in self.sent if isinstance(f, bytes)]
+                if len(audio) == 3 and not self._pressed:
+                    # Frames are flowing: the user presses Ctrl-C, once (a
+                    # later CloseStream send must not schedule another).
+                    self._pressed = True
+                    threading.Timer(0.05, os.kill, (os.getpid(), signal.SIGINT)).start()
+
+            async def __anext__(self):
+                if not self._said:
+                    self._said = True
+                    return _json.dumps(
+                        {
+                            "type": "Results",
+                            "is_final": True,
+                            "start": 0.0,
+                            "duration": 1.0,
+                            "channel": {
+                                "alternatives": [{"transcript": "hi", "words": []}]
+                            },
+                        }
+                    )
+                return await super().__anext__()
+
+        ws = _OneResultThenEndOnClose()
+        _install_websockets(monkeypatch, ws)
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+        client.auth_manager.get_api_key.return_value = "k"
+
+        start = time.monotonic()
+        result = command._stream_mic(
+            client,
+            model="nova-3",
+            language="en-US",
+            api_version=1,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            redact=(),
+            numerals=False,
+            sample_rate=16000,
+            channels=1,
+            save_to=None,
+            caption_format=None,
+        )
+
+        assert time.monotonic() - start < 5
+        assert events == ["start", "stop", "close"]
+        assert all(isinstance(frame, bytes) for frame in ws.sent[:3])
+        assert _json.loads(ws.sent[-1]) == {"type": "CloseStream"}
+        assert result.status == "success"
+        assert result.transcript == "hi"
+        assert command.exit_code_for(result) == 0
 
     def test_end_of_turn_with_empty_transcript_is_noop(self, command, capsys):
         """An EndOfTurn that never carried text emits nothing (no blank line)."""
@@ -1125,106 +1412,54 @@ class TestFluxV2TurnHandling:
 
         fake_sounddevice = types.ModuleType("sounddevice")
         fake_sounddevice.RawInputStream = _FakeInputStream
-        fake_numpy = types.ModuleType("numpy")
-        fake_numpy.int16 = "int16"
         monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
-        monkeypatch.setitem(sys.modules, "numpy", fake_numpy)
 
         client = MagicMock()
         client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
         client.auth_manager.get_api_key.return_value = "test-key"
 
-        with pytest.raises(click.ClickException) as exc_info:
-            command._stream_mic(
-                client,
-                model="flux-general-en",
-                language="en-US",
-                api_version=2,
-                diarize=False,
-                smart_format=True,
-                punctuate=True,
-                interim=False,
-                redact=(),
-                numerals=False,
-                sample_rate=16000,
-                channels=1,
-                save_to=None,
-                caption_format=None,
-            )
+        result = command._stream_mic(
+            client,
+            model="flux-general-en",
+            language="en-US",
+            api_version=2,
+            diarize=False,
+            smart_format=True,
+            punctuate=True,
+            interim=False,
+            redact=(),
+            numerals=False,
+            sample_rate=16000,
+            channels=1,
+            save_to=None,
+            caption_format=None,
+        )
 
-        assert "INVALID_AUDIO" in exc_info.value.message
-        assert "audio stream is invalid" in exc_info.value.message
+        assert result.status == "error"
+        assert result.code == "server_error"
+        assert command.exit_code_for(result) == 1
+        assert "INVALID_AUDIO" in result.error
+        assert "audio stream is invalid" in result.error
         assert events == {"started": True, "stopped": True, "closed": True}
 
     def test_stream_stdin_flux_error_does_not_wait_for_blocked_input(
         self, command, monkeypatch
     ):
-        import asyncio as _asyncio
-        import json as _json
-        import sys
+        """A server error ends the stream while stdin is still open and idle."""
+        import os
         import threading
-        import types
         from unittest.mock import MagicMock
 
-        read_started = threading.Event()
-        release_read = threading.Event()
-
-        class _BlockingBuffer:
-            def read(self, _size):
-                read_started.set()
-                release_read.wait()
-                return b""
-
-        fake_stdin = types.SimpleNamespace(buffer=_BlockingBuffer())
-        monkeypatch.setattr(
-            "deepctl_cmd_listen.command.sys.stdin", fake_stdin, raising=False
-        )
-
-        error_frame = _json.dumps(
-            {
-                "type": "Error",
-                "code": "INVALID_AUDIO",
-                "description": "audio stream is invalid",
-            }
-        )
-
-        class _FakeWS:
-            def __init__(self):
-                self.sent_error = False
-
-            async def send(self, _data):
-                return None
-
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                if self.sent_error:
-                    raise StopAsyncIteration
-                while not read_started.is_set():
-                    await _asyncio.sleep(0)
-                self.sent_error = True
-                return error_frame
-
-        class _FakeConnect:
-            async def __aenter__(self):
-                return _FakeWS()
-
-            async def __aexit__(self, *_args):
-                return False
-
-        monkeypatch.setattr(
-            "deepctl_cmd_listen.command._live_connect",
-            lambda *_args, **_kwargs: _FakeConnect(),
-        )
+        writer = _stdin_pipe(monkeypatch, close=False)
+        _install_flux_error_websockets(monkeypatch)
 
         client = MagicMock()
         client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
         client.auth_manager.get_api_key.return_value = "test-key"
-        errors = []
+        results = []
 
         def run_stream():
-            try:
+            results.append(
                 command._stream_stdin(
                     client,
                     model="flux-general-en",
@@ -1242,61 +1477,35 @@ class TestFluxV2TurnHandling:
                     save_to=None,
                     caption_format=None,
                 )
-            except BaseException as exc:
-                errors.append(exc)
+            )
 
         stream_thread = threading.Thread(target=run_stream, daemon=True)
         stream_thread.start()
-        assert read_started.wait(timeout=1)
-        stream_thread.join(timeout=1)
-        exited_before_stdin = not stream_thread.is_alive()
-        release_read.set()
-        stream_thread.join(timeout=1)
+        stream_thread.join(timeout=2)
+        exited_while_stdin_open = not stream_thread.is_alive()
+        os.close(writer)
 
-        assert exited_before_stdin
-        assert len(errors) == 1
-        assert isinstance(errors[0], click.ClickException)
-        assert "INVALID_AUDIO" in errors[0].message
+        assert exited_while_stdin_open
+        (result,) = results
+        assert result.status == "error"
+        assert result.code == "server_error"
+        assert "INVALID_AUDIO" in result.error
 
-    def test_stream_stdin_keyboard_interrupt_preserves_transcript_and_save_to(
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill of SIGINT ends the whole process on Windows")
+    def test_stream_stdin_ctrl_c_preserves_transcript_and_save_to(
         self, command, monkeypatch, tmp_path
     ):
         """Ctrl-C on `dg listen -` (stdin) keeps the partial transcript and
-        writes --save-to, mirroring the mic path. The stdin path used to
-        re-raise the interrupt and drop both."""
-        import sys
-        import types
+        writes --save-to, and ends as cancelled (exit 2)."""
+        import os
+        import signal
+        import threading
         from unittest.mock import MagicMock
 
-        # No real stdin read: return EOF at once if the reader thread starts.
-        fake_stdin = types.SimpleNamespace(
-            buffer=types.SimpleNamespace(read=lambda _n: b"")
-        )
-        monkeypatch.setattr(
-            "deepctl_cmd_listen.command.sys.stdin", fake_stdin, raising=False
-        )
-
-        class _FakeWS:
-            async def send(self, *a):
-                return None
-
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                raise StopAsyncIteration
-
-        class _FakeConnect:
-            async def __aenter__(self):
-                return _FakeWS()
-
-            async def __aexit__(self, *a):
-                return False
-
-        monkeypatch.setattr(
-            "deepctl_cmd_listen.command._live_connect",
-            lambda *a, **k: _FakeConnect(),
-        )
+        writer = _stdin_pipe(monkeypatch, close=False)
+        ws = _EndOnCloseStream()
+        _install_websockets(monkeypatch, ws)
+        threading.Timer(0.2, os.kill, (os.getpid(), signal.SIGINT)).start()
 
         # A turn received but never finalized before the interrupt.
         seeded = {
@@ -1312,11 +1521,6 @@ class TestFluxV2TurnHandling:
             "order": [0],
         }
         monkeypatch.setattr(command, "_new_v2_state", lambda: seeded)
-
-        async def _interrupt(*a, **k):
-            raise KeyboardInterrupt
-
-        monkeypatch.setattr("deepctl_cmd_listen.command.asyncio.gather", _interrupt)
 
         client = MagicMock()
         client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
@@ -1341,5 +1545,8 @@ class TestFluxV2TurnHandling:
             caption_format=None,
         )
 
+        os.close(writer)
         assert result.transcript == "hello world"
+        assert result.status == "cancelled"
+        assert command.exit_code_for(result) == 2
         assert save_to.read_text().strip() == "hello world"

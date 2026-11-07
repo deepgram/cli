@@ -17,21 +17,21 @@ import hashlib
 import io
 import os
 import re
-import secrets
 import stat
 import sys
 import threading
 import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import platformdirs
-import yaml
-from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+    from ._config_loader import _ConfigLoader
+    from .config_models import DeepgramConfig, ProfileConfig
 
 from . import messages as msg
 from .hosts import (
@@ -46,73 +46,123 @@ from .hosts import (
     parse_origin,
 )
 
-
-class ProfileConfig(BaseModel):
-    """Configuration for a specific profile."""
-
-    api_key: str | None = None
-    project_id: str | None = None
-    base_url: str = DEFAULT_BASE_URL
-    dg_token_expires_at: str | None = None
-
-
-class OutputConfig(BaseModel):
-    """Output formatting configuration."""
-
-    format: str = Field(default="json", pattern="^(json|yaml|table|csv)$")
-    color: bool = True
-    quiet: bool = False
-    verbose: bool = False
-
-
-class PluginConfig(BaseModel):
-    """Plugin configuration."""
-
-    enabled: list[str] = Field(default_factory=list)
-    disabled: list[str] = Field(default_factory=list)
-
-
-class UpdateConfig(BaseModel):
-    """Update configuration."""
-
-    check_enabled: bool = True
-    check_frequency: str = "daily"  # daily, weekly, never
-    last_check: str | None = None
-    installation_method: str | None = None
-    installation_path: str | None = None
-    cached_version_info: dict[str, Any] | None = None
-
-
-class ToolsConfig(BaseModel):
-    """External tools configuration."""
-
-    ffprobe_path: str | None = None
+# The settings models live in config_models (pydantic), imported on first
+# use. Their field names are listed here so the file scan can tell, without
+# them, whether merging a file's data could fail (_merge_is_safe); a unit
+# test keeps the two in step.
+_MODEL_NAMES = frozenset(
+    {
+        "ApiConfig",
+        "DeepgramConfig",
+        "OutputConfig",
+        "PluginConfig",
+        "ProfileConfig",
+        "TelemetryConfig",
+        "ToolsConfig",
+        "UpdateConfig",
+    }
+)
+_PROFILE_FIELDS = frozenset(
+    {"api_key", "project_id", "base_url", "dg_token_expires_at"}
+)
+_OUTPUT_FIELDS = ("format", "color", "quiet", "verbose")
+_SECTION_FIELDS: dict[str, frozenset[str]] = {
+    "output": frozenset(_OUTPUT_FIELDS),
+    "plugins": frozenset({"enabled", "disabled"}),
+    "update": frozenset(
+        {
+            "check_enabled",
+            "check_frequency",
+            "last_check",
+            "installation_method",
+            "installation_path",
+            "cached_version_info",
+        }
+    ),
+    "tools": frozenset({"ffprobe_path"}),
+    "telemetry": frozenset({"enabled"}),
+    "api": frozenset({"allowed_hosts"}),
+}
+_SCALAR_FIELDS = frozenset({"default_profile", "active_profile"})
 
 
-class TelemetryConfig(BaseModel):
-    """Telemetry setting, still accepted. This version sends no telemetry."""
+def _models() -> Any:
+    """``deepctl_core.config_models``, imported (with pydantic) on first use."""
+    from . import config_models
 
-    enabled: bool = True
-
-
-class ApiConfig(BaseModel):
-    """API host trust configuration. Read from the user config file only."""
-
-    allowed_hosts: list[str] = Field(default_factory=list)
+    return config_models
 
 
-class DeepgramConfig(BaseModel):
-    """Main configuration model."""
+def _yaml() -> Any:
+    """The yaml module, imported when a file is first parsed or written."""
+    import yaml
 
-    default_profile: str = "default"
-    active_profile: str | None = None  # Currently selected profile
-    profiles: dict[str, ProfileConfig] = Field(default_factory=dict)
-    output: OutputConfig = Field(default_factory=OutputConfig)
-    plugins: PluginConfig = Field(default_factory=PluginConfig)
-    update: UpdateConfig = Field(default_factory=UpdateConfig)
-    tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
-    api: ApiConfig = Field(default_factory=ApiConfig)
+    return yaml
+
+
+def _loaders() -> Any:
+    """``deepctl_core._config_loader`` (the bounded YAML loaders), imported
+    with yaml the first time a file is parsed."""
+    from . import _config_loader
+
+    return _config_loader
+
+
+class _NoYamlError(Exception):
+    """Never raised: stands in for yaml.YAMLError while yaml isn't loaded."""
+
+
+def _yaml_error() -> type[Exception]:
+    """yaml.YAMLError once yaml is imported, otherwise an exception nothing
+    raises: no YAML error can exist before yaml is. For except clauses and
+    isinstance checks, which then catch exactly what they did."""
+    yaml = sys.modules.get("yaml")
+    error = getattr(yaml, "YAMLError", None) if yaml is not None else None
+    return error if isinstance(error, type) else _NoYamlError
+
+
+def _is_parse_error(exc: BaseException) -> bool:
+    """An error reading or parsing a YAML file: OSError, ValueError or
+    yaml's own (which can only exist once yaml was imported)."""
+    return isinstance(exc, (OSError, ValueError, _yaml_error()))
+
+
+def __getattr__(name: str) -> Any:
+    # ``from deepctl_core.config import ProfileConfig`` and the ``yaml``
+    # attribute keep working without loading either at import.
+    if name in _MODEL_NAMES:
+        return getattr(_models(), name)
+    if name == "yaml":
+        return _yaml()
+    if name in ("_ConfigLoader", "_KeyWatchingLoader"):
+        return getattr(_loaders(), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _merge_is_safe(data: Any) -> bool:
+    """Whether ``Config._merge_config(data)`` is sure not to raise.
+
+    True only for a mapping whose every key is a known field with a value of
+    the shape the merge walks (a mapping where it calls ``.items()``). The
+    scan-only Config skips the merge for such data; anything else is merged
+    for real, so a file the merge can't take prints the same warning in
+    both modes.
+    """
+    if not isinstance(data, dict):
+        return False
+    for key, value in data.items():
+        if key == "profiles":
+            if not isinstance(value, dict):
+                return False
+            for profile in value.values():
+                if not isinstance(profile, dict) or not set(profile) <= _PROFILE_FIELDS:
+                    return False
+        elif key in _SECTION_FIELDS:
+            if not isinstance(value, dict) or not set(value) <= _SECTION_FIELDS[key]:
+                return False
+        elif key not in _SCALAR_FIELDS:
+            return False
+    return True
 
 
 # Notices raised while loading config are queued, because config loads
@@ -237,7 +287,16 @@ def _windows_folder(csidl: int) -> str | None:
 
 def _real_default_config_file() -> Path | None:
     """Where platformdirs puts the user config with no ``HOME`` or
-    ``XDG_CONFIG_HOME`` override: derived from the account itself."""
+    ``XDG_CONFIG_HOME`` override: derived from the account itself.
+
+    On macOS, platformdirs 4.6 and later move the config to
+    ``$XDG_CONFIG_HOME`` when that is set. Only the XDG default,
+    ``~/.config`` under the account's own home, is followed there: it is a
+    fixed path, like the Linux one, and only when the installed platformdirs
+    really puts the config there. Any other value keeps
+    ``~/Library/Application Support``, so a file somewhere else (a
+    repository, say) never counts in an agent session.
+    """
     if sys.platform == "win32":
         base = _windows_folder(0x1C)  # CSIDL_LOCAL_APPDATA
         if base is None:
@@ -246,11 +305,29 @@ def _real_default_config_file() -> Path | None:
     home = _real_home()
     if home is None:
         return None
+    xdg_default = Path(home) / ".config" / "deepctl" / "config.yaml"
     if sys.platform == "darwin":
+        xdg = os.environ.get("XDG_CONFIG_HOME", "")
+        if (
+            os.path.isabs(xdg)
+            and os.path.normpath(xdg) == os.path.join(os.path.normpath(home), ".config")
+            and _platformdirs_follows_xdg(xdg)
+        ):
+            return xdg_default
         return (
             Path(home) / "Library" / "Application Support" / "deepctl" / "config.yaml"
         )
-    return Path(home) / ".config" / "deepctl" / "config.yaml"
+    return xdg_default
+
+
+def _platformdirs_follows_xdg(xdg: str) -> bool:
+    """Whether platformdirs puts the user config under ``xdg`` (it does on
+    macOS from 4.6), so the trust root is the file dg actually reads."""
+    try:
+        used = platformdirs.user_config_dir("deepctl", "deepgram")
+    except Exception:
+        return False
+    return os.path.normpath(used) == os.path.join(os.path.normpath(xdg), "deepctl")
 
 
 def _trust_root_location() -> tuple[Path, Path] | None:
@@ -298,7 +375,7 @@ def _open_trust_root_text() -> tuple[os.stat_result, Any, str | None] | None:
     """Like _open_trust_root, also returning the text the data came from."""
     try:
         st, data, why, text = _check_trust_root()
-    except (ValueError, yaml.YAMLError, OSError, RecursionError):
+    except (ValueError, _yaml_error(), OSError, RecursionError):
         return None  # UnicodeDecodeError and ConfigTooLarge are ValueErrors
     return (st, data, text) if st is not None and why is None else None
 
@@ -647,7 +724,7 @@ def _loads_back(text: str) -> bool:
         return False
     try:
         _yaml_from_text(text)
-    except (ValueError, yaml.YAMLError):  # never echoed: no content
+    except (ValueError, _yaml_error()):  # never echoed: no content
         return False
     return True
 
@@ -676,81 +753,6 @@ _FLOAT_PATTERN = re.compile(
 _MAX_NUMBER_CHARS = 64
 
 
-class _ConfigLoader(yaml.SafeLoader):
-    """SafeLoader for config files, bounded while it loads.
-
-    - Merge keys (``<<``): every merged entry in the document counts against
-      one budget. Each merged mapping is flattened first (its own merges
-      resolved) and charged at that full size before PyYAML copies it, so
-      neither one mapping merging many aliases, nor many mappings each
-      merging one, nor merges nested inside merges can grow past the node
-      limit.
-    - Nesting and size: the composer refuses a node more than 32
-      collections deep, flow or block, before the scanner reads any deeper,
-      and stops after 10,000 nodes.
-    - Numbers: no sexagesimal forms, and at most 64 characters.
-    """
-
-    def __init__(self, stream: Any) -> None:
-        super().__init__(stream)
-        self._merged = 0
-        self._depth = 0
-        self._nodes = 0
-
-    def compose_node(self, parent: Any, index: Any) -> Any:
-        self._nodes += 1
-        if self._nodes > _MAX_CONFIG_NODES + 1:  # the root, plus the limit
-            raise ConfigTooLarge("config too large")
-        self._depth += 1
-        try:
-            # 32 nested collections, plus the scalar inside the last one.
-            if self._depth > _MAX_CONFIG_DEPTH + 1:
-                raise ConfigTooLarge("config nested too deeply")
-            return super().compose_node(parent, index)
-        finally:
-            self._depth -= 1
-
-    def flatten_mapping(self, node: yaml.MappingNode) -> None:
-        for key_node, value_node in node.value:
-            if key_node.tag != _MERGE_TAG:
-                continue
-            if isinstance(value_node, yaml.SequenceNode):
-                merged = value_node.value
-            else:
-                merged = [value_node]
-            for sub in merged:
-                if isinstance(sub, yaml.MappingNode):
-                    # Charge what will be copied: its own merges first.
-                    self.flatten_mapping(sub)
-                    self._merged += len(sub.value)
-                    if self._merged > _MAX_CONFIG_NODES:
-                        raise ConfigTooLarge("config too large")
-        super().flatten_mapping(node)  # nested merges come back through here
-
-    def construct_yaml_int(self, node: Any) -> Any:
-        if len(self.construct_scalar(node)) > _MAX_NUMBER_CHARS:
-            raise ConfigTooLarge("config number too long")
-        return super().construct_yaml_int(node)
-
-    def construct_yaml_float(self, node: Any) -> Any:
-        if len(self.construct_scalar(node)) > _MAX_NUMBER_CHARS:
-            raise ConfigTooLarge("config number too long")
-        return super().construct_yaml_float(node)
-
-
-# A copied resolver table for this loader only; yaml.SafeLoader is untouched.
-_ConfigLoader.yaml_implicit_resolvers = {
-    first: [
-        (tag, regexp) for tag, regexp in resolvers if tag not in (_INT_TAG, _FLOAT_TAG)
-    ]
-    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
-}
-_ConfigLoader.add_implicit_resolver(_INT_TAG, _INT_PATTERN, list("-+0123456789"))
-_ConfigLoader.add_implicit_resolver(_FLOAT_TAG, _FLOAT_PATTERN, list("-+0123456789."))
-_ConfigLoader.add_constructor(_INT_TAG, _ConfigLoader.construct_yaml_int)
-_ConfigLoader.add_constructor(_FLOAT_TAG, _ConfigLoader.construct_yaml_float)
-
-
 # Parses of config files, per process: dg builds several Config objects per
 # command. The file (at most 64 KiB) is read every time and the key is the
 # SHA-256 of those bytes, so a cached result always matches the content
@@ -775,7 +777,7 @@ def _parse_fd_text(f: Any) -> tuple[Any, str]:
         result: tuple[bool, Any]
         try:
             result = (True, _yaml_from_text(raw.decode("utf-8")))
-        except (ValueError, yaml.YAMLError) as exc:  # incl. ConfigTooLarge
+        except (ValueError, _yaml_error()) as exc:  # incl. ConfigTooLarge
             # without the traceback, which holds the raw text in its frames
             result = (False, exc.with_traceback(None))
         if len(_parse_cache) >= 16:
@@ -826,6 +828,14 @@ def _is_regular_fd(fd: int, st: os.stat_result | None = None) -> bool:
     return False
 
 
+# (st_dev, st_ino) of files whose shared lock stayed taken for a whole wait
+# in this process. A command reads the user config several times (load,
+# then auth and profile lookups); each later read of such a file tries the
+# lock once and gives up at once instead of waiting again, so a stuck
+# writer costs one bounded wait per run.
+_busy_files: set[tuple[int, int]] = set()
+
+
 def _flock_shared_bounded(fd: int) -> bool:
     """Take a shared flock on ``fd``, waiting about ``_LOCK_TIMEOUT`` s.
 
@@ -843,15 +853,24 @@ def _flock_shared_bounded(fd: int) -> bool:
         import fcntl
     except ImportError:
         return False
+    try:
+        st = os.fstat(fd)
+        key: tuple[int, int] | None = (st.st_dev, st.st_ino)
+    except OSError:
+        key = None
     deadline = time.monotonic() + _LOCK_TIMEOUT
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            if key is not None:
+                _busy_files.discard(key)
             return True
         except OSError as exc:
             if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
                 return False
-        if time.monotonic() >= deadline:
+        if key in _busy_files or time.monotonic() >= deadline:
+            if key is not None:
+                _busy_files.add(key)
             raise _ConfigBusy(errno.EWOULDBLOCK, _E_READ_BUSY)
         time.sleep(_LOCK_STEP / 5)
 
@@ -884,7 +903,7 @@ def _yaml_from_text(text: str, name: str = "config.yaml") -> Any:
     bounds merge keys, nesting and numbers while it loads (see
     _ConfigLoader), and the result is capped in size and depth.
     """
-    return _yaml_load(_ConfigLoader(_named_stream(text, name)))
+    return _yaml_load(_loaders()._ConfigLoader(_named_stream(text, name)))
 
 
 def _named_stream(text: str, name: str) -> io.StringIO:
@@ -906,25 +925,6 @@ def _yaml_load(loader: _ConfigLoader) -> Any:
     return data
 
 
-class _KeyWatchingLoader(_ConfigLoader):
-    """_ConfigLoader that notes a watched key repeated in one mapping."""
-
-    def __init__(self, stream: Any, watch: frozenset[str]) -> None:
-        super().__init__(stream)
-        self._watch = watch
-        self.repeated_key = False
-
-    def construct_mapping(self, node: Any, deep: bool = False) -> Any:
-        seen: set[str] = set()
-        for key_node, _ in node.value:
-            if isinstance(key_node, yaml.ScalarNode):
-                key = key_node.value
-                if key in self._watch and key in seen:
-                    self.repeated_key = True
-                seen.add(key)
-        return super().construct_mapping(node, deep=deep)
-
-
 def load_config_text(
     text: str, repeated: frozenset[str] = frozenset()
 ) -> tuple[Any, bool]:
@@ -935,7 +935,7 @@ def load_config_text(
     whether a key in ``repeated`` appears twice in one mapping. Raises
     ConfigTooLarge (a ValueError) or yaml.YAMLError, as a load does.
     """
-    loader = _KeyWatchingLoader(_named_stream(text, "config.yaml"), repeated)
+    loader = _loaders()._KeyWatchingLoader(_named_stream(text, "config.yaml"), repeated)
     return _yaml_load(loader), loader.repeated_key
 
 
@@ -979,13 +979,13 @@ def read_user_config_text(path: Path | str) -> str | None:
             return reader.text
     except FileNotFoundError:
         raise
-    except (ValueError, yaml.YAMLError, OSError, RecursionError):
+    except (ValueError, _yaml_error(), OSError, RecursionError):
         return None  # incl. a FIFO, device or directory (_NotRegularFile)
 
 
 def _load_error_summary(exc: BaseException) -> str:
     """Why a config file couldn't be loaded, without any of its content."""
-    if isinstance(exc, yaml.YAMLError):
+    if isinstance(exc, _yaml_error()):
         mark = getattr(exc, "problem_mark", None)
         if mark is not None:
             return f"invalid YAML at line {mark.line + 1}, column {mark.column + 1}"
@@ -1044,17 +1044,20 @@ def _save_refusal(st: os.stat_result | None) -> str | None:
 
 class ConfigSaveRefused(OSError):
     """An explicit save refused in an AI agent session; ``hint`` says who
-    fixes it."""
+    fixes it, ``why`` is the cause (a W_CFG_UNTRUSTED_WHY key)."""
 
     hint = msg.W_CFG_UNTRUSTED_FILE_HINT
+    why: str = ""
 
 
 def _save_refused(why: str, config_path: Path) -> ConfigSaveRefused:
-    return ConfigSaveRefused(
+    exc = ConfigSaveRefused(
         errno.EPERM,
         msg.W_CFG_SAVE_UNTRUSTED.format(why=msg.W_CFG_UNTRUSTED_WHY[why]),
         str(config_path),
     )
+    exc.why = why
+    return exc
 
 
 @contextmanager
@@ -1166,9 +1169,10 @@ def _set_path(data: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
 
 def _model_default(path: tuple[str, ...]) -> Any:
     """The built-in default for a config leaf (``profiles.<name>.*`` included)."""
+    models = _models()
     if len(path) == 3 and path[0] == "profiles":
-        return ProfileConfig().model_dump().get(path[2])
-    return _flatten(DeepgramConfig().model_dump()).get(path)
+        return models.ProfileConfig().model_dump().get(path[2])
+    return _flatten(models.DeepgramConfig().model_dump()).get(path)
 
 
 def _host_entries(hosts: Any) -> list[str]:
@@ -1243,6 +1247,8 @@ class Config:
         config_path: str | None = None,
         profile: str | None = None,
         base_url: str | None = None,
+        *,
+        scan_only: bool = False,
     ):
         """Initialize configuration manager.
 
@@ -1251,7 +1257,13 @@ class Config:
             profile: Optional profile name to use
             base_url: Optional base URL from the command line (``--base-url``).
                 It applies to this run only and is never saved.
+            scan_only: Read the files and run every trust, permission and
+                allowlist check exactly as a full load does, with the same
+                notices, but don't build the settings (no pydantic). For
+                ``--help``: such a Config has ``config_path`` and
+                ``user_config_text`` and nothing else to read.
         """
+        self._scan_only = scan_only
         self.config_path = (
             Path(config_path) if config_path else self._get_default_config_path()
         )
@@ -1264,7 +1276,6 @@ class Config:
         self._trusted_file = False
         # Set when the default file is distrusted in an AI agent session.
         self._untrusted_reason: str | None = None
-        self._config: DeepgramConfig
         # Raw user-file data: the only layer save() writes back.
         self._user_data: dict[str, Any] = {}
         # True when the user file exists but couldn't be read or parsed:
@@ -1290,6 +1301,24 @@ class Config:
         # file was absent or couldn't be read.
         self.user_config_text: str | None = None
         self._load_config()
+
+    @property
+    def _config(self) -> DeepgramConfig:
+        """The merged settings. A scan-only Config has none: reading them is
+        a programming error, never a silent default."""
+        model = self.__dict__.get("_model")
+        if model is None:
+            raise RuntimeError("a scan-only Config holds no settings")
+        return cast("DeepgramConfig", model)
+
+    @_config.setter
+    def _config(self, value: DeepgramConfig) -> None:
+        self.__dict__["_model"] = value
+
+    @property
+    def scan_only(self) -> bool:
+        """True when only the file scan ran (``scan_only=True``)."""
+        return self._scan_only
 
     @property
     def profile(self) -> str | None:
@@ -1326,7 +1355,10 @@ class Config:
         """Get the default configuration path for the current platform."""
         # Use platformdirs for cross-platform config directory
         config_dir = Path(platformdirs.user_config_dir("deepctl", "deepgram"))
-        _private_mkdir(config_dir)
+        # A home dg can't write (a read-only mount) still runs every command;
+        # a save reports the error, and dg login stops with state_unwritable.
+        with suppress(OSError):
+            _private_mkdir(config_dir)
 
         # Migrate from old location if needed
         self._migrate_config_if_needed(config_dir)
@@ -1349,15 +1381,31 @@ class Config:
             return
         # If old config exists and new doesn't, migrate it
         if old_config_path.exists() and not new_config_path.exists():
+            # Queued like every config notice: stderr, once, in the run's
+            # output mode.
+            old_shown = msg.display(str(old_config_path))
+            new_shown = msg.display(str(new_config_path))
             try:
-                print(f"Migrating config from {old_config_path} to {new_config_path}")
                 text = old_config_path.read_text(encoding="utf-8")
                 # Written like any save: 0600, atomic, never via the source's mode.
                 with _directory_lock(new_config_dir):
                     self._replace_or_rewrite(new_config_path, text)
-                print("✓ Config migrated successfully")
+                _queue_notice(
+                    "I-CFG-MIGRATED",
+                    str(new_config_path),
+                    f"Copied the config from {old_shown} to {new_shown}.",
+                    None,
+                    quiet_ok=True,
+                )
             except Exception as e:
-                print(f"Warning: Could not migrate config: {e}")
+                _queue_notice(
+                    "W-CFG-MIGRATE",
+                    str(new_config_path),
+                    f"Could not migrate config from {old_shown} to {new_shown}: "
+                    f"{msg.display(str(e))}",
+                    None,
+                    quiet_ok=False,
+                )
 
     def _get_project_config_path(self) -> Path:
         """Get the project-specific configuration path."""
@@ -1371,18 +1419,35 @@ class Config:
         finally:
             self._loading = False
         if self._load_busy:
-            # The saved settings are unknown, the telemetry opt-out included.
-            self._config.telemetry.enabled = False
+            # The saved settings are unknown, the telemetry opt-out included
+            # (a scan-only Config has no settings; user_config_refused says
+            # the same to telemetry).
+            if not self._scan_only:
+                self._config.telemetry.enabled = False
             self._trusted_file = False
+        if self._scan_only:
+            return
         # A single host written as a string is a one-item list.
         hosts = self._config.api.allowed_hosts
         if isinstance(hosts, str):
             self._config.api.allowed_hosts = [hosts]
         self._baseline = self._config.model_dump(warnings=False)
 
+    def _merge_layer(self, data: Any) -> None:
+        """Merge one file's data into the settings. A scan-only Config skips
+        the merge when it can't fail (``_merge_is_safe``) and otherwise runs
+        it, so a file the merge can't take warns exactly as in a full load."""
+        if self._scan_only and _merge_is_safe(data):
+            return
+        if "_model" not in self.__dict__:
+            self._config = _models().DeepgramConfig()
+        self._merge_config(data)
+
     def _load_layers(self) -> None:
-        # Start with default configuration
-        self._config = DeepgramConfig()
+        # Start with default configuration (a scan-only Config builds none).
+        self.__dict__.pop("_model", None)
+        if not self._scan_only:
+            self._config = _models().DeepgramConfig()
         self._key_untrusted = False
         self._key_untrusted_why: str | None = None
 
@@ -1418,7 +1483,7 @@ class Config:
                             user_config = _without_api_keys(user_config)
                         if not self._trusted_file:
                             user_config = self._filter_custom_config(user_config)
-                    self._merge_config(user_config)
+                    self._merge_layer(user_config)
                     if isinstance(user_config, dict):
                         self._note_base_url_sources(user_config, SOURCE_USER)
             except Exception as e:
@@ -1443,7 +1508,7 @@ class Config:
                     project_config = f.load()
                     if project_config:
                         allowed = self._filter_project_config(project_config)
-                        self._merge_config(allowed)
+                        self._merge_layer(allowed)
                         self._note_base_url_sources(allowed, SOURCE_PROJECT)
             except Exception as e:
                 _queue_notice(
@@ -1455,6 +1520,11 @@ class Config:
                     None,
                     quiet_ok=False,
                 )
+
+        if self._scan_only:
+            # The environment and --base-url only set values: nothing to
+            # check or report.
+            return
 
         # Override with environment variables
         self._load_env_config()
@@ -1665,7 +1735,7 @@ class Config:
         for key, value in data.items():
             key = str(key)
             if key == "output" and isinstance(value, dict):
-                fields = OutputConfig.model_fields
+                fields = _OUTPUT_FIELDS
                 kept = {k: v for k, v in value.items() if k in fields}
                 for k in value:
                     if k not in fields:
@@ -1826,11 +1896,12 @@ class Config:
 
     def _merge_config(self, config_dict: dict[str, Any]) -> None:
         """Merge configuration dictionary into current config."""
+        models = _models()
         # Deep merge configuration
         if "profiles" in config_dict:
             for profile_name, profile_config in config_dict["profiles"].items():
                 if profile_name not in self._config.profiles:
-                    self._config.profiles[profile_name] = ProfileConfig()
+                    self._config.profiles[profile_name] = models.ProfileConfig()
 
                 # Update profile config
                 for key, value in profile_config.items():
@@ -1840,7 +1911,7 @@ class Config:
         # Update other top-level config
         for key, value in config_dict.items():
             if key != "profiles" and hasattr(self._config, key):
-                if isinstance(getattr(self._config, key), BaseModel):
+                if isinstance(getattr(self._config, key), models.BaseModel):
                     # Handle nested models
                     nested_model = getattr(self._config, key)
                     for nested_key, nested_value in value.items():
@@ -1911,7 +1982,7 @@ class Config:
                 # These belong to the current profile
                 profile_name = self.profile or self._config.default_profile
                 if profile_name not in self._config.profiles:
-                    self._config.profiles[profile_name] = ProfileConfig()
+                    self._config.profiles[profile_name] = _models().ProfileConfig()
                 setattr(self._config.profiles[profile_name], path, value)
             else:
                 setattr(self._config, path, value)
@@ -1940,7 +2011,7 @@ class Config:
         profile_name = profile_name or self.profile or self._config.default_profile
 
         if profile_name not in self._config.profiles:
-            self._config.profiles[profile_name] = ProfileConfig()
+            self._config.profiles[profile_name] = _models().ProfileConfig()
 
         return self._config.profiles[profile_name]
 
@@ -2009,7 +2080,9 @@ class Config:
                 if _same_file(self.config_path, default):
                     return []
                 _, data = _read_yaml_fd(default)
-        except (OSError, yaml.YAMLError, ValueError):
+        except Exception as exc:
+            if not _is_parse_error(exc):
+                raise
             return []
         api = data.get("api") if isinstance(data, dict) else None
         return api.get("allowed_hosts") if isinstance(api, dict) else []
@@ -2131,7 +2204,9 @@ class Config:
         if why is not None:
             raise _save_refused(why, self.config_path)
         if not self._load_failed and not _loads_back(
-            yaml.safe_dump(self._user_data, default_flow_style=False, sort_keys=False)
+            _yaml().safe_dump(
+                self._user_data, default_flow_style=False, sort_keys=False
+            )
         ):
             # The file loaded, but written back it wouldn't: no save of it can
             # succeed (the same check a save makes).
@@ -2172,6 +2247,7 @@ class Config:
     def _write_user_file_locked(
         self, apply: Callable[[dict[str, Any]], None], implicit: bool
     ) -> dict[str, Any] | None:
+        yaml = _yaml()
         target = Path(os.path.realpath(self.config_path))
         _private_mkdir(target.parent)
         if _same_file(self.config_path, _default_config_file()):
@@ -2183,7 +2259,7 @@ class Config:
                 st, data = _read_for_update(target)
             except _ConfigBusy:
                 raise
-            except (OSError, ValueError, yaml.YAMLError) as exc:
+            except (OSError, ValueError, _yaml_error()) as exc:
                 data = exc
             if not isinstance(data, dict):
                 if implicit:
@@ -2212,6 +2288,8 @@ class Config:
         return data
 
     def _replace_or_rewrite(self, target: Path, text: str) -> None:
+        import secrets
+
         tmp = target.with_name(f".{target.name}.{secrets.token_hex(6)}.tmp")
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY, 0o600)
@@ -2254,7 +2332,9 @@ class Config:
         kwargs.pop("base_url", None)
         existing = self._config.profiles.get(name)
         base_url = existing.base_url if existing is not None else DEFAULT_BASE_URL
-        self._config.profiles[name] = ProfileConfig(base_url=base_url, **kwargs)
+        self._config.profiles[name] = _models().ProfileConfig(
+            base_url=base_url, **kwargs
+        )
         for key in kwargs:
             self._explicit.add(("profiles", name, key))
         self.save()

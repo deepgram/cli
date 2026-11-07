@@ -1,6 +1,8 @@
 """Tests for API command."""
 
 import json
+import os
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
@@ -93,9 +95,22 @@ class TestApiCommand:
         assert headers["Accept"] == "text/plain"
 
     def test_build_headers_no_custom(self, command):
-        """Test header building with only auth."""
+        """With a key: the transport's request headers (identification,
+        session ID, auth), as every other API request sends."""
+        from deepctl_core import transport
+
         headers = command._build_headers("test-key", None)
-        assert headers == {"Authorization": "Token test-key"}
+        assert headers == transport.request_headers("test-key")
+        assert headers["Authorization"] == "Token test-key"
+
+    def test_build_headers_without_a_key_has_no_session_id(self, command):
+        """No key (a host that doesn't get it): nothing from the builder."""
+        assert command._build_headers(None, ["X-A: 1"]) == {"X-A": "1"}
+
+    def test_custom_header_replaces_one_in_any_case(self, command):
+        headers = command._build_headers("test-key", ["user-agent: mine"])
+        assert [k for k in headers if k.lower() == "user-agent"] == ["user-agent"]
+        assert headers["user-agent"] == "mine"
 
     def test_build_body_from_fields(self, command):
         """Test body building from field arguments."""
@@ -175,7 +190,7 @@ class TestApiCommand:
         with pytest.raises(RuntimeError, match="jq error"):
             command._apply_jq_filter("{}", "invalid[")
 
-    @patch("httpx.Client")
+    @patch("deepctl_core.transport.shared_client")
     def test_handle_success(
         self, mock_client_class, command, mock_config, mock_auth_manager, mock_client
     ):
@@ -187,8 +202,6 @@ class TestApiCommand:
         mock_response.elapsed.total_seconds.return_value = 0.150
 
         mock_http = Mock()
-        mock_http.__enter__ = Mock(return_value=mock_http)
-        mock_http.__exit__ = Mock(return_value=False)
         mock_http.request.return_value = mock_response
         mock_client_class.return_value = mock_http
 
@@ -206,7 +219,7 @@ class TestApiCommand:
         assert result.url == f"{DEFAULT_BASE_URL}/v1/projects"
         assert result.response_body == {"projects": []}
 
-    @patch("httpx.Client")
+    @patch("deepctl_core.transport.shared_client")
     def test_handle_error_response(
         self, mock_client_class, command, mock_config, mock_auth_manager, mock_client
     ):
@@ -218,8 +231,6 @@ class TestApiCommand:
         mock_response.elapsed.total_seconds.return_value = 0.050
 
         mock_http = Mock()
-        mock_http.__enter__ = Mock(return_value=mock_http)
-        mock_http.__exit__ = Mock(return_value=False)
         mock_http.request.return_value = mock_response
         mock_client_class.return_value = mock_http
 
@@ -234,14 +245,12 @@ class TestApiCommand:
         assert result.status == "error"
         assert result.status_code == 404
 
-    @patch("httpx.Client")
+    @patch("deepctl_core.transport.shared_client")
     def test_handle_request_error(
         self, mock_client_class, command, mock_config, mock_auth_manager, mock_client
     ):
         """Test handling of request errors."""
         mock_http = Mock()
-        mock_http.__enter__ = Mock(return_value=mock_http)
-        mock_http.__exit__ = Mock(return_value=False)
         mock_http.request.side_effect = httpx.ConnectError("Connection refused")
         mock_client_class.return_value = mock_http
 
@@ -275,7 +284,7 @@ class TestApiCommand:
         assert result.status == "error"
         assert "No API key found" in result.message
 
-    @patch("httpx.Client")
+    @patch("deepctl_core.transport.shared_client")
     def test_handle_post_with_fields(
         self, mock_client_class, command, mock_config, mock_auth_manager, mock_client
     ):
@@ -287,8 +296,6 @@ class TestApiCommand:
         mock_response.elapsed.total_seconds.return_value = 0.200
 
         mock_http = Mock()
-        mock_http.__enter__ = Mock(return_value=mock_http)
-        mock_http.__exit__ = Mock(return_value=False)
         mock_http.request.return_value = mock_response
         mock_client_class.return_value = mock_http
 
@@ -357,3 +364,52 @@ class TestApiResult:
         data = result.model_dump()
         assert data["method"] == "POST"
         assert data["status_code"] == 201
+
+
+@pytest.mark.parametrize(
+    ("insecure", "host", "agent", "hinted"),
+    [
+        ("1", "127.0.0.1", False, True),
+        ("true", "localhost", False, True),
+        ("1", "127.0.0.1", True, False),
+        ("0", "127.0.0.1", False, False),
+        ("1", "api.eu.deepgram.com", False, False),
+    ],
+)
+def test_insecure_hint_on_loopback_tls_failure(monkeypatch, capsys, insecure, host, agent, hinted):
+    """dg api always verifies TLS; say so when DEEPGRAM_CLI_INSECURE was set."""
+    from deepctl_core import output
+
+    base = f"https://{host}:8443" if host != "api.eu.deepgram.com" else f"https://{host}"
+    auth = Mock(spec=AuthManager)
+    auth.get_api_key.return_value = "test-api-key"
+    auth.check_base_url.return_value = base
+    config = Mock(spec=Config)
+    config.allowed_hosts.return_value = [f"{host}:8443"]
+    monkeypatch.setenv("DEEPGRAM_CLI_INSECURE", insecure)
+    monkeypatch.setattr(output, "is_ai_agent", lambda: agent)
+    monkeypatch.setattr(output.stderr_console, "_width", 400)
+    failing = Mock()
+    failing.request.side_effect = httpx.ConnectError(
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed"
+    )
+    monkeypatch.setattr("deepctl_core.transport.verified_client", lambda: failing)
+    result = ApiCommand().handle(config, auth, Mock(), endpoint="/v1/projects")
+    assert result.status == "error"
+    err = capsys.readouterr().err
+    assert ("DEEPGRAM_CLI_INSECURE doesn't apply to dg api," in err) is hinted
+
+
+@pytest.mark.skipif(
+    not os.environ.get("DG_ERROR_CODES_JSON"),
+    reason="DG_ERROR_CODES_JSON names no error catalogue file",
+)
+def test_insecure_hint_matches_catalogue():
+
+    from deepctl_cmd_api import messages
+
+    catalogue = json.loads(Path(os.environ["DG_ERROR_CODES_JSON"]).read_text())
+    assert (
+        catalogue["strings"]["H-API-INSECURE-IGNORED"]
+        == messages.H_API_INSECURE_IGNORED
+    )

@@ -164,3 +164,8 @@ tmp_community-turbo/
 tmp_deepgram-cli/
 # Local Netlify folder
 .netlify
+
+# The command manifest, assembled at build time from src/deepctl/_manifest.d/
+src/deepctl/_manifest.json
+# Help specs, copied from the fragments at build time
+src/deepctl/_help/

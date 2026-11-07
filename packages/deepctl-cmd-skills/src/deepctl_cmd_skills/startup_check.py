@@ -1,7 +1,11 @@
 """First-run prompt to nudge users to set up AI assistant skills.
 
-Checks for installed AI coding CLIs and prints a one-line notification
-to stderr. Shows only once (uses a cache file to track).
+Checks for installed AI coding CLIs in a daemon thread and prints a
+one-line notification to stderr after the command, only if the thread has
+already finished; dg never waits for it. Shows only once (a cache file
+records that it was shown), and only to a person at a terminal: never in
+CI, an AI agent session, under ``dg mcp``, with ``DEEPCTL_NO_UPDATE_CHECK``
+set, or when stderr isn't a terminal.
 """
 
 from __future__ import annotations
@@ -41,13 +45,44 @@ def _is_oneshot() -> bool:
     return bool(exe_path.startswith(pipx_cache))
 
 
+def _stderr_is_terminal() -> bool:
+    try:
+        return bool(sys.stderr is not None and sys.stderr.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def _is_agent() -> bool:
+    try:
+        from deepctl_core.output import is_agentic, is_ai_agent
+    except ImportError:
+        return False
+    return is_agentic() or is_ai_agent()
+
+
+def _opted_out() -> bool:
+    """``DEEPCTL_NO_UPDATE_CHECK`` turns off every startup check."""
+    value = os.environ.get("DEEPCTL_NO_UPDATE_CHECK", "").strip().lower()
+    return value not in ("", "0", "false", "no")
+
+
+def _is_mcp() -> bool:
+    """This run is ``dg mcp`` (root options before it allowed)."""
+    try:
+        from deepctl_cmd_update.startup_check import _subcommand
+    except ImportError:
+        args = [a for a in sys.argv[1:] if not a.startswith("-")]
+        return bool(args) and args[0] == "mcp"
+    return _subcommand() == "mcp"
+
+
 def _already_prompted() -> bool:
     return _CACHE_FILE.exists()
 
 
 def _mark_prompted() -> None:
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _CACHE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
         _CACHE_FILE.write_text("1")
     except OSError:
         pass
@@ -66,7 +101,6 @@ def _background_detect(result: dict[str, bool]) -> None:
         detected = detect_ai_clis()
         if detected:
             result["should_prompt"] = True
-            _mark_prompted()
     except Exception:
         pass
 
@@ -83,36 +117,56 @@ def check_and_notify(quiet: bool = False) -> None:
     after CLI execution to display the result.
     """
     global _thread, _result
+    _thread = None
     _result = {}
 
-    if quiet or _is_ci() or _is_oneshot() or _already_prompted():
+    if (
+        quiet
+        or _opted_out()
+        or _is_ci()
+        or not _stderr_is_terminal()
+        or _is_agent()
+        or _is_oneshot()
+        or _is_mcp()
+        or _already_prompted()
+    ):
         return
 
     _thread = threading.Thread(
         target=_background_detect,
         args=(_result,),
+        name="deepctl-skills-check",
         daemon=True,
     )
     _thread.start()
 
 
 def print_pending_notification() -> None:
-    """Print the skills prompt if AI CLIs were detected."""
+    """Print the skills prompt if the check already found AI CLIs.
+
+    Never waits: a check that is still running is dropped, and the prompt
+    is recorded as shown only once it is printed.
+    """
     global _thread
 
-    if _thread is None:
+    thread, _thread = _thread, None
+    if thread is None or thread.is_alive():
         return
 
-    _thread.join(timeout=2.0)
-    _thread = None
+    from deepctl_core.output import invoked_prog, stderr_color
 
     if _result.get("should_prompt"):
         try:
-            sys.stderr.write(
-                "\033[36mAI coding assistants detected. "
-                "Run 'deepctl skills install' to set up integration.\033[0m\n"
+            line = (
+                "Found AI coding agents on this computer. "
+                f"Run {invoked_prog()} skills install to add Deepgram skills "
+                "to them."
             )
+            if stderr_color():
+                line = f"\033[36m{line}\033[0m"
+            sys.stderr.write(line + "\n")
         except (BrokenPipeError, OSError, ValueError):
             # The output stream closed (e.g. an MCP host disconnected stdio
             # after `dg mcp` finished). The prompt is purely advisory.
-            pass
+            return
+        _mark_prompted()

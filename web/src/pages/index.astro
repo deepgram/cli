@@ -168,7 +168,7 @@ const commandCards: CommandCard[] = [
   // ── MCP & agents ────────────────────────────────────────────────────────
   { cmd: 'mcp', icon: 'bolt', color: 'brand',
     title: 'Run as MCP server',
-    desc: 'Give Claude, Cursor and other MCP clients Deepgram documentation search.',
+    desc: 'Let Claude, Cursor, and other MCP clients search Deepgram’s docs.',
     lines: ['dg mcp'] },
   { cmd: 'skills', icon: 'robot', color: 'brand',
     title: 'Regenerate AI skill files',
@@ -1064,8 +1064,7 @@ const commandCards: CommandCard[] = [
     // ── MCP server for AI editors ─────────────────
     [
       { p: '❯ ', t: 'claude mcp add deepgram -- dg mcp', c: '' },
-      { p: '',   t: 'Added stdio MCP server deepgram with command: dg mcp', c: '#13ef95' },
-      { p: '',   t: '  Your editor starts dg mcp over stdio', c: '#949498' },
+      { p: '',   t: '# stdio server: Claude Code can now search Deepgram’s docs', c: '#949498' },
       { p: '',   t: '', c: '' },
     ],
   ];

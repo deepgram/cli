@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-telemetry"
-version = "0.0.7" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "Error reporting for deepctl; this version sends no telemetry"
 readme = "README.md"
 license = "MIT"
@@ -21,10 +21,11 @@ classifiers = [
 keywords = ["deepgram", "cli", "telemetry", "sentry"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.3.0",
+    "deepctl==0.4.1", # x-release-please-version
+    "deepctl-core==0.4.1", # x-release-please-version
     "sentry-sdk>=2.35.0,<3",
-    "click>=8.0.0",
-    "rich>=13.0.0",
+    "click>=8.2.0,<9",
+    "rich>=13.0.0,<16",
 ]
 
 [tool.setuptools]
@@ -36,3 +37,4 @@ include = ["deepctl_telemetry*"]
 
 [tool.uv.sources]
 deepctl-core = { workspace = true }
+deepctl = { workspace = true }

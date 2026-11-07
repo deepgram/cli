@@ -1,9 +1,10 @@
 """Tests for the DeepgramClient class."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, mock_open, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from deepctl_core import transport
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
@@ -71,10 +72,13 @@ class TestDeepgramClient:
         # Verify auth guard was called
         mock_auth_manager.guard.assert_called_once()
 
-        # Verify DGClient was created with keyword args, without redirects
+        # Verify DGClient was created with keyword args, on the shared
+        # client, which follows no redirects
         assert mock_dg_client.called
         assert mock_dg_client.call_args.kwargs["api_key"] == "sk-test"
-        assert mock_dg_client.call_args.kwargs["follow_redirects"] is False
+        http = mock_dg_client.call_args.kwargs["httpx_client"]
+        assert http is transport.shared_client()
+        assert http.follow_redirects is False
 
         # Verify client is cached
         assert client._client == mock_instance
@@ -128,8 +132,9 @@ class TestDeepgramClient:
         # Verify DGClient was created with environment kwarg
         mock_dg_client.assert_called_once_with(
             api_key="sk-test",
+            httpx_client=transport.shared_client(),
+            session_id=transport.session_id(),
             environment=mock_env.return_value,
-            follow_redirects=False,
         )
 
     @patch("deepctl_core.client.DGClient")
@@ -174,12 +179,10 @@ class TestDeepgramClient:
             client._create_client()
 
     @patch("deepctl_core.client.DGClient")
-    @patch("deepctl_core.client.Path.exists")
-    @patch("builtins.open", new_callable=mock_open, read_data=b"audio data")
-    def test_transcribe_file(self, mock_file, mock_exists, mock_dg_client, client):
+    def test_transcribe_file(self, mock_dg_client, client, tmp_path):
         """Test transcribing a file."""
-        # Setup mocks
-        mock_exists.return_value = True
+        audio = tmp_path / "test.mp3"
+        audio.write_bytes(b"audio data")
         mock_instance = Mock()
         mock_media = Mock()
         mock_data = {"transcript": "Hello world"}
@@ -189,13 +192,18 @@ class TestDeepgramClient:
 
         # Test transcription
         result = client.transcribe_file(
-            "/audio/test.mp3", options={"model": "nova-2", "language": "en"}
+            audio, options={"model": "nova-2", "language": "en"}
         )
 
         assert result == {"transcript": "Hello world"}
 
-        # Verify transcribe_file was called
+        # Verify transcribe_file was called with a streamed body
         mock_media.transcribe_file.assert_called_once()
+        kwargs = mock_media.transcribe_file.call_args.kwargs
+        assert kwargs["request_options"] == {
+            "additional_headers": {"Content-Length": "10"}
+        }
+        assert kwargs["model"] == "nova-2"
 
     @patch("deepctl_core.client.DGClient")
     def test_transcribe_url(self, mock_dg_client, client):

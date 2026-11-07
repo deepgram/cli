@@ -48,9 +48,13 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.delenv(skill_bundle.REF_ENV_VAR, raising=False)
     for con in (output.console, output.stderr_console, login_module.console):
+        # Both: rich uses 80x25 on TERM=dumb unless the size is fully set.
         monkeypatch.setattr(con, "_width", 400)
+        monkeypatch.setattr(con, "_height", 25)
     saved = dict(output._output_config)
     output._output_config.update(agentic=True, format="default", quiet=False)
+    # The mock config has no real file: nothing for login's pre-flight to check.
+    monkeypatch.setattr(login_module, "_preflight", lambda config: None)
     yield use_home(monkeypatch, tmp_path / "home")
     output._output_config.clear()
     output._output_config.update(saved)
@@ -182,9 +186,15 @@ def mock_client():
 
 
 @pytest.fixture
-def login_command():
-    """Create a login command instance."""
-    return LoginCommand()
+def login_command(monkeypatch):
+    """A login command run by a person in a terminal (its prompts can show,
+    and the browser login waits), with nothing on disk to check."""
+    cmd = LoginCommand()
+    cmd._can_ask = lambda: True  # type: ignore[method-assign]
+    cmd._pending_mode = lambda **kw: False  # type: ignore[method-assign]
+    monkeypatch.setattr(login_module, "_preflight", lambda config: None)
+    monkeypatch.setitem(output._output_config, "agentic", False)
+    return cmd
 
 
 class TestLoginCommand:
@@ -544,16 +554,18 @@ class TestWhoamiKeySource:
         return WhoamiCommand()
 
     def _run(self, whoami_command, mock_config, mock_client, env, profile_key):
-        auth_manager = Mock(spec=AuthManager)
-        auth_manager.get_project_id.return_value = "proj-1"
-        auth_manager.has_profile_credentials.return_value = (bool(profile_key), False)
-        auth_manager.is_authenticated.return_value = bool(profile_key or env)
+        # Whoami takes the key and its source from the resolver, so
+        # this runs the real AuthManager over the mocked config and keyring.
         mock_config.get_profile.return_value.api_key = profile_key
+        mock_config.get_profile.return_value.project_id = "proj-1"
         mock_config.get_profile.return_value.dg_token_expires_at = None
+        keyring = Mock()
+        keyring.get_password.return_value = None
         with (
             patch.dict("os.environ", env, clear=False),
-            patch("keyring.get_password", return_value=None),
+            patch("deepctl_core.auth.keyring", keyring, create=True),
         ):
+            auth_manager = AuthManager(mock_config)
             if "DEEPGRAM_API_KEY" not in env:
                 import os
 
@@ -691,6 +703,7 @@ class TestLoginSkillsThroughSharedInstaller:
         monkeypatch.setitem(output._output_config, "agentic", True)
         for con in (output.console, output.stderr_console, login_module.console):
             monkeypatch.setattr(con, "_width", 400)
+            monkeypatch.setattr(con, "_height", 25)
         use_home(monkeypatch, tmp_path / "[dim]home")
         detect("claude")
         out, err, _ = run_skills_step(monkeypatch, capsys)

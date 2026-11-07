@@ -1,6 +1,6 @@
 """Base class for group commands that can contain subcommands."""
 
-from typing import Any
+from typing import Any, cast
 
 import click
 
@@ -14,6 +14,34 @@ from .output import stderr_console
 # it goes to stderr and can never corrupt the machine-readable payload a
 # command writes to stdout. See get_status_console() in output.py.
 console = stderr_console
+
+
+class _LazyClient:
+    """A :class:`DeepgramClient` built on first use.
+
+    A group's callback runs before its subcommand parses ``--help``, so
+    ``dg debug <sub> --help`` must not load the SDK (and with it httpx and
+    ssl) just to hand the group a client it rarely uses.
+    """
+
+    __slots__ = ("_args", "_client")
+
+    def __init__(self, config: Config, auth_manager: AuthManager) -> None:
+        object.__setattr__(self, "_args", (config, auth_manager))
+        object.__setattr__(self, "_client", None)
+
+    def _real(self) -> DeepgramClient:
+        client = object.__getattribute__(self, "_client")
+        if client is None:
+            client = DeepgramClient(*object.__getattribute__(self, "_args"))
+            object.__setattr__(self, "_client", client)
+        return cast("DeepgramClient", client)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._real(), name, value)
 
 
 class BaseGroupCommand(BaseCommand):
@@ -43,6 +71,10 @@ class BaseGroupCommand(BaseCommand):
         # Only set if not already defined at class level
         if not hasattr(self, "invoke_without_command"):
             self.invoke_without_command = False
+
+    def _make_client(self, config: Config, auth_manager: AuthManager) -> Any:
+        """A client built only if the group's handler uses it."""
+        return _LazyClient(config, auth_manager)
 
     def add_subcommand(self, name: str, command_class: type[BaseCommand]) -> None:
         """Add a subcommand to this group.
@@ -166,6 +198,7 @@ class BaseGroupCommand(BaseCommand):
                         required=arg.get("required", False),
                         is_flag=arg.get("is_flag", False),
                         multiple=arg.get("multiple", False),
+                        **({"metavar": arg["metavar"]} if "metavar" in arg else {}),
                     )(group)
                 else:
                     group = click.argument(
@@ -191,6 +224,17 @@ class BaseGroupCommand(BaseCommand):
         def group_callback(**kwargs: Any) -> Any:
             # Pass CLI context and arguments to the command
             ctx = click.get_current_context()
+            obj = ctx.find_root().obj
+            if (
+                ctx.invoked_subcommand is not None
+                and isinstance(obj, dict)
+                and obj.get("help_without_config")
+            ):
+                # A --help run with no readable config (an unreadable HOME):
+                # Click calls the group before its subcommand parses --help,
+                # and building a Config here would fail the help. The
+                # subcommand shows its help, or fails on its own Config.
+                return None
             return self.execute(ctx, **kwargs)
 
         # Set function name and docstring

@@ -3,23 +3,61 @@
 import os
 import time
 import webbrowser
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from typing import TYPE_CHECKING, Any, TypeVar, cast
+from urllib.parse import urlsplit
 
-import httpx
-import keyring
-from keyring.errors import PasswordDeleteError
-from pydantic import BaseModel
-from rich.markup import escape
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from pydantic import BaseModel, field_validator
 
-from . import hosts, output
+from . import credentials, hosts, output, transport
 from . import messages as msg
 from .client import _split_base_url
 from .config import Config
 from .hosts import check_credential_host, check_identity_host
+from .login_state import MIN_POLL_INTERVAL
 from .models import ProfileInfo, ProfilesResult
 from .output import stderr_console
+
+if TYPE_CHECKING:
+    # Bound at run time by _load_modules() below, not by these imports.
+    import httpx  # noqa: TC004
+    import keyring  # noqa: TC004
+
+# httpx and keyring load when they're first used, not when this module is
+# imported (every command module imports it) or an AuthManager is built
+# (every command builds one). __getattr__ binds them as module globals on
+# first access, so `deepctl_core.auth.keyring` is the real module and tests
+# can patch it as before. The keyring is read through
+# deepctl_core.credentials, which bounds the read off a terminal.
+_LAZY_MODULES = ("httpx", "keyring")
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _bind_module(name: str) -> Any:
+    import importlib
+
+    module = importlib.import_module(name)
+    globals()[name] = module
+    return module
+
+
+# Only at run time: type checkers see the TYPE_CHECKING imports above.
+if not TYPE_CHECKING:
+
+    def __getattr__(name: str) -> Any:
+        if name not in _LAZY_MODULES:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        return _bind_module(name)
+
+
+def _load_modules(*names: str) -> None:
+    for name in names or _LAZY_MODULES:
+        if name not in globals():
+            _bind_module(name)
+
 
 # Diagnostics only: everything printed here is status or error chrome, so
 # it goes to stderr and can never corrupt the machine-readable payload a
@@ -35,6 +73,21 @@ CLIENT_ID = "deepgram-cli"
 # Keyring service identifier using reverse domain notation
 KEYRING_SERVICE = "com.deepgram.dx.deepctl"
 
+# Sent where the identity provider asks for a device name: a fixed value,
+# never this machine's hostname.
+DEVICE_NAME = "deepctl"
+DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+
+
+def _https_or_loopback(url: str | None) -> str | None:
+    """``url`` when it is https, or http to a loopback host; else ValueError."""
+    if url is None:
+        return None
+    origin = hosts.parse_origin(url)
+    if origin is None or not (origin.secure or hosts.is_loopback(origin.host)):
+        raise ValueError("the login link must use https")
+    return url
+
 
 class DeviceCodeResponse(BaseModel):
     """Response from device code request."""
@@ -44,16 +97,45 @@ class DeviceCodeResponse(BaseModel):
     verification_uri: str
     verification_uri_complete: str | None = None
     expires_in: int
-    interval: int
+    interval: int = 5
+
+    _check_uris = field_validator("verification_uri", "verification_uri_complete")(
+        _https_or_loopback
+    )
 
 
 class TokenResponse(BaseModel):
-    """Response from token request."""
+    """Response from token request (``pid`` is the RFC 8628 path's name for
+    the project ID)."""
 
     access_token: str
-    project_id: str
+    project_id: str | None = None
+    pid: str | None = None
     dg_token: str | None = None
     dg_expires_in: int | None = None
+
+
+@dataclass(frozen=True)
+class DevicePoll:
+    """One answer from the token endpoint.
+
+    ``state`` is ``token`` (``token`` is set), ``pending``, ``slow_down``,
+    ``denied``, ``expired`` or ``error`` (``detail`` says why).
+    """
+
+    state: str
+    token: TokenResponse | None = None
+    detail: str = ""
+    retry_after: int | None = None
+
+
+def _retry_after(response: "httpx.Response") -> int | None:
+    """The server's Retry-After in whole seconds (delta form only), or None."""
+    value = response.headers.get("Retry-After")
+    if not isinstance(value, str) or not value.strip().isdigit():
+        return None
+    value = value.strip()
+    return min(int(value), 3600)
 
 
 def _insecure_allowed() -> bool:
@@ -78,13 +160,14 @@ def _insecure_allowed() -> bool:
 _INSECURE_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
-def _insecure_mounts() -> dict[str, httpx.BaseTransport]:
+def _insecure_mounts() -> "dict[str, httpx.BaseTransport]":
     """Unverified transports for the loopback hosts only.
 
     Host-specific mounts take precedence over the scheme-wide proxy mounts
     httpx builds from HTTPS_PROXY/ALL_PROXY/NO_PROXY, so every other host
     keeps both certificate verification and the proxy settings.
     """
+    _load_modules("httpx")
     unverified = httpx.HTTPTransport(verify=False)
     return {
         f"all://{'[::1]' if host == '::1' else host}": unverified
@@ -92,8 +175,10 @@ def _insecure_mounts() -> dict[str, httpx.BaseTransport]:
     }
 
 
-def _warn_if_verified(request: httpx.Request) -> None:
+def _warn_if_verified(request: "httpx.Request") -> None:
     """Say once per host that DEEPGRAM_CLI_INSECURE did not apply to it."""
+    from rich.markup import escape
+
     host = request.url.host
     if host in _INSECURE_HOSTS:
         return
@@ -104,10 +189,74 @@ def _warn_if_verified(request: httpx.Request) -> None:
         output.print_hint(escape(msg.W_INSECURE_REMOTE_HINT))
 
 
+def escape(text: str) -> str:
+    """rich.markup.escape, imported on first use (no rich at import)."""
+    from rich.markup import escape as rich_escape
+
+    return rich_escape(text)
+
+
 class AuthenticationError(Exception):
     """Authentication related errors."""
 
     pass
+
+
+class DeviceCodeUnreadable(AuthenticationError):
+    """The device-code answer from ``host`` couldn't be read (not a JSON
+    object with the expected fields): ``network_unavailable``."""
+
+    def __init__(self, host: str) -> None:
+        super().__init__(f"unreadable device code response from {host}")
+        self.host = host
+
+
+def _forgets_resolved(method: _F) -> _F:
+    """Forget cached credential answers once ``method`` has written the keyring
+    or a profile (also when it fails part-way), so later questions see the
+    new state."""
+    import functools
+
+    @functools.wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._forget_resolved()
+
+    return cast("_F", wrapper)
+
+
+class AuthRequiredError(transport.TransportError, AuthenticationError):
+    """``auth_required``: no API key is set (``E-AUTH-REQUIRED``), or the only
+    one was in a user config file this AI agent session doesn't trust
+    (``E-KEY-UNTRUSTED``).
+
+    A :class:`~deepctl_core.transport.TransportError`, so ``BaseCommand``
+    renders the coded result, and an :class:`AuthenticationError`, so code
+    that caught ``guard()``'s error before 0.5.0 still does.
+    """
+
+    def __init__(self, untrusted_source: str | None = None) -> None:
+        if untrusted_source is None:
+            super().__init__("auth_required", {}, {})
+        else:
+            super().__init__(
+                "auth_required",
+                {"user_config": untrusted_source},
+                {},
+                transport.KEY_UNTRUSTED,
+            )
+
+
+class _NoFlags:
+    """A credentials context without ``--api-key`` and ``--project-id``."""
+
+    explicit_api_key = None
+    explicit_project_id = None
+
+    def __init__(self, config: Config) -> None:
+        self.config = config
 
 
 class AuthManager:
@@ -129,19 +278,100 @@ class AuthManager:
         self.config = config
         self.explicit_api_key = explicit_api_key
         self.explicit_project_id = explicit_project_id
-        # DEEPGRAM_CLI_INSECURE=1 skips TLS verification for localhost,
-        # 127.0.0.1 and [::1] (local dev), never for any other host and never
-        # in an AI agent session: the agent may have set it. Proxy settings
-        # from the environment still apply to every other host.
-        if _insecure_allowed():
-            self.client = httpx.Client(
-                timeout=30.0,
-                verify=True,
-                mounts=_insecure_mounts(),
-                event_hooks={"request": [_warn_if_verified]},
+        # One credential resolution per question set (deepctl_core.credentials);
+        # forgotten whenever this manager writes the keyring or a profile.
+        self._resolved: dict[tuple[Any, ...], credentials.Resolved] = {}
+        # Keyring entries this manager already removed (expired credentials).
+        self._pruned: set[str] = set()
+        self._client: httpx.Client | None = None
+
+    @property
+    def client(self) -> "httpx.Client":
+        """The HTTP client for login's device flow and key verification.
+
+        Built on first use, so no other command makes a second client; API
+        requests use the shared one (``deepctl_core.transport``).
+        """
+        if self._client is None:
+            _load_modules("httpx")
+            # DEEPGRAM_CLI_INSECURE=1 skips TLS verification for localhost,
+            # 127.0.0.1 and [::1] (local dev), never for any other host and
+            # never in an AI agent session: the agent may have set it. Proxy
+            # settings from the environment still apply to every other host.
+            if _insecure_allowed():
+                self._client = httpx.Client(
+                    timeout=30.0,
+                    verify=True,
+                    mounts=_insecure_mounts(),
+                    event_hooks={"request": [_warn_if_verified]},
+                )
+            else:
+                self._client = httpx.Client(timeout=30.0, verify=True)
+        return self._client
+
+    @client.setter
+    def client(self, value: "httpx.Client | None") -> None:
+        self._client = value
+
+    @client.deleter
+    def client(self) -> None:
+        self._client = None
+
+    def resolve(
+        self,
+        *,
+        profile: str | None = None,
+        ignore_env: bool = False,
+        need_key: bool = True,
+        use_flags: bool = True,
+        prune: bool = True,
+    ) -> credentials.Resolved:
+        """This run's credentials and their sources (``credentials.resolve``).
+
+        ``use_flags=False`` answers as if no ``--api-key`` or
+        ``--project-id`` had been given (the stored-profile questions).
+        ``prune=False`` keeps it read-only (introspection: whoami, login's
+        checks); answers are cached either way, so one run resolves once.
+        """
+        ctx: Any = self if use_flags else _NoFlags(self.config)
+        name = profile or credentials.profile_name(self.config)[0]
+        stored = self.config.get_profile(name)
+        state = (
+            name,
+            ignore_env,
+            ctx.explicit_api_key,
+            ctx.explicit_project_id,
+            stored.api_key,
+            stored.project_id,
+            stored.dg_token_expires_at,
+        )
+        # A full answer also answers the project-only question.
+        found = self._resolved.get((True, *state))
+        if found is None and not need_key:
+            found = self._resolved.get((False, *state))
+        if found is None:
+            found = credentials.resolve(
+                ctx,
+                profile=profile,
+                ignore_env=ignore_env,
+                need_key=need_key,
+                prune=False,
             )
-        else:
-            self.client = httpx.Client(timeout=30.0, verify=True)
+            self._resolved[(need_key, *state)] = found
+        # Project-only questions (need_key=False) never touch the keyring.
+        if (
+            prune
+            and need_key
+            and found.prune_target
+            and found.prune_target not in self._pruned
+        ):
+            self._pruned.add(found.prune_target)
+            credentials.prune_expired(found)
+        return found
+
+    def _forget_resolved(self) -> None:
+        self._resolved.clear()
+        self._pruned.clear()
 
     def check_base_url(self) -> str:
         """Return the base URL credentials may be sent to.
@@ -157,8 +387,8 @@ class AuthManager:
         Returns:
             Tuple of (has_api_key, has_project_id)
         """
-        return bool(os.getenv("DEEPGRAM_API_KEY")), bool(
-            os.getenv("DEEPGRAM_PROJECT_ID")
+        return bool(credentials.env_value("DEEPGRAM_API_KEY")), bool(
+            credentials.env_value("DEEPGRAM_PROJECT_ID")
         )
 
     def has_profile_credentials(
@@ -166,35 +396,17 @@ class AuthManager:
     ) -> tuple[bool, bool]:
         """Check if profile has stored credentials.
 
+        As in 0.4.1, a profile key is a usable keyring entry or a key in the
+        profile as the config holds it (which includes ``DEEPGRAM_API_KEY``).
+
         Args:
             profile_name: Profile to check (uses current profile if not specified)
 
         Returns:
             Tuple of (has_api_key, has_project_id)
         """
-        profile_name = profile_name or self.config.profile or "default"
-
-        # Check keyring for a direct API key.
-        has_api_key = False
-        expired, _ = self._credential_expiry(profile_name)
-        if not expired:
-            try:
-                has_api_key = bool(
-                    keyring.get_password(KEYRING_SERVICE, f"api-key.{profile_name}")
-                )
-            except Exception:
-                pass
-
-            # If not in keyring, check config.
-            if not has_api_key:
-                profile = self.config.get_profile(profile_name)
-                has_api_key = bool(profile.api_key)
-
-        # Check for project ID in profile
-        profile = self.config.get_profile(profile_name)
-        has_project_id = bool(profile.project_id)
-
-        return has_api_key, has_project_id
+        resolved = self.resolve(profile=profile_name, use_flags=False, prune=False)
+        return resolved.profile_has_key, resolved.profile_has_project
 
     def is_authenticated(self, check_profile_only: bool = False) -> bool:
         """Check if user is authenticated.
@@ -202,24 +414,23 @@ class AuthManager:
         Args:
             check_profile_only: If True, only check profile credentials, not env vars
         """
-        # Check explicit credentials first (highest priority)
         if self.explicit_api_key:
             return True
-
-        # Check profile credentials
-        profile_name = self.config.profile or "default"
-        has_profile_key, _ = self.has_profile_credentials(profile_name)
-        if has_profile_key:
+        resolved = self.resolve(use_flags=False, prune=False)
+        if resolved.profile_has_key:
             return True
-
-        # Check environment variables (unless checking profile only)
-        return not check_profile_only and bool(os.getenv("DEEPGRAM_API_KEY"))
+        return not check_profile_only and bool(
+            credentials.env_value("DEEPGRAM_API_KEY")
+        )
 
     def is_ci_mode(self) -> bool:
         """Check if running in CI mode (credentials from environment)."""
         # If both API key and project ID are provided via environment,
         # we're in CI mode
-        return bool(os.getenv("DEEPGRAM_API_KEY") and os.getenv("DEEPGRAM_PROJECT_ID"))
+        return bool(
+            credentials.env_value("DEEPGRAM_API_KEY")
+            and credentials.env_value("DEEPGRAM_PROJECT_ID")
+        )
 
     def get_api_key(self, ignore_env: bool = False) -> str | None:
         """Get API key following precedence: explicit > profile > env.
@@ -231,72 +442,20 @@ class AuthManager:
         Args:
             ignore_env: If True, don't check environment variables
         """
-        # Explicit credentials (--api-key flag, CI/CD) bypass the JWT flow.
-        if self.explicit_api_key:
-            return self.explicit_api_key
-
-        profile_name = self.config.profile or "default"
-        current_profile = self.config.get_profile(profile_name)
-
-        expired, expiry_error = self._credential_expiry(profile_name)
-        if not expired:
-            # Profile keyring entry, followed by its config-file fallback.
-            try:
-                api_key = keyring.get_password(
-                    KEYRING_SERVICE, f"api-key.{profile_name}"
-                )
-                if api_key:
-                    return api_key
-            except Exception:
-                pass
-
-            if current_profile.api_key:
-                return current_profile.api_key
-        else:
-            self._delete_keyring_credential(f"api-key.{profile_name}")
-
-        # Environment variable — lowest priority.
-        if not ignore_env:
-            api_key = os.getenv("DEEPGRAM_API_KEY")
-            if api_key:
-                return api_key
-
-        if expiry_error:
-            raise AuthenticationError(expiry_error)
-
+        resolved = self.resolve(ignore_env=ignore_env)
+        if resolved.api_key:
+            return resolved.api_key
+        if resolved.expiry_error:
+            raise AuthenticationError(resolved.expiry_error)
         return None
 
     def _credential_expiry(self, profile_name: str) -> tuple[bool, str | None]:
         """Return whether a finite profile credential is unusable and why."""
-        expires_at = self.config.get_profile(profile_name).dg_token_expires_at
-        if not isinstance(expires_at, str):
-            return False, None
-
-        try:
-            parsed_expiry = datetime.fromisoformat(expires_at)
-            if parsed_expiry.tzinfo is None:
-                raise ValueError
-        except (TypeError, ValueError):
-            return (
-                True,
-                "Your Deepgram credential expiry is invalid. Run `dg login` again.",
-            )
-
-        if parsed_expiry <= datetime.now(timezone.utc):
-            return True, "Your Deepgram credential has expired. Run `dg login` again."
-
-        return False, None
+        return credentials.credential_expiry(self.config, profile_name)
 
     def _delete_keyring_credential(self, keyring_key: str) -> None:
         """Remove a credential when present without masking keyring failures."""
-        try:
-            keyring.delete_password(KEYRING_SERVICE, keyring_key)
-        except PasswordDeleteError:
-            pass
-        except Exception as exc:
-            console.print(
-                f"[yellow]Warning:[/yellow] Could not remove legacy credential: {exc}"
-            )
+        credentials.keyring_delete(keyring_key)
 
     def get_project_id(self, ignore_env: bool = False) -> str | None:
         """Get project ID following precedence: explicit > profile > env.
@@ -304,23 +463,7 @@ class AuthManager:
         Args:
             ignore_env: If True, don't check environment variables
         """
-        # Explicit credentials have highest priority
-        if self.explicit_project_id:
-            return self.explicit_project_id
-
-        # Check profile next
-        profile_name = self.config.profile or "default"
-        current_profile = self.config.get_profile(profile_name)
-        if current_profile.project_id:
-            return current_profile.project_id
-
-        # Environment variable has lowest priority
-        if not ignore_env:
-            project_id = os.getenv("DEEPGRAM_PROJECT_ID")
-            if project_id:
-                return project_id
-
-        return None
+        return self.resolve(ignore_env=ignore_env, need_key=False).project_id
 
     def get_credential_source(self) -> str:
         """Get a description of where credentials are coming from.
@@ -331,16 +474,18 @@ class AuthManager:
         if self.explicit_api_key or self.explicit_project_id:
             return "explicit flags"
 
-        profile_name = self.config.profile or "default"
-        has_profile_key, has_profile_project = self.has_profile_credentials(
-            profile_name
-        )
-
-        if has_profile_key or has_profile_project:
-            return f"profile '{profile_name}'"
-
-        has_env_key, has_env_project = self.has_env_credentials()
-        if has_env_key or has_env_project:
+        # The real source: a profile key equal to DEEPGRAM_API_KEY came from
+        # the environment (Config merges it into the profile).
+        resolved = self.resolve()
+        if resolved.key_source in (
+            credentials.KEY_SOURCE_KEYRING,
+            credentials.KEY_SOURCE_FILE,
+        ) or (resolved.project_source == "profile"):
+            return f"profile '{resolved.profile}'"
+        if (
+            resolved.key_source == credentials.KEY_SOURCE_ENV
+            or resolved.project_source == "env"
+        ):
             return "environment variables"
 
         return "no credentials"
@@ -356,6 +501,7 @@ class AuthManager:
         Returns:
             Tuple of (success, message, error_type)
         """
+        _load_modules("httpx")
         if not api_key:
             api_key = self.get_api_key()
 
@@ -369,7 +515,7 @@ class AuthManager:
 
         try:
             headers = {
-                "Authorization": f"Token {api_key}",
+                **transport.request_headers(api_key),
                 "Content-Type": "application/json",
             }
 
@@ -422,6 +568,7 @@ class AuthManager:
             - error_type: 'auth' for API key issues, 'project' for project ID
               issues, None if successful
         """
+        _load_modules("httpx")
         # Use provided credentials or get from storage
         if not api_key:
             api_key = self.get_api_key()
@@ -441,7 +588,7 @@ class AuthManager:
         # Make API request to verify both credentials
         try:
             headers = {
-                "Authorization": f"Token {api_key}",
+                **transport.request_headers(api_key),
                 "Content-Type": "application/json",
             }
 
@@ -481,54 +628,29 @@ class AuthManager:
             )
 
     def guard(self) -> None:
-        """Guard function to ensure a valid API key is available.
+        """Check that an API key is available, without sending it anywhere.
 
-        Only validates that the API key works. Project ID validation
-        is handled separately by requires_project on BaseCommand.
-        Refuses first, before reading or sending any key, when the base URL
-        isn't trusted with credentials.
+        Refuses first, before reading any key, when the base URL isn't
+        trusted with credentials. With no key, raises :class:`AuthRequiredError`
+        (``auth_required``), which ``BaseCommand`` renders; the key itself
+        is checked by the command's own request: a 401 or 403 there becomes
+        ``auth_invalid`` or ``auth_forbidden`` (see ``deepctl_core.transport``).
+        Project ID validation is handled separately by requires_project on
+        BaseCommand.
         """
         self.check_base_url()
-        api_key = self.get_api_key()
-
-        if not api_key and getattr(self.config, "api_key_untrusted", False) is True:
+        # Raises the expiry error when a stored credential expired and
+        # nothing else is set, as before.
+        if self.get_api_key():
+            return
+        resolved = self.resolve()
+        if resolved.untrusted_source:
             # The file's key was left unused (W-PERM-AGENT / W-CFG-UNTRUSTED):
             # say so, and send the agent to a person, not to dg login.
-            from rich.markup import escape
+            raise AuthRequiredError(untrusted_source=resolved.untrusted_source)
+        raise AuthRequiredError()
 
-            text = msg.E_KEY_UNTRUSTED.format(
-                user_config=msg.display_path(self.config.config_path)
-            )
-            output.print_error(escape(text))
-            output.print_hint(msg.W_CFG_UNTRUSTED_FILE_HINT)
-            raise AuthenticationError(text)
-        if not api_key:
-            console.print(
-                "[red]Error:[/red] DEEPGRAM_API_KEY is not set in the "
-                "configuration file "
-                f"({self.config.config_path}) or environment variable.\n"
-            )
-            console.print(
-                "[yellow]Run[/yellow] [bold]deepctl login[/bold] "
-                "[yellow]to configure the CLI with your Deepgram "
-                "account.[/yellow]\n"
-            )
-            raise AuthenticationError("DEEPGRAM_API_KEY is not set")
-
-        # Verify the API key is valid (does NOT require project_id)
-        success, message, error_type = self.verify_api_key(api_key)
-        if not success:
-            console.print(f"[red]Error:[/red] {message}")
-
-            if error_type == "auth":
-                console.print(
-                    "[yellow]Your API key may have expired or been "
-                    "revoked.[/yellow]\n"
-                    "[yellow]Run[/yellow] [bold]deepctl login[/bold] "
-                    "[yellow]to re-authenticate.[/yellow]"
-                )
-            raise AuthenticationError(message)
-
+    @_forgets_resolved
     def login_with_api_key(
         self, api_key: str, project_id: str | None = None, _force_write: bool = False
     ) -> None:
@@ -539,12 +661,6 @@ class AuthManager:
             project_id: Deepgram project ID (optional — can be set later)
             force_write: Skip confirmation prompts
         """
-        # Validate API key format (basic check)
-        if not api_key.startswith(("sk-", "pk-")):
-            console.print(
-                "[red]Warning:[/red] API key format doesn't match expected pattern"
-            )
-
         # Verify API key (and project if provided)
         console.print("[dim]Verifying credentials...[/dim]")
         success, message, error_type = self.verify_credentials(
@@ -557,13 +673,12 @@ class AuthManager:
             elif error_type == "project":
                 # Project ID is invalid, but the key might be fine — warn but
                 # still store the key so the user isn't locked out.
-                console.print(
-                    f"[yellow]Warning:[/yellow] {message}. "
-                    "API key will still be stored."
+                output.print_warning(
+                    escape(f"{message}. API key will still be stored."), stderr=True
                 )
                 console.print(
-                    "[dim]You can update the project ID later with: "
-                    "deepctl login --project-id <id>[/dim]"
+                    "[dim]You can set the project ID later with: "
+                    f"{transport.prog() or 'dg'} login --project-id <id>[/dim]"
                 )
                 # Clear the bad project_id so we don't store it
                 project_id = None
@@ -573,6 +688,7 @@ class AuthManager:
             console.print(f"[green]✓[/green] {message}")
 
         # Store API key in keyring for security
+        _load_modules("keyring")
         profile_name = self.config.profile or "default"
         keyring_available = False
         # Nothing goes to the keyring when the profile can't be saved.
@@ -584,8 +700,13 @@ class AuthManager:
             console.print("[green]✓[/green] API key stored securely in system keyring")
             keyring_available = True
         except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Could not store in keyring: {e}")
-            console.print("API key will be stored in config file instead")
+            output.print_warning(
+                escape(
+                    f"Could not store in keyring: {e}. "
+                    "The API key will be stored in the config file instead."
+                ),
+                stderr=True,
+            )
 
         # Update config with non-sensitive data
         # Only store API key in config if keyring is not available
@@ -601,7 +722,7 @@ class AuthManager:
         if project_id:
             console.print(f"[dim]Project ID:[/dim] {project_id}")
 
-    def login_with_device_flow(self) -> None:
+    def login_with_device_flow(self, open_browser: bool = True) -> None:
         """Login using device flow (interactive method)."""
         console.print("[blue]Starting device flow authentication...[/blue]")
 
@@ -609,9 +730,6 @@ class AuthManager:
         identity_url = check_identity_host(self.config)
 
         try:
-            # Get hostname for device identification
-            hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
-
             # Request device code from dx-id auth provider
             device_response = self._request_device_code(identity_url)
 
@@ -621,28 +739,37 @@ class AuthManager:
             )
 
             # Open browser immediately and start polling
-            console.print(
-                "\n[bold]Hello from Deepgram![/bold] Opening browser to "
-                "complete login..."
+            if open_browser:
+                console.print(
+                    "\n[bold]Hello from Deepgram![/bold] Opening browser to "
+                    "complete login..."
+                )
+            else:
+                console.print(
+                    "\n[bold]Hello from Deepgram![/bold] Open the link below to "
+                    "complete login."
+                )
+            output.print_info(
+                escape(
+                    msg.I_LOGIN_PENDING.format(
+                        verification_uri=msg.display(device_response.verification_uri),
+                        user_code=msg.display(device_response.user_code or ""),
+                    )
+                ),
+                stderr=True,
             )
-            if device_response.user_code:
-                console.print(f"[bold]Enter code:[/bold] {device_response.user_code}")
 
-            try:
-                webbrowser.open(verification_uri)
-                console.print("[green]✓[/green] Opened browser for authentication")
-            except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Could not open browser: {e}")
-
-            console.print(
-                f"[dim]If the browser didn't open, visit:[/dim] "
-                f"[dim]{verification_uri}[/dim]\n"
-            )
+            if open_browser:
+                try:
+                    webbrowser.open(verification_uri)
+                    console.print("[green]✓[/green] Opened browser for authentication")
+                except Exception as e:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] Could not open browser: {e}"
+                    )
 
             # Poll for token (starts immediately — user may have clicked the link)
-            token_response = self._poll_for_token(
-                device_response, hostname, identity_url
-            )
+            token_response = self._poll_for_token(device_response, identity_url)
 
             # Store token and get user info
             self._store_token(token_response)
@@ -650,6 +777,8 @@ class AuthManager:
             console.print("\n[green]Key created and stored successfully.[/green]")
             console.print("\nYou are now logged in. Happy coding!")
 
+        except DeviceCodeUnreadable:
+            raise
         except Exception as e:
             console.print(f"[red]Error during device flow:[/red] {e}")
             raise AuthenticationError(f"Device flow failed: {e}")
@@ -662,11 +791,10 @@ class AuthManager:
         Returns:
             DeviceCodeResponse with device code and verification URI
         """
-        hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
-
+        _load_modules("httpx")
         payload = {
             "client_id": CLIENT_ID,
-            "hostname": hostname,
+            "hostname": DEVICE_NAME,
             "scopes": "openid profile email",
         }
 
@@ -678,8 +806,18 @@ class AuthManager:
                 headers={"Content-Type": "application/json"},
             )
 
-            if response.status_code == 201:
-                return DeviceCodeResponse(**response.json())
+            if response.status_code in (200, 201):
+                host = urlsplit(base).hostname or base
+                try:
+                    body = response.json()
+                except ValueError:
+                    raise DeviceCodeUnreadable(host) from None
+                if not isinstance(body, dict):
+                    raise DeviceCodeUnreadable(host)
+                try:
+                    return DeviceCodeResponse(**body)
+                except (ValueError, TypeError):  # incl. pydantic ValidationError
+                    raise DeviceCodeUnreadable(host) from None
             else:
                 raise AuthenticationError(
                     f"Device code request failed: {response.status_code}"
@@ -688,25 +826,73 @@ class AuthManager:
         except httpx.RequestError as e:
             raise AuthenticationError(f"Network error during device code request: {e}")
 
+    def poll_device_token(
+        self, device_code: str, identity_url: str | None = None
+    ) -> DevicePoll:
+        """Ask the token endpoint once whether ``device_code`` was approved.
+
+        A POST (RFC 8628 §3.4), so the device code never lands in a URL,
+        and no device name is sent. Network errors are raised
+        (``httpx.RequestError``).
+        """
+        _load_modules("httpx")
+        base = identity_url or check_identity_host(self.config)
+        response = self.client.post(
+            f"{base}/token",
+            data={
+                "grant_type": DEVICE_CODE_GRANT,
+                "device_code": device_code,
+                "client_id": CLIENT_ID,
+            },
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            body = {}
+        if response.status_code in (200, 201):
+            try:
+                return DevicePoll("token", token=TokenResponse(**body))
+            except ValueError:
+                return DevicePoll("error", detail="unusable token response")
+        if response.status_code == 429:
+            return DevicePoll("slow_down", retry_after=_retry_after(response))
+        error = body.get("error")
+        if response.status_code >= 500 or error == "temporarily_unavailable":
+            # A transient server problem: back off and ask again.
+            return DevicePoll(
+                "unavailable",
+                detail=f"HTTP {response.status_code}",
+                retry_after=_retry_after(response),
+            )
+        state = {
+            "authorization_pending": "pending",
+            "slow_down": "slow_down",
+            "access_denied": "denied",
+            "expired_token": "expired",
+        }.get(error if isinstance(error, str) else "")
+        if state is not None:
+            return DevicePoll(state)
+        reason = error if isinstance(error, str) else "unknown error"
+        return DevicePoll(
+            "error", detail=f"HTTP {response.status_code}: {msg.display(reason)[:80]}"
+        )
+
     def _poll_for_token(
         self,
         device_response: DeviceCodeResponse,
-        hostname: str,
         identity_url: str | None = None,
     ) -> TokenResponse:
-        """Poll for token using device code."""
+        """Poll for token using device code until approved, denied or expired."""
+        _load_modules("httpx")
         console.print("\n[blue]Waiting for authentication...[/blue]")
 
         start_time = time.time()
-
-        query_params = {
-            "device_code": device_response.device_code,
-            "client_id": CLIENT_ID,
-            "hostname": hostname,
-        }
-
+        interval = max(MIN_POLL_INTERVAL, device_response.interval)
         base = identity_url or check_identity_host(self.config)
-        poll_url = f"{base}/device/token?{urlencode(query_params)}"
+
+        from rich.progress import Progress, SpinnerColumn, TextColumn
 
         with Progress(
             SpinnerColumn(),
@@ -718,31 +904,30 @@ class AuthManager:
 
             while time.time() - start_time < device_response.expires_in:
                 try:
-                    # Use GET request like Go implementation
-                    response = self.client.get(poll_url)
-
-                    if response.status_code == 201:
-                        response_data = response.json()
-                        return TokenResponse(**response_data)
-                    elif response.status_code == 404:
-                        # Still pending - this is the expected status code from
-                        # Go implementation
-                        time.sleep(device_response.interval)
-                        continue
-                    else:
-                        error_data = response.json()
-                        raise AuthenticationError(
-                            f"Token request failed: "
-                            f"{error_data.get('error', 'Unknown error')}"
-                        )
-
+                    poll = self.poll_device_token(device_response.device_code, base)
                 except httpx.RequestError as e:
                     console.print(f"[red]Network error:[/red] {e}")
-                    time.sleep(device_response.interval)
+                    time.sleep(interval)
                     continue
+                if poll.state == "token" and poll.token is not None:
+                    return poll.token
+                if poll.state == "pending":
+                    time.sleep(interval)
+                    continue
+                if poll.state in ("slow_down", "unavailable"):
+                    interval = max(interval + 5, poll.retry_after or 0)
+                    left = device_response.expires_in - (time.time() - start_time)
+                    time.sleep(max(0.0, min(interval, left)))
+                    continue
+                if poll.state == "denied":
+                    raise AuthenticationError(msg.E_AUTH_DENIED)
+                if poll.state == "expired":
+                    break
+                raise AuthenticationError(str(poll.detail))
 
         raise AuthenticationError("Authentication timed out")
 
+    @_forgets_resolved
     def _store_token(self, token_response: TokenResponse) -> None:
         """Store authentication token.
 
@@ -750,6 +935,7 @@ class AuthManager:
         expires independently of the OIDC access token and requires a new
         device authorization when it expires.
         """
+        _load_modules("keyring")
         profile_name = self.config.profile or "default"
 
         if token_response.dg_token:
@@ -772,10 +958,13 @@ class AuthManager:
                 )
                 keyring_available = True
             except Exception as e:
-                console.print(
-                    f"[yellow]Warning:[/yellow] Could not store in keyring: {e}"
+                output.print_warning(
+                    escape(
+                        f"Could not store in keyring: {e}. "
+                        "The API key will be stored in the config file instead."
+                    ),
+                    stderr=True,
                 )
-                console.print("API key will be stored in config file instead")
 
             for keyring_key in (f"jwt.{profile_name}", f"refresh-token.{profile_name}"):
                 self._delete_keyring_credential(keyring_key)
@@ -783,7 +972,7 @@ class AuthManager:
             self.config.create_profile(
                 profile_name,
                 api_key=api_key if not keyring_available else None,
-                project_id=token_response.project_id,
+                project_id=token_response.project_id or token_response.pid,
             )
             profile = self.config.get_profile(profile_name)
             profile.dg_token_expires_at = expires_at
@@ -792,16 +981,13 @@ class AuthManager:
                 console.print(
                     "[green]✓[/green] API key stored securely in system keyring"
                 )
-            else:
-                console.print(
-                    "[yellow]Warning:[/yellow] API key stored in the config file fallback"
-                )
             return
 
         raise AuthenticationError(
             "Deepgram sign-in did not return a finite credential. Run `dg update` and `dg login` again."
         )
 
+    @_forgets_resolved
     def logout(self, keep_config: bool = False) -> None:
         """Logout user and clear credentials.
 
@@ -809,6 +995,7 @@ class AuthManager:
             keep_config: If True, keep profile configuration (project ID, base URL)
                         and only clear credentials. If False, remove profile completely.
         """
+        _load_modules("keyring")
         profile_name = self.config.profile or "default"
         # Nothing is cleared from the keyring when the profile can't be saved.
         self.config.check_saveable()
@@ -845,17 +1032,18 @@ class AuthManager:
         for profile_name in self.config.list_profiles():
             profile = self.config.get_profile(profile_name)
 
-            # Try to get API key from keyring first
-            api_key = None
+            # The keyring's key when it has one, else the config file's.
+            # Project ID is only stored in config, not keyring.
             project_id = profile.project_id
-
             try:
-                api_key = keyring.get_password(
-                    KEYRING_SERVICE, f"api-key.{profile_name}"
-                )
-                # Project ID is only stored in config, not keyring
+                # Bounded off a terminal; a timeout falls back like an error.
+                api_key = credentials.keyring_read(f"api-key.{profile_name}")
             except Exception:
-                # Fall back to config
+                api_key = None
+            if not api_key:
+                # No entry, as with a key saved only in the config file
+                # while a keyring backend (Windows Credential Manager, say)
+                # is present.
                 api_key = profile.api_key
 
             masked_key = None
@@ -875,5 +1063,6 @@ class AuthManager:
 
     def __del__(self) -> None:
         """Cleanup HTTP client."""
-        if hasattr(self, "client"):
-            self.client.close()
+        client = self.__dict__.get("_client")
+        if client is not None:
+            client.close()

@@ -1,0 +1,644 @@
+{
+  "name": "transcribe",
+  "module": "deepctl_cmd_transcribe.command",
+  "attr": "TranscribeCommand",
+  "dist": "deepctl-cmd-transcribe",
+  "summary": "Transcribe audio (deprecated alias for dg listen)",
+  "hidden": true,
+  "requires_auth": true,
+  "help": {
+    "name": "transcribe",
+    "help": "Transcribe audio files or URLs using Deepgram.\n\nThis command is a deprecated alias for `dg listen`. Use `dg listen` for all new scripts.\n\nExamples:\n  dg listen audio.mp3\n  dg listen https://example.com/call.mp3 --diarize\n  dg listen --mic --model nova-3 --interim\n  dg listen audio.mp3 --diarize --summarize --save-to transcript.txt\n  dg listen call.wav --redact numbers --numerals\n  dg listen --mic --model flux-general-en --redact aggressive_numbers\n  dg -o json listen audio.mp3 | jq '.results.channels[0].alternatives[0].transcript'\n  ffmpeg -i video.mp4 -f s16le -ar 16000 -ac 1 - | dg listen --encoding linear16\n  dg listen -  # read raw audio from stdin interactively\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Transcribe audio (deprecated alias for dg listen)",
+    "epilog": null,
+    "hidden": true,
+    "deprecated": false,
+    "no_args_is_help": false,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "srt",
+        "opts": [
+          "--srt"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output SRT captions instead of plain transcript. In live mode, entries are printed as they arrive. Mutually exclusive with --webvtt."
+      },
+      {
+        "class": "option",
+        "name": "webvtt",
+        "opts": [
+          "--webvtt"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output WebVTT captions instead of plain transcript. In live mode, entries are printed as they arrive. Mutually exclusive with --srt."
+      },
+      {
+        "class": "option",
+        "name": "full_output",
+        "opts": [
+          "--full-output"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "In an AI agent session, print a large result in full instead of saving it to a file and printing a summary."
+      },
+      {
+        "class": "option",
+        "name": "timeout",
+        "opts": [
+          "--timeout"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "float range",
+          "min": 1,
+          "max": null,
+          "min_open": false,
+          "max_open": false,
+          "clamp": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Seconds to wait at each step (connecting, sending, the response) before giving up. Not a limit on the whole run. Default: 300. Files and URLs only."
+      },
+      {
+        "class": "option",
+        "name": "check_url",
+        "opts": [
+          "--check-url"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Check that the URL responds before transcribing: a HEAD request, then a 1-byte GET if needed. Sends no Deepgram API key."
+      },
+      {
+        "class": "option",
+        "name": "no_validate",
+        "opts": [
+          "--no-validate"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip source validation (faster, but less helpful errors)"
+      },
+      {
+        "class": "option",
+        "name": "probe",
+        "opts": [
+          "--probe"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Run ffprobe analysis before transcribing (local files only)"
+      },
+      {
+        "class": "option",
+        "name": "save_to",
+        "opts": [
+          "--save-to",
+          "-s"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Save transcript (or caption file) to a path"
+      },
+      {
+        "class": "option",
+        "name": "channels",
+        "opts": [
+          "--channels"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "integer"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Number of audio channels (default: 1)"
+      },
+      {
+        "class": "option",
+        "name": "sample_rate",
+        "opts": [
+          "--sample-rate"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "integer"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Sample rate in Hz for raw stdin streams (default: 16000)"
+      },
+      {
+        "class": "option",
+        "name": "encoding",
+        "opts": [
+          "--encoding"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Raw audio encoding for stdin streams (e.g. linear16, mulaw, opus). Auto-detect skips this."
+      },
+      {
+        "class": "option",
+        "name": "interim",
+        "opts": [
+          "--interim"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Show partial results as they arrive (live streaming only)"
+      },
+      {
+        "class": "option",
+        "name": "numerals",
+        "opts": [
+          "--numerals"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Convert spoken numbers to digits ('four twenty' -> '420'). Applies to files and live streams."
+      },
+      {
+        "class": "option",
+        "name": "redact",
+        "opts": [
+          "--redact"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": true,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Redact sensitive content. Flux STT (v2) accepts 'numbers' or 'aggressive_numbers'; v1 models also accept 'pci', 'ssn', etc. Repeatable on v1 (e.g. --redact pci --redact numbers). Applies to files and live streams."
+      },
+      {
+        "class": "option",
+        "name": "sentiment",
+        "opts": [
+          "--sentiment"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Analyse sentiment (pre-recorded only)"
+      },
+      {
+        "class": "option",
+        "name": "topics",
+        "opts": [
+          "--topics"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Detect topics (pre-recorded only)"
+      },
+      {
+        "class": "option",
+        "name": "summarize",
+        "opts": [
+          "--summarize"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Generate a summary (pre-recorded only)"
+      },
+      {
+        "class": "option",
+        "name": "punctuate",
+        "opts": [
+          "--punctuate"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Add punctuation (default: on)"
+      },
+      {
+        "class": "option",
+        "name": "smart_format",
+        "opts": [
+          "--smart-format"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable smart formatting — numbers, dates, punctuation (default: on)"
+      },
+      {
+        "class": "option",
+        "name": "diarize",
+        "opts": [
+          "--diarize"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Label speakers in output as [Speaker 0], [Speaker 1], …"
+      },
+      {
+        "class": "option",
+        "name": "language",
+        "opts": [
+          "--language",
+          "-l"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Language code, e.g. en-US, es-ES (default: en-US)"
+      },
+      {
+        "class": "option",
+        "name": "model",
+        "opts": [
+          "--model",
+          "-m"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Deepgram model to use (default: nova-3)"
+      },
+      {
+        "class": "option",
+        "name": "mic",
+        "opts": [
+          "--mic"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Use microphone for live transcription (requires: pip install 'deepctl-cmd-listen[mic]')"
+      },
+      {
+        "class": "argument",
+        "name": "source",
+        "opts": [
+          "source"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true
+      },
+      {
+        "class": "option",
+        "name": "agent_friendly",
+        "opts": [
+          "--agent-friendly"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": true,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output machine-readable JSON metadata for this command and exit."
+      },
+      {
+        "class": "option",
+        "name": "non_interactive",
+        "opts": [
+          "--non-interactive"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip interactive prompts; use defaults for any optional features."
+      },
+      {
+        "class": "option",
+        "name": "output",
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "choice",
+          "choices": [
+            "json",
+            "yaml",
+            "table",
+            "csv",
+            "text"
+          ],
+          "case_sensitive": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Output format (same as the global -o before the command)."
+      },
+      {
+        "class": "option",
+        "name": "quiet",
+        "opts": [
+          "--quiet",
+          "-q"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Suppress non-essential output."
+      },
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose output."
+      }
+    ]
+  }
+}

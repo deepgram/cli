@@ -1,0 +1,46 @@
+{
+  "name": "debug",
+  "module": "deepctl_cmd_debug.command",
+  "attr": "DebugCommand",
+  "dist": "deepctl-cmd-debug",
+  "summary": "Debug utilities",
+  "hidden": false,
+  "group": true,
+  "requires_auth": false,
+  "help": {
+    "name": "debug",
+    "help": "Debug utilities for troubleshooting Deepgram integration issues",
+    "short_help": "Debug utilities",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": true,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose debug output"
+      }
+    ],
+    "group": true,
+    "subcommand_metavar": "COMMAND [ARGS]..."
+  }
+}

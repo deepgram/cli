@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl"
-version = "0.4.0" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
 license = "MIT"
@@ -33,46 +33,45 @@ keywords = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "click>=8.0.0",
+    "click>=8.2.0,<9",
     "deepgram-sdk>=7.7.0,<8",
-    "deepctl-core>=0.3.0",
-    "deepctl-cmd-login>=0.2.0",
-    "deepctl-cmd-projects>=0.2.0",
-    "deepctl-cmd-transcribe>=0.1.12",
-    "deepctl-cmd-usage>=0.2.1",
-    "deepctl-cmd-mcp>=0.1.15",
-    "deepctl-cmd-api>=0.0.2",
-    "deepctl-cmd-debug>=0.1.13",
-    "deepctl-cmd-debug-browser>=0.1.12",
-    "deepctl-cmd-debug-network>=0.1.12",
-    "deepctl-cmd-debug-audio>=0.1.14",
-    "deepctl-cmd-debug-probe>=0.0.2",
-    "deepctl-cmd-debug-toolkit>=0.2.0",
-    "deepctl-cmd-ffprobe>=0.0.3",
-    "deepctl-cmd-update>=0.2.7",
-    "deepctl-cmd-plugin>=0.1.14",
-    "deepctl-cmd-skills>=0.0.9",
-    "deepctl-cmd-init>=0.1.0",
-    "deepctl-cmd-models>=0.1.1",
-    "deepctl-cmd-speak>=0.0.5",
-    "deepctl-cmd-keys>=0.1.0",
-    "deepctl-cmd-read>=0.1.0",
-    "deepctl-cmd-listen>=0.0.14",
-    "deepctl-cmd-requests>=0.1.0",
-    "deepctl-cmd-billing>=0.1.0",
-    "deepctl-cmd-members>=0.1.0",
-    "deepctl-cmd-completion>=0.0.3",
-    "deepctl-shared-utils>=0.1.13",
-    "deepctl-telemetry>=0.0.7",
-    "pydantic>=2.0.0",
-    "rich>=13.0.0",
-    "httpx>=0.24.0",
+    "deepctl-core==0.4.1", # x-release-please-version
+    "deepctl-cmd-login==0.4.1", # x-release-please-version
+    "deepctl-cmd-projects==0.4.1", # x-release-please-version
+    "deepctl-cmd-transcribe==0.4.1", # x-release-please-version
+    "deepctl-cmd-usage==0.4.1", # x-release-please-version
+    "deepctl-cmd-mcp==0.4.1", # x-release-please-version
+    "deepctl-cmd-api==0.4.1", # x-release-please-version
+    "deepctl-cmd-debug==0.4.1", # x-release-please-version
+    "deepctl-cmd-debug-browser==0.4.1", # x-release-please-version
+    "deepctl-cmd-debug-network==0.4.1", # x-release-please-version
+    "deepctl-cmd-debug-audio==0.4.1", # x-release-please-version
+    "deepctl-cmd-debug-probe==0.4.1", # x-release-please-version
+    "deepctl-cmd-debug-toolkit==0.4.1", # x-release-please-version
+    "deepctl-cmd-ffprobe==0.4.1", # x-release-please-version
+    "deepctl-cmd-update==0.4.1", # x-release-please-version
+    "deepctl-cmd-plugin==0.4.1", # x-release-please-version
+    "deepctl-cmd-skills==0.4.1", # x-release-please-version
+    "deepctl-cmd-init==0.4.1", # x-release-please-version
+    "deepctl-cmd-models==0.4.1", # x-release-please-version
+    "deepctl-cmd-speak==0.4.1", # x-release-please-version
+    "deepctl-cmd-keys==0.4.1", # x-release-please-version
+    "deepctl-cmd-read==0.4.1", # x-release-please-version
+    "deepctl-cmd-listen==0.4.1", # x-release-please-version
+    "deepctl-cmd-requests==0.4.1", # x-release-please-version
+    "deepctl-cmd-billing==0.4.1", # x-release-please-version
+    "deepctl-cmd-members==0.4.1", # x-release-please-version
+    "deepctl-cmd-completion==0.4.1", # x-release-please-version
+    "deepctl-shared-utils==0.4.1", # x-release-please-version
+    "deepctl-telemetry==0.4.1", # x-release-please-version
+    "pydantic>=2.0.0,<3",
+    "rich>=13.0.0,<16",
+    "httpx>=0.24.0,<1",
     "requests>=2.31,<3.0",
     "pyjwt>=2.8.0",
-    "keyring>=24.0.0",
+    "keyring>=24.0.0,<26",
     "pyyaml>=6.0.0",
-    "typer>=0.9.0",
-    "platformdirs>=3.0.0",
+    "platformdirs>=3.0.0,<5",
 ]
 
 [project.optional-dependencies]
@@ -84,6 +83,9 @@ dev = [
     "pytest-mock>=3.10.0",
     "pytest-timeout>=2.3.1,<3",
     "responses>=0.23.0",
+    # tests/unit/test_manifest.py validates the command manifest against
+    # docs/contracts/*.schema.json.
+    "jsonschema>=4.18.0",
     # Code Quality
     "ruff>=0.8.0",
     "mypy>=1.0.0",
@@ -112,15 +114,22 @@ deepctl = "deepctl.main:main"
 deepgram = "deepctl.main:main"
 dg = "deepctl.main:main"
 
-# Entry points are now provided by individual command packages
-# [project.entry-points."deepctl.commands"]
-# transcribe = "deepctl.commands.transcribe:TranscribeCommand"
-# projects = "deepctl.commands.projects:ProjectsCommand"
-# usage = "deepctl.commands.usage:UsageCommand"
-# login = "deepctl.commands.login:LoginCommand"
+# Most commands come from the command packages; the help topics ship here.
+[project.entry-points."deepctl.commands"]
+help = "deepctl.help_topics:HelpCommand"
+
+[project.entry-points."deepctl.subcommands.help"]
+agent-mode = "deepctl.help_topics.agent_mode:AgentModeCommand"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+# build_py also assembles deepctl/_manifest.json from the command
+# fragments in src/deepctl/_manifest.d/ (deepctl/_manifest_build.py).
+cmdclass = { build_py = "deepctl._manifest_build.BuildPy" }
+
+[tool.setuptools.exclude-package-data]
+# The fragments are build input; wheels carry the assembled _manifest.json.
+deepctl = ["_manifest.d/*"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -146,15 +155,10 @@ disable_error_code = ["call-arg", "no-untyped-call", "no-untyped-def", "untyped-
 module = [
     "sounddevice",
     "sounddevice.*",
-    "numpy",
-    "numpy.*",
 ]
-# Optional microphone dependencies (sounddevice, numpy) ship without type
-# stubs.
+# The microphone dependency (sounddevice) ships without type stubs. Skip
+# analyzing it; usages fall back to Any.
 ignore_missing_imports = true
-# numpy>=2.2 ships PEP 695 `type` aliases in its stubs, which mypy rejects
-# under python_version = "3.10" (aborting before our code is checked). Skip
-# analyzing these third-party stubs entirely; usages fall back to Any.
 follow_imports = "skip"
 follow_imports_for_stubs = true
 
@@ -246,6 +250,9 @@ testing = [
     "pytest-mock>=3.10.0",
     "pytest-timeout>=2.3.1,<3",
     "responses>=0.23.0",
+    # tests/unit/test_manifest.py validates the command manifest against
+    # docs/contracts/*.schema.json.
+    "jsonschema>=4.18.0",
     "deepctl-plugin-example",
 ]
 dev = [

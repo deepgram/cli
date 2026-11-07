@@ -31,7 +31,7 @@ E_FH_PROFILE = (
 # The command comes last, with no trailing period, so it can be copied.
 E_FH_PROFILE_HINT = (
     "If you trust {host}, add it to api.allowed_hosts in {user_config}. To "
-    "switch back to Deepgram, run: dg --base-url https://api.deepgram.com "
+    "switch back to Deepgram, run: dg --base-url https://api.deepgram.com "  # host-literal: user text
     "login --profile {profile} --save-base-url --force-write"
 )
 # Agent-mode hint shared by every foreign_host error. Never names a flag,
@@ -134,11 +134,117 @@ E_TOOL_PATH_AGENT = (
 E_PERSON_ONLY_AGENT_HINT = (
     "A person must run this command. If you are an AI agent, ask the user."
 )
+# A login prompt that can't be shown (catalogue strings). Hints:
+# H = person, A = AI agent, C = automation (CI, cron); *_NULL when next_step
+# is null. {prog} is the running executable.
+E_CONFIRM_ENVKEY = (
+    "DEEPGRAM_API_KEY is set, and logging in saves a profile that {prog} will "
+    "use instead of it."
+)
+A_CONFIRM_ENVKEY = (
+    "Run next_step only if the user agrees: the saved login will then take "
+    "precedence over DEEPGRAM_API_KEY."
+)
+A_CONFIRM_ENVKEY_NULL = (
+    "Ask the user whether to save a login profile; {prog} will then use it "
+    "instead of DEEPGRAM_API_KEY. Never put a key on the command line."
+)
+C_CONFIRM_ENVKEY_NULL = (
+    "This job's DEEPGRAM_API_KEY is used without a login. Drop the login step, "
+    "or add --yes if a saved profile is intended."
+)
+E_CONFIRM_RELOGIN = 'Profile "{profile}" already has a saved login.'
+H_CONFIRM_YES = "To go ahead, run the command again with --yes."
+A_CONFIRM_YES = "Run the command in next_step only if the user agrees."
+A_CONFIRM_YES_NULL = (
+    "Ask the user to rerun the command with --yes in their own terminal if they agree."
+)
+C_CONFIRM_YES_NULL = (
+    "Add --yes to this command in the job if replacing the saved login is intended."
+)
+
+# Device login for agents (catalogue strings).
+CODE_AUTH_PENDING = "auth_pending"
+CODE_AUTH_EXPIRED = "auth_expired"
+CODE_AUTH_DENIED = "auth_denied"
+CODE_STATE_UNWRITABLE = "state_unwritable"
+M_LOGIN_PENDING = "Open the link and enter the code to finish logging in."
+I_LOGIN_PENDING = (
+    "To finish logging in, open {verification_uri} and enter the code {user_code}."
+)
+A_LOGIN_PENDING = (
+    "Give the user the link and code, then run {prog} login --complete after "
+    "they approve."
+)
+# The person's variant of the line above (mode H/P).
+H_LOGIN_PENDING = (
+    "After you approve the login in your browser, run {prog} login --complete."
+)
+E_AUTH_PENDING = "Login is waiting for approval in the browser."
+H_AUTH_PENDING = (
+    "Open {verification_uri}, enter the code {user_code}, then run {prog} login "
+    "--complete."
+)
+A_AUTH_PENDING = (
+    "Wait {retry_after} s for the user to approve the login at "
+    "{verification_uri} with the code {user_code}, then run {prog} login --complete."
+)
+E_AUTH_EXPIRED = "No login is waiting to be completed, or it expired."
+H_AUTH_EXPIRED = "Run {prog} login to start again."
+A_AUTH_EXPIRED = "Run {prog} login again and give the user the new link and code."
+E_AUTH_DENIED = "The login request was denied in the browser."
+H_AUTH_DENIED = "Run {prog} login to try again."
+A_AUTH_DENIED = "The user denied the login. Ask them before trying again."
+E_STATE_UNWRITABLE = "{prog} can't save a login here: {dir} isn't writable."
+H_STATE_UNWRITABLE = (
+    "Run {prog} login in a terminal where your home directory is writable."
+)
+A_STATE_UNWRITABLE = (
+    "This environment can't store credentials. Ask the user to run {prog} login "
+    "in their own terminal."
+)
+# Login and an untrusted user config: the config file (``{path}``, shown with
+# ``~``) can't be saved in this AI agent session, so login stops before
+# anything is sent. Code state_unwritable; hint W_CFG_UNTRUSTED_FILE_HINT.
+# {why} is a W_CFG_UNTRUSTED_WHY value.
+E_CFG_SAVE_UNTRUSTED = (
+    "In an AI agent session, {prog} can't save a login to {path} because the "
+    "file {why}. Nothing was sent or saved."
+)
+# A pending device-login file that fails the agent-session test;
+# it is ignored and left in place.
+W_LOGIN_PENDING_UNTRUSTED = (
+    "Ignored the pending login in {path}: in an AI agent session, {prog} "
+    "doesn't use a file that {why}."
+)
+# The identity provider's device-code answer couldn't be read (code
+# network_unavailable, details.reason "unreadable response").
+CODE_NETWORK_UNAVAILABLE = "network_unavailable"
+E_NETWORK_UNREADABLE = "Got a response from {host} that {prog} couldn't read."
+H_NETWORK_UNREADABLE = (
+    "A proxy, captive portal or firewall may be answering in Deepgram's place. "
+    "Check that this network lets {prog} reach {host}, then try again."
+)
+A_NETWORK_UNREADABLE = (
+    "Retry once. If it fails again, tell the user that something on this network "
+    "(a proxy, captive portal or firewall) is answering in Deepgram's place."
+)
 E_SAVE_CUSTOM_CONFIG = (
     "--save-base-url can't be used with --config: only the default user "
     "config ({user_config}) can approve API hosts. Run the command without "
     "--config."
 )
+
+# ── Cancelled and unexpected errors (the root handler) ───────────
+
+E_CANCELLED = "Cancelled."
+A_CANCELLED = "The user cancelled. Don't retry unless they ask."
+E_INTERNAL = "Command failed: {exception_message}"
+H_INTERNAL = (
+    "Run the command again with --verbose for details, and report it at "
+    "https://github.com/deepgram/cli/issues."
+)
+A_INTERNAL = "This is a bug in dg. Tell the user and include the command you ran."
 
 # ── Project file deepgram.yaml ───────────────────────────────────
 

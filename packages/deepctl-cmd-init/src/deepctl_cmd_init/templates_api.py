@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import httpx
-
 from .models import TemplateDetail, TemplateInfo, TemplateListResponse
 
 BASE_URL = "https://templates.dx.deepgram.com"
@@ -25,6 +23,8 @@ def list_templates(
     Returns:
         Parsed template list response.
     """
+    import httpx
+
     params: dict[str, str | int] = {"page": page, "limit": limit}
     if search:
         params["search"] = search
@@ -47,6 +47,8 @@ def get_template(slug: str) -> TemplateDetail:
     Returns:
         Parsed template detail.
     """
+    import httpx
+
     resp = httpx.get(
         f"{BASE_URL}/api/templates/{slug}",
         timeout=DEFAULT_TIMEOUT,
