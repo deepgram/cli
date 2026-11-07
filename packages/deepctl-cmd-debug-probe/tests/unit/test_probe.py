@@ -745,3 +745,56 @@ def test_refused_host_gets_no_key(monkeypatch, tmp_path):
         with pytest.raises(hosts.CredentialHostError):
             ProbeCommand().handle(config, AuthManager(config), Mock(), port=None)
     assert built == []
+
+
+@pytest.mark.parametrize(
+    ("origin", "refused"),
+    [("https://evil.example", True), ("null", True), ("http://localhost:5173", False)],
+)
+def test_the_running_proxy_checks_origin_before_any_upstream(origin, refused):
+    """End to end: start() wires process_request, so a browser page from
+    another origin gets 403 on the handshake and nothing reaches Deepgram."""
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import InvalidStatus
+
+    seen = []
+
+    def record(connection, request):
+        seen.append(request.path)
+
+    async def main():
+        upstream, up_port = await _upstream(record)
+        proxy = _proxy_to(up_port)
+        port = _free_port()
+        run = asyncio.ensure_future(proxy.run(port))
+        status = None
+        try:
+            for _ in range(100):
+                try:
+                    async with connect(
+                        f"ws://127.0.0.1:{port}/v1/listen?encoding=linear16",
+                        origin=origin,
+                        open_timeout=5,
+                    ) as ws:
+                        await ws.send(b"\0\0")
+                    break
+                except InvalidStatus as exc:
+                    status = exc.response.status_code
+                    break
+                except OSError:
+                    await asyncio.sleep(0.02)  # not listening yet
+            await asyncio.sleep(0.2)
+        finally:
+            proxy._stop.set()
+            await asyncio.wait_for(run, 20)
+            upstream.close()
+            await upstream.wait_closed()
+        return status
+
+    status = asyncio.run(main())
+    if refused:
+        assert status == 403
+        assert seen == []
+    else:
+        assert status is None
+        assert seen == ["/v1/listen?encoding=linear16"]
