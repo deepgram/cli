@@ -55,6 +55,19 @@ def test_any_other_xdg_keeps_application_support(macos, monkeypatch, value):
     assert config_module._real_default_config_file() == LIBRARY
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths")
+def test_xdg_default_needs_platformdirs_to_follow_it(macos, monkeypatch):
+    """platformdirs before 4.6 ignores XDG_CONFIG_HOME on macOS and reads
+    Application Support: the trust root stays the file dg reads."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", f"{HOME}/.config")
+    monkeypatch.setattr(
+        config_module.platformdirs,
+        "user_config_dir",
+        lambda *_a, **_k: str(LIBRARY.parent),
+    )
+    assert config_module._real_default_config_file() == LIBRARY
+
+
 def test_home_env_never_counts(macos, monkeypatch):
     monkeypatch.setenv("HOME", "/tmp/fakehome")
     monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/fakehome/.config")

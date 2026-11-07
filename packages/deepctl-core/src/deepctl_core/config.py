@@ -289,11 +289,13 @@ def _real_default_config_file() -> Path | None:
     """Where platformdirs puts the user config with no ``HOME`` or
     ``XDG_CONFIG_HOME`` override: derived from the account itself.
 
-    On macOS, platformdirs moves the config to ``$XDG_CONFIG_HOME`` when
-    that is set. Only the XDG default, ``~/.config`` under the account's
-    own home, is followed there: it is a fixed path, like the Linux one.
-    Any other value keeps ``~/Library/Application Support``, so a file
-    somewhere else (a repository, say) never counts in an agent session.
+    On macOS, platformdirs 4.6 and later move the config to
+    ``$XDG_CONFIG_HOME`` when that is set. Only the XDG default,
+    ``~/.config`` under the account's own home, is followed there: it is a
+    fixed path, like the Linux one, and only when the installed platformdirs
+    really puts the config there. Any other value keeps
+    ``~/Library/Application Support``, so a file somewhere else (a
+    repository, say) never counts in an agent session.
     """
     if sys.platform == "win32":
         base = _windows_folder(0x1C)  # CSIDL_LOCAL_APPDATA
@@ -306,14 +308,26 @@ def _real_default_config_file() -> Path | None:
     xdg_default = Path(home) / ".config" / "deepctl" / "config.yaml"
     if sys.platform == "darwin":
         xdg = os.environ.get("XDG_CONFIG_HOME", "")
-        if os.path.isabs(xdg) and os.path.normpath(xdg) == os.path.join(
-            os.path.normpath(home), ".config"
+        if (
+            os.path.isabs(xdg)
+            and os.path.normpath(xdg) == os.path.join(os.path.normpath(home), ".config")
+            and _platformdirs_follows_xdg(xdg)
         ):
             return xdg_default
         return (
             Path(home) / "Library" / "Application Support" / "deepctl" / "config.yaml"
         )
     return xdg_default
+
+
+def _platformdirs_follows_xdg(xdg: str) -> bool:
+    """Whether platformdirs puts the user config under ``xdg`` (it does on
+    macOS from 4.6), so the trust root is the file dg actually reads."""
+    try:
+        used = platformdirs.user_config_dir("deepctl", "deepgram")
+    except Exception:
+        return False
+    return os.path.normpath(used) == os.path.join(os.path.normpath(xdg), "deepctl")
 
 
 def _trust_root_location() -> tuple[Path, Path] | None:
