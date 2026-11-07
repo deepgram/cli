@@ -95,3 +95,57 @@ def _fresh_credentials_state():
     credentials._reset_for_tests()
     yield
     credentials._reset_for_tests()
+
+
+# ── Tests that send this process a real signal run in a child process ──────
+#
+# A test marked ``signals_in_child`` sends SIGTERM, SIGINT or SIGHUP to its
+# own process. If the handler it relies on isn't installed (a bug, or a
+# signal that arrives late), that signal would end or interrupt the whole
+# pytest run. So the test runs in a pytest child of its own; this process
+# only checks that the child passed.
+
+_CHILD_NODE_ENV = "DEEPCTL_TEST_CHILD_NODE"
+_BASE_ENV = dict(os.environ)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "signals_in_child: the test sends its own process a real signal; "
+        "it runs in a child pytest process",
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    if pyfuncitem.get_closest_marker("signals_in_child") is None:
+        return None
+    if os.environ.get(_CHILD_NODE_ENV) == pyfuncitem.nodeid:
+        return None  # this is the child: run the test here
+    import subprocess
+    import sys
+
+    config = pyfuncitem.config
+    node = str(pyfuncitem.path) + "::" + pyfuncitem.nodeid.split("::", 1)[1]
+    argv = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    argv += ["-p", "no:warnings"]
+    argv += ["--rootdir", str(config.rootpath)]
+    if config.inipath is not None:
+        argv += ["-c", str(config.inipath)]
+    argv += [node]
+    proc = subprocess.run(
+        argv,
+        cwd=config.invocation_params.dir,
+        env={**_BASE_ENV, _CHILD_NODE_ENV: pyfuncitem.nodeid},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    output = proc.stdout[-5000:] + proc.stderr[-1000:]
+    if proc.returncode < 0:
+        pytest.fail(f"the child test process was killed by signal {-proc.returncode}:\n{output}")
+    if proc.returncode != 0 or " passed" not in proc.stdout:
+        pytest.fail(f"the child test process failed ({proc.returncode}):\n{output}")
+    return True

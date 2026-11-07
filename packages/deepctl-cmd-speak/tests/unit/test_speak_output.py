@@ -32,6 +32,32 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+class _SignalFromAnotherThread:
+    """A thread, started before any section blocks signals (a thread
+    inherits its creator's mask), that takes ``signum`` itself when
+    ``send()`` is called: pthread_kill to itself delivers it before the
+    call returns, and Python runs the handler in the main thread."""
+
+    def __init__(self, signum: int) -> None:
+        import signal
+
+        self._go = threading.Event()
+        self._sent = threading.Event()
+
+        def run() -> None:
+            self._go.wait()
+            signal.pthread_kill(threading.get_ident(), signum)
+            self._sent.set()
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+
+    def send(self) -> None:
+        self._go.set()
+        assert self._sent.wait(10)
+        self._thread.join(10)
+
+
 class _Cut(Exception):
     """Stands in for the SDK error a dropped connection raises."""
 
@@ -683,6 +709,7 @@ class TestNoPartialFile:
 # ── SIGTERM / SIGHUP mid-stream ─────────────────────────────────────────
 
 
+@pytest.mark.signals_in_child
 class TestTerminateMidStream:
     @pytest.fixture
     def died(self, monkeypatch):
@@ -702,7 +729,7 @@ class TestTerminateMidStream:
             for i, chunk in enumerate(chunks):
                 yield chunk
                 if i == 0:
-                    os.kill(os.getpid(), sig)
+                    _signal.raise_signal(sig)
             raise AssertionError("the signal should have stopped the stream")
 
         return gen(), _signal
@@ -753,7 +780,7 @@ class TestTerminateMidStream:
             speak._terminate_cleanly(lambda: cleaned.append(True)),
         ):
             try:
-                os.kill(os.getpid(), signal.SIGTERM)
+                signal.raise_signal(signal.SIGTERM)
                 time.sleep(1)  # unreachable: the handler raises
             except speak._Terminated:
                 # "Stuck" unwinding: wait until the re-delivered signal ends
@@ -776,9 +803,9 @@ class TestTerminateMidStream:
             speak._terminate_cleanly(lambda: cleaned.append(True)),
         ):
             try:
-                os.kill(os.getpid(), signal.SIGINT)
+                signal.raise_signal(signal.SIGINT)
             except KeyboardInterrupt:
-                os.kill(os.getpid(), signal.SIGINT)
+                signal.raise_signal(signal.SIGINT)
         assert cleaned == [True]
         assert exits == []
         timers = [t for t in threading.enumerate() if isinstance(t, threading.Timer)]
@@ -789,6 +816,7 @@ class TestTerminateMidStream:
 # ── Round 3: ignored signals, special bits, critical sections, fd paths ──
 
 
+@pytest.mark.signals_in_child
 class TestIgnoredSignalsStayIgnored:
     """nohup, background jobs and `trap ''` keep their dispositions."""
 
@@ -801,7 +829,7 @@ class TestIgnoredSignalsStayIgnored:
         try:
             with speak._terminate_cleanly(lambda: None):
                 assert signal.getsignal(sig) is signal.SIG_IGN
-                os.kill(os.getpid(), sig)  # ignored: nothing raises
+                signal.raise_signal(sig)  # ignored: nothing raises
             assert signal.getsignal(sig) is signal.SIG_IGN
         finally:
             signal.signal(sig, before)
@@ -839,7 +867,7 @@ class TestIgnoredSignalsStayIgnored:
 
         def gen():
             yield b"\x01\x00"
-            os.kill(os.getpid(), signal.SIGHUP)
+            signal.raise_signal(signal.SIGHUP)
             yield b"\x02\x00"
 
         if model.startswith("flux"):
@@ -890,17 +918,36 @@ class TestRound3Sinks:
         assert [p.name for p in tmp_path.iterdir()] == ["a.wav"]
         assert path.read_bytes() == b"old"
 
-    def test_signals_wait_for_the_end_of_a_critical_section(self):
+    @pytest.mark.signals_in_child
+    @pytest.mark.parametrize("taken_by", ["main", "another thread"])
+    def test_signals_wait_for_the_end_of_a_critical_section(self, taken_by):
+        """A signal sent to the main thread stays pending while the section
+        blocks it; one another thread takes is handled in the main thread
+        and deferred. Either way it ends the run only after the section.
+
+        Each is sent to one thread (pthread_kill): a signal sent to the
+        process can be taken by any thread that doesn't block it, at a time
+        the kernel picks (on macOS, after the section may have ended)."""
         import signal
 
         seen: list[str] = []
+        main = threading.main_thread().ident
+        assert main is not None
+        other = _SignalFromAnotherThread(signal.SIGTERM)
 
         with (
             pytest.raises(speak._Terminated),
             speak._terminate_cleanly(lambda: None),
         ):
             with sinks.critical_section():
-                os.kill(os.getpid(), signal.SIGTERM)
+                if taken_by == "main":
+                    signal.pthread_kill(main, signal.SIGTERM)
+                else:
+                    other.send()
+                    deadline = time.monotonic() + 5
+                    while not sinks._deferred and time.monotonic() < deadline:
+                        time.sleep(0.001)  # the handler runs and defers
+                    assert sinks._deferred == [signal.SIGTERM]
                 seen.append("still inside")
             seen.append("unreachable")
         assert seen == ["still inside"]
@@ -957,6 +1004,7 @@ class TestSignalGuardEdges:
     """Windows re-delivery, the restore window, masks left blocked, bursts, and
     cleanup outside the guard."""
 
+    @pytest.mark.signals_in_child
     def test_signal_inside_importlib_comes_again_later(self, monkeypatch):
         """A raise inside importlib's lock bookkeeping can leave the import
         lock held (a hang), so the guard lets the signal come again."""
@@ -974,11 +1022,11 @@ class TestSignalGuardEdges:
             pytest.raises(speak._Terminated),
             speak._terminate_cleanly(lambda: cleaned.append(True)),
         ):
-            os.kill(os.getpid(), signal.SIGTERM)
+            signal.raise_signal(signal.SIGTERM)
             time.sleep(0.05)  # handled, deferred: no raise
             assert later == [signal.SIGTERM]
             inside[0] = False
-            os.kill(os.getpid(), signal.SIGTERM)
+            signal.raise_signal(signal.SIGTERM)
             time.sleep(1)  # unreachable: the handler raises
         assert cleaned == []  # first signal: unwinding, no forced cleanup
         signals._deferred_since.clear()
@@ -1060,6 +1108,7 @@ class TestSignalGuardEdges:
         assert info.value.code == 128 + signal.SIGTERM
         assert not [k for k in killed if k[0] == own]
 
+    @pytest.mark.signals_in_child
     def test_deferred_signal_is_raised_not_killed(self, monkeypatch):
         import signal
 
@@ -1083,6 +1132,7 @@ class TestSignalGuardEdges:
         finally:
             signal.signal(signal.SIGHUP, before)
 
+    @pytest.mark.signals_in_child
     def test_most_severe_deferred_signal_wins(self):
         """TERM then INT during a section ends by TERM."""
         import signal
@@ -1105,6 +1155,7 @@ class TestSignalGuardEdges:
             for s, old in saved.items():
                 signal.signal(s, old)
 
+    @pytest.mark.signals_in_child
     @pytest.mark.parametrize("signame", ["SIGINT", "SIGTERM"])
     def test_a_signal_during_the_restore_reaches_the_restored_handler(
         self, monkeypatch, signame
@@ -1126,7 +1177,7 @@ class TestSignalGuardEdges:
         def wrapped(s, h):
             if armed[0] and getattr(h, "__name__", "") != "handler":
                 armed[0] = False
-                os.kill(os.getpid(), sig)  # arrives during the restore
+                signal.raise_signal(sig)  # arrives during the restore
             return real(s, h)
 
         cleaned: list[bool] = []
@@ -1173,6 +1224,10 @@ stop = threading.Event()
 def h(signum, frame):
     if sinks.defer_signal(signum) or stop.is_set():
         return
+    # Only inside sinks' own code, the section's setup and teardown: raised
+    # anywhere else (the loop around it), Boom could escape the script.
+    if frame is None or frame.f_code.co_filename != sinks.__file__:
+        return
     raise Boom
 h._deepctl_defers = True
 signal.signal(signal.SIGTERM, h)
@@ -1210,6 +1265,7 @@ print(f"raises={raises} masks_left_blocked={stuck} critical={sinks._critical}")
         assert "masks_left_blocked=0 critical=0" in p.stdout, p.stdout
         assert "raises=0" not in p.stdout
 
+    @pytest.mark.signals_in_child
     def test_abort_outside_the_guard_still_removes_the_temp_file(self, tmp_path):
         """A Ctrl-C taken by another thread while abort() runs with no
         guard installed is held until the removal is done."""
@@ -1221,13 +1277,12 @@ print(f"raises={raises} masks_left_blocked={stuck} critical={sinks._critical}")
         out.write(b"x" * 100)
         real_close = os.close
         fd = out._fd
+        other = _SignalFromAnotherThread(signal.SIGINT)
 
         def close_then_signal(n):
             real_close(n)
             if n == fd:
-                t = threading.Thread(target=os.kill, args=(os.getpid(), signal.SIGINT))
-                t.start()
-                t.join()
+                other.send()
                 time.sleep(0.05)
 
         sinks.os.close = close_then_signal
