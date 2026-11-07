@@ -8,6 +8,7 @@ only it has (O_BINARY), so the Windows paths are exercised everywhere.
 from __future__ import annotations
 
 import os
+import stat
 
 import pytest
 from deepctl_cmd_speak import sinks
@@ -110,3 +111,58 @@ def test_null_device_opens_without_o_nonblock_or_set_blocking(monkeypatch):
     out = sinks.AudioFile(target)
     out.write(b"audio")
     out.commit()
+
+
+# ── File identity: Windows gives pipes, consoles and devices index 0 ─────
+
+
+def _no_index(mode: int) -> os.stat_result:
+    """What Windows' fstat says about a pipe, a console or NUL."""
+    return os.stat_result((mode, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+
+
+def test_files_without_an_index_are_never_the_same():
+    pipe, console = _no_index(stat.S_IFIFO), _no_index(stat.S_IFCHR)
+    assert os.path.samestat(pipe, console)  # what made them look alike
+    assert not sinks.same_file(pipe, console)
+    assert not sinks.same_file(pipe, pipe)
+
+
+@pytest.mark.parametrize(
+    ("mode", "takes"), [(stat.S_IFIFO, False), (stat.S_IFCHR, True)]
+)
+def test_stdout_without_an_index(monkeypatch, mode, takes):
+    """A piped stdout isn't taken for NUL in an agent session; a console
+    or NUL still takes audio."""
+    monkeypatch.setattr(sinks, "stdout_stat", lambda: _no_index(mode))
+    real_stat = os.stat
+
+    def stat_(path, *args, **kwargs):
+        if path == os.devnull:
+            return _no_index(stat.S_IFCHR)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(sinks.os, "stat", stat_)
+    monkeypatch.setattr(sinks.os, "isatty", lambda _fd: False)
+    assert sinks.stdout_takes_audio() is takes
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs a real character device")
+def test_null_device_is_not_taken_for_stderr(monkeypatch):
+    """`--out-file NUL` with stderr on a console or a pipe: neither has an
+    index, so NUL used to be refused as "stderr"."""
+    monkeypatch.setattr(sinks, "_stderr_stat", lambda: _no_index(stat.S_IFCHR))
+    monkeypatch.setattr(sinks, "stdout_stat", lambda: _no_index(stat.S_IFIFO))
+    real_stat = os.stat
+
+    def stat_(path, *args, **kwargs):
+        if path == os.devnull:
+            return _no_index(stat.S_IFCHR)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(sinks.os, "stat", stat_)
+    target = sinks.plan_target(os.devnull, overwrite=False)
+    assert isinstance(target, sinks.Target), target
+    assert target.kind == "special"
+    monkeypatch.undo()
+    os.close(target.fd)

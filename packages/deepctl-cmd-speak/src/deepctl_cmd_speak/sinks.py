@@ -106,6 +106,13 @@ def stdout_stat() -> os.stat_result | None:
         return None
 
 
+def same_file(a: os.stat_result, b: os.stat_result) -> bool:
+    """``os.path.samestat``, except that a file with no index is never the
+    same as another: Windows reports index 0 for every pipe, console and
+    device, so two of them would always match."""
+    return a.st_ino != 0 and os.path.samestat(a, b)
+
+
 def stdout_takes_audio() -> bool:
     """True when stdout is a terminal, a regular file or the null device:
     the destinations where agent mode still writes audio."""
@@ -114,8 +121,12 @@ def stdout_takes_audio() -> bool:
         return False
     if stat.S_ISREG(out.st_mode):
         return True
+    if out.st_ino == 0:
+        # Windows: a pipe, a console or NUL, with nothing to compare. The
+        # console and NUL are character devices; a pipe is not.
+        return stat.S_ISCHR(out.st_mode)
     try:
-        if os.path.samestat(out, os.stat(os.devnull)):
+        if same_file(out, os.stat(os.devnull)):
             return True
         return os.isatty(sys.stdout.fileno())
     except Exception:
@@ -369,11 +380,11 @@ def plan_target(path: str, *, overwrite: bool) -> Target | Refusal:
         followed = None
     if followed is not None:
         err = _stderr_stat()
-        if err is not None and os.path.samestat(followed, err):
+        if err is not None and same_file(followed, err):
             # Audio would be mixed with dg's own messages.
             return Refusal("unwritable", OSError(errno.EINVAL, _STDERR, path))
         out = stdout_stat()
-        if out is not None and os.path.samestat(followed, out):
+        if out is not None and same_file(followed, out):
             return Target(path, "stdout", ident=(followed.st_dev, followed.st_ino))
 
     try:
@@ -557,7 +568,7 @@ class AudioFile:
                 # another file (renamed or replaced meanwhile), leave it
                 # alone.
                 try:
-                    if os.path.samestat(os.lstat(self.target.path), ours):
+                    if same_file(os.lstat(self.target.path), ours):
                         os.unlink(self.target.path)
                 except OSError:
                     pass
