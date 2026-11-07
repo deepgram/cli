@@ -355,25 +355,26 @@ def test_console_on_a_terminal_honors_no_color(env, ansi):
         if k not in (*agents.HARD_ENV_VARS, "DG_AGENT", "NO_COLOR", "FORCE_COLOR", "CI")
     }
     master, slave = pty.openpty()
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         [sys.executable, "-c", code],
         stdin=slave,
         stdout=slave,
         stderr=slave,
         env={**clean, "TERM": "xterm-256color", "PATH": "/usr/bin:/bin", **env},
-        timeout=60,
-        check=True,
     )
     os.close(slave)
+    # Read while the child runs: macOS drops what is still unread in the
+    # terminal once the child's side closes, and a full terminal blocks it.
     out = b""
     while True:
         try:
             chunk = os.read(master, 4096)
-        except OSError:
+        except OSError:  # EIO: the child closed its side
             break
         if not chunk:
             break
         out += chunk
+    proc.wait(timeout=60)
     os.close(master)
     assert proc.returncode == 0
     assert (b"\x1b[" in out) is ansi, out

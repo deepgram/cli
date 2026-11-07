@@ -243,7 +243,7 @@ class TestAgentModeNotice:
         self, home: Path, env: dict[str, str], expected: str | None
     ) -> None:
         import pty
-        import select
+        import threading
 
         master, slave = pty.openpty()
         code = (
@@ -259,19 +259,25 @@ class TestAgentModeNotice:
             cwd=home,
         )
         os.close(slave)
+        # Read the terminal while the child runs: on macOS a full terminal
+        # blocks the child, and what is unread when its side closes is lost.
+        chunks: list[bytes] = []
+
+        def drain() -> None:
+            while True:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:  # EIO: the child closed its side
+                    return
+                if not chunk:
+                    return
+                chunks.append(chunk)
+
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
         out, _ = proc.communicate(timeout=60)
-        err = b""
-        while True:
-            ready, _, _ = select.select([master], [], [], 0.5)
-            if not ready:
-                break
-            try:
-                chunk = os.read(master, 65536)
-            except OSError:
-                break
-            if not chunk:
-                break
-            err += chunk
+        reader.join(timeout=10)
+        err = b"".join(chunks)
         os.close(master)
         text = err.decode("utf-8", "replace").replace("\r\n", "\n")
         flat = " ".join(text.split())

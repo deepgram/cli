@@ -87,6 +87,15 @@ def _cases() -> list[tuple[list[str], str, str, str]]:
     return sample
 
 
+# Where the user config is under HOME: platformdirs' default for the OS (the
+# runs clear XDG_CONFIG_HOME).
+CONFIG = (
+    Path("Library", "Application Support", "deepctl", "config.yaml")
+    if sys.platform == "darwin"
+    else Path(".config", "deepctl", "config.yaml")
+)
+
+
 def _fixture(root: Path, fixture: str, variant: str) -> tuple[Path, Path]:
     """Build ``root`` afresh: (home, cwd)."""
     if root.exists():
@@ -98,7 +107,7 @@ def _fixture(root: Path, fixture: str, variant: str) -> tuple[Path, Path]:
     home.mkdir(parents=True)
     cwd.mkdir()
     if fixture in ("trusted", "untrusted-agent"):
-        config = home / ".config" / "deepctl" / "config.yaml"
+        config = home / CONFIG
         config.parent.mkdir(parents=True)
         config.write_text(yaml.safe_dump(TRUSTED))
         # A key in a 0644 file: a person's run restricts it (I-PERM-FIXED).
@@ -207,7 +216,7 @@ def test_matrix_reaches_the_notices(tmp_path: Path) -> None:
     ]
     assert len(agent_lines) == 4
     _, _, err = _run(["speak"], "80", "plain", "trusted", root, "spec")
-    assert "Restricted ~/.config/deepctl/config.yaml to owner-only access" in err
+    assert f"Restricted ~/{CONFIG.as_posix()} to owner-only access" in err
 
 
 def test_leaves_cover_the_t3_rows() -> None:
