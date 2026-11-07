@@ -8,7 +8,7 @@ config file's key was left unused because the file isn't trusted. Every
 is answered from it, so ``mcp``, ``init``, ``debug toolkit`` and ``login``
 share one precedence.
 
-The 0.5.0 precedence is 0.4.2's, unchanged: ``--api-key`` > the profile's
+The 0.5.0 precedence is 0.4.1's, unchanged: ``--api-key`` > the profile's
 keyring entry > the profile in the config file > ``DEEPGRAM_API_KEY``. The
 config file layer already holds ``DEEPGRAM_API_KEY`` when it is set
 (``Config`` merges the environment into the profile), so a file key equal to
@@ -101,7 +101,7 @@ class Resolved:
     untrusted_source: str | None = None
     # Why a stored credential was unusable when nothing else was set.
     expiry_error: str | None = None
-    # 0.4.2's has_profile_credentials(): a usable keyring entry, or a key in
+    # 0.4.1's has_profile_credentials(): a usable keyring entry, or a key in
     # the profile as Config holds it (which includes DEEPGRAM_API_KEY).
     profile_has_key: bool = False
     profile_has_project: bool = False
@@ -400,8 +400,8 @@ def resolve(
     leaves ``DEEPGRAM_API_KEY`` and ``DEEPGRAM_PROJECT_ID`` out.
     ``need_key=False`` answers project questions without reading the keyring.
     ``prune=False`` keeps the answer read-only: an expired credential's
-    keyring entry stays (whoami and the other introspection, as in 0.4.2);
-    commands that use the key prune it, as 0.4.2's ``get_api_key`` did.
+    keyring entry stays (whoami and the other introspection, as in 0.4.1);
+    commands that use the key prune it, as 0.4.1's ``get_api_key`` did.
     Raises nothing; ``expiry_error`` says why a stored credential wasn't used.
     """
     try:
@@ -499,7 +499,7 @@ def _resolve(
                 if raw_env_key and file_key == raw_env_key
                 else KEY_SOURCE_FILE
             )
-            # As in 0.4.2, ignore_env doesn't skip the env value Config
+            # As in 0.4.1, ignore_env doesn't skip the env value Config
             # merged into the profile; it skips only the last fallback.
             mismatch = source == KEY_SOURCE_FILE and _mismatch(file_key, env_key)
             return result(file_key, source, has_key=True, env_mismatch=mismatch)

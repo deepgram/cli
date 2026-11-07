@@ -99,12 +99,12 @@ def test_profiles_list_is_bounded(setup):
     config = Config()
     result, took = _timed(lambda: AuthManager(config).list_profiles())
     assert took < 5.0  # the keyring hangs until the test ends
-    # A timeout falls back to the file, like a keyring error did in 0.4.2.
+    # A timeout falls back to the file, like a keyring error did in 0.4.1.
     assert result.profiles["work"].api_key == "****" + "w" * 4
 
 
 def test_whoami_leaves_an_expired_entry_alone(tmp_path, monkeypatch):
-    """Whoami is read-only, as in 0.4.2; key_source unchanged."""
+    """Whoami is read-only, as in 0.4.1; key_source unchanged."""
     from deepctl_cmd_login.command import WhoamiCommand
 
     monkeypatch.setattr(config_module, "_pending_notices", [])

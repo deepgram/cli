@@ -396,7 +396,7 @@ class AuthManager:
     ) -> tuple[bool, bool]:
         """Check if profile has stored credentials.
 
-        As in 0.4.2, a profile key is a usable keyring entry or a key in the
+        As in 0.4.1, a profile key is a usable keyring entry or a key in the
         profile as the config holds it (which includes ``DEEPGRAM_API_KEY``).
 
         Args:

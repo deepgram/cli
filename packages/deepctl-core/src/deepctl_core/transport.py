@@ -10,7 +10,7 @@ so ``--version`` and ``--help`` never import httpx. It follows no redirects
 cookies, and verifies TLS. A person's ``DEEPGRAM_CLI_INSECURE=1`` (or
 ``true``) skips verification for localhost, 127.0.0.1 and [::1] only, and
 never under an AI agent (``auth._insecure_allowed`` and
-``auth._insecure_mounts``, as in 0.4.2). :func:`verified_client` is the
+``auth._insecure_mounts``, as in 0.4.1). :func:`verified_client` is the
 always-verified client for ``dg api``; WebSocket streams always verify.
 The SDK facade builds its client through :attr:`Transport.backend`, a seam
 for other backends (#142's SageMaker), with the REST backend as the default.
@@ -89,7 +89,7 @@ def _new_client(*, insecure_loopback: bool) -> httpx.Client:
     from .auth import _insecure_mounts, _warn_if_verified
 
     if insecure_loopback:
-        # As AuthManager.client (0.4.2): verification stays on, and only the
+        # As AuthManager.client (0.4.1): verification stays on, and only the
         # loopback hosts get unverified transports.
         return httpx.Client(
             timeout=DEFAULT_TIMEOUT_S,

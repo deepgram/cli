@@ -14,7 +14,7 @@ export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1
 mkdir -p /idx/pool
 W=/w; WH=$W/wheelhouse
 CUR=$(cat $W/lockstep/cur/VERSION); NEXT=$(cat $W/lockstep/next/VERSION)
-FIELD=$(cat $W/FIELD_VERSIONS)                # e.g. "0.3.3 0.4.0 0.4.1 0.4.2"
+FIELD=$(cat $W/FIELD_VERSIONS)                # e.g. "0.3.3 0.4.0 0.4.1"
 LCUR="$W/lockstep/cur"; LNEXT="$W/lockstep/next"
 field_dirs(){ for d in $W/field/*/; do [ -d "$d" ] && printf '%s ' "${d%/}"; done; }
 mk(){ python -I /s/mkidx.py /idx/$1 /idx/pool "${@:2}" 2>>/o/idx.log; }
