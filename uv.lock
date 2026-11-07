@@ -1243,7 +1243,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.2.0,<9" },
     { name = "deepctl", editable = "." },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "mcp", specifier = ">=1.22.0,<2.0.0" },
+    { name = "mcp", specifier = ">=1.23.1,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
     { name = "pydantic", specifier = ">=2.10.1,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.3" },
