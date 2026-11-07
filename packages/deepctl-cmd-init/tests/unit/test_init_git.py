@@ -4,6 +4,7 @@ inside a repository from running a program."""
 from __future__ import annotations
 
 import os
+import sys
 import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -86,6 +87,7 @@ def test_repository_config_runs_nothing(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+@pytest.mark.skipif(sys.platform == "win32", reason="the hook is a POSIX shell command")
 def test_without_the_settings_fsmonitor_would_run(tmp_path: Path) -> None:
     """Control: the same config does run code when git runs without them."""
     repo = tmp_path / "repo"

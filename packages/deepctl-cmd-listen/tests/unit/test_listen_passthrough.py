@@ -255,7 +255,8 @@ def test_large_result_under_an_agent_is_compacted(monkeypatch, capsysbinary, tmp
     full = compact["full_result_path"]
     assert Path(full).read_bytes() == body + b"\n"
     assert compact["full_result_bytes"] == len(body) + 1
-    assert stat.S_IMODE(os.stat(full).st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(full).st_mode) == 0o600
     text = json.loads(body)["results"]["channels"][0]["alternatives"][0]["transcript"]
     assert Path(compact["transcript_path"]).read_text() == text + "\n"
     assert compact["transcript_chars"] == len(text)

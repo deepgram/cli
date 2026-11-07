@@ -340,6 +340,7 @@ def _run_probe(**proxy_hooks):
 class TestInterrupt:
     """Ctrl+C handling in handle(): POSIX signal handler, Windows fallback."""
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill of SIGINT ends the whole process on Windows")
     def test_sigint_on_the_loop_stops_and_restores_the_previous_handler(
         self, capsys
     ):

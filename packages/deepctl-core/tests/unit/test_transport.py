@@ -666,6 +666,7 @@ def test_details_omitted_when_empty():
     ]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a bare name needs PATHEXT on Windows")
 def test_prog_bare_name_only_when_which_matches(monkeypatch, tmp_path):
     script = tmp_path / "bin" / "dg"
     script.parent.mkdir()

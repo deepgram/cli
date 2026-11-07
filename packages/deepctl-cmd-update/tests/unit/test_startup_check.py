@@ -191,6 +191,7 @@ class TestSkipConditions:
         monkeypatch.setattr(mod, "_is_oneshot", lambda: True)
         self._assert_skipped(check_allowed)
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX owners")
     def test_unusable_cache_dir(self, check_allowed, monkeypatch):
         """A foreign-owned cache dir: no check thread, no network, no state."""
         check_allowed.mkdir(parents=True, mode=0o755)

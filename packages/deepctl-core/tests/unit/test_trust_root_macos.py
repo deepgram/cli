@@ -32,6 +32,7 @@ def test_without_xdg_it_is_application_support(macos):
 @pytest.mark.parametrize(
     "value", [f"{HOME}/.config", f"{HOME}/.config/", f"{HOME}//.config/."]
 )
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths")
 def test_xdg_default_follows_the_config(macos, monkeypatch, value):
     monkeypatch.setenv("XDG_CONFIG_HOME", value)
     assert config_module._real_default_config_file() == DOT_CONFIG

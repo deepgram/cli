@@ -19,6 +19,10 @@ from deepctl_core.agents import HARD_ENV_VARS
 
 from deepctl import _cache, _cli, _manifest
 
+# The cache's location, modes and owners are POSIX here: on Windows the real
+# cache root is LocalAppData, which these tests can't redirect.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX cache")
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 

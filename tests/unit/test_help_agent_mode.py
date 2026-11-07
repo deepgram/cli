@@ -45,7 +45,11 @@ def _render(**env: str) -> str:
         ("person.txt", {}),
     ],
 )
-def test_golden(golden: str, env: dict[str, str]) -> None:
+def test_golden(
+    golden: str, env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The goldens are the POSIX text (Windows has no `chmod 600` line).
+    monkeypatch.setattr(sys, "platform", "linux")
     expected = (GOLDEN / golden).read_text(encoding="utf-8")
     assert _render(**env) == expected
 

@@ -88,6 +88,7 @@ def home(tmp_path: Path) -> Path:
 
 
 class TestConfigWarnings:
+    @pytest.mark.skipif(sys.platform == "win32", reason="XDG config location")
     def test_malformed_config_json_stdout_stays_clean(self, home: Path) -> None:
         _user_config(home).write_text("profiles: [\n  bad", encoding="utf-8")
         proc = _dg(home, "-o", "json", "models")
@@ -111,6 +112,7 @@ class TestConfigWarnings:
         json.loads(proc.stdout)
         assert proc.stderr.count("Could not load config") == 1
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="XDG config location")
     def test_malformed_config_human_output_warns_once_on_stderr(
         self, home: Path
     ) -> None:

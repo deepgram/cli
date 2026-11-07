@@ -243,6 +243,7 @@ def test_reader_reads_capped_frames_then_eof():
     assert items[-1] == b""
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="non-blocking POSIX pipes")
 def test_reader_blocks_on_full_queue_instead_of_buffering():
     """Backpressure: with nobody consuming, the reader holds at most
     maxsize buffers plus the one it is handing over."""
