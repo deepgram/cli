@@ -489,10 +489,7 @@ def main() -> None:
             stale.append("README.md")
 
     if args.check and stale:
-        print(
-            f"\n{len(stale)} README(s) out of date. "
-            "Run: python scripts/generate_readmes.py"
-        )
+        print(f"\n{len(stale)} README(s) out of date. Run: make readmes")
         sys.exit(1)
 
     if not args.check and not args.dry_run:
