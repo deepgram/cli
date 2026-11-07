@@ -71,6 +71,12 @@ ARGS_CHECKS = {
 }
 
 SKIP_DIRS = {"node_modules", "dist", ".astro", "__pycache__", "tests"}
+# Source that names a transport only to refuse it: the standalone entry point
+# (`python -m deepctl_cmd_mcp`) still parses the names an old MCP config may
+# use, so it prints E_MCP_TRANSPORT instead of an argparse error.
+REFUSES = {
+    ("packages/deepctl-cmd-mcp/src/deepctl_cmd_mcp/__main__.py", "streamable-http"),
+}
 TEXT_SUFFIXES = {".md", ".txt", ".py", ".astro", ".ts", ".tsx", ".js", ".json"}
 
 
@@ -121,6 +127,8 @@ def _hits() -> list[str]:
         lines = text.splitlines()
         rel = path.relative_to(REPO)
         for number, label in check_text(text):
+            if (rel.as_posix(), label) in REFUSES:
+                continue
             hits.append(f"{rel}:{number}: {label}: {lines[number - 1].strip()}")
     return hits
 
