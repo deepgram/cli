@@ -214,13 +214,20 @@ def _merge_base() -> str:
     return "b: &b\n" + "".join(f"  k{i}: 1\n" for i in range(3000))
 
 
-# The three 64 KiB bombs are built at test time rather than committed.
+# The three 64 KiB bombs and the deeply nested ones are built at test time
+# rather than committed. A committed .yaml nested thousands deep overflows
+# the stack of CodeQL's YAML extractor.
 GENERATED_BOMBS = {
     "many_seq_64k": lambda: "l:\n" + "- 1\n" * 16381,
     "merge_seq_64k": lambda: (
         _merge_base() + "x:\n  <<: [" + ", ".join(["*b"] * 8385) + "]\n"
     ),
     "merge_wide_64k": lambda: _merge_base() + "l:\n" + "- <<: *b\n" * 3725,
+    "block_dash_deep": lambda: "- " * 20000 + "x\n",
+    "deep10k_flow_map": lambda: "x: " + "{a: " * 10000 + "1" + "}" * 10000 + "\n",
+    "deep10k_flow_seq": lambda: "x: " + "[" * 10000 + "1" + "]" * 10000 + "\n",
+    "quote_bypass_dq": lambda: 'x: [a "b, ' + "[" * 15000 + 'c"' + "]" * 15001 + "\n",
+    "quote_bypass_sq": lambda: "x: [a 'b, " + "[" * 15000 + "c'" + "]" * 15001 + "\n",
 }
 
 # sha256 of the files as they were first committed.
@@ -228,6 +235,11 @@ GENERATED_BOMB_SHA256 = {
     "many_seq_64k": "11d7bdf1173c5f9bdf4a0493fc480dd4fdc58b75757ef0b0cda38ad73efc0dd8",
     "merge_seq_64k": "ba2713e4b697f0120c97bec7b197af564dd7fc464a9123b9a353d736d6199528",
     "merge_wide_64k": "8817fe27ece4b66124b1a64c4b2d8e27c746c1b103a956341b3175d54f0d15ae",
+    "block_dash_deep": "1375d0948a34f2d406a917b8d6dda45d3d544436825976aedbf7e93aef7d77fa",
+    "deep10k_flow_map": "60292fe95d6c0531dd755a4a5e6b9b00a3af62c094d3845b042f90b990849750",
+    "deep10k_flow_seq": "a80b8b1403a0f0984fd690a79af443bfd6653e3fd1e47d884f744c70d5253d15",
+    "quote_bypass_dq": "5edfc58635917346dd2ba946dff2fb360b8200d0b145fb31d9e47988fe555c94",
+    "quote_bypass_sq": "ad8aa72fb812ba85364f258f659239201662aaf43e1b13f7da721338d75be4c8",
 }
 
 BOMBS = sorted({p.stem for p in BOMB_DIR.glob("*.yaml")} | set(GENERATED_BOMBS))
@@ -335,7 +347,10 @@ def test_bomb_in_every_placement_loads_quickly_with_one_warning(
 @pytest.mark.parametrize("agent", [False, True])
 def test_bomb_files_never_hang_dg(tmp_path, name, placement, agent):
     (tmp_path / "home").mkdir()
-    text = (Path(__file__).parent / "fixtures" / "config_bombs" / f"{name}.yaml").read_text()
+    if name in GENERATED_BOMBS:
+        text = GENERATED_BOMBS[name]()
+    else:
+        text = (BOMB_DIR / f"{name}.yaml").read_text()
     if placement == "project":
         (tmp_path / "deepgram.yaml").write_text(text)
         extra: list[str] = []
