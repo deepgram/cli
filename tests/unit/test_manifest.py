@@ -22,6 +22,12 @@ from deepctl._manifest_build import ManifestError, assemble, build, load_fragmen
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA = REPO / "docs" / "contracts" / "manifest.schema.json"
 FRAGMENTS = REPO / "src" / "deepctl" / "_manifest.d"
+# deepctl imported from this source tree (an editable install), not from an
+# installed wheel, which carries the built manifest and no fragments.
+FROM_SOURCE = Path(_manifest.__file__).resolve().parent == FRAGMENTS.parent.resolve()
+source_tree_only = pytest.mark.skipif(
+    not FROM_SOURCE, reason="deepctl is installed, not imported from this tree"
+)
 
 
 def _fragment(name: str, **extra: Any) -> dict[str, Any]:
@@ -56,8 +62,9 @@ class TestRepoManifest:
 
     def test_runtime_reads_the_same_manifest(self) -> None:
         assert _manifest.load() == assemble(str(FRAGMENTS))
-        # From the source tree the fragments are used, never a stale file.
-        assert _manifest.source == "fragments"
+        # From the source tree the fragments are used, never a stale file;
+        # an installed wheel reads the manifest built from them.
+        assert _manifest.source == ("fragments" if FROM_SOURCE else "built")
 
     def test_validates_against_the_schema(self) -> None:
         import jsonschema  # a test dependency: this must never skip
@@ -69,6 +76,7 @@ class TestRepoManifest:
         for path in sorted(FRAGMENTS.glob("*.json")):
             jsonschema.validate(json.loads(path.read_text()), fragment_schema)
 
+    @source_tree_only
     def test_check_cli(self) -> None:
         proc = subprocess.run(
             [sys.executable, "-m", "deepctl._manifest_build", "--check"],
@@ -78,6 +86,7 @@ class TestRepoManifest:
         )
         assert proc.returncode == 0, proc.stderr
 
+    @source_tree_only
     def test_builder_is_stdlib_only(self, tmp_path: Path) -> None:
         """It runs in the build_py hook, where only setuptools is installed."""
         code = (

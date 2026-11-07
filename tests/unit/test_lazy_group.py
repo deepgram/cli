@@ -97,6 +97,22 @@ def _invoke(group: click.Group, args: list[str]) -> None:
         pass
 
 
+def _example_plugin_installed() -> bool:
+    """deepctl-plugin-example is installed in the dev environment (a
+    workspace member), not with the released packages."""
+    from importlib import metadata
+
+    return any(
+        ep.name == "example" for ep in metadata.entry_points(group="deepctl.plugins")
+    )
+
+
+needs_example_plugin = pytest.mark.skipif(
+    not _example_plugin_installed(),
+    reason="needs deepctl-plugin-example installed (no plugin: nothing to discover)",
+)
+
+
 class TestDiscovery:
     """Plugins are discovered only for unknown names, --help, plugin list
     and an allowed override."""
@@ -106,7 +122,7 @@ class TestDiscovery:
         [
             (["models", "--help"], False),
             (["debug-audio", "--help"], False),
-            (["--help"], True),
+            pytest.param(["--help"], True, marks=needs_example_plugin),
             (["plugin", "list", "--help"], True),
         ],
     )
@@ -444,6 +460,7 @@ class TestHyphenatedSubcommands:
 
 
 class TestCompletion:
+    @needs_example_plugin
     def test_plugins_complete(self, tmp_path: Path) -> None:
         """Completion offers plugin commands, as 0.4.x did."""
         proc = _dg(

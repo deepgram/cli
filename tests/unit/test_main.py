@@ -351,6 +351,15 @@ class TestGlobalOptionHint:
         assert "error" in captured.err.lower()
 
 
+def _no_such(token: str, *possible: str) -> str:
+    """Click's own "No such option" text: click 8.4 quotes the option and
+    ends with a period ("No such option '--x'."), earlier releases don't
+    ("No such option: --x")."""
+    import click
+
+    return click.NoSuchOption(token, possibilities=list(possible)).format_message()
+
+
 class TestUsageErrorModes:
     """Usage/Try lines for people; two prefixed lines in agent mode."""
 
@@ -373,7 +382,7 @@ class TestUsageErrorModes:
     def test_agent_mode_root_prints_error_and_hint_only(self, capsys):
         err = self._run(["dg", "-o", "json", "--bogus"], capsys, agentic=True)
         assert err.splitlines() == [
-            "ERROR: No such option '--bogus'. Did you mean '--verbose'?",
+            "ERROR: " + _no_such("--bogus", "--verbose"),
             "HINT: Run dg --help to see valid options.",
         ]
 
@@ -387,7 +396,7 @@ class TestUsageErrorModes:
         err = self._run(["dg", "models", "--profile", "staging"], capsys, agentic=True)
         # Always exactly two lines: the placement hint replaces A-USAGE.
         assert err.splitlines() == [
-            "ERROR: No such option '--profile'.",
+            "ERROR: " + _no_such("--profile"),
             "HINT: --profile is a global option, so it goes before the "
             "command: dg --profile <value> models …",
         ]
@@ -402,7 +411,7 @@ class TestUsageErrorModes:
     @pytest.mark.parametrize("token", ["--[/x]", "--[red]x"])
     def test_human_mode_message_is_not_markup(self, capsys, token):
         err = self._run(["dg", "models", token], capsys, agentic=False)
-        assert f"Error: No such option '{token}'" in " ".join(err.split())
+        assert f"Error: {_no_such(token)}" in " ".join(err.split())
         assert "Traceback" not in err and "MarkupError" not in err
 
     def test_human_global_option_hint_uses_real_names(self, capsys):
