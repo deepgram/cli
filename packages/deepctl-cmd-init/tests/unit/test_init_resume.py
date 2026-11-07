@@ -521,3 +521,46 @@ class TestResumeWithoutDirectoryHandles(TestResume):
     @pytest.fixture(autouse=True)
     def _windows(self, run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         _windows_directories(monkeypatch)
+
+
+@needs_git
+class TestAgentRecordsUnderTheRealHome:
+    """In an AI agent session the records live under the account's own
+    home, never $HOME, which the agent can point anywhere."""
+
+    @pytest.fixture
+    def real_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        from deepctl_core import config as config_module
+
+        real = tmp_path / "real-home"
+        real.mkdir()
+        monkeypatch.setattr(config_module, "_real_home", lambda: str(real))
+        return real
+
+    def _agent(self, run: Any, monkeypatch: pytest.MonkeyPatch, on: bool) -> None:
+        from deepctl_core import output
+
+        run.agent = on
+        monkeypatch.setattr(output, "is_ai_agent", lambda: on)
+
+    def test_a_record_under_home_is_not_used(
+        self, run: Any, real_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run.makefile = True
+        assert run(no_install=True).status == "success"  # a person's clone
+        assert (run.home / ".deepctl" / clones.DIR_NAME).is_dir()
+        self._agent(run, monkeypatch, True)
+        result = run(api_key=KEY, install=True)
+        assert result.code == "invalid_argument"
+        assert run.setup_runs == []
+
+    def test_the_agent_resumes_its_own_clone(
+        self, run: Any, real_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run.makefile = True
+        self._agent(run, monkeypatch, True)
+        assert run(no_install=True).status == "success"
+        assert (real_home / ".deepctl" / clones.DIR_NAME).is_dir()
+        assert not (run.home / ".deepctl").exists()
+        assert run(no_install=True).status == "success"
+        assert run.clones == 1
