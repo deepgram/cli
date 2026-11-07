@@ -230,7 +230,7 @@ class TestSubcommand:
 class TestBackoff:
     """The cache file records every attempt, success or not."""
 
-    def test_failure_is_recorded_and_waits_a_day(self, check_allowed):
+    def test_failure_is_recorded_and_waits_before_retrying(self, check_allowed):
         with patch("httpx.Client.get", side_effect=OSError("unreachable")):
             check_and_notify(current_version="1.0.0")
             mod._thread.join(timeout=5.0)
@@ -298,6 +298,42 @@ class TestBackoff:
         state["checked_at"] -= 86401
         path.write_text(json.dumps(state))
         assert check_cache.due(check_cache.UPDATE_FILE, 86400.0)
+
+    @staticmethod
+    def _aged(directory, *, ok: bool, seconds: float) -> None:
+        check_cache.write(check_cache.UPDATE_FILE, ok=ok, latest=None, source="pypi")
+        path = directory / check_cache.UPDATE_FILE
+        state = json.loads(path.read_text())
+        state["checked_at"] -= seconds
+        path.write_text(json.dumps(state))
+
+    def test_unfinished_check_is_retried_within_the_interval(self, check_allowed):
+        """dg often exits before the answer arrives (the check never makes
+        a run wait): such an attempt counts for RETRY_SECONDS, not a day,
+        so short commands don't keep the check from ever completing."""
+        assert check_cache.usable()
+        retry = check_cache.RETRY_SECONDS
+        assert retry < 86400.0
+        self._aged(check_allowed, ok=False, seconds=retry - 60)
+        assert not check_cache.due(check_cache.UPDATE_FILE, 86400.0)
+        self._aged(check_allowed, ok=False, seconds=retry + 1)
+        assert check_cache.due(check_cache.UPDATE_FILE, 86400.0)
+        with patch.object(mod.threading, "Thread") as thread_cls:
+            check_and_notify(current_version="1.0.0")
+        thread_cls.assert_called_once()
+
+    def test_completed_check_waits_the_whole_interval(self, check_allowed):
+        assert check_cache.usable()
+        self._aged(check_allowed, ok=True, seconds=check_cache.RETRY_SECONDS + 1)
+        assert not check_cache.due(check_cache.UPDATE_FILE, 86400.0)
+        with patch.object(mod.threading, "Thread") as thread_cls:
+            check_and_notify(current_version="1.0.0")
+        thread_cls.assert_not_called()
+
+    def test_retry_is_never_later_than_the_interval(self, check_allowed):
+        assert check_cache.usable()
+        self._aged(check_allowed, ok=False, seconds=601)
+        assert check_cache.due(check_cache.UPDATE_FILE, 600.0)
 
     def test_future_timestamp_is_due(self, check_allowed):
         assert check_cache.usable()

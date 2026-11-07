@@ -168,9 +168,9 @@ def _background_plugin_check(result: dict[str, Any]) -> None:
     """Run plugin discovery + PyPI check (called inside a daemon thread).
 
     The attempt is saved just before the first request goes out (see
-    :func:`_check_pypi_versions`), so one that fails or never finishes still
-    counts as this interval's check, while a run that ends before then
-    doesn't.
+    :func:`_check_pypi_versions`), so one that fails or never finishes is
+    tried again after ``check_cache.RETRY_SECONDS``, while a run that ends
+    before then doesn't count at all.
     """
     try:
         plugins = _discover_community_plugins()

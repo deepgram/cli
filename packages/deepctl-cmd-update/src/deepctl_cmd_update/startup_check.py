@@ -5,13 +5,14 @@ command is done, a one-line notice goes to stderr only if the thread has
 already finished; dg never waits for it. A check that hasn't finished is
 dropped, and the interpreter stops the thread at exit.
 
-The check runs at most once per interval (daily by default). Its state lives
-in ``<cache>/update-check.json`` (``check_cache``), written just before the
-request goes out and again with the answer, so a failing or slow index is
-tried again only after a full interval. When no check is due and the saved
-answer names a newer version, the notice prints from it, at most once per
-interval (``notified_at``), so an answer that came in too late for its own
-run still reaches the person. The user config file is never written. When
+A check that got its answer runs again after the interval (daily by
+default). Its state lives in ``<cache>/update-check.json`` (``check_cache``),
+written just before the request goes out and again with the answer, so a
+failing or slow index, or a run that ended first, is tried again after
+``check_cache.RETRY_SECONDS`` (an hour), not on every run. When no check is
+due and the saved answer names a newer version, the notice prints from it, at
+most once per interval (``notified_at``), so an answer that came in too late
+for its own run still reaches the person. The user config file is never written. When
 the cache directory can't be made private, the check doesn't run at all.
 
 The check is skipped entirely under ``--quiet``, in CI, in an AI agent or
@@ -142,8 +143,9 @@ def _background_check(current_version: str, result: dict[str, Any]) -> None:
     """Run the version check synchronously (called inside a thread).
 
     The attempt is saved just before the request goes out, so one that
-    fails or never finishes still counts as this interval's check, while a
-    run that ends before the request (imports take a while) doesn't.
+    fails or never finishes is tried again after ``check_cache.RETRY_SECONDS``
+    rather than on every run, while a run that ends before the request
+    (imports take a while) doesn't count at all.
     """
     try:
         # httpx loads here, in the thread, never on the main path. Building
@@ -248,7 +250,7 @@ def check_and_notify(
             return
 
     state = check_cache.read(check_cache.UPDATE_FILE)
-    if not check_cache.elapsed(check_cache.checked_at(state), interval):
+    if not check_cache.check_due(state, interval):
         _saved_notice = _newer_saved(state, current_version, interval)
         return
 
