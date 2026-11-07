@@ -404,8 +404,27 @@ def stdout_is_file_or_null() -> bool:
     if stat.S_ISREG(st.st_mode):
         return True
     if stat.S_ISCHR(st.st_mode):
+        if sys.platform == "win32":
+            # Every character device reports device number 0 there: NUL
+            # is the one that isn't a console.
+            return not _windows_console(sys.stdout.fileno())
         try:
             return st.st_rdev == os.stat(os.devnull).st_rdev
         except OSError:
             return False
     return False
+
+
+def _windows_console(fd: int) -> bool:
+    """Whether ``fd`` is a Windows console (GetConsoleMode succeeds on a
+    console and fails on NUL). True when it can't be told."""
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = msvcrt.get_osfhandle(fd)  # type: ignore[attr-defined,unused-ignore]
+        mode = ctypes.c_uint32()
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined,unused-ignore]
+        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except Exception:
+        return True
