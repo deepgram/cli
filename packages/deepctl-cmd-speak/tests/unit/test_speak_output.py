@@ -193,15 +193,18 @@ class TestPlanTarget:
         assert refusal.error.errno == errno.ENXIO
         assert refusal.error.strerror == "no program is reading from that pipe"
 
-    def test_socket_is_refused(self, tmp_path):
+    def test_socket_is_refused(self, tmp_path, monkeypatch):
         """Only character devices and FIFOs are written as they are."""
         import socket
 
-        path = tmp_path / "s"
+        # A relative name: macOS limits a socket path to 104 bytes, and the
+        # test's temp directory can be longer than that.
+        monkeypatch.chdir(tmp_path)
+        path = "s"
         sock = socket.socket(socket.AF_UNIX)
-        sock.bind(str(path))
+        sock.bind(path)
         try:
-            refusal = sinks.plan_target(str(path), overwrite=True)
+            refusal = sinks.plan_target(str(tmp_path / path), overwrite=True)
             assert refusal.reason == "unwritable"
             assert refusal.error.strerror == (
                 "it isn't a file, a pipe or a device like /dev/null"

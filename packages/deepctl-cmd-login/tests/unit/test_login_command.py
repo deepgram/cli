@@ -48,7 +48,9 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.delenv(skill_bundle.REF_ENV_VAR, raising=False)
     for con in (output.console, output.stderr_console, login_module.console):
+        # Both: rich uses 80x25 on TERM=dumb unless the size is fully set.
         monkeypatch.setattr(con, "_width", 400)
+        monkeypatch.setattr(con, "_height", 25)
     saved = dict(output._output_config)
     output._output_config.update(agentic=True, format="default", quiet=False)
     # The mock config has no real file: nothing for login's pre-flight to check.
@@ -701,6 +703,7 @@ class TestLoginSkillsThroughSharedInstaller:
         monkeypatch.setitem(output._output_config, "agentic", True)
         for con in (output.console, output.stderr_console, login_module.console):
             monkeypatch.setattr(con, "_width", 400)
+            monkeypatch.setattr(con, "_height", 25)
         use_home(monkeypatch, tmp_path / "[dim]home")
         detect("claude")
         out, err, _ = run_skills_step(monkeypatch, capsys)
