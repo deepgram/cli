@@ -162,6 +162,10 @@ def _read_umask() -> int:
 
 _UMASK = _read_umask()
 
+# A new file: O_EXCL is the race guard behind the lstat check. O_BINARY
+# (Windows) so a 0x0A in the audio is never written as 0x0D 0x0A.
+_NEW_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+
 # The file types written as they are: character devices and FIFOs.
 # These follow "Couldn't write the output to FILE: " (details.reason).
 _NOT_SPECIAL = "it isn't a file, a pipe or a device like /dev/null"
@@ -328,7 +332,11 @@ def _open_special(path: str, checked: os.stat_result) -> Target | Refusal:
         opened = os.fstat(fd)
         if not os.path.samestat(opened, checked) or not _is_special(opened.st_mode):
             raise OSError(errno.EEXIST, _CHANGED, path)
-        os.set_blocking(fd, True)
+        if getattr(os, "O_NONBLOCK", 0):
+            # Only where it was opened non-blocking: on Windows there is no
+            # O_NONBLOCK, and set_blocking works only on pipes (and not at
+            # all before Python 3.12).
+            os.set_blocking(fd, True)
     except OSError as exc:
         os.close(fd)
         return Refusal("unwritable", exc)
@@ -435,7 +443,7 @@ class AudioFile:
             if kind == "new":
                 with critical_section():
                     try:
-                        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+                        fd = os.open(path, _NEW_FLAGS, 0o666)
                     except FileExistsError as exc:
                         raise Exists(path) from exc
                     self._fd, self._created = fd, True
@@ -503,10 +511,12 @@ class AudioFile:
             try:
                 if fd is not None:
                     try:
-                        if self._tmp is not None:
-                            # An existing file keeps its permission bits
-                            # ; a new file or a replaced symlink gets
-                            # 0666 & ~umask, as open() would.
+                        if self._tmp is not None and hasattr(os, "fchmod"):
+                            # An existing file keeps its permission bits;
+                            # a new file or a replaced symlink gets 0666 &
+                            # ~umask, as open() would. (No fchmod on
+                            # Windows before Python 3.13: the temp file's
+                            # attributes stay.)
                             mode = self.target.mode
                             os.fchmod(fd, 0o666 & ~_UMASK if mode is None else mode)
                     finally:
