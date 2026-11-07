@@ -1,5 +1,6 @@
 """Tests for ffprobe command."""
 
+import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -56,14 +57,15 @@ class TestFfprobeCommand:
             returncode=0, stdout="ffprobe version 6.0\n"
         )
 
+        path = os.path.abspath("/opt/homebrew/bin/ffprobe")
         result = self.cmd.handle(
             self.config, self.auth, self.client,
-            path="/opt/homebrew/bin/ffprobe",
+            path=path,
         )
 
         assert result.status == "success"
         assert isinstance(result, FfprobeResult)
-        assert result.stored_path == "/opt/homebrew/bin/ffprobe"
+        assert result.stored_path == path
         assert result.available is True
         self.config.save.assert_called_once()
 

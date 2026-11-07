@@ -107,10 +107,11 @@ class TestGetFfprobePath:
         mock_access.return_value = True
         mock_which.return_value = "/usr/bin/ffprobe"
 
+        stored = os.path.abspath("/opt/custom/ffprobe")
         config = Mock()
-        config.get.return_value = "/opt/custom/ffprobe"
+        config.get.return_value = stored
 
-        assert get_ffprobe_path(config) == "/opt/custom/ffprobe"
+        assert get_ffprobe_path(config) == stored
         # shutil.which should not be called when config path is valid
         mock_which.assert_not_called()
 
@@ -155,31 +156,37 @@ class TestGetFfprobePath:
         assert get_ffprobe_path(config) == str(tool)
 
     def test_path_lookup_skips_relative_entries(self, tmp_path, monkeypatch):
-        tool = tmp_path / "ffprobe"
-        tool.write_text("#!/bin/sh\nexit 0\n")
-        tool.chmod(0o755)
+        _fake_ffprobe(tmp_path, monkeypatch)
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("PATH", os.pathsep.join([".", "", "tools"]))
 
         assert get_ffprobe_path() is None
 
     def test_path_lookup_skips_current_directory(self, tmp_path, monkeypatch):
-        tool = tmp_path / "ffprobe"
-        tool.write_text("#!/bin/sh\nexit 0\n")
-        tool.chmod(0o755)
+        _fake_ffprobe(tmp_path, monkeypatch)
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("PATH", str(tmp_path))
 
         assert get_ffprobe_path() is None
 
     def test_path_lookup_finds_absolute_entries(self, tmp_path, monkeypatch):
-        tool = tmp_path / "bin" / "ffprobe"
-        tool.parent.mkdir()
-        tool.write_text("#!/bin/sh\nexit 0\n")
-        tool.chmod(0o755)
+        tool = _fake_ffprobe(tmp_path / "bin", monkeypatch)
         monkeypatch.setenv("PATH", str(tool.parent))
 
         assert get_ffprobe_path() == str(tool)
+
+
+def _fake_ffprobe(directory, monkeypatch):
+    """An executable ffprobe that PATH lookup would find on this platform."""
+    tool = directory / "ffprobe"
+    if os.name == "nt":
+        tool = tool.with_suffix(".exe")
+        monkeypatch.setenv("PATHEXT", ".exe")
+    directory.mkdir(exist_ok=True)
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+    return tool
+
 
 class TestCheckFfprobe:
     """Test check_ffprobe function."""
@@ -281,7 +288,8 @@ class TestFfprobeInput:
     """File names are never read as ffprobe options."""
 
     def test_absolute_path_gets_file_protocol(self):
-        assert ffprobe_input("/tmp/test.wav") == "file:/tmp/test.wav"
+        path = os.path.abspath("/tmp/test.wav")
+        assert ffprobe_input(path) == f"file:{path}"
 
     def test_option_like_name_becomes_a_file_input(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -314,7 +322,9 @@ class TestFfprobeInput:
 
         probe_buffer(b"\x00" * 100, "test")
 
-        assert mock_run.call_args[0][0][-1].startswith("file:/")
+        arg = mock_run.call_args[0][0][-1]
+        assert arg.startswith("file:")
+        assert os.path.isabs(arg[len("file:") :])
 
 
 class TestProbeBuffer:
