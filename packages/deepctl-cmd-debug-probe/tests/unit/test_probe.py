@@ -464,7 +464,7 @@ async def _hold_connection(proxy, port):
 
 
 class TestProbeConnectionChecks:
-    """0.4.2's Host and Origin cases, on the websockets proxy: checked in
+    """0.4.1's Host and Origin cases, on the websockets proxy: checked in
     process_request, before the handshake and any upstream connection."""
 
     KEY = "fa1ce0000000000000000000000000000000000d"

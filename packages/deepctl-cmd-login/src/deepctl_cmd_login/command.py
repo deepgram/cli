@@ -1646,7 +1646,7 @@ class WhoamiCommand(BaseCommand):
         # key_source uses these same words): one bounded keyring read, and an
         # expired finite profile credential doesn't mask the environment's.
         # Like before, --api-key isn't a storage source here. Read-only, as in
-        # 0.4.2: an expired credential's keyring entry stays (prune=False).
+        # 0.4.1: an expired credential's keyring entry stays (prune=False).
         resolved = auth_manager.resolve(
             profile=profile_name, use_flags=False, prune=False
         )

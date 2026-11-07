@@ -1,4 +1,4 @@
-"""deepctl_core.credentials: one resolver, 0.4.2's precedence."""
+"""deepctl_core.credentials: one resolver, 0.4.1's precedence."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def write_config(home: Path, data: dict[str, Any], mode: int = 0o600) -> Path:
     return path
 
 
-# ── 0.4.2's get_api_key(), verbatim in substance, as the golden ─────────
+# ── 0.4.1's get_api_key(), verbatim in substance, as the golden ─────────
 
 
 def golden_042(config: Config, explicit: str | None, kr: FakeKeyring) -> str | None:
@@ -104,7 +104,7 @@ def golden_042(config: Config, explicit: str | None, kr: FakeKeyring) -> str | N
 
 
 def whoami_source_042(config: Config, key: str | None, kr: FakeKeyring) -> str:
-    """`dg whoami`'s key_source rule (0.4.2), plus the flag."""
+    """`dg whoami`'s key_source rule (0.4.1), plus the flag."""
     if key is None:
         return credentials.KEY_SOURCE_NONE
     name = config.profile or "default"
@@ -180,7 +180,7 @@ def test_login_forgets_the_cached_answer(home, kr, monkeypatch):
 def test_project_id_precedence(home, kr, monkeypatch):
     write_config(home, {"profiles": {"default": {"project_id": "p-file"}}})
     monkeypatch.setenv("DEEPGRAM_PROJECT_ID", "p-env")
-    # Config merges the env value over the file's, as in 0.4.2.
+    # Config merges the env value over the file's, as in 0.4.1.
     assert AuthManager(Config()).get_project_id() == "p-env"
     assert AuthManager(Config(), None, "p-flag").get_project_id() == "p-flag"
     monkeypatch.delenv("DEEPGRAM_PROJECT_ID")
@@ -194,9 +194,9 @@ def test_project_id_precedence(home, kr, monkeypatch):
 def test_env_key_is_reported_as_the_environments(home, kr, monkeypatch):
     monkeypatch.setenv("DEEPGRAM_API_KEY", "f" * 40)
     auth = AuthManager(Config())
-    # 0.4.2 said "profile 'default'": Config merges the env key into the profile.
+    # 0.4.1 said "profile 'default'": Config merges the env key into the profile.
     assert auth.get_credential_source() == "environment variables"
-    assert auth.has_profile_credentials() == (True, False)  # 0.4.2's answer
+    assert auth.has_profile_credentials() == (True, False)  # 0.4.1's answer
 
 
 def test_stored_key_is_reported_as_the_profiles(home, kr, monkeypatch):
@@ -265,7 +265,7 @@ def test_trusted_expiry_still_deletes_keyring(home, kr):
 
 
 def test_introspection_never_prunes(home, kr, monkeypatch):
-    """Whoami and login's checks stay read-only, as in 0.4.2."""
+    """Whoami and login's checks stay read-only, as in 0.4.1."""
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     write_config(home, {"profiles": {"default": {"dg_token_expires_at": past}}})
     kr.entries["api-key.default"] = "k" * 40
@@ -275,7 +275,7 @@ def test_introspection_never_prunes(home, kr, monkeypatch):
     assert auth.has_profile_credentials("default") == (False, False)
     assert auth.is_authenticated() is True
     assert kr.deletes == []
-    # A command that uses the key prunes it, once (0.4.2's get_api_key).
+    # A command that uses the key prunes it, once (0.4.1's get_api_key).
     assert auth.get_api_key() == "e" * 40
     assert auth.get_api_key() == "e" * 40
     assert kr.deletes == ["api-key.default"]

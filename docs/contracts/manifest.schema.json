@@ -32,7 +32,7 @@
   },
   "$defs": {
     "name": {
-      "description": "A command or alias name: the 0.4.2 plugin name rule.",
+      "description": "A command or alias name: the 0.4.1 plugin name rule.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{0,63}$"
     },
