@@ -358,6 +358,18 @@ def test_complete_never_sends_the_code_to_another_login_host(env, monkeypatch):
     assert [r.split()[0] for r in env["fake"].requests] == ["code"]
 
 
+def test_complete_refuses_an_untrusted_base_url_before_polling(env, monkeypatch):
+    write_user(env)
+    run(env)
+    env["fake"].answers = [approved()]
+    monkeypatch.setenv("DEEPGRAM_BASE_URL", "https://api.evil.example")
+    _, result = run(env, complete=True)
+    assert result.code == "foreign_host"
+    assert [r.split()[0] for r in env["fake"].requests] == ["code"]
+    assert env["keyring"] == {}
+    assert pending_path(env).exists()
+
+
 def test_complete_with_api_key_is_a_usage_error(env):
     import click
 
