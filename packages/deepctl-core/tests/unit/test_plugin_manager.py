@@ -740,6 +740,55 @@ def _clear_agent_env(monkeypatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
+def _home_config(monkeypatch) -> str:
+    """Point the home directory and the trusted user config under it at a
+    fixed path; return that config path as the messages show it."""
+    home = os.path.abspath("/home/u")
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)  # what expanduser reads on Windows
+    monkeypatch.setattr(
+        "deepctl_core.plugin_manager.trusted_user_config_file",
+        lambda: Path(home, ".config", "deepctl", "config.yaml"),
+    )
+    return os.path.join("~", ".config", "deepctl", "config.yaml")
+
+
+def _set_real_home(monkeypatch, home: Path) -> None:
+    """Point _real_home at ``home``. On Windows the trust root comes from
+    LOCAL_APPDATA via SHGetFolderPathW, not _real_home; keep it under
+    ``home`` too."""
+    local = home / "AppData" / "Local"
+    monkeypatch.setattr(config_module, "_real_home", lambda: str(home))
+    monkeypatch.setattr(
+        config_module,
+        "_windows_folder",
+        lambda csidl: str(local) if csidl == 0x1C else None,  # CSIDL_LOCAL_APPDATA
+    )
+
+
+def _site_packages(venv: Path) -> Path:
+    """Where get_venv_site_packages looks on this platform."""
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        return venv / "Lib" / "site-packages"
+    pyver = f"python{_sys.version_info[0]}.{_sys.version_info[1]}"
+    return venv / "lib" / pyver / "site-packages"
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    """Symlink ``link`` to ``target``; on Windows without the symlink
+    privilege, a junction, which any user can create."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1314:  # ERROR_PRIVILEGE_NOT_HELD
+            raise
+        import _winapi
+
+        _winapi.CreateJunction(str(target.resolve(strict=True)), str(link))
+
+
 def _err(capsys) -> str:
     """Captured stderr with Rich's line wrapping undone."""
     return " ".join(capsys.readouterr().err.split())
@@ -985,11 +1034,7 @@ class TestReservedBuiltinNames:
     def test_warning_and_hint_text_in_a_terminal(self, capsys, monkeypatch):
         """W-PLUGIN-SHADOW, then its hint on a line of its own."""
         _set_mode(monkeypatch, agentic=False, marker=False)
-        monkeypatch.setenv("HOME", "/home/u")
-        monkeypatch.setattr(
-            "deepctl_core.plugin_manager.trusted_user_config_file",
-            lambda: Path("/home/u/.config/deepctl/config.yaml"),
-        )
+        shown = _home_config(monkeypatch)
         cls = _command_class("login", [])
         _load(PluginManager(), plugin_eps=[_entry_point("x", "m:L", cls, "p")])
         raw = capsys.readouterr().err
@@ -998,7 +1043,7 @@ class TestReservedBuiltinNames:
             "⚠ Ignored the plugin command 'login' from p 1.0 (m): plugins "
             "can't replace built-in commands.",
             "If you trust this plugin, add 'login' to plugins.allow_override "
-            "in ~/.config/deepctl/config.yaml to use its version.",
+            f"in {shown} to use its version.",
         ]
 
     def test_agent_hint_names_no_setting_or_path(self, capsys, monkeypatch):
@@ -1847,7 +1892,7 @@ class TestAllowOverride:
             "plugins:\n  allow_override: [login]\n"
         )
         real_home = tmp_path / "realhome"
-        monkeypatch.setattr(config_module, "_real_home", lambda: str(real_home))
+        _set_real_home(monkeypatch, real_home)
         monkeypatch.setenv("CLAUDECODE", "1")
         assert _plugin_trust.allow_override_names() == frozenset()
 
@@ -1866,7 +1911,7 @@ class TestAllowOverride:
         from deepctl_core import _plugin_trust
 
         work = tmp_path / "work"
-        monkeypatch.setattr(config_module, "_real_home", lambda: str(work / "h"))
+        _set_real_home(monkeypatch, work / "h")
         monkeypatch.setenv("CLAUDECODE", "1")
         assert _plugin_trust._agent_trust_root() is None
 
@@ -1876,7 +1921,7 @@ class TestAllowOverride:
         from deepctl_core import _plugin_trust
 
         home = tmp_path / "work"  # cwd is home itself
-        monkeypatch.setattr(config_module, "_real_home", lambda: str(home))
+        _set_real_home(monkeypatch, home)
         monkeypatch.setenv("AI_AGENT", "x")
         assert _plugin_trust._agent_trust_root() is not None
 
@@ -1926,7 +1971,7 @@ class TestAllowOverride:
         from deepctl_core import _plugin_trust
 
         real_home = tmp_path / "realhome"
-        monkeypatch.setattr(config_module, "_real_home", lambda: str(real_home))
+        _set_real_home(monkeypatch, real_home)
         monkeypatch.setenv("CLAUDECODE", "1")
         real_cfg = _plugin_trust._agent_trust_root()
         assert real_cfg is not None
@@ -2112,11 +2157,7 @@ class TestOverrideNotice:
             "deepctl_core.plugin_manager.allow_override_names",
             lambda: frozenset({"login"}),
         )
-        monkeypatch.setenv("HOME", "/home/u")
-        monkeypatch.setattr(
-            "deepctl_core.plugin_manager.trusted_user_config_file",
-            lambda: Path("/home/u/.config/deepctl/config.yaml"),
-        )
+        return _home_config(monkeypatch)
 
     def _run(self):
         cls = _command_class("login", [])
@@ -2165,7 +2206,7 @@ class TestOverrideNotice:
         assert [line.strip() for line in raw.splitlines() if line.strip()] == [
             "ℹ Using 'login' from deepctl-plugin-tts 0.2.0 (deepctl_plugin_tts) "
             "instead of the built-in, as plugins.allow_override in "
-            "~/.config/deepctl/config.yaml allows."
+            f"{override_login} allows."
         ]
 
     @pytest.mark.parametrize(
@@ -2268,8 +2309,7 @@ class TestPluginVenvUnderAgent:
         import sys as _sys
 
         venv = home / ".deepctl" / "plugins" / "venv"
-        pyver = f"python{_sys.version_info[0]}.{_sys.version_info[1]}"
-        sp = venv / "lib" / pyver / "site-packages"
+        sp = _site_packages(venv)
         sp.mkdir(parents=True)
         (venv / "pyvenv.cfg").write_text(
             f"home = /usr/bin\nversion = {_sys.version_info[0]}.{_sys.version_info[1]}.0\n"
@@ -2320,7 +2360,7 @@ class TestPluginVenvUnderAgent:
             "deepctl_core.plugin_env.PLUGIN_STATE_FILE",
             repo_home / ".deepctl" / "plugins" / "plugins.json",
         )
-        monkeypatch.setattr(config_module, "_real_home", lambda: str(real_home))
+        _set_real_home(monkeypatch, real_home)
         monkeypatch.setenv("DEEPGRAM_API_KEY", "sk-FAKEKEYSENTINEL123")
         monkeypatch.setattr(_sys, "path", list(_sys.path))
         work = tmp_path / "work"
@@ -2411,7 +2451,7 @@ class TestPluginVenvUnderAgent:
 
         elsewhere = env["tmp"] / "elsewhere"
         self._sidecar(elsewhere, env["marker"])
-        (env["real_home"] / ".deepctl").symlink_to(elsewhere / ".deepctl")
+        _link_dir(env["real_home"] / ".deepctl", elsewhere / ".deepctl")
         monkeypatch.setenv("CLAUDECODE", "1")
         assert _plugin_trust.agent_plugin_venv() is None
         group = click.Group("dg")
@@ -2420,13 +2460,12 @@ class TestPluginVenvUnderAgent:
 
     def test_agent_venv_with_symlinked_site_packages_is_skipped(self, env, monkeypatch):
         import shutil
-        import sys as _sys
 
         venv = self._sidecar(env["real_home"], env["marker"])
-        lib = venv / "lib" / f"python{_sys.version_info[0]}.{_sys.version_info[1]}"
+        sp = _site_packages(venv)
         outside = env["tmp"] / "outside-sp"
-        shutil.move(str(lib / "site-packages"), outside)
-        (lib / "site-packages").symlink_to(outside)
+        shutil.move(str(sp), outside)
+        _link_dir(sp, outside)
         monkeypatch.setenv("CLAUDECODE", "1")
         group = click.Group("dg")
         PluginManager()._load_plugin_venv_entries(group)
