@@ -1,16 +1,19 @@
 # Telemetry
 
-dg sends one error report when a command fails with an unexpected error. Nothing is sent when a command succeeds, for a usage error or another error dg reports to you, or for `--help` and `--version`. The README's Telemetry section says where reports go.
+This version of dg sends no telemetry: no error reports, usage data or other telemetry, whether a command succeeds or fails. It has no built-in destination for reports. dg still contacts the Deepgram API for the commands you run, and pypi.org to check for updates.
+
+The error-reporting code is still in dg, and it runs only when `DEEPCTL_TELEMETRY_DSN` points at a sink on this machine (a loopback address such as `127.0.0.1`), which is for tests and local development. A value that points anywhere else is ignored. This page describes what that code does with a loopback sink: when it runs, the switches that turn it off, and the exact fields of a report.
 
 ## When it runs
 
-- **At most one report per run**, and only for an unexpected error.
+- **Only with a loopback `DEEPCTL_TELEMETRY_DSN`.** Without one, dg installs no error hooks, never loads the reporting library, and the last line of `dg --help` says "This version of dg sends no telemetry."
+- **At most one report per run**, and only for an unexpected error. Nothing is reported when a command succeeds, for a usage error or another error dg reports to you, or for `--help` and `--version`.
 - **No network or reporting code on the success path.** The reporting library is loaded only after an unexpected error, so a command that succeeds opens no connection for telemetry.
-- **A short time budget.** dg waits about 0.6 s at most for a report, loading included, and doesn't wait at all when no report was queued. With blocked or slow egress, a failing command takes at most that much longer.
+- **A short time budget.** dg waits about 0.6 s at most for a report, loading included, and doesn't wait at all when no report was queued.
 
 ## Turn it off
 
-Any one of these turns telemetry off. They are checked in this order:
+With a loopback sink set, any one of these turns reporting off. They are checked in this order:
 
 | Switch | Scope |
 |---|---|
@@ -21,14 +24,14 @@ Any one of these turns telemetry off. They are checked in this order:
 | `CI` set (as CI services do) | Any CI job |
 | `telemetry.enabled: false` in your `config.yaml` | Always |
 
-For `DEEPCTL_TELEMETRY_DISABLED`, `DO_NOT_TRACK` and `CI`, any value except an empty one, `0`, `false`, `no` or `off` turns telemetry off. `DEEPCTL_TELEMETRY` turns it off when set to `off`, `0`, `false`, `no` or `disabled`; `log` is described below, and any other value changes nothing. A config file dg won't load (unreadable, too large, not valid YAML, a repeated `telemetry` key, or one dg doesn't trust in an AI agent session) counts as turned off too. A project's `deepgram.yaml` can't change these settings. The last line of `dg --help` shows whether telemetry is on.
+For `DEEPCTL_TELEMETRY_DISABLED`, `DO_NOT_TRACK` and `CI`, any value except an empty one, `0`, `false`, `no` or `off` turns reporting off. `DEEPCTL_TELEMETRY` turns it off when set to `off`, `0`, `false`, `no` or `disabled`; `log` is described below, and any other value changes nothing. A config file dg won't load (unreadable, too large, not valid YAML, a repeated `telemetry` key, or one dg doesn't trust in an AI agent session) counts as turned off too. A project's `deepgram.yaml` can't change these settings.
 
-## See what would be sent
+## See a report
 
-Run a command with `DEEPCTL_TELEMETRY=log`. If it fails with an unexpected error and telemetry is on, dg prints the report it would have sent to stderr, as one JSON line, and sends nothing.
+With a loopback sink set, run a command with `DEEPCTL_TELEMETRY=log`. If it fails with an unexpected error and reporting is on, dg prints the report to stderr as one JSON line and sends nothing, not even to the loopback sink.
 
 ```sh
-DEEPCTL_TELEMETRY=log dg listen recording.wav
+DEEPCTL_TELEMETRY_DSN=http://key@127.0.0.1:9000/1 DEEPCTL_TELEMETRY=log dg listen recording.wav
 ```
 
 ## Field schema
