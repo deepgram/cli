@@ -1390,7 +1390,15 @@ class Config:
         # (telemetry's opt-out) can parse the same bytes without opening the
         # file again; a FIFO or /dev/stdin can only be read once.
         self.user_config_text = None
-        if self.config_path.exists():
+        try:
+            present = self.config_path.exists()
+        except OSError:
+            # It can't be looked up (EINVAL on macOS while a symlink there is
+            # being replaced, or a folder that can't be searched). Try to read
+            # it anyway: a failure is then reported like any unreadable config,
+            # and the file is never saved over.
+            present = True
+        if present:
             try:
                 user_config = self._read_user_file()
                 if user_config:
