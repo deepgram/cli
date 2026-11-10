@@ -492,3 +492,82 @@ def test_live_result_into_a_closed_stdout_is_quiet(command, monkeypatch):
     r = ListenResult(status="success", source="stdin", mode="live", transcript="x")
     command.output_result(r, Mock(spec=Config))
     assert silenced == [True]
+
+
+# ── A caption reader gone before the header: no capture, no upload ─────────
+
+
+def _header_into_closed_pipe(monkeypatch):
+    """`dg listen --webvtt ... | head -n0`: the WebVTT header hits EPIPE.
+    Returns the record of what started: sockets, stdin reads, mic opens."""
+    import sys as _sys
+    import types
+
+    _fmt(monkeypatch, "text", source="default")
+    started: dict[str, int] = {"connect": 0, "stdin": 0, "mic": 0, "silenced": 0}
+
+    def header(self, note=None):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(StreamingCaptionWriter, "print_header", header)
+    monkeypatch.setattr(
+        live, "silence_stdout", lambda: started.__setitem__("silenced", 1)
+    )
+
+    def connect(*_args, **_kwargs):
+        started["connect"] += 1
+        raise AssertionError("the socket must not open")
+
+    monkeypatch.setattr("deepctl_cmd_listen.live._open", connect)
+
+    def stdin_fd():
+        started["stdin"] += 1
+        raise AssertionError("stdin must not be read")
+
+    monkeypatch.setattr("deepctl_cmd_listen.command._stdin_fd", stdin_fd)
+
+    class _Mic:
+        def __init__(self, **_kwargs):
+            started["mic"] += 1
+
+        def start(self):
+            raise AssertionError("the microphone must not open")
+
+    fake_sd = types.ModuleType("sounddevice")
+    fake_sd.RawInputStream = _Mic
+    monkeypatch.setitem(_sys.modules, "sounddevice", fake_sd)
+    return started
+
+
+@pytest.mark.timeout(30)
+def test_closed_caption_pipe_never_reads_stdin(command, monkeypatch):
+    started = _header_into_closed_pipe(monkeypatch)
+    result = _stream(command, caption_format="webvtt")
+    assert isinstance(result, ListenResult)
+    assert result.status == "success"
+    assert result.transcript == ""
+    assert started == {"connect": 0, "stdin": 0, "mic": 0, "silenced": 1}
+
+
+@pytest.mark.timeout(30)
+def test_closed_caption_pipe_never_opens_the_microphone(command, monkeypatch):
+    started = _header_into_closed_pipe(monkeypatch)
+    kw = {
+        "model": "nova-3",
+        "language": "en-US",
+        "api_version": 1,
+        "diarize": False,
+        "smart_format": True,
+        "punctuate": True,
+        "interim": True,
+        "redact": (),
+        "numerals": False,
+        "sample_rate": 16000,
+        "channels": 1,
+        "save_to": None,
+        "caption_format": "webvtt",
+    }
+    result = command._stream_mic(_client(), **kw)
+    assert isinstance(result, ListenResult)
+    assert result.status == "success"
+    assert started == {"connect": 0, "stdin": 0, "mic": 0, "silenced": 1}

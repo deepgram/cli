@@ -1124,7 +1124,12 @@ class ListenCommand(BaseCommand):
                     note=note if caption_format == "webvtt" else None
                 )
             except BrokenPipeError:
-                live.silence_stdout()
+                # Nobody reads the captions (`| head -n1` already exited):
+                # end before the microphone opens or any audio is sent.
+                early.restore()
+                return self._output_closed_early(
+                    "mic", model, language, diarize, caption_writer, caption_format
+                )
         else:
             status.print(
                 f"[green]✓[/green] Listening on microphone · {model} · Ctrl+C to stop"
@@ -1318,8 +1323,6 @@ class ListenCommand(BaseCommand):
     ) -> BaseResult | ListenCodedError:
         import asyncio
 
-        from . import live
-
         self._echo = not _machine_format()
         resolved_encoding = encoding or "linear16"
         if not encoding:
@@ -1343,7 +1346,10 @@ class ListenCommand(BaseCommand):
                     note=note if caption_format == "webvtt" else None
                 )
             except BrokenPipeError:
-                live.silence_stdout()
+                # As for the microphone: no stdin read, no socket opened.
+                return self._output_closed_early(
+                    "stdin", model, language, diarize, caption_writer, caption_format
+                )
         else:
             status.print(
                 f"[green]✓[/green] Streaming stdin · {model} · press "
@@ -1458,6 +1464,33 @@ class ListenCommand(BaseCommand):
             caption_format=caption_format,
             save_to=save_to,
             v2_state=v2_state,
+        )
+
+    def _output_closed_early(
+        self,
+        source: str,
+        model: str,
+        language: str,
+        diarize: bool,
+        caption_writer: StreamingCaptionWriter,
+        caption_format: str,
+    ) -> BaseResult | ListenCodedError:
+        """stdout closed before the session started: the quiet result of a
+        session whose reader went away, without capturing or uploading."""
+        from . import live
+
+        live.silence_stdout()
+        return self._finish_live(
+            live.LiveOutcome(stdout_closed=True),
+            source=source,
+            model=model,
+            language=language,
+            diarize=diarize,
+            transcript_acc=[],
+            caption_writer=caption_writer,
+            caption_format=caption_format,
+            save_to=None,
+            v2_state=None,
         )
 
     def _finish_live(
