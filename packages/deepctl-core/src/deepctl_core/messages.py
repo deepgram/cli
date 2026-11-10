@@ -270,7 +270,14 @@ W_CFG_UNTRUSTED_WHY = {
     "writable": "can be changed by other users",
     "owner": "is owned by another user",
     "not_regular": "isn't a regular file",
+    "unreadable": "couldn't be opened safely",
 }
+# The real config refused before it was read, with the cause ({why}, a
+# W_CFG_UNTRUSTED_WHY value). Hint: W_CFG_UNTRUSTED_FILE_HINT.
+W_CFG_UNTRUSTED_SKIPPED = (
+    "Ignored {config_file}: in an AI agent session, dg doesn't read the deepctl "
+    "user config when the file {why}."
+)
 W_CFG_UNTRUSTED_FILE_HINT = (
     "A person must fix this file. If you are an AI agent, ask the user."
 )

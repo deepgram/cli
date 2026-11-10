@@ -486,6 +486,19 @@ class TestHardAgentSignals:
             ("CODEX_SANDBOX_NETWORK_DISABLED", "1"),
             ("CURSOR_AGENT", "1"),
             ("GEMINI_CLI", "1"),
+            ("OPENCODE", "1"),
+            ("OPENCODE_CLIENT", "cli"),
+            ("CLAUDE_CODE", "1"),
+            ("CODEX_CI", "1"),
+            ("CODEX_THREAD_ID", "thread-1"),
+            ("AUGMENT_AGENT", "1"),
+            ("ANTIGRAVITY_AGENT", "1"),
+            ("CURSOR_EXTENSION_HOST_ROLE", "agent-exec"),
+            ("CLAUDE_CODE_IS_COWORK", "1"),
+            ("COPILOT_CLI", "1"),
+            ("GOOSE_TERMINAL", "1"),
+            ("AGENT", "amp"),
+            ("AGENT", "goose"),
             ("OR_APP_NAME", "Aider"),
             ("OR_SITE_URL", "https://aider.chat"),
         ],
@@ -493,6 +506,37 @@ class TestHardAgentSignals:
     def test_agent_markers(self, real_agent_detection, monkeypatch, name, value):
         monkeypatch.setenv(name, value)
         assert output.is_ai_agent() is True
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            # A person's own shell in these tools sets them too.
+            ("CURSOR_EXTENSION_HOST_ROLE", "user"),
+            ("AGENT", "someone"),
+            ("CURSOR_TRACE_ID", "abc"),
+            ("REPL_ID", "abc"),
+        ],
+    )
+    def test_not_agent_markers(self, real_agent_detection, monkeypatch, name, value):
+        monkeypatch.setenv(name, value)
+        assert output.is_ai_agent() is False
+
+    @pytest.mark.parametrize(
+        ("name", "value"), [("OPENCODE", "1"), ("OPENCODE_CLIENT", "cli")]
+    )
+    def test_opencode_env_host_refused(
+        self, tmp_path, monkeypatch, real_agent_detection, name, value
+    ):
+        """An OpenCode session's DEEPGRAM_BASE_URL never gets the API key
+        unless it is regional or approved in the user config."""
+        monkeypatch.setenv(name, value)
+        monkeypatch.setenv("DEEPGRAM_BASE_URL", FOREIGN)
+        config = Config(config_path=write_user(tmp_path, KEYED))
+        auth, seen = recording_auth(config)
+        with pytest.raises(CredentialHostError) as err:
+            auth.guard()
+        assert err.value.code == "foreign_host"
+        assert seen == []
 
     def test_ci_proxy_env_host_sent_with_one_warning(
         self, tmp_path, monkeypatch, real_agent_detection, capsys

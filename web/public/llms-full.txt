@@ -356,10 +356,14 @@ Per-command flags, which go after the command:
 - Exit codes: 0 = success, 1 = error, 2 = user interrupt
 
 **In an AI agent session:**
-An AI agent session is one an agent marked: `AI_AGENT`, `CLAUDECODE`,
-`CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`,
-`CURSOR_AGENT` or `GEMINI_CLI` set, or Aider. `CI`, TTY state and flags don't
-make one.
+An AI agent session is one an agent marked: `AI_AGENT`, `ANTIGRAVITY_AGENT`,
+`AUGMENT_AGENT`, `CLAUDECODE`, `CLAUDE_CODE`, `CLAUDE_CODE_ENTRYPOINT`,
+`CLAUDE_CODE_IS_COWORK`, `CODEX_CI`, `CODEX_SANDBOX`,
+`CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_THREAD_ID`, `COPILOT_CLI`,
+`CURSOR_AGENT`, `GEMINI_CLI`, `GOOSE_TERMINAL`, `OPENCODE` or
+`OPENCODE_CLIENT` set, `AGENT=amp` or `AGENT=goose`,
+`CURSOR_EXTENSION_HOST_ROLE=agent-exec`, or Aider. `CI`, TTY state and flags
+don't make one.
 - `dg plugin install`, `update` and `remove`, and `dg ffprobe --path <path>`, are
   refused. A person runs them in their own terminal.
 - `DEEPGRAM_BASE_URL` can't send your API key to a host that isn't a Deepgram

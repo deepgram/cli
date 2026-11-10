@@ -41,9 +41,10 @@ def _clean_ai_agent_env(monkeypatch):
     agent trust mode. Tests that cover that mode set them, or patch
     is_ai_agent, themselves.
     """
-    from deepctl_core.output import AI_AGENT_ENV_MARKERS
+    from deepctl_core.output import AI_AGENT_ENV_MARKERS, AI_AGENT_ENV_VALUES
 
-    for key in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL"):
+    names = (*AI_AGENT_ENV_MARKERS, *AI_AGENT_ENV_VALUES, "OR_APP_NAME", "OR_SITE_URL")
+    for key in names:
         monkeypatch.delenv(key, raising=False)
 
 

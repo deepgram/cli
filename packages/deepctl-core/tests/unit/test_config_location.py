@@ -94,6 +94,27 @@ def assert_filtered(config: Config) -> None:
         hosts.check_credential_host(Config(base_url="http://127.0.0.1:8000"))
 
 
+SYMLINK_WHY = "is a symlink or is reached through one"
+
+
+def assert_unread(config: Config, why: str = SYMLINK_WHY) -> None:
+    """The real config was refused before it was read: nothing in it is
+    used, one line names the file and the cause, and saves are refused."""
+    assert config.trusted_file is False
+    assert config.user_config_refused is True
+    assert config.allowed_hosts() == []
+    assert config.get_profile().base_url == "https://api.deepgram.com"
+    assert config.get("tools.ffprobe_path") is None
+    lines = [t for i, t in zip(ids(), notices()) if i == "W-CFG-UNTRUSTED"]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("Ignored /"), lines
+    assert lines[0].endswith(f"when the file {why}."), lines
+    with pytest.raises(config_module.ConfigSaveRefused):
+        config.check_saveable()
+    with pytest.raises(hosts.CredentialHostError):
+        hosts.check_credential_host(Config(base_url="http://127.0.0.1:8000"))
+
+
 def test_agent_real_config_honored_with_cwd_home(real_home, monkeypatch):
     agent(monkeypatch, True)
     monkeypatch.chdir(real_home)
@@ -290,7 +311,7 @@ def test_dotfiles_symlinked_config_filtered_in_agent_mode(real_home, monkeypatch
     plant(real_home / "dotfiles")
     link_config_to(real_home, real_home / "dotfiles" / "config.yaml")
     monkeypatch.chdir(real_home)
-    assert_filtered(Config())
+    assert_unread(Config())
 
 
 def test_dotfiles_symlinked_config_honored_outside_agent_mode(real_home, monkeypatch):
@@ -309,7 +330,7 @@ def test_repointed_link_hop_filtered(real_home, tmp_path, monkeypatch):
     (repo / "deepctl.yaml").symlink_to(tmp_path / "elsewhere" / "config.yaml")
     link_config_to(real_home, repo / "deepctl.yaml")
     monkeypatch.chdir(tmp_path / "repo")
-    assert_filtered(Config())
+    assert_unread(Config())
 
 
 def test_symlinked_config_folder_filtered(real_home, tmp_path, monkeypatch):
@@ -320,7 +341,7 @@ def test_symlinked_config_folder_filtered(real_home, tmp_path, monkeypatch):
     (real_home / _CFG / "deepctl").symlink_to(
         tmp_path / "repo" / "dotfiles" / "deepctl", target_is_directory=True
     )
-    assert_filtered(Config())
+    assert_unread(Config())
 
 
 def test_symlinked_dot_config_filtered(real_home, tmp_path, monkeypatch):
@@ -328,7 +349,7 @@ def test_symlinked_dot_config_filtered(real_home, tmp_path, monkeypatch):
     plant(tmp_path / "x" / "deepctl")
     (real_home / _CFG).parent.mkdir(parents=True, exist_ok=True)
     (real_home / _CFG).symlink_to(tmp_path / "x", target_is_directory=True)
-    assert_filtered(Config())
+    assert_unread(Config())
 
 
 def test_hardlinked_config_filtered(real_home, tmp_path, monkeypatch):
@@ -338,6 +359,76 @@ def test_hardlinked_config_filtered(real_home, tmp_path, monkeypatch):
     (tmp_path / "repo").mkdir()
     os.link(real_home / _CFG / "deepctl" / "config.yaml", tmp_path / "repo" / "dg.yaml")
     assert_filtered(Config())
+
+
+KEY_ONLY = {"profiles": {"default": {"api_key": "k"}}}
+
+
+def _rejected_root_with_key(real_home, tmp_path, setup) -> Path:
+    """A current-user 0600 config holding an API key, at the default
+    location but refused by the trust-root check. Returns the target."""
+    cfg_dir = real_home / _CFG / "deepctl"
+    if setup == "hardlink":
+        target = cfg_dir / "config.yaml"
+        cfg_dir.mkdir(parents=True)
+    else:
+        target = tmp_path / "dotfiles" / "deepctl" / "config.yaml"
+        target.parent.mkdir(parents=True)
+    target.write_text(yaml.safe_dump(KEY_ONLY))
+    target.chmod(0o600)
+    if setup == "file_link":
+        link_config_to(real_home, target)
+    elif setup == "dir_link":
+        cfg_dir.parent.mkdir(parents=True, exist_ok=True)
+        cfg_dir.symlink_to(target.parent, target_is_directory=True)
+    else:
+        os.link(target, tmp_path / "repo-copy.yaml")
+    return target
+
+
+@pytest.mark.parametrize("setup", ["file_link", "dir_link", "hardlink"])
+def test_rejected_trust_root_key_never_used(real_home, tmp_path, monkeypatch, setup):
+    """The trust-root check refuses the file; dg never reads it again
+    through its path, and never uses its API key."""
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    agent(monkeypatch, True)
+    target = _rejected_root_with_key(real_home, tmp_path, setup)
+    cfg = real_home / _CFG / "deepctl" / "config.yaml"
+    reread: list[Path] = []
+    real_read = config_module._read_yaml_text_fd
+
+    def spy(path):
+        if os.path.abspath(path) == os.path.abspath(cfg):
+            reread.append(path)
+        return real_read(path)
+
+    monkeypatch.setattr(config_module, "_read_yaml_text_fd", spy)
+    config = Config()
+    assert config.get_profile().api_key is None
+    assert config.trusted_file is False
+    assert config.user_config_refused is True
+    assert reread == []
+    assert "W-CFG-UNTRUSTED" in ids()
+    if setup != "hardlink":
+        # Nor is anything written through the refused link.
+        before = target.read_text()
+        with pytest.raises(config_module.ConfigSaveRefused):
+            config.update_profile("default", api_key="sk-NEW")
+        assert target.read_text() == before
+
+
+def test_rejected_trust_root_env_key_still_used(real_home, tmp_path, monkeypatch):
+    agent(monkeypatch, True)
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "env-key")
+    _rejected_root_with_key(real_home, tmp_path, "file_link")
+    assert Config().get_profile().api_key == "env-key"
+
+
+def test_symlinked_key_file_used_outside_agent_mode(real_home, tmp_path, monkeypatch):
+    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+    agent(monkeypatch, False)
+    _rejected_root_with_key(real_home, tmp_path, "file_link")
+    assert Config().get_profile().api_key == "k"
 
 
 def test_group_writable_config_filtered(real_home, monkeypatch):
@@ -431,7 +522,6 @@ def reasons() -> list[str]:
 @pytest.mark.parametrize(
     ("setup", "why"),
     [
-        ("symlink", "is a symlink or is reached through one"),
         ("hardlink", "has more than one hard link"),
         ("writable", "can be changed by other users"),
     ],
@@ -439,15 +529,11 @@ def reasons() -> list[str]:
 def test_untrusted_real_config_names_the_cause(real_home, tmp_path, monkeypatch, setup, why):
     agent(monkeypatch, True)
     cfg = real_home / _CFG / "deepctl" / "config.yaml"
-    if setup == "symlink":
-        plant(real_home / "dotfiles")
-        link_config_to(real_home, real_home / "dotfiles" / "config.yaml")
+    plant(cfg.parent)
+    if setup == "hardlink":
+        os.link(cfg, tmp_path / "copy.yaml")
     else:
-        plant(cfg.parent)
-        if setup == "hardlink":
-            os.link(cfg, tmp_path / "copy.yaml")
-        else:
-            cfg.chmod(0o664)
+        cfg.chmod(0o664)
     assert_filtered(Config())
     lines = reasons()
     assert lines
@@ -576,7 +662,7 @@ def test_dir_fd_unavailable_still_refuses_symlinks(real_home, monkeypatch):
     monkeypatch.setattr(config_module.os, "supports_dir_fd", set())
     plant(real_home / "dotfiles")
     link_config_to(real_home, real_home / "dotfiles" / "config.yaml")
-    assert_filtered(Config())
+    assert_unread(Config())
 
 
 @pytest.mark.parametrize("replaces", [1, 2, 4])
@@ -1130,7 +1216,7 @@ def test_unreadable_real_config_never_drops_a_custom_config(
 
 
 @pytest.mark.parametrize(
-    "kind", ["fifo_root", "device_link_root", "fifo_custom", "dir_custom", "device_custom"]
+    "kind", ["fifo_root", "fifo_custom", "dir_custom", "device_custom"]
 )
 def test_agent_non_regular_config_warns_like_outside_agent_mode(
     real_home, tmp_path, monkeypatch, kind
@@ -1141,10 +1227,6 @@ def test_agent_non_regular_config_warns_like_outside_agent_mode(
         path = real_home / _CFG / "deepctl" / "config.yaml"
         path.parent.mkdir(parents=True)
         os.mkfifo(path)
-    elif kind == "device_link_root":
-        path = real_home / _CFG / "deepctl" / "config.yaml"
-        path.parent.mkdir(parents=True)
-        path.symlink_to("/dev/null")
     elif kind == "fifo_custom":
         path = tmp_path / "c.yaml"
         os.mkfifo(path)
@@ -1162,6 +1244,22 @@ def test_agent_non_regular_config_warns_like_outside_agent_mode(
     with pytest.raises(OSError) as err:
         config.save()
     assert "this config file isn't a regular file, so nothing was saved" in str(err.value)
+
+
+def test_agent_device_link_root_refused_unread(real_home, monkeypatch):
+    """A real config linked to a device is refused as a symlink, never
+    opened through the link, and an explicit save says why."""
+    agent(monkeypatch, True)
+    path = real_home / _CFG / "deepctl" / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.symlink_to("/dev/null")
+    config = Config()
+    assert_unread(config)
+    assert "W-CFG-LOAD" not in ids()
+    config._set_config_value("output.format", "yaml")
+    with pytest.raises(OSError) as err:
+        config.save()
+    assert f"can't save this config because the file {SYMLINK_WHY}" in str(err.value)
 
 
 @pytest.mark.parametrize("on", [False, True])

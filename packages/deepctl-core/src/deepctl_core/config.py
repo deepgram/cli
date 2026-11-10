@@ -1275,6 +1275,7 @@ class Config:
         # Another dg process held the user config's lock for the whole wait:
         # nothing from the file is used, and telemetry is off for this run.
         self._load_busy = False
+        self._unread_why: str | None = None
         # Effective values right after loading; save() writes what changed.
         self._baseline: dict[str, Any] = {}
         # Paths a command set explicitly (written even if equal to baseline).
@@ -1385,6 +1386,8 @@ class Config:
         self._config = DeepgramConfig()
         self._key_untrusted = False
         self._key_untrusted_why: str | None = None
+        # Why the real config was refused unread in this AI agent session.
+        self._unread_why = None
 
         # Load from user config file. The raw text is kept so other readers
         # (telemetry's opt-out) can parse the same bytes without opening the
@@ -1513,16 +1516,20 @@ class Config:
                 raise _NotRegularFile(
                     errno.EINVAL, "not a regular file", str(self.config_path)
                 )
+            # Refused: never read again through the path the check refused
+            # (it may lead anywhere), and its credentials are never used.
             self._trusted_file = False
-            st, data, text = _read_yaml_text_fd(self.config_path)
-            if st is not None and not stat.S_ISREG(st.st_mode):
-                # e.g. a link to a device: not read, and reported.
-                raise _NotRegularFile(
-                    errno.EINVAL, "not a regular file", str(self.config_path)
-                )
-            self.user_config_text = text
             self._untrusted_reason = _untrusted_reason(why)
-            return data
+            self._key_untrusted = True
+            self._key_untrusted_why = why
+            if root_st is None:
+                # Refused before it was opened (a symlink on the way, or it
+                # couldn't be opened): nothing in it is used.
+                self._unread_why = why or _WHY_UNREADABLE
+                self._warn_untrusted_file(why)
+                return None
+            self.user_config_text = root_text
+            return root_data
         for _attempt in range(3):
             st, data, text = _read_yaml_text_fd(self.config_path)
             self.user_config_text = text
@@ -1570,7 +1577,9 @@ class Config:
         W-PERM-AGENT instead."""
         why = self._key_untrusted_why or _WHY_WRITABLE
         reason = msg.W_CFG_UNTRUSTED_FILE.format(why=msg.W_CFG_UNTRUSTED_WHY[why])
-        fields = _CREDENTIAL_FIELDS if why == _WHY_OWNER else ("dg_token_expires_at",)
+        fields = (
+            ("dg_token_expires_at",) if why == _WHY_WRITABLE else _CREDENTIAL_FIELDS
+        )
         for key in _credential_paths(data, fields):
             _queue_notice(
                 "W-CFG-UNTRUSTED",
@@ -1583,6 +1592,22 @@ class Config:
                 msg.W_CFG_UNTRUSTED_FILE_HINT,
                 quiet_ok=False,
             )
+
+    def _warn_untrusted_file(self, why: str | None) -> None:
+        """One W-CFG-UNTRUSTED line for a real config refused unread."""
+        shown = msg.W_CFG_UNTRUSTED_WHY.get(
+            why or "", msg.W_CFG_UNTRUSTED_WHY[_WHY_UNREADABLE]
+        )
+        _queue_notice(
+            "W-CFG-UNTRUSTED",
+            str(self.config_path),
+            msg.W_CFG_UNTRUSTED_SKIPPED.format(
+                config_file=msg.display(os.path.abspath(self.config_path)),
+                why=shown,
+            ),
+            msg.W_CFG_UNTRUSTED_FILE_HINT,
+            quiet_ok=False,
+        )
 
     def _check_permissions(self, user_config: dict[str, Any]) -> bool:
         """Restrict a user config that holds an API key to 0600 (POSIX).
@@ -2060,6 +2085,11 @@ class Config:
                 "error shown above, then run the command again",
                 str(self.config_path),
             )
+        if self._unread_why is not None:
+            # Never written through a path the trust-root check refused.
+            if implicit:
+                return
+            raise _save_refused(self._unread_why, self.config_path)
         current = self._config.model_dump(warnings=False)
         before = _flatten(self._baseline)
         after = _flatten(current)
@@ -2121,6 +2151,8 @@ class Config:
         saving, so a save that can't happen (a link to /dev/null) stops them
         first.
         """
+        if self._unread_why is not None:
+            raise _save_refused(self._unread_why, self.config_path)
         try:
             st = os.stat(os.path.realpath(self.config_path))
         except OSError:

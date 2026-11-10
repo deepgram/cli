@@ -73,26 +73,46 @@ def is_agentic() -> bool:
 # hard signal only. CI, a missing TTY or a missing TERM are never on this
 # list, so CI jobs, cron and containers keep the environment they were given.
 # An exact list; is_agentic() above is for output formatting and is broader.
+# Variables a person's own shell sets too (Cursor's CURSOR_TRACE_ID, Replit's
+# REPL_ID) are left out.
 AI_AGENT_ENV_MARKERS: tuple[str, ...] = (
     "AI_AGENT",
+    "ANTIGRAVITY_AGENT",
+    "AUGMENT_AGENT",
     "CLAUDECODE",
+    "CLAUDE_CODE",
     "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_IS_COWORK",
+    "CODEX_CI",
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CODEX_THREAD_ID",
+    "COPILOT_CLI",
     "CURSOR_AGENT",
     "GEMINI_CLI",
+    "GOOSE_TERMINAL",
+    "OPENCODE",
+    "OPENCODE_CLIENT",
 )
+# Markers that count only with one of these values.
+AI_AGENT_ENV_VALUES: dict[str, tuple[str, ...]] = {
+    "AGENT": ("amp", "goose"),
+    "CURSOR_EXTENSION_HOST_ROLE": ("agent-exec",),
+}
 
 
 def is_ai_agent() -> bool:
     """True only when an AI coding agent marked the environment.
 
-    Hard signals: any non-empty variable in ``AI_AGENT_ENV_MARKERS``, or
-    Aider (``OR_APP_NAME=Aider`` or "aider" in ``OR_SITE_URL``). Never
-    ``CI``, TTY state, ``TERM`` or command-line flags.
+    Hard signals: any non-empty variable in ``AI_AGENT_ENV_MARKERS``, a
+    variable in ``AI_AGENT_ENV_VALUES`` with one of its values, or Aider
+    (``OR_APP_NAME=Aider`` or "aider" in ``OR_SITE_URL``). Never ``CI``,
+    TTY state, ``TERM`` or command-line flags.
     """
     env = os.environ
     if any(env.get(name) for name in AI_AGENT_ENV_MARKERS):
+        return True
+    if any(env.get(name) in values for name, values in AI_AGENT_ENV_VALUES.items()):
         return True
     return env.get("OR_APP_NAME") == "Aider" or "aider" in env.get("OR_SITE_URL", "")
 
