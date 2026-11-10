@@ -287,3 +287,65 @@ def test_http_client_follows_no_redirects_and_keeps_no_cookies() -> None:
         assert not client.cookies.jar._policy.allowed_domains()
     finally:
         asyncio.run(client.aclose())
+
+
+def _capture_server() -> tuple[Any, list[dict[str, str]]]:
+    """A loopback HTTP server that answers 200 and records each request's
+    headers (and the request line, under "_line")."""
+    import http.server
+    import threading
+
+    seen: list[dict[str, str]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _answer(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)
+            seen.append({"_line": self.requestline, **dict(self.headers)})
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = do_POST = _answer
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, seen
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("variable", ["HTTP_PROXY", "http_proxy", "ALL_PROXY"])
+def test_http_client_never_sends_the_key_to_an_environment_proxy(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """An approved loopback MCP base is reached directly: HTTP_PROXY and
+    friends never see the request or its Authorization header."""
+    import asyncio
+
+    target, to_target = _capture_server()
+    trap, to_proxy = _capture_server()
+    try:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+            monkeypatch.delenv(name, raising=False)
+            monkeypatch.delenv(name.lower(), raising=False)
+        monkeypatch.setenv(variable, f"http://127.0.0.1:{trap.server_port}")
+        monkeypatch.setenv("NO_PROXY", "")
+
+        async def call() -> int:
+            client = proxy.http_client(headers={"Authorization": "Token k"})
+            try:
+                url = f"http://127.0.0.1:{target.server_port}/v1/mcp"
+                return (await client.post(url, json={})).status_code
+            finally:
+                await client.aclose()
+
+        assert asyncio.run(call()) == 200
+        assert to_proxy == []
+        assert [r["Authorization"] for r in to_target] == ["Token k"]
+    finally:
+        target.shutdown()
+        trap.shutdown()

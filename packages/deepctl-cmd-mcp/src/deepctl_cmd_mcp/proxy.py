@@ -155,6 +155,10 @@ def http_client(
     TLS verified. The SDK's own factory follows every redirect before mcp
     1.30, and 1.30 follows same-origin ones itself up to ``max_redirects``,
     so that is 0 too: any 3xx is an ``HTTPStatusError`` and a tool error.
+
+    ``trust_env=False``: every request carries ``Authorization: Token``, so
+    ``HTTP_PROXY``/``HTTPS_PROXY``/``ALL_PROXY`` (which an agent can set)
+    never route it, and ``.netrc`` and ``SSL_CERT_*`` aren't read either.
     """
     import httpx
     from deepctl_core.transport import _no_cookies
@@ -166,6 +170,7 @@ def http_client(
         follow_redirects=False,
         max_redirects=0,
         verify=True,
+        trust_env=False,
     )
     _no_cookies(client)  # type: ignore[arg-type]
     return client
