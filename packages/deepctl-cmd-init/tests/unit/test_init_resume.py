@@ -314,7 +314,23 @@ def _forge(dest: Path, tmp_path: Path, git_cmd: Any, flag: Path) -> None:
         tar.add(work, arcname=".")
     dest.mkdir()
     with tarfile.open(archive) as tar:
-        tar.extractall(dest, filter="tar")  # type: ignore[call-arg]
+        _extract(tar, dest)
+
+
+def _extract(tar: tarfile.TarFile, dest: Path) -> None:
+    """extractall() with the "tar" filter where the runtime has one. Python
+    3.10 builds before 3.10.12 (setup-python's macOS 3.10) have no filter
+    argument, so check every member by hand there: only directories and
+    regular files, all inside dest."""
+    if hasattr(tarfile, "tar_filter"):
+        tar.extractall(dest, filter="tar")  # type: ignore[call-arg,unused-ignore]
+        return
+    root = dest.resolve()
+    for member in tar.getmembers():
+        target = (root / member.name).resolve()
+        if not (member.isdir() or member.isreg()) or not target.is_relative_to(root):
+            raise ValueError(f"unsafe tar member: {member.name!r}")
+        tar.extract(member, root)
 
 
 @needs_git
