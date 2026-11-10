@@ -61,8 +61,8 @@ npm install -g @deepgram/cli # npm (installs dg and deepgram)
 ```
 
 The npm package is a launcher for the same Python CLI. It needs
-[uv](https://docs.astral.sh/uv/) or Python 3.10+ with `venv`, and sets the CLI
-up on first run. See [npm/README.md](npm/README.md).
+Node.js 20+ and either [uv](https://docs.astral.sh/uv/) or Python 3.10-3.14
+with `venv`, and sets the CLI up on first run. See [npm/README.md](npm/README.md).
 
 ### Try Without Installing
 

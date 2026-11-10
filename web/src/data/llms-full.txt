@@ -24,7 +24,7 @@ pip install deepctl       # pip
 pipx install deepctl      # pipx (isolated)
 uvx deepctl --help        # uvx (run without install)
 brew install deepgram/tap/deepgram  # Homebrew
-npm install -g @deepgram/cli        # npm (needs uv or Python 3.10+; installs dg, deepgram)
+npm install -g @deepgram/cli        # npm (needs Node.js 20+ and uv or Python 3.10-3.14 with venv; installs dg, deepgram)
 npx @deepgram/cli --help            # npx (run without install)
 ```
 

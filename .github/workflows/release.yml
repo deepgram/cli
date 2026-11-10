@@ -312,10 +312,10 @@ jobs:
 
   deploy-web:
     name: Deploy web to production
-    needs: [release-please, publish, verify-published]
+    needs: [release-please, publish, verify-published, publish-npm]
     # Only fire on root-package releases (v0.2.4, v1.0.0, …) and only after
-    # PyPI publish so cli.deepgram.com never advertises a version that isn't
-    # installable yet. Sub-package tags look like deepctl-cmd-listen-v0.0.3 —
+    # PyPI publish and the npm publish + npx smoke test, so cli.deepgram.com
+    # never advertises a version that isn't installable yet. Sub-package tags look like deepctl-cmd-listen-v0.0.3 —
     # skip those.
     if: |
       needs.release-please.outputs.release_created == 'true' &&
