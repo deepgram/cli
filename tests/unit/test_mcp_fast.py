@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
 import sys
 import types
 from typing import Any
@@ -233,6 +235,46 @@ def test_unexpected_exception_answers_the_request_and_exits_1(
     assert reply["id"] == 42 and reply["error"]["code"] == -32603
     err = capsys.readouterr().err.splitlines()
     assert err == ["ERROR: dg mcp stopped: bug"]
+
+
+class _ClosedOut(io.BytesIO):
+    """The protocol stream on descriptor ``fd``, failing as Windows does
+    when the client closed it: EINVAL."""
+
+    def __init__(self, fd: int) -> None:
+        super().__init__()
+        self._fd = fd
+
+    def fileno(self) -> int:
+        return self._fd
+
+    def write(self, _data: Any) -> int:
+        raise OSError(errno.EINVAL, "Invalid argument")
+
+
+def test_einval_on_a_windows_pipe_is_a_closed_client(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    r, w = os.pipe()
+    try:
+        assert _fast.serve(_session(_init()), _ClosedOut(w)) == 0
+    finally:
+        os.close(r)
+        os.close(w)
+    assert capsys.readouterr().err == ""
+
+
+def test_einval_on_a_windows_file_is_still_an_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Any
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    fd = os.open(tmp_path / "out", os.O_WRONLY | os.O_CREAT)
+    try:
+        assert _fast.serve(_session(_init()), _ClosedOut(fd)) == 1
+    finally:
+        os.close(fd)
+    assert "dg mcp stopped" in capsys.readouterr().err
 
 
 def test_client_responses_and_notifications_get_no_reply() -> None:

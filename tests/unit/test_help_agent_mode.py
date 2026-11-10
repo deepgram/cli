@@ -96,7 +96,11 @@ def test_remedies_name_the_matched_variable() -> None:
         assert f"    {line}" in text
 
 
-def test_dg_agent_0_still_reports_the_marker_and_trust() -> None:
+def test_dg_agent_0_still_reports_the_marker_and_trust(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The POSIX text: Windows has no `chmod 600` line.
+    monkeypatch.setattr(sys, "platform", "linux")
     text = " ".join(_render(CLAUDECODE="1", DG_AGENT="0").split())
     assert "Agent mode: off, because DG_AGENT=0." in text
     assert "An AI-agent signal is still set (CLAUDECODE)" in text
@@ -245,4 +249,17 @@ def test_windows_gets_no_chmod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     text = " ".join(_render(CLAUDECODE="1").split())
     assert "chmod" not in text
-    assert "On Windows, dg doesn't check the file's owner or permissions." in text
+    assert "On Windows, dg doesn't check the file's owner or permissions" in text
+
+
+def test_windows_text_does_not_tell_you_to_fix_the_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dg checks nothing on Windows, so the section must not claim the file
+    won't be read, nor ask the reader to fix it."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    text = " ".join(_render(CLAUDECODE="1", DG_AGENT="0").split())
+    assert "There is nothing to fix." in text
+    assert "won't read the user config" not in text
+    assert "run this yourself" not in text
+    assert "make sure you own it" not in text

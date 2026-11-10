@@ -363,6 +363,30 @@ class TestCacheFile:
         assert info is not None
         assert (info.latest_version, info.update_available) == ("3.0.0", True)
 
+    def test_a_check_in_the_same_clock_tick_as_the_write_is_fresh(self, monkeypatch):
+        """Windows before Python 3.13: time.time() moves in 15.6 ms ticks, so
+        a check right after the write reads the very time it stamped, and
+        datetime.now(), which drops the sub-microsecond part, reads just
+        before it. That looked like a clock moved back: a check was due."""
+        import time
+        from datetime import timezone
+
+        from deepctl_cmd_update import check_cache, version_check
+
+        tick = 1_700_000_000.1234565  # not a whole microsecond
+        monkeypatch.setattr(time, "time", lambda: tick)
+
+        class SameTick(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls.fromtimestamp(time.time(), tz)
+
+        monkeypatch.setattr(version_check, "datetime", SameTick)
+        assert SameTick.now(timezone.utc).timestamp() < tick  # the premise
+        check_cache.write(check_cache.UPDATE_FILE, ok=True, latest="3.0.0", source="pypi")
+        assert check_cache.checked_at(check_cache.read(check_cache.UPDATE_FILE)) == tick
+        assert VersionChecker(self._config(), "1.0.0").should_check() is False
+
     def test_failed_check_has_no_cached_answer(self):
         from deepctl_cmd_update import check_cache
 

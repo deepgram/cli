@@ -42,6 +42,7 @@ from deepctl_core.output import (
     print_info,
     print_warning,
 )
+from deepctl_core.signals import reader_gone
 from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Confirm, Prompt
@@ -1123,7 +1124,9 @@ class ListenCommand(BaseCommand):
                 caption_writer.print_header(
                     note=note if caption_format == "webvtt" else None
                 )
-            except BrokenPipeError:
+            except OSError as exc:
+                if not reader_gone(exc, sys.stdout):
+                    raise
                 # Nobody reads the captions (`| head -n1` already exited):
                 # end before the microphone opens or any audio is sent.
                 early.restore()
@@ -1345,7 +1348,9 @@ class ListenCommand(BaseCommand):
                 caption_writer.print_header(
                     note=note if caption_format == "webvtt" else None
                 )
-            except BrokenPipeError:
+            except OSError as exc:
+                if not reader_gone(exc, sys.stdout):
+                    raise
                 # As for the microphone: no stdin read, no socket opened.
                 return self._output_closed_early(
                     "stdin", model, language, diarize, caption_writer, caption_format
@@ -1515,11 +1520,10 @@ class ListenCommand(BaseCommand):
         if v2_state is not None:
             try:
                 self._flush_v2(v2_state, transcript_acc, caption_writer=caption_writer)
-            except BrokenPipeError:
-                live.silence_stdout()
             except OSError as exc:
+                gone = reader_gone(exc, sys.stdout)
                 live.silence_stdout()
-                if outcome.status == "success":
+                if not gone and outcome.status == "success":
                     outcome = live.output_failed(exc)
 
         if outcome.status == "cancelled":
@@ -2005,13 +2009,14 @@ class ListenCommand(BaseCommand):
                         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
                     )
                     sys.stdout.flush()
-            except BrokenPipeError:
-                # The reader went away (`| true`): end quietly, exit as is.
-                engine.silence_stdout()
             except OSError as exc:
+                gone = reader_gone(exc, sys.stdout)
+                engine.silence_stdout()
+                if gone:
+                    # The reader went away (`| true`): end quietly, exit as is.
+                    return
                 # stdout can't take the result (ENOSPC, EIO): output_unwritable
                 # on stderr, exit 1.
-                engine.silence_stdout()
                 reason = engine.output_failed(exc).os_error or ""
                 kept = self._live_kept or {
                     "transcript": result.transcript,
@@ -2189,10 +2194,11 @@ class ListenCommand(BaseCommand):
             else:
                 stream.write(data)
             sys.stdout.flush()
-        except BrokenPipeError:
-            _silence_stdout()
         except OSError as exc:
+            gone = reader_gone(exc, sys.stdout)
             _silence_stdout()
+            if gone:
+                return
             reason = " ".join(str(exc.strerror or exc).split())[:200]
             self._output_unwritable(reason or exc.__class__.__name__, {})
             self._output_failed = True

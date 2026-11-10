@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import _imp
 import _thread
+import errno
 import os
 import signal
+import stat
 import sys
 import threading
 import time
@@ -17,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType
+    from typing import IO, Any
 
     Handler = Callable[[int, FrameType | None], None]
 
@@ -27,6 +30,7 @@ __all__ = [
     "die_by_signal",
     "in_importlib",
     "install_interrupt_handler",
+    "reader_gone",
     "send_to_main",
 ]
 
@@ -55,6 +59,36 @@ def die_by_signal(signum: int) -> None:
     except Exception:
         pass
     os._exit(128 + signum)
+
+
+def _is_pipe(stream: int | IO[Any] | None) -> bool:
+    try:
+        if stream is None:
+            stream = sys.stdout
+        fd = stream if isinstance(stream, int) else stream.fileno()
+        return stat.S_ISFIFO(os.fstat(fd).st_mode)
+    except Exception:
+        return False
+
+
+def reader_gone(exc: BaseException, stream: int | IO[Any] | None = None) -> bool:
+    """True when ``exc``, raised by a write to ``stream`` (a file object or a
+    descriptor; stdout when ``None``), means the reader went away.
+
+    POSIX: ``BrokenPipeError`` (EPIPE). Windows also reports a write to a
+    pipe whose reader closed as ``OSError(EINVAL)``; that counts only when
+    ``stream`` is a pipe, so a real EINVAL from a file or a console is still
+    an error. Call it before pointing the stream at the null device, which
+    makes it a character device.
+    """
+    if isinstance(exc, BrokenPipeError):
+        return True
+    return (
+        sys.platform == "win32"
+        and isinstance(exc, OSError)
+        and exc.errno == errno.EINVAL
+        and _is_pipe(stream)
+    )
 
 
 #: Where importlib's own lock bookkeeping runs. A KeyboardInterrupt raised

@@ -217,7 +217,17 @@ def _print_version() -> None:
     try:
         sys.stdout.write(version_line() + "\n")
         sys.stdout.flush()
-    except BrokenPipeError:
+    except OSError as exc:
+        if not isinstance(exc, BrokenPipeError):
+            # Only Windows reports a reader that went away as EINVAL; on
+            # other systems any other error is real. deepctl_core is
+            # imported only there: this path is stdlib only.
+            if sys.platform != "win32":
+                raise
+            from deepctl_core.signals import reader_gone
+
+            if not reader_gone(exc, sys.stdout):
+                raise
         # The reader went away (`dg --version | true`): exit quietly, and
         # keep the interpreter's final flush from reporting it again.
         try:

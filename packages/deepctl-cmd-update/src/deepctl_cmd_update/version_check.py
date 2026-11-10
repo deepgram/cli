@@ -236,10 +236,13 @@ class VersionChecker:
 
         state = self._saved_state()
         if state is not None:
-            elapsed = datetime.now(timezone.utc).timestamp() - check_cache.checked_at(
-                state
+            # The clock that stamped checked_at (time.time). datetime.now()
+            # drops the sub-microsecond part, so on a clock that hasn't
+            # ticked since the write (Windows before Python 3.13) it reads
+            # just before checked_at, which looks like a clock moved back.
+            return check_cache.elapsed(
+                check_cache.checked_at(state), cache_duration.total_seconds()
             )
-            return not 0 <= elapsed < cache_duration.total_seconds()
 
         # No cache file yet: the timestamp older versions kept in the config
         last_check = self.config.get("update.last_check")

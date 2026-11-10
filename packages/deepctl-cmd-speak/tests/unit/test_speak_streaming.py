@@ -7,6 +7,8 @@ is ``output_unwritable`` with fd 1 silenced.
 from __future__ import annotations
 
 import errno
+import os
+import sys
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import Mock, patch
@@ -141,6 +143,38 @@ class TestV1ToStdout:
             ("yield", b"b"),
         ]
         assert rec.closed
+        silenced.assert_called_once()
+        assert "Error" not in capsys.readouterr().err
+
+    def test_einval_on_a_windows_pipe_ends_quietly(
+        self, fake_sys, silenced, capsys, monkeypatch
+    ):
+        """Windows: a closed pipe is EINVAL, not EPIPE."""
+
+        class PipeSink(_Sink):
+            def fileno(self) -> int:
+                return w
+
+        monkeypatch.setattr(sys, "platform", "win32")
+        r, w = os.pipe()
+        rec = _Recorder()
+        exc = OSError(errno.EINVAL, "Invalid argument")
+        fake_sys.stdout.buffer = PipeSink(rec, fail_on=2, exc=exc)
+        client = Mock(spec=DeepgramClient)
+        client.speak_text.return_value = _Stream(rec, [b"a", b"b", b"c"])
+        cmd = SpeakCommand()
+        try:
+            result = _run(cmd, client)
+        finally:
+            os.close(r)
+            os.close(w)
+
+        assert result is None
+        assert cmd.exit_code_for(result) == 0
+        assert [e for e in rec.events if e[0] == "yield"] == [
+            ("yield", b"a"),
+            ("yield", b"b"),
+        ]
         silenced.assert_called_once()
         assert "Error" not in capsys.readouterr().err
 
@@ -346,6 +380,48 @@ class TestResultOnStdout:
         assert p.wait(60) == 0, err
         assert "RC=0" in err
         assert "Traceback" not in err and "Exception ignored" not in err
+
+    def _fail_on_stdout(self, monkeypatch, fd, code):
+        """The result write fails with ``code``; fd 1 is ``fd``."""
+        monkeypatch.setattr(
+            speak.sys, "stdout", type("Out", (), {"fileno": lambda _self: fd})()
+        )
+        cmd = SpeakCommand()
+        with patch.object(
+            speak.BaseCommand,
+            "output_result",
+            side_effect=OSError(code, os.strerror(code)),
+        ):
+            cmd.output_result(self._result(), Mock(spec=Config))
+        return cmd
+
+    def test_einval_on_a_windows_pipe_is_quiet_and_exits_0(
+        self, silenced, capsys, monkeypatch
+    ):
+        """Windows reports a write to a pipe whose reader closed as EINVAL
+        ("Invalid argument"), not EPIPE."""
+        monkeypatch.setattr(speak.sys, "platform", "win32")
+        r, w = os.pipe()
+        try:
+            cmd = self._fail_on_stdout(monkeypatch, w, errno.EINVAL)
+        finally:
+            os.close(r)
+            os.close(w)
+        silenced.assert_called_once()
+        assert cmd.exit_code_for(self._result()) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_einval_on_a_windows_file_is_output_unwritable(
+        self, silenced, capsys, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(speak.sys, "platform", "win32")
+        fd = os.open(tmp_path / "out", os.O_WRONLY | os.O_CREAT)
+        try:
+            cmd = self._fail_on_stdout(monkeypatch, fd, errno.EINVAL)
+        finally:
+            os.close(fd)
+        assert cmd.exit_code_for(self._result()) == 1
+        assert "Couldn't write the output to stdout:" in capsys.readouterr().err
 
     def test_a_coded_error_is_not_reported_twice(self, silenced, capsys):
         cmd = SpeakCommand()

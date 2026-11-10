@@ -32,6 +32,7 @@ import json
 import os
 import re
 import signal
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 from deepctl_core.signals import die_by_signal as die_by_signal  # re-export
+from deepctl_core.signals import reader_gone
 
 from . import messages as msg
 
@@ -542,6 +544,11 @@ async def run_session(
             if end is not None:
                 clock.last_final_end = max(clock.last_final_end, end)
 
+    def stdout_closed() -> LiveOutcome:
+        # Whoever read stdout is gone (``| head -n 1``): end quietly.
+        silence_stdout()
+        return LiveOutcome(stdout_closed=True)
+
     async def receive() -> LiveOutcome | None:
         """Read until the server closes. Returns the failure, or None."""
         try:
@@ -549,18 +556,16 @@ async def run_session(
                 track(raw)
                 try:
                     on_message(raw)
-                except BrokenPipeError:
-                    raise
                 except OSError as exc:
+                    if reader_gone(exc, sys.stdout):
+                        return stdout_closed()
                     # stdout can't be written (ENOSPC, EIO, ...): an output
                     # failure, not a network one. Silence fd 1 so the exit
                     # flush can't fail again.
                     silence_stdout()
                     return output_failed(exc, secrets)
         except BrokenPipeError:
-            # Whoever read stdout is gone (``| head -n 1``): end quietly.
-            silence_stdout()
-            return LiveOutcome(stdout_closed=True)
+            return stdout_closed()
         except click.ClickException as exc:
             # A server-reported error frame (Flux "Error").
             return LiveOutcome(

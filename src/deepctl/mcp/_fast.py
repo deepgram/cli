@@ -206,6 +206,16 @@ def _silence(out: "BinaryIO") -> None:
         pass
 
 
+def _reader_gone(exc: Exception, out: "BinaryIO") -> bool:
+    """Windows can report a client that closed stdout as EINVAL, not EPIPE.
+    deepctl_core is imported only then, so this module stays stdlib only."""
+    if sys.platform != "win32" or not isinstance(exc, OSError):
+        return False
+    from deepctl_core.signals import reader_gone
+
+    return reader_gone(exc, out)
+
+
 def serve(
     inp: "BinaryIO | None" = None,
     out: "BinaryIO | None" = None,
@@ -271,6 +281,9 @@ def serve(
         _silence(out)
         return 0
     except Exception as exc:
+        if _reader_gone(exc, out):
+            _silence(out)
+            return 0
         sys.stderr.write(f"ERROR: dg mcp stopped: {exc}\n")
         sys.stderr.flush()
         try:

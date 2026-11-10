@@ -49,6 +49,7 @@ from deepctl_core.output import (
 from deepctl_core.signals import coalescing as _coalescing
 from deepctl_core.signals import defer_in_importlib as _defer_in_importlib
 from deepctl_core.signals import die_by_signal as _die_by_signal
+from deepctl_core.signals import reader_gone as _reader_gone
 from deepctl_core.signals import send_to_main as _send_to_main
 from rich.console import Console
 from rich.markup import escape
@@ -249,8 +250,12 @@ def _play_audio(player: str, audio: bytes, *, suffix: str) -> None:
             )
         return
 
-    with _player_stdin(player) as sink, suppress(BrokenPipeError):
-        sink.write(audio)
+    with _player_stdin(player) as sink:
+        try:
+            sink.write(audio)
+        except OSError as exc:
+            if not _reader_gone(exc, sink):
+                raise
 
 
 def _prog() -> str:
@@ -1483,7 +1488,9 @@ class SpeakCommand(BaseCommand):
                         header = b""
                     sink.write(chunk)
                     sink.flush()
-                except BrokenPipeError:
+                except OSError as exc:
+                    if not _reader_gone(exc, sink):
+                        raise
                     # The player exited first (ffplay's "q"): the user
                     # stopped playback, not a failure. With a file, keep
                     # draining so it is complete; otherwise stop.
@@ -1699,10 +1706,10 @@ class SpeakCommand(BaseCommand):
                     header = b""
                 out.write(chunk)
                 out.flush()
-            except BrokenPipeError:
-                _silence_stdout()
-                return total, False
             except OSError as exc:
+                if _reader_gone(exc, out):
+                    _silence_stdout()
+                    return total, False
                 return total, _stdout_unwritable(exc)
             total += len(chunk)
         return total, True
@@ -1736,7 +1743,9 @@ class SpeakCommand(BaseCommand):
                     try:
                         sink.write(chunk)
                         sink.flush()
-                    except BrokenPipeError:
+                    except OSError as exc:
+                        if not _reader_gone(exc, sink):
+                            raise
                         # The user stopped playback (ffplay's "q"). With a
                         # file, keep draining so it is complete; otherwise
                         # stop and close the response.
@@ -1822,8 +1831,6 @@ class SpeakCommand(BaseCommand):
             super().output_result(result, config)
             if result is not None:
                 sys.stdout.flush()
-        except BrokenPipeError:
-            _silence_stdout()
         except SystemExit as exc:
             # rich handles EPIPE itself: it points stdout at the null device
             # and raises SystemExit(1). The reader went away, which ends the
@@ -1832,7 +1839,10 @@ class SpeakCommand(BaseCommand):
                 raise
             _silence_stdout()
         except OSError as exc:
+            gone = _reader_gone(exc, sys.stdout)
             _silence_stdout()
+            if gone:
+                return  # the reader went away: quietly, exit 0
             if isinstance(result, SpeakCodedError):
                 return  # already reported on stderr; it exits 1 anyway
             _output_unwritable(exc, path="-")

@@ -50,6 +50,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from deepctl_core.signals import reader_gone
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -238,11 +240,14 @@ def most_severe(signals: list[int]) -> int | None:
     return signals[0] if signals else None
 
 
-def _set_mask(how: int) -> set[int] | None:
+def _block_priority() -> set[int] | None:
+    """Block the ``_PRIORITY`` signals; the previous mask, or ``None``
+    where there is no mask (Windows has no pthread_sigmask or SIG_BLOCK,
+    so neither is looked up there)."""
     if not hasattr(signal, "pthread_sigmask"):
         return None
     try:
-        return set(signal.pthread_sigmask(how, _PRIORITY))
+        return set(signal.pthread_sigmask(signal.SIG_BLOCK, _PRIORITY))
     except (OSError, ValueError):
         return None
 
@@ -258,7 +263,7 @@ def critical_section() -> Iterator[None]:
     swapped: dict[int, Any] = {}
     try:
         if main and _critical == 1:
-            blocked = _set_mask(signal.SIG_BLOCK)
+            blocked = _block_priority()
             for sig in _PRIORITY:
                 current = signal.getsignal(sig)
                 if current is signal.SIG_IGN or current is None:
@@ -494,9 +499,9 @@ class AudioFile:
             try:
                 out.write(data)
                 out.flush()
-            except BrokenPipeError as exc:
-                raise ReaderGone from exc
             except OSError as exc:
+                if reader_gone(exc, out):
+                    raise ReaderGone from exc
                 raise WriteFailed(exc, stdout=True) from exc
             self.bytes_written += len(data)
             return
@@ -506,9 +511,9 @@ class AudioFile:
             while view:
                 n = os.write(self._fd, view)
                 view = view[n:]
-        except BrokenPipeError as exc:
-            raise ReaderGone from exc
         except OSError as exc:
+            if reader_gone(exc, self._fd):
+                raise ReaderGone from exc
             raise WriteFailed(exc, stdout=False) from exc
         self.bytes_written += len(data)
 

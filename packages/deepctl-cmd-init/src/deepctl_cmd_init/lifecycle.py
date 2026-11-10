@@ -222,9 +222,14 @@ def same_directory(target_dir: Path, dev: int, ino: int) -> bool:
     inode), and it and its ``.git`` must be owned by this user, with
     ``.git`` a real directory.
 
-    On Windows, where a directory can't be opened, ``st_ino`` can be 0 or
-    unstable and there are no POSIX owners, only the path checks apply: no
-    link, ``.git`` a real directory.
+    On Windows, where a directory can't be opened, it is checked by path:
+    no link, ``.git`` a real directory, and the directory's volume serial
+    (``st_dev``) and file ID (``st_ino``, from ``lstat``) the ones recorded,
+    so a directory made again at the path is refused there too. A file ID
+    of 0, now or recorded, means the file system gave none: then only the
+    volume is compared, and a copy made on the same volume isn't caught.
+    There are no POSIX owners to check. On either system the check covers
+    the moment it runs, not a swap made after it returns.
     """
     from deepctl_core import login_state
 
@@ -234,7 +239,12 @@ def same_directory(target_dir: Path, dev: int, ino: int) -> bool:
             git = os.lstat(target_dir / ".git")
         except OSError:
             return False
-        return stat.S_ISDIR(top.st_mode) and stat.S_ISDIR(git.st_mode)
+        return (
+            stat.S_ISDIR(top.st_mode)
+            and stat.S_ISDIR(git.st_mode)
+            and top.st_dev == dev
+            and (top.st_ino == 0 or ino == 0 or top.st_ino == ino)
+        )
     try:
         fd = os.open(target_dir, os.O_RDONLY | _O_DIRECTORY | _NOFOLLOW)
     except OSError:

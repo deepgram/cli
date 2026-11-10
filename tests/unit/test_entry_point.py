@@ -6,6 +6,7 @@ process imports and prints.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -87,6 +88,62 @@ class TestVersion:
         )
         proc = _run([sys.executable, "-c", code], tmp_path)
         assert proc.stdout.splitlines() == ["0 ''", "0 ''"], proc.stdout
+
+    @pytest.mark.parametrize(("pipe", "quiet"), [(True, True), (False, False)])
+    def test_einval_on_a_windows_pipe_is_a_closed_pipe(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pipe: bool, quiet: bool
+    ) -> None:
+        """Windows reports `dg --version | true` as EINVAL, not EPIPE: quiet
+        on a pipe, still an error on a file."""
+        from deepctl import main as main_module
+
+        if pipe:
+            r, fd = os.pipe()
+            os.close(r)
+        else:
+            fd = os.open(tmp_path / "out", os.O_WRONLY | os.O_CREAT)
+
+        class Out:
+            def fileno(self) -> int:
+                return fd
+
+            def write(self, _text: str) -> int:
+                raise OSError(errno.EINVAL, "Invalid argument")
+
+            def flush(self) -> None:
+                pass
+
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(sys, "stdout", Out())
+        try:
+            if quiet:
+                main_module._print_version()
+            else:
+                with pytest.raises(OSError):
+                    main_module._print_version()
+        finally:
+            os.close(fd)
+
+    def test_einval_is_a_real_error_off_windows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only Windows reports a closed pipe as EINVAL. Elsewhere it
+        propagates, and the stdlib-only version path imports nothing for it."""
+        from deepctl import main as main_module
+
+        class Out:
+            def write(self, _text: str) -> int:
+                raise OSError(errno.EINVAL, "Invalid argument")
+
+            def flush(self) -> None:
+                pass
+
+        monkeypatch.delitem(sys.modules, "deepctl_core.signals", raising=False)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(sys, "stdout", Out())
+        with pytest.raises(OSError):
+            main_module._print_version()
+        assert "deepctl_core.signals" not in sys.modules
 
     def test_version_constant_matches_metadata(self) -> None:
         import importlib.metadata

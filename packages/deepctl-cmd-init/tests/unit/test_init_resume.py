@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -124,6 +125,21 @@ class TestResume:
         assert not (moved / ".env").exists()
 
 
+def _rmtree(path: Path) -> None:
+    """``shutil.rmtree`` that also removes read-only files, as git leaves
+    its objects on Windows: the read-only bit is cleared and the removal
+    tried again. ``onexc`` is 3.12+, and ``onerror`` is deprecated there."""
+
+    def clear_and_retry(func: Any, name: str, _exc: Any) -> None:
+        os.chmod(name, stat.S_IWRITE)
+        func(name)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_and_retry)
+    else:
+        shutil.rmtree(path, onerror=clear_and_retry)
+
+
 def _record_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Every git command dg runs from here on (and still runs it)."""
     calls: list[list[str]] = []
@@ -159,7 +175,7 @@ class TestRecordedDirectoryReplaced:
         self._clone(run)
         copy = tmp_path / "copy"
         shutil.copytree(run.dest, copy, symlinks=True)
-        shutil.rmtree(run.dest)
+        _rmtree(run.dest)
         copy.rename(run.dest)  # same contents and HEAD, another inode
         calls = _record_git(monkeypatch)
         self._refused(run, calls, install=True)
@@ -537,6 +553,106 @@ class TestResumeWithoutDirectoryHandles(TestResume):
     @pytest.fixture(autouse=True)
     def _windows(self, run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         _windows_directories(monkeypatch)
+
+
+@needs_git
+class TestRecordedDirectoryReplacedWithoutDirectoryHandles(
+    TestRecordedDirectoryReplaced
+):
+    """The same refusals where a directory can't be opened (Windows): the
+    directory's volume and file ID, read by path, must be the recorded
+    ones. Only dg's switch is turned off here, not the whole of
+    ``_windows_directories``: the test's own ``shutil.rmtree`` opens
+    directories by descriptor on POSIX, which that forbids."""
+
+    @pytest.fixture(autouse=True)
+    def _windows(self, run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(login_state, "DIR_FDS", False)
+
+    @pytest.mark.skip(reason="Windows has no POSIX owners to check")
+    def test_owned_by_someone_else(self) -> None:
+        pass
+
+
+@needs_git
+class TestSwappedWhileRunningWithoutDirectoryHandles(TestSwappedWhileRunning):
+    """A directory swapped in while dg init runs is refused where a
+    directory can't be opened (Windows)."""
+
+    @pytest.fixture(autouse=True)
+    def _windows(self, run: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        _windows_directories(monkeypatch)
+
+
+class TestSameDirectoryWithoutDirectoryHandles:
+    """``same_directory`` where a directory can't be opened (Windows): the
+    volume and file ID ``lstat`` gives are compared with the recorded ones,
+    and a file ID of 0 (now or recorded) is unknown, not a mismatch."""
+
+    @pytest.fixture(autouse=True)
+    def _windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _windows_directories(monkeypatch)
+
+    @pytest.fixture
+    def dest(self, tmp_path: Path) -> Path:
+        dest = tmp_path / "app"
+        (dest / ".git").mkdir(parents=True)
+        return dest
+
+    def _identity(self, dest: Path) -> tuple[int, int]:
+        identity = lifecycle.directory_identity(dest)
+        assert identity is not None
+        return identity
+
+    def _no_file_id(self, monkeypatch: pytest.MonkeyPatch, dest: Path) -> None:
+        """``lstat`` of ``dest`` reports file ID 0, as some file systems do."""
+        real_lstat = os.lstat
+
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
+            st = real_lstat(path, *args, **kwargs)
+            if os.fspath(path) != os.fspath(dest):
+                return st
+            return types.SimpleNamespace(st_mode=st.st_mode, st_dev=st.st_dev, st_ino=0)
+
+        monkeypatch.setattr(os, "lstat", lstat)
+
+    def test_still_the_same_after_files_change_inside(self, dest: Path) -> None:
+        identity = self._identity(dest)
+        (dest / "notes.txt").write_text("x\n")
+        (dest / "src").mkdir()
+        (dest / "src" / "a.js").write_text("a\n")
+        (dest / "notes.txt").rename(dest / "src" / "notes.txt")
+        (dest / ".git" / "index").write_text("i\n")
+        assert lifecycle.same_directory(dest, *identity)
+
+    def test_made_again_at_the_same_path(self, dest: Path, tmp_path: Path) -> None:
+        identity = self._identity(dest)
+        copy = tmp_path / "copy"
+        shutil.copytree(dest, copy)
+        dest.rename(tmp_path / "old")
+        copy.rename(dest)  # same contents, another file ID
+        assert not lifecycle.same_directory(dest, *identity)
+
+    def test_another_file_id_is_refused(self, dest: Path) -> None:
+        dev, ino = self._identity(dest)
+        assert not lifecycle.same_directory(dest, dev, ino + 1)
+
+    def test_another_volume_is_refused(self, dest: Path) -> None:
+        dev, ino = self._identity(dest)
+        assert not lifecycle.same_directory(dest, dev + 1, ino)
+
+    def test_no_file_id_now_is_unknown(
+        self, dest: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dev, ino = self._identity(dest)
+        self._no_file_id(monkeypatch, dest)
+        assert lifecycle.same_directory(dest, dev, ino)
+        assert not lifecycle.same_directory(dest, dev + 1, ino)
+
+    def test_no_file_id_recorded_is_unknown(self, dest: Path) -> None:
+        dev, _ = self._identity(dest)
+        assert lifecycle.same_directory(dest, dev, 0)
+        assert not lifecycle.same_directory(dest, dev + 1, 0)
 
 
 @needs_git

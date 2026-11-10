@@ -141,6 +141,46 @@ def test_final_result_epipe_stays_quiet(command, monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
+def _final_result_einval(command, monkeypatch, fd):
+    """The final result's write fails with EINVAL on Windows; fd 1 is fd."""
+    monkeypatch.setattr(listen_cmd.sys, "platform", "win32")
+    monkeypatch.setattr(live, "silence_stdout", lambda: None)
+    monkeypatch.setattr(listen_cmd, "get_output_format", lambda: "json")
+    stdout = Mock()
+    stdout.fileno.return_value = fd
+    stdout.write.side_effect = OSError(errno.EINVAL, "Invalid argument")
+    monkeypatch.setattr(listen_cmd.sys, "stdout", stdout)
+    result = ListenResult(status="success", mode="live", transcript="hi")
+    command.output_result(result, Mock(spec=Config))
+    return command.exit_code_for(result)
+
+
+def test_final_result_einval_on_a_windows_pipe_stays_quiet(
+    command, monkeypatch, capsys
+):
+    """Windows reports a pipe whose reader closed as EINVAL, not EPIPE."""
+    r, w = os.pipe()
+    try:
+        assert _final_result_einval(command, monkeypatch, w) == 0
+    finally:
+        os.close(r)
+        os.close(w)
+    assert capsys.readouterr().err == ""
+
+
+def test_final_result_einval_on_a_windows_file_exits_1(
+    command, monkeypatch, capsys, tmp_path
+):
+    fd = os.open(tmp_path / "out", os.O_WRONLY | os.O_CREAT)
+    try:
+        assert _final_result_einval(command, monkeypatch, fd) == 1
+    finally:
+        os.close(fd)
+    assert "Couldn't write the output to stdout: Invalid argument." in (
+        capsys.readouterr().err
+    )
+
+
 def test_coded_error_write_failure_silences_stdout(command, monkeypatch):
     silenced = []
     monkeypatch.setattr(live, "silence_stdout", lambda: silenced.append(True))

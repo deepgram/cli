@@ -77,15 +77,28 @@ def _status(detection: agents.Detection) -> list[str]:
     return ["  Agent mode: off. No signal matched."]
 
 
-def _owner_fix(config_path: str) -> list[str]:
-    """The command that fixes the config file's permissions. Windows has
-    none: dg doesn't check the owner or permissions there."""
+def _config_rules(prog: str, config_path: str) -> list[str]:
+    """The config-file trust rules and the command that fixes the file's
+    permissions. Windows has neither: dg doesn't check the owner or
+    permissions there, so there is nothing to fix."""
     if sys.platform == "win32":
         return _para(
-            "On Windows, dg doesn't check the file's owner or permissions.",
-            indent="    ",
+            "On Windows, dg doesn't check the file's owner or permissions, so "
+            "an agent session reads and saves the user config like any other "
+            "session. There is nothing to fix."
         )
-    return [f"    chmod 600 {config_path}"]
+    return [
+        *_para(
+            f"While any signal above is set, {prog} won't read the user config "
+            f"({config_path}), or the API key in it, if other users can "
+            "change the file or another user owns it. It won't save to that "
+            "file either. DG_AGENT=0 doesn't change this. To fix the file, "
+            "make sure you own it, then run this yourself, not through an "
+            "agent:"
+        ),
+        "",
+        f"    chmod 600 {config_path}",
+    ]
 
 
 def render(
@@ -163,16 +176,7 @@ def render(
         "",
         "CONFIG FILES IN AGENT SESSIONS",
         "",
-        *_para(
-            f"While any signal above is set, {prog} won't read the user config "
-            f"({config_path}), or the API key in it, if other users can "
-            "change the file or another user owns it. It won't save to that "
-            "file either. DG_AGENT=0 doesn't change this. To fix the file, "
-            "make sure you own it, then run this yourself, not through an "
-            "agent:"
-        ),
-        "",
-        *_owner_fix(config_path),
+        *_config_rules(prog, config_path),
         "",
         "SOURCES",
         "",
@@ -218,6 +222,11 @@ class AgentModeCommand(BaseCommand):
         try:
             sys.stdout.write(text)
             sys.stdout.flush()
-        except (BrokenPipeError, ValueError):
+        except ValueError:
             pass
+        except OSError as exc:
+            from deepctl_core.signals import reader_gone
+
+            if not reader_gone(exc, sys.stdout):
+                raise
         return None

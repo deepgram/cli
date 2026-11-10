@@ -4,6 +4,7 @@ lock bookkeeping, and the helpers behind it."""
 from __future__ import annotations
 
 import _imp
+import errno
 import importlib
 import os
 import signal
@@ -253,3 +254,80 @@ def test_another_thread_holding_the_import_lock_doesnt_hold_up_ctrl_c():
     finally:
         release.set()
         t.join(5)
+
+
+# ── reader_gone: a failed write whose reader went away ──────────────────
+
+
+@pytest.fixture
+def pipe_fd():
+    """The write end of a real pipe (S_IFIFO on every OS)."""
+    r, w = os.pipe()
+    yield w
+    os.close(r)
+    os.close(w)
+
+
+@pytest.fixture
+def file_fd(tmp_path):
+    fd = os.open(tmp_path / "out", os.O_WRONLY | os.O_CREAT)
+    yield fd
+    os.close(fd)
+
+
+def _einval():
+    return OSError(errno.EINVAL, "Invalid argument")
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
+def test_a_broken_pipe_is_a_reader_gone_everywhere(monkeypatch, platform, file_fd):
+    monkeypatch.setattr(sys, "platform", platform)
+    assert signals.reader_gone(BrokenPipeError(errno.EPIPE, "Broken pipe"), file_fd)
+
+
+def test_einval_on_a_windows_pipe_is_a_reader_gone(monkeypatch, pipe_fd):
+    """What Windows raises for a write to a pipe whose reader closed."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert signals.reader_gone(_einval(), pipe_fd)
+
+
+def test_einval_on_a_windows_file_is_a_real_error(monkeypatch, file_fd):
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert not signals.reader_gone(_einval(), file_fd)
+
+
+@pytest.mark.parametrize("code", [errno.ENOSPC, errno.EIO, errno.EBADF])
+def test_other_errors_on_a_windows_pipe_are_real_errors(monkeypatch, pipe_fd, code):
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert not signals.reader_gone(OSError(code, os.strerror(code)), pipe_fd)
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_einval_on_a_posix_pipe_is_a_real_error(monkeypatch, platform, pipe_fd):
+    monkeypatch.setattr(sys, "platform", platform)
+    assert not signals.reader_gone(_einval(), pipe_fd)
+
+
+def test_the_stream_can_be_a_file_object_and_defaults_to_stdout(
+    monkeypatch, pipe_fd
+):
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    class Out:
+        def fileno(self):
+            return pipe_fd
+
+    assert signals.reader_gone(_einval(), Out())
+    monkeypatch.setattr(sys, "stdout", Out())
+    assert signals.reader_gone(_einval())
+
+
+def test_a_stream_without_a_descriptor_is_not_a_pipe(monkeypatch):
+    """A stdout replaced by something with no fileno, or a closed one."""
+    import io
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert not signals.reader_gone(_einval(), io.BytesIO())
+    closed = io.BytesIO()
+    closed.close()
+    assert not signals.reader_gone(_einval(), closed)
