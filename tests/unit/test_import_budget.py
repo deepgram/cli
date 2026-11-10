@@ -48,6 +48,10 @@ GATES_IMPORTS: dict[str, Any] = {
             "_virtualenv",
             "sitecustomize",
             "usercustomize",
+            # pywin32's .pth file imports these at startup on Windows (mcp
+            # depends on pywin32 there).
+            "pywin32_bootstrap",
+            "pywin32_system32",
         ],
     },
     "forbidden": {
@@ -168,11 +172,18 @@ def _allowlist_violations(modules: list[str]) -> list[str]:
     return violations
 
 
+def test_pywin32_startup_imports_are_allowed() -> None:
+    """pywin32's .pth runs on every Windows interpreter start; the allowlist
+    must not count those two modules against the fast paths."""
+    assert _allowlist_violations(["pywin32_bootstrap", "pywin32_system32"]) == []
+    assert _allowlist_violations(["pywin32_other"]) == ["pywin32_other"]
+
+
 def test_mirror_matches_bench_gates() -> None:
     gates = REPO / "bench" / "gates.json"
     if not gates.exists():
         pytest.skip("bench/gates.json is not in this tree yet")
-    assert json.loads(gates.read_text())["imports"] == GATES_IMPORTS
+    assert json.loads(gates.read_text(encoding="utf-8"))["imports"] == GATES_IMPORTS
 
 
 def test_version_path_imports(tmp_path: Path) -> None:

@@ -16,6 +16,13 @@ def _real_config(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    # Config resolves its default path through platformdirs, which honors
+    # XDG_CONFIG_HOME on Linux, but ignores it on Windows.
+    # Pin it so the file (and the assert below) are the same on every OS.
+    monkeypatch.setattr(
+        "deepctl_core.config.platformdirs.user_config_dir",
+        lambda *_a, **_k: str(tmp_path / "xdg" / "deepctl"),
+    )
     path = tmp_path / "xdg" / "deepctl" / "config.yaml"
     path.parent.mkdir(parents=True, mode=0o700)
     path.write_text(

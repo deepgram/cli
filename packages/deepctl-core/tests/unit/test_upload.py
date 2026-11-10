@@ -100,7 +100,14 @@ def test_a_retry_sends_the_file_opened_not_the_one_at_the_path(tmp_path):
         assert b"".join(body) == original
         swap = tmp_path / "swap.wav"
         swap.write_bytes(b"x" * 3000)
-        os.replace(swap, path)  # a new file at the same path
+        if sys.platform == "win32":
+            # The open descriptor has no FILE_SHARE_DELETE, so Windows refuses
+            # to replace the file under it: the path can't name another file
+            # while the body is open, which is the same guarantee.
+            with pytest.raises(PermissionError):
+                os.replace(swap, path)
+        else:
+            os.replace(swap, path)  # a new file at the same path
         assert b"".join(body) == original
 
 

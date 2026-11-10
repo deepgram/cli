@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
+import types
 
 import pytest
 import yaml
@@ -286,9 +287,33 @@ def test_secret_bearing_argv_has_no_next_step(monkeypatch, argv):
     assert login_module._rerun_with_yes("dg") is None
 
 
-def test_rerun_quotes_and_refuses_unsafe_tokens(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["dg", "login", "--profile", "my work"])
-    assert login_module._rerun_with_yes("dg") == "dg login --profile 'my work' --yes"
+def _as_os(monkeypatch, name):
+    """Make the command module see ``os.name == name``: only its own ``os``
+    is swapped, not the process's, so pathlib and the rest keep working."""
+    monkeypatch.setattr(login_module, "os", types.SimpleNamespace(name=name))
+
+
+@pytest.mark.parametrize(
+    ("os_name", "profile", "expected"),
+    [
+        # POSIX quotes with shlex.
+        ("posix", "my work", "dg login --profile 'my work' --yes"),
+        ("posix", "work", "dg login --profile work --yes"),
+        # Windows has no shell quoting to rely on: None when a token needs
+        # quoting, the plain command when none does.
+        ("nt", "my work", None),
+        ("nt", "work", "dg login --profile work --yes"),
+    ],
+)
+def test_rerun_quotes_or_refuses_by_platform(monkeypatch, os_name, profile, expected):
+    monkeypatch.setattr(sys, "argv", ["dg", "login", "--profile", profile])
+    _as_os(monkeypatch, os_name)
+    assert login_module._rerun_with_yes("dg") == expected
+
+
+@pytest.mark.parametrize("os_name", ["posix", "nt"])
+def test_rerun_refuses_unsafe_tokens(monkeypatch, os_name):
+    _as_os(monkeypatch, os_name)
     monkeypatch.setattr(sys, "argv", ["dg", "login", "--profile", "=x"])
     assert login_module._rerun_with_yes("dg") is None
     monkeypatch.setattr(sys, "argv", ["dg", "login"])

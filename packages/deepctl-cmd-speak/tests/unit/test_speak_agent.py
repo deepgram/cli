@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import stat
+import types
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -207,8 +209,34 @@ class TestNoOutput:
         self, monkeypatch, text
     ):
         result = _pre(["speak", text], monkeypatch, text=text)
+        if os.name == "nt":
+            # Windows has no shell quoting to rely on: a command line that
+            # needs quoting gets no next_step.
+            assert result.next_step is None
+            assert result.hint.startswith("Run the same command again")
+            return
         assert_e10(result.next_step)
         assert shlex.split(result.next_step)[2] == text
+
+    @pytest.mark.parametrize(
+        ("os_name", "tokens", "expected"),
+        [
+            # POSIX quotes with shlex.
+            ("posix", ["dg", "speak", "hello"], "dg speak hello"),
+            ("posix", ["dg", "speak", "hi there"], "dg speak 'hi there'"),
+            # Windows: the plain command when no token needs quoting, else None.
+            ("nt", ["dg", "speak", "hello"], "dg speak hello"),
+            ("nt", ["dg", "speak", "hi there"], None),
+            ("nt", ["dg", "speak", "Q&A"], None),
+        ],
+    )
+    def test_next_step_quotes_or_refuses_by_platform(
+        self, monkeypatch, os_name, tokens, expected
+    ):
+        # Only the command module's view of os.name changes, not the
+        # process's, so pathlib keeps working.
+        monkeypatch.setattr(speak, "os", types.SimpleNamespace(name=os_name))
+        assert speak._next_step(tokens) == expected
 
     def test_a_token_starting_with_equals_nulls_next_step(self, monkeypatch):
         result = _pre(["speak", "=cmd"], monkeypatch, text="=cmd")
@@ -239,16 +267,14 @@ class TestStdoutTakesAudio:
         assert _REAL_TAKES_AUDIO() is True
         monkeypatch.setattr(sinks, "stdout_stat", lambda: os.stat(os.devnull))
         assert _REAL_TAKES_AUDIO() is True
-        r, w = os.pipe()
-        try:
-            monkeypatch.setattr(sinks, "stdout_stat", lambda: os.fstat(w))
-            monkeypatch.setattr(sinks.os, "isatty", lambda fd: False)
-            assert _REAL_TAKES_AUDIO() is False
-            monkeypatch.setattr(sinks.os, "isatty", lambda fd: True)
-            assert _REAL_TAKES_AUDIO() is True
-        finally:
-            os.close(r)
-            os.close(w)
+        # A pipe with a nonzero index, built by hand: a real os.pipe() has
+        # index 0 on Windows, which takes the no-index branch instead.
+        fifo = os.stat_result((stat.S_IFIFO | 0o600, 4242, 7, 1, 0, 0, 0, 0, 0, 0))
+        monkeypatch.setattr(sinks, "stdout_stat", lambda: fifo)
+        monkeypatch.setattr(sinks.os, "isatty", lambda fd: False)
+        assert _REAL_TAKES_AUDIO() is False
+        monkeypatch.setattr(sinks.os, "isatty", lambda fd: True)
+        assert _REAL_TAKES_AUDIO() is True
         monkeypatch.setattr(sinks, "stdout_stat", lambda: None)
         assert _REAL_TAKES_AUDIO() is False
 

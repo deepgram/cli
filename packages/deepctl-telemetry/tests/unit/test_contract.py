@@ -7,6 +7,7 @@ docs/telemetry.md. Reports go to a local sink on loopback, never further.
 
 from __future__ import annotations
 
+import errno
 import json
 import re
 import socket
@@ -230,6 +231,12 @@ class TestFlush:
                 assert client.report_exception(exc) is False
         flush.assert_not_called()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="a real refused loopback connect is delayed (~2 s per attempt) "
+        "on Windows; test_an_injected_refusal_does_not_wait_out_the_budget "
+        "covers the same property there",
+    )
     def test_refused_connection_does_not_wait_out_the_budget(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -247,6 +254,31 @@ class TestFlush:
         started = time.monotonic()
         assert _fail() is True
         assert time.monotonic() - started < 2.5
+
+    def test_an_injected_refusal_does_not_wait_out_the_budget(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The one send is refused at once, and the flush returns as soon as
+        # it has, not at its timeout. The refusal is injected at the socket
+        # connect, so the timing is the same on every OS.
+        attempts: list[tuple[Any, ...]] = []
+
+        def refuse(*args: Any, **kwargs: Any) -> Any:
+            attempts.append(args)
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+
+        monkeypatch.setattr("urllib3.util.connection.create_connection", refuse)
+        # A 4 s flush timeout and budget: returning well before them shows
+        # the flush ended with the failed send.
+        monkeypatch.setattr(client, "FLUSH_TIMEOUT_SECONDS", 4.0)
+        monkeypatch.setattr(client, "REPORT_BUDGET_SECONDS", 4.0)
+        monkeypatch.setenv(client.DSN_ENV_VAR, "http://k@127.0.0.1:9/1")
+        client.init_telemetry(_config())
+        started = time.monotonic()
+        assert _fail() is True
+        assert time.monotonic() - started < 2.5
+        # The send did reach the injected refusal.
+        assert attempts
 
     def test_unanswered_send_is_held_to_the_budget(
         self, monkeypatch: pytest.MonkeyPatch

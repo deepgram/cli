@@ -9,12 +9,14 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 import pytest
 from deepctl_cmd_init import clones, lifecycle
+from deepctl_cmd_init import command as init_command
 from deepctl_cmd_init.command import InitCommand
 from deepctl_cmd_init.models import InitCodedError, InitResult, TemplateDetail
 from deepctl_core import AuthManager, Config, DeepgramClient
@@ -46,6 +48,14 @@ def make_detail() -> Any:
     return template_detail
 
 
+def _expected_step(run: Any, *flags: str) -> str | None:
+    """The rerun next_step names: a runnable command, or None on Windows when
+    any token (the temp path always) needs shell quoting."""
+    if os.name == "nt":
+        return None
+    return " ".join(["dg init node-transcription --dir", str(run.dest), *flags])
+
+
 class TestListedSteps:
     """Setup commands the template service lists: confirmed before cloning."""
 
@@ -56,9 +66,7 @@ class TestListedSteps:
         assert result.status == "error"
         assert result.code == "confirmation_required"
         assert "--yes runs touch pwned" in result.error
-        assert result.next_step == (
-            f"dg init node-transcription --dir {run.dest} --no-install --no-start"
-        )
+        assert result.next_step == _expected_step(run, "--no-install", "--no-start")
         assert result.details == {"flag": "--yes"}
         assert result.hint.startswith("Nothing was cloned.")
         assert run.clones == 0
@@ -70,7 +78,15 @@ class TestListedSteps:
         run.agent = True
         result = run(install=True)
         assert result.code == "confirmation_required"
-        assert "only if the user approves" in result.hint
+        if os.name == "nt":
+            # The temp path needs quoting, so there is no next_step to name.
+            assert result.next_step is None
+            assert result.hint == (
+                "Nothing was cloned. Show the user the setup commands and ask "
+                "them to run dg init in their terminal."
+            )
+        else:
+            assert "only if the user approves" in result.hint
         assert run.clones == 0
 
     def test_agent_hint_without_a_runnable_next_step(
@@ -147,9 +163,7 @@ class TestListedSteps:
         assert run.setup_runs == ["npm install"]
         assert run.start_runs == []
         assert result.code == "confirmation_required"
-        assert result.next_step == (
-            f"dg init node-transcription --dir {run.dest} --no-start"
-        )
+        assert result.next_step == _expected_step(run, "--no-start")
         assert result.details == {"flag": "--start"}
         assert run.record().phases == ["clone", "setup"]  # type: ignore[index]
 
@@ -190,7 +204,10 @@ class TestMakefileSteps:
     def test_next_step_resumes_without_cloning_again(self, run: Any) -> None:
         run.makefile = True
         first = run()
-        assert first.next_step.endswith("--no-install --no-start")
+        if os.name == "nt":
+            assert first.next_step is None  # the temp path needs quoting
+        else:
+            assert first.next_step.endswith("--no-install --no-start")
         result = run(no_install=True, no_start=True)
         assert result.status == "success"
         assert result.installed is False
@@ -363,3 +380,37 @@ def test_unsaved_progress_says_a_rerun_wont_resume(
     out = " ".join(capsys.readouterr().out.split())
     assert "Couldn't save setup progress (disk full), so running dg init " in out
     assert "again won't resume in" in out
+
+
+@pytest.mark.parametrize(
+    ("os_name", "dest", "expected"),
+    [
+        # POSIX quotes with shlex.
+        ("posix", "/work/app", "dg init tpl --dir /work/app --no-start"),
+        ("posix", "/work/my app", "dg init tpl --dir '/work/my app' --no-start"),
+        # Windows has no shell quoting to rely on: None when a token needs
+        # quoting, the plain command when none does.
+        ("nt", "/work/app", "dg init tpl --dir /work/app --no-start"),
+        ("nt", "/work/my app", None),
+    ],
+)
+def test_rerun_quotes_or_refuses_by_platform(
+    monkeypatch: pytest.MonkeyPatch, os_name: str, dest: str, expected: str | None
+) -> None:
+    monkeypatch.setattr("deepctl_core.transport.prog", lambda: "dg")
+    # Only the command module's view of os.name changes, not the process's,
+    # so pathlib keeps working; PurePosixPath prints the same on every OS.
+    monkeypatch.setattr(init_command, "os", SimpleNamespace(name=os_name))
+    assert init_command._rerun("tpl", PurePosixPath(dest), "--no-start") == expected
+
+
+@pytest.mark.parametrize("os_name", ["posix", "nt"])
+def test_rerun_refuses_an_equals_token_and_an_unknown_prog(
+    monkeypatch: pytest.MonkeyPatch, os_name: str
+) -> None:
+    monkeypatch.setattr(init_command, "os", SimpleNamespace(name=os_name))
+    dest = PurePosixPath("/work/app")
+    monkeypatch.setattr("deepctl_core.transport.prog", lambda: "dg")
+    assert init_command._rerun("=tpl", dest, "--no-start") is None
+    monkeypatch.setattr("deepctl_core.transport.prog", lambda: None)
+    assert init_command._rerun("tpl", dest, "--no-start") is None

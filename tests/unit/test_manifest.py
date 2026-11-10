@@ -69,12 +69,14 @@ class TestRepoManifest:
     def test_validates_against_the_schema(self) -> None:
         import jsonschema  # a test dependency: this must never skip
 
-        schema = json.loads(SCHEMA.read_text())
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator.check_schema(schema)
         jsonschema.validate(assemble(str(FRAGMENTS)), schema)
         fragment_schema = {**schema["$defs"]["fragment"], "$defs": schema["$defs"]}
         for path in sorted(FRAGMENTS.glob("*.json")):
-            jsonschema.validate(json.loads(path.read_text()), fragment_schema)
+            jsonschema.validate(
+                json.loads(path.read_text(encoding="utf-8")), fragment_schema
+            )
 
     @source_tree_only
     def test_check_cli(self) -> None:
@@ -245,8 +247,8 @@ class TestAssembleRules:
     def test_assemble_writes_the_file(self, tmp_path: Path) -> None:
         out = tmp_path / "_manifest.json"
         manifest = assemble(str(FRAGMENTS), str(out))
-        assert json.loads(out.read_text()) == manifest
-        assert out.read_text() == _manifest_build.dumps(manifest)
+        assert json.loads(out.read_text(encoding="utf-8")) == manifest
+        assert out.read_text(encoding="utf-8") == _manifest_build.dumps(manifest)
 
     def test_cli_check_fails_on_a_duplicate(self, tmp_path: Path) -> None:
         directory = _write(
@@ -596,8 +598,12 @@ class TestBuiltFile:
         monkeypatch.setattr(_manifest, "_HERE", str(package))
         monkeypatch.setattr(_manifest, "_manifest", None)
         monkeypatch.setattr(_manifest, "source", None)
-        listen = json.loads((FRAGMENTS / "listen.json").read_text())["help"]
-        probe = json.loads((FRAGMENTS / "debug-probe.json").read_text())["help"]
+        listen = json.loads((FRAGMENTS / "listen.json").read_text(encoding="utf-8"))[
+            "help"
+        ]
+        probe = json.loads(
+            (FRAGMENTS / "debug-probe.json").read_text(encoding="utf-8")
+        )["help"]
         assert _manifest.help_spec("listen") == listen
         assert _manifest.help_spec("debug probe") == probe
         assert _manifest.help_spec("nosuch") is None
@@ -616,7 +622,9 @@ class TestBuiltFile:
         monkeypatch.setattr(_manifest, "_manifest", None)
         assert _manifest.load() == assemble(str(FRAGMENTS))
         assert _manifest.source == "fragments"
-        listen = json.loads((FRAGMENTS / "listen.json").read_text())["help"]
+        listen = json.loads((FRAGMENTS / "listen.json").read_text(encoding="utf-8"))[
+            "help"
+        ]
         assert _manifest.help_spec("listen") == listen
 
 

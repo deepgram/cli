@@ -465,9 +465,16 @@ class TestLazyQuiet:
         assert _LazyConsole().quiet is False
 
     def test_setup_output_imports_no_rich(self, tmp_path):
+        import os
         import subprocess
         import sys
 
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+        # Windows Python can't seed its hash randomization without SYSTEMROOT.
+        # Only that one variable is passed on, so what the child imports stays
+        # independent of the CI and agent variables in this process.
+        if "SYSTEMROOT" in os.environ:
+            env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
         code = (
             "import sys\n"
             "from deepctl_core.output import console, setup_output\n"
@@ -480,7 +487,7 @@ class TestLazyQuiet:
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+            env=env,
             timeout=60,
         )
         assert proc.returncode == 0, proc.stderr
