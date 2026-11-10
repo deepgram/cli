@@ -219,16 +219,26 @@ def test_drop_oldest_ignores_audio_once_closing():
 # ── Stdin reader ───────────────────────────────────────────────────────────
 
 
+@pytest.mark.timeout(30)
 def test_reader_reads_capped_frames_then_eof():
+    # 5,000 bytes is more than a Windows anonymous pipe holds (4 KiB), so
+    # write from a thread once the reader is running; never before it.
     r, w = os.pipe()
-    os.write(w, b"a" * 5000)
-    os.close(w)
+
+    def write() -> None:
+        try:
+            os.write(w, b"a" * 5000)
+        finally:
+            os.close(w)
+
+    writer = threading.Thread(target=write, daemon=True)
 
     async def main():
         q: asyncio.Queue = asyncio.Queue(maxsize=32)
         live.StdinReader(
             asyncio.get_running_loop(), q, threading.Event(), read_size=1600, fd=r
         ).start()
+        writer.start()
         items = []
         while True:
             item = await asyncio.wait_for(q.get(), 5)
@@ -237,7 +247,9 @@ def test_reader_reads_capped_frames_then_eof():
                 return items
 
     items = run(main())
+    writer.join(5)
     os.close(r)
+    assert not writer.is_alive()
     assert all(len(i) <= 1600 for i in items)
     assert b"".join(items) == b"a" * 5000
     assert items[-1] == b""

@@ -51,8 +51,10 @@ Path(sys.argv[1]).write_text(f"deepctl=={version}\n" + "\n".join(sorted(set(reqs
 Path(sys.argv[2]).write_text("\n".join(floors) + "\n")
 PYEOF
   uv venv -q -p "$PY" "$ENV/venv" || exit 1
+  # --refresh: a restored uv cache can hold deepctl wheels from an earlier
+  # build of this same version, and uv would install those instead of $DIST.
   if ! uv pip install -q --python "$ENV/venv/bin/python" --resolution lowest-direct --no-build \
-      --find-links "$DIST" -r "$ENV/requirements.txt"; then
+      --refresh --find-links "$DIST" -r "$ENV/requirements.txt"; then
     echo "FAIL lowest-direct: the lockstep closure does not resolve at its floors"; exit 1
   fi
   uv pip freeze --python "$ENV/venv/bin/python" > "$ENV/freeze.txt"
