@@ -299,10 +299,20 @@ def _as_os(monkeypatch, name):
         # POSIX quotes with shlex.
         ("posix", "my work", "dg login --profile 'my work' --yes"),
         ("posix", "work", "dg login --profile work --yes"),
-        # Windows has no shell quoting to rely on: None when a token needs
-        # quoting, the plain command when none does.
-        ("nt", "my work", None),
+        ("posix", "a&b", "dg login --profile 'a&b' --yes"),
+        ("posix", "C:\\x", "dg login --profile 'C:\\x' --yes"),
+        # Windows: double quotes when a token needs them, None when no form
+        # reaches dg unchanged from cmd, PowerShell and Git Bash.
+        ("nt", "my work", 'dg login --profile "my work" --yes'),
         ("nt", "work", "dg login --profile work --yes"),
+        ("nt", "my work, v2", 'dg login --profile "my work, v2" --yes'),
+        # ' ; ( ) { } run code once an agent wraps the line in another shell.
+        ("nt", "it's", None),
+        ("nt", "work (old)", None),
+        ("nt", "a&b", None),
+        ("nt", "100%", None),
+        ("nt", "$x", None),
+        ("nt", "C:\\x\\", None),
     ],
 )
 def test_rerun_quotes_or_refuses_by_platform(monkeypatch, os_name, profile, expected):
@@ -311,13 +321,54 @@ def test_rerun_quotes_or_refuses_by_platform(monkeypatch, os_name, profile, expe
     assert login_module._rerun_with_yes("dg") == expected
 
 
+def test_rerun_on_windows_names_the_program_path(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["dg", "login"])
+    _as_os(monkeypatch, "nt")
+    assert (
+        login_module._rerun_with_yes("C:/Users/me/.venv/Scripts/dg.exe")
+        == "C:/Users/me/.venv/Scripts/dg.exe login --yes"
+    )
+
+
 @pytest.mark.parametrize("os_name", ["posix", "nt"])
 def test_rerun_refuses_unsafe_tokens(monkeypatch, os_name):
     _as_os(monkeypatch, os_name)
+    monkeypatch.setattr(sys, "argv", ["dg", "login", "--profile", "x"])
+    assert login_module._rerun_with_yes("dg") is not None
     monkeypatch.setattr(sys, "argv", ["dg", "login", "--profile", "=x"])
     assert login_module._rerun_with_yes("dg") is None
     monkeypatch.setattr(sys, "argv", ["dg", "login"])
     assert login_module._rerun_with_yes(None) is None
+
+
+@pytest.mark.parametrize(
+    ("profile", "next_step"),
+    [
+        ("my work", 'dg login --profile "my work" --yes'),
+        ("100%", None),
+    ],
+)
+def test_windows_hint_follows_next_step(tmp_path, monkeypatch, profile, next_step):
+    """On Windows a quoted next_step keeps the run-it hint; a refused one
+    gets the ask-the-user hint."""
+    monkeypatch.setattr(login_module, "is_ai_agent", lambda: True)
+    monkeypatch.setattr(sys, "argv", ["dg", "login", "--profile", profile])
+    saved = {"profiles": {profile: {"api_key": "saved-key-0000"}}}
+    with monkeypatch.context() as patched:
+        _as_os(patched, "nt")
+        next_step_seen = login_module._rerun_with_yes("dg")
+    assert next_step_seen == next_step
+    monkeypatch.setattr(login_module, "_rerun_with_yes", lambda prog: next_step_seen)
+    _, result, _ = run(tmp_path, user=saved, profile=profile)
+    assert result.code == "confirmation_required"
+    assert result.next_step == next_step
+    if next_step is None:
+        assert result.hint == (
+            "Ask the user to rerun the command with --yes in their own terminal "
+            "if they agree."
+        )
+    else:
+        assert result.hint == "Run the command in next_step only if the user agrees."
 
 
 def test_details_is_left_out_when_empty():

@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
@@ -49,11 +50,14 @@ def make_detail() -> Any:
 
 
 def _expected_step(run: Any, *flags: str) -> str | None:
-    """The rerun next_step names: a runnable command, or None on Windows when
-    any token (the temp path always) needs shell quoting."""
+    """The rerun next_step names: a runnable command. On Windows the
+    directory has forward slashes, in double quotes when it needs any."""
+    directory = str(run.dest)
     if os.name == "nt":
-        return None
-    return " ".join(["dg init node-transcription --dir", str(run.dest), *flags])
+        directory = PureWindowsPath(directory).as_posix()
+        if not re.fullmatch(r"[A-Za-z0-9_+=:./-]+", directory):
+            directory = f'"{directory}"'
+    return " ".join(["dg init node-transcription --dir", directory, *flags])
 
 
 class TestListedSteps:
@@ -78,14 +82,29 @@ class TestListedSteps:
         run.agent = True
         result = run(install=True)
         assert result.code == "confirmation_required"
+        # A runnable next_step on every OS (forward slashes on Windows).
+        assert result.next_step == _expected_step(run, "--no-install", "--no-start")
+        assert "only if the user approves" in result.hint
+        assert run.clones == 0
+
+    def test_agent_hint_when_the_dir_cant_be_given(
+        self, run: Any, make_detail: Any
+    ) -> None:
+        # No Windows shell keeps a % inside quotes as typed, so there is no
+        # next_step there and the hint says to ask the user. POSIX quotes it.
+        run.dest = run.dest.with_name("100%app")
+        run.detail = make_detail(install="npm install")
+        run.agent = True
+        result = run(install=True)
+        assert result.code == "confirmation_required"
         if os.name == "nt":
-            # The temp path needs quoting, so there is no next_step to name.
             assert result.next_step is None
             assert result.hint == (
                 "Nothing was cloned. Show the user the setup commands and ask "
                 "them to run dg init in their terminal."
             )
         else:
+            assert result.next_step == _expected_step(run, "--no-install", "--no-start")
             assert "only if the user approves" in result.hint
         assert run.clones == 0
 
@@ -204,10 +223,7 @@ class TestMakefileSteps:
     def test_next_step_resumes_without_cloning_again(self, run: Any) -> None:
         run.makefile = True
         first = run()
-        if os.name == "nt":
-            assert first.next_step is None  # the temp path needs quoting
-        else:
-            assert first.next_step.endswith("--no-install --no-start")
+        assert first.next_step == _expected_step(run, "--no-install", "--no-start")
         result = run(no_install=True, no_start=True)
         assert result.status == "success"
         assert result.installed is False
@@ -385,13 +401,40 @@ def test_unsaved_progress_says_a_rerun_wont_resume(
 @pytest.mark.parametrize(
     ("os_name", "dest", "expected"),
     [
-        # POSIX quotes with shlex.
+        # POSIX quotes with shlex, and a backslash is part of the name.
         ("posix", "/work/app", "dg init tpl --dir /work/app --no-start"),
         ("posix", "/work/my app", "dg init tpl --dir '/work/my app' --no-start"),
-        # Windows has no shell quoting to rely on: None when a token needs
-        # quoting, the plain command when none does.
-        ("nt", "/work/app", "dg init tpl --dir /work/app --no-start"),
-        ("nt", "/work/my app", None),
+        ("posix", "/work/a\\b", "dg init tpl --dir '/work/a\\b' --no-start"),
+        ("posix", "/work/100%", "dg init tpl --dir /work/100% --no-start"),
+        # Windows: forward slashes, double quotes when needed, None when no
+        # form reaches dg unchanged from cmd, PowerShell and Git Bash.
+        ("nt", "C:\\work\\app", "dg init tpl --dir C:/work/app --no-start"),
+        (
+            "nt",
+            "C:\\work\\my app",
+            'dg init tpl --dir "C:/work/my app" --no-start',
+        ),
+        ("nt", "C:\\work\\Q2, 2026", 'dg init tpl --dir "C:/work/Q2, 2026" --no-start'),
+        # ' ; ( ) { } run code once an agent wraps the line in another shell.
+        ("nt", "C:\\work\\It's", None),
+        ("nt", "C:\\work\\app (1)", None),
+        (
+            "nt",
+            "\\\\server\\share\\app",
+            "dg init tpl --dir //server/share/app --no-start",
+        ),
+        ("nt", "\\\\?\\C:\\work\\app", "dg init tpl --dir C:/work/app --no-start"),
+        (
+            "nt",
+            "\\\\?\\UNC\\server\\share\\app",
+            "dg init tpl --dir //server/share/app --no-start",
+        ),
+        ("nt", "C:\\work\\100%", None),
+        ("nt", "C:\\work\\a&b", None),
+        ("nt", "C:\\work\\$HOME", None),
+        ("nt", "C:\\work\\Jos\u00e9", None),
+        # A rooted path without a drive: Git Bash would rewrite it.
+        ("nt", "\\work\\app", None),
     ],
 )
 def test_rerun_quotes_or_refuses_by_platform(
@@ -399,9 +442,10 @@ def test_rerun_quotes_or_refuses_by_platform(
 ) -> None:
     monkeypatch.setattr("deepctl_core.transport.prog", lambda: "dg")
     # Only the command module's view of os.name changes, not the process's,
-    # so pathlib keeps working; PurePosixPath prints the same on every OS.
+    # so pathlib keeps working; a pure path prints the same on every OS.
     monkeypatch.setattr(init_command, "os", SimpleNamespace(name=os_name))
-    assert init_command._rerun("tpl", PurePosixPath(dest), "--no-start") == expected
+    path = PurePosixPath(dest) if os_name == "posix" else PureWindowsPath(dest)
+    assert init_command._rerun("tpl", path, "--no-start") == expected
 
 
 @pytest.mark.parametrize("os_name", ["posix", "nt"])
@@ -409,8 +453,11 @@ def test_rerun_refuses_an_equals_token_and_an_unknown_prog(
     monkeypatch: pytest.MonkeyPatch, os_name: str
 ) -> None:
     monkeypatch.setattr(init_command, "os", SimpleNamespace(name=os_name))
-    dest = PurePosixPath("/work/app")
+    dest = (
+        PurePosixPath("/work/app") if os_name == "posix" else PureWindowsPath("C:/app")
+    )
     monkeypatch.setattr("deepctl_core.transport.prog", lambda: "dg")
+    assert init_command._rerun("tpl", dest, "--no-start") is not None
     assert init_command._rerun("=tpl", dest, "--no-start") is None
     monkeypatch.setattr("deepctl_core.transport.prog", lambda: None)
     assert init_command._rerun("tpl", dest, "--no-start") is None

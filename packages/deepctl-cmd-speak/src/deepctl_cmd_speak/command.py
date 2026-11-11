@@ -262,8 +262,14 @@ def _prog() -> str:
     """The program name to show in messages and ``next_step``.
 
     The bare name when it resolves on PATH to the running executable;
-    otherwise ``dg``.
+    otherwise ``dg``. On Windows :func:`deepctl_core.transport.prog`, which
+    gives the launcher's forward-slash path when ``dg`` is not on PATH
+    (``argv[0]`` has no ``.exe`` there, so it never matches PATH here).
     """
+    if os.name == "nt":
+        from deepctl_core.transport import prog
+
+        return prog() or "dg"
     try:
         argv0 = sys.argv[0]
         name = os.path.basename(argv0)
@@ -481,9 +487,12 @@ def _next_step(tokens: list[str]) -> str | None:
             token.startswith("<") and token.endswith(">") and token[1:-1].isupper()
         ):
             return None
+    if os.name == "nt":
+        from deepctl_core.nt_command import join
+
+        nt_line = join(tokens)
+        return None if nt_line is None or tokens[:1] == ["sudo"] else nt_line
     line = shlex.join(tokens)
-    if os.name == "nt" and line != " ".join(tokens):
-        return None
     if shlex.join(shlex.split(line)) != line or tokens[:1] == ["sudo"]:
         return None
     return line

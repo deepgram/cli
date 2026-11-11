@@ -1038,6 +1038,7 @@ def prog() -> str | None:
     script's absolute path, quoted. ``None`` when neither applies (``python
     -m``, an unknown launcher), which makes ``next_step`` null.
     A stable command name replaces the fallback in a later release.
+    On Windows see :func:`_prog_nt`.
     """
     argv0 = sys.argv[0] if sys.argv else ""
     name = os.path.basename(argv0)
@@ -1045,6 +1046,8 @@ def prog() -> str | None:
         name = name[:-4]
     if name not in _PROG_NAMES:
         return None
+    if os.name == "nt":
+        return _prog_nt(argv0, name)
     found = shutil.which(name)
     running = shutil.which(argv0) or argv0
     try:
@@ -1055,9 +1058,42 @@ def prog() -> str | None:
     if not os.path.isfile(running):
         return None
     path = os.path.abspath(running)
-    if os.name == "nt":
-        return None if shlex.quote(path) != path else path
     return shlex.quote(path)
+
+
+def _prog_nt(argv0: str, name: str) -> str | None:
+    """:func:`prog` on Windows: the bare name, else the path with forward
+    slashes when no shell needs it quoted (a quoted program is a string to
+    PowerShell, not a command), else ``None``.
+
+    The console-script launcher strips ``.exe`` from ``argv[0]``
+    (``...\\Scripts\\dg``) on every Python version, so the file is looked
+    for with ``.exe`` added, spelled as on disk. ``shutil.which(argv0)``
+    finds it only on 3.12 and later (3.10 and 3.11 apply PATHEXT only to a
+    bare name), and spells the extension as PATHEXT does (``dg.EXE``).
+    """
+    from .nt_command import forward_slashes, join
+
+    if not os.path.isfile(argv0) and os.path.isfile(argv0 + ".exe"):
+        running = argv0 + ".exe"
+    else:
+        running = shutil.which(argv0) or argv0
+    found = shutil.which(name)
+    try:
+        if found and (
+            os.path.normcase(os.path.abspath(found))
+            == os.path.normcase(os.path.abspath(running))
+            or os.path.samefile(found, running)
+        ):
+            return name
+    except OSError:
+        pass
+    if not os.path.isfile(running):
+        return None
+    path = forward_slashes(os.path.abspath(running))
+    if re.match(r"[A-Za-z]:/", path) is None:
+        return None  # a share path: only drive paths were tried in each shell
+    return path if join([path]) == path else None
 
 
 def _key_source(auth_manager: AuthManager | None) -> str | None:

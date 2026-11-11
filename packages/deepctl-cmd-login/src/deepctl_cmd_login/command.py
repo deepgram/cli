@@ -3,7 +3,6 @@
 import dataclasses
 import os
 import shlex
-import shutil
 import sys
 import time
 from collections.abc import Iterator
@@ -95,31 +94,11 @@ def _interactive_terminal() -> bool:
 
 
 def _prog() -> str | None:
-    """``{prog}``: the running executable, as a command.
+    """``{prog}``: :func:`deepctl_core.transport.prog`, here so tests can
+    replace it for this module alone."""
+    from deepctl_core.transport import prog
 
-    The bare name when ``which(name)`` is this same file; else the console
-    script's absolute path, quoted. ``None`` when neither applies (``python
-    -m``, an unknown launcher), which makes ``next_step`` null.
-    """
-    argv0 = sys.argv[0] if sys.argv else ""
-    name = os.path.basename(argv0)
-    if os.name == "nt" and name.lower().endswith(".exe"):
-        name = name[:-4]
-    if name not in _PROG_NAMES:
-        return None
-    found = shutil.which(name)
-    running = shutil.which(argv0) or argv0
-    try:
-        if found and os.path.samefile(found, running):
-            return name
-    except OSError:
-        pass
-    if not os.path.isfile(running):
-        return None
-    path = os.path.abspath(running)
-    if os.name == "nt":
-        return None if shlex.quote(path) != path else path
-    return shlex.quote(path)
+    return prog()
 
 
 def _secret_in(argv: list[str]) -> bool:
@@ -153,8 +132,10 @@ def _rerun_with_yes(prog: str | None) -> str | None:
     tokens = [*argv, _YES_FLAG]
     if any(token.startswith("=") for token in tokens):
         return None  # zsh's EQUALS option would expand it
-    if os.name == "nt" and any(shlex.quote(token) != token for token in tokens):
-        return None
+    if os.name == "nt":
+        from deepctl_core.nt_command import join
+
+        return join([prog, *tokens])
     step = f"{prog} {shlex.join(tokens)}"
     return step if shlex.join(shlex.split(step)) == step else None
 

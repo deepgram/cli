@@ -203,20 +203,47 @@ class TestNoOutput:
 
     @pytest.mark.parametrize(
         "text",
-        ["Q&A starts now", "a < b; echo $HOME | x", "It's Q & A time", "I'll sudo it"],
+        [
+            "Q&A starts now",
+            "a < b; echo $HOME | x",
+            "It's Q & A time",
+            "I'll sudo it",
+            "Hi; rm it",
+            "I will sudo it, #1 now.",
+            "How are you?",
+        ],
     )
     def test_shell_metacharacters_stay_inside_one_quoted_argument(
         self, monkeypatch, text
     ):
         result = _pre(["speak", text], monkeypatch, text=text)
-        if os.name == "nt":
-            # Windows has no shell quoting to rely on: a command line that
-            # needs quoting gets no next_step.
+        if os.name == "nt" and any(ch in text for ch in "&<>|$;'?"):
+            # & < > | $ have no quoting that every Windows shell honours,
+            # and ; ' ? run code or glob once an agent wraps the line in
+            # another shell: no next_step, and the hint says to run it again.
             assert result.next_step is None
             assert result.hint.startswith("Run the same command again")
             return
+        if os.name == "nt":
+            assert result.next_step.startswith(f'dg speak "{text}" --out-file ')
+            return
         assert_e10(result.next_step)
         assert shlex.split(result.next_step)[2] == text
+
+    def test_text_with_spaces_gets_a_quoted_next_step(self, monkeypatch):
+        # Windows refuses the apostrophe (see the test above).
+        text = "Its time, now" if os.name == "nt" else "It's time"
+        result = _pre(["speak", text], monkeypatch, text=text)
+        out_file = result.next_step.split(" ")[-1]
+        assert OUT_FILE.match(out_file)
+        if os.name == "nt":
+            expected = 'dg speak "Its time, now"'
+        else:
+            expected = "dg speak 'It'\"'\"'s time'"
+        assert result.next_step == f"{expected} --out-file {out_file}"
+        assert result.hint == (
+            f"next_step saves the audio to {out_file}. Give the user that path."
+        )
 
     @pytest.mark.parametrize(
         ("os_name", "tokens", "expected"),
@@ -224,10 +251,29 @@ class TestNoOutput:
             # POSIX quotes with shlex.
             ("posix", ["dg", "speak", "hello"], "dg speak hello"),
             ("posix", ["dg", "speak", "hi there"], "dg speak 'hi there'"),
-            # Windows: the plain command when no token needs quoting, else None.
+            ("posix", ["dg", "speak", "Q&A"], "dg speak 'Q&A'"),
+            ("posix", ["dg", "speak", "-o.wav"], "dg speak -o.wav"),
+            ("posix", ["dg", "speak", "It's"], "dg speak 'It'\"'\"'s'"),
+            ("posix", ["dg", "speak", "x;y"], "dg speak 'x;y'"),
+            # Windows: double quotes when a token needs them, None when no
+            # form reaches dg unchanged from cmd, PowerShell and Git Bash.
             ("nt", ["dg", "speak", "hello"], "dg speak hello"),
-            ("nt", ["dg", "speak", "hi there"], None),
+            ("nt", ["dg", "speak", "hi there"], 'dg speak "hi there"'),
+            ("nt", ["dg", "speak", "a,b"], 'dg speak "a,b"'),
+            ("nt", ["dg", "speak", "-o.wav"], 'dg speak "-o.wav"'),
             ("nt", ["dg", "speak", "Q&A"], None),
+            ("nt", ["dg", "speak", "Hi!"], None),
+            ("nt", ["dg", "speak", "say “hi”"], None),
+            ("nt", ["dg", "speak", "/x"], None),
+            # Code runs once an agent wraps the line in another shell.
+            ("nt", ["dg", "speak", "It's"], None),
+            ("nt", ["dg", "speak", "x;y"], None),
+            ("nt", ["dg", "speak", "(x)"], None),
+            ("nt", ["dg", "speak", "@{a=1}"], None),
+            ("nt", ["dg", "speak", "How are you?"], None),
+            ("posix", ["dg", "speak", "How are you?"], "dg speak 'How are you?'"),
+            ("nt", ["dg", "speak", "-x:"], 'dg speak "-x:"'),
+            ("nt", ["sudo", "speak", "hi"], None),
         ],
     )
     def test_next_step_quotes_or_refuses_by_platform(
@@ -237,6 +283,43 @@ class TestNoOutput:
         # process's, so pathlib keeps working.
         monkeypatch.setattr(speak, "os", types.SimpleNamespace(name=os_name))
         assert speak._next_step(tokens) == expected
+
+    @pytest.mark.parametrize(
+        ("prog", "expected"),
+        [
+            ("C:/venv/Scripts/dg.exe", "C:/venv/Scripts/dg.exe"),
+            ("dg", "dg"),
+            (None, "dg"),
+        ],
+    )
+    def test_prog_on_windows_is_transport_prog(self, monkeypatch, prog, expected):
+        # argv[0] has no .exe on Windows, so it never matches which("dg"):
+        # off PATH the launcher's forward-slash path is the runnable one.
+        from deepctl_core import transport
+
+        monkeypatch.setattr(speak, "os", types.SimpleNamespace(name="nt", path=os.path))
+        monkeypatch.setattr(transport, "prog", lambda: prog)
+        assert speak._prog() == expected
+
+    def test_prog_on_posix_does_not_ask_transport(self, monkeypatch):
+        from deepctl_core import transport
+
+        monkeypatch.setattr(
+            speak, "os", types.SimpleNamespace(name="posix", path=os.path)
+        )
+        monkeypatch.setattr(transport, "prog", lambda: "/opt/venv/bin/dg")
+        monkeypatch.setattr(speak.sys, "argv", ["/opt/venv/bin/dg"])
+        monkeypatch.setattr(speak.shutil, "which", lambda name: None)
+        assert speak._prog() == "dg"
+
+    def test_windows_next_step_off_path_runs_the_launcher(self, monkeypatch):
+        from deepctl_core import transport
+
+        monkeypatch.setattr(transport, "prog", lambda: "C:/venv/Scripts/dg.exe")
+        monkeypatch.setattr(speak, "os", types.SimpleNamespace(name="nt", path=os.path))
+        assert speak._next_step([speak._prog(), "speak", "hi there"]) == (
+            'C:/venv/Scripts/dg.exe speak "hi there"'
+        )
 
     def test_a_token_starting_with_equals_nulls_next_step(self, monkeypatch):
         result = _pre(["speak", "=cmd"], monkeypatch, text="=cmd")

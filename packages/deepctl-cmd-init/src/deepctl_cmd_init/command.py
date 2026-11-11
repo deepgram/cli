@@ -65,11 +65,19 @@ def _rerun(template: str, dest: Path, *flags: str) -> str | None:
     program = prog()
     if program is None:
         return None
-    tokens = ["init", template, "--dir", str(dest), *flags]
+    directory = str(dest)
+    if os.name == "nt":
+        from deepctl_core.nt_command import forward_slashes
+
+        # Forward slashes need no quoting; init reads them back as dest.
+        directory = forward_slashes(directory)
+    tokens = ["init", template, "--dir", directory, *flags]
     if any(token.startswith("=") for token in tokens):
         return None  # zsh's EQUALS option would expand it
-    if os.name == "nt" and any(shlex.quote(token) != token for token in tokens):
-        return None
+    if os.name == "nt":
+        from deepctl_core.nt_command import join
+
+        return join([program, *tokens])
     step = f"{program} {shlex.join(tokens)}"
     return step if shlex.join(shlex.split(step)) == step else None
 
