@@ -74,8 +74,8 @@ Each gate in `gates.json` quotes its target and has a `since` version.
 
 ## Release gating
 
-Not wired yet. `competitive-bench.yml` accepts `workflow_call` with a `ref`
-input, and `--profile release` measures dg only, with no competitors, no cold
+Not wired yet. `competitive-bench.yml` has no `workflow_call` trigger; add one
+(with a `ref` input) when a release-gating caller is wired up. `--profile release` measures dg only, with no competitors, no cold
 rows and no warm or floor timing. It still runs report-only timing: the egress
 backstop and one MCP timing run, bounded by a 60 s per-invocation timeout
 (worst case about 32 minutes if every egress path stalls). Gates on a channel
