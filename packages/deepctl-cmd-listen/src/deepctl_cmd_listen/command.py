@@ -17,8 +17,9 @@ import asyncio
 import json
 import sys
 import threading
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlencode
 
 import click
@@ -28,8 +29,15 @@ from deepctl_core import (
     BaseResult,
     Config,
     DeepgramClient,
+    get_output_format,
 )
 from deepctl_core.output import _agentic
+from deepctl_core.sagemaker import (
+    SageMakerTransportError,
+    create_sagemaker_client,
+    endpoint_name,
+    region_name,
+)
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
@@ -48,6 +56,9 @@ from .formatters import (
     format_diarized_words,
 )
 from .models import ListenResult
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # Status messages → stderr so stdout stays clean for transcript piping
 status = Console(stderr=True)
@@ -138,6 +149,22 @@ class ListenCommand(BaseCommand):
                     "(requires: pip install 'deepctl-cmd-listen[mic]')"
                 ),
                 "is_flag": True,
+                "is_option": True,
+            },
+            {
+                "names": ["--sagemaker-endpoint"],
+                "help": (
+                    "Stream through this Amazon SageMaker endpoint using AWS "
+                    "credentials (or set SAGEMAKER_ENDPOINT_NAME). Requires "
+                    "Python 3.12+ and deepctl[sagemaker]."
+                ),
+                "type": str,
+                "is_option": True,
+            },
+            {
+                "names": ["--sagemaker-region"],
+                "help": "AWS region for --sagemaker-endpoint (default: AWS_REGION or us-west-2)",
+                "type": str,
                 "is_option": True,
             },
             # ── Model ─────────────────────────────────────────────────
@@ -288,6 +315,10 @@ class ListenCommand(BaseCommand):
             },
         ]
 
+    def uses_external_auth(self, **kwargs: Any) -> bool:
+        """SageMaker signs streams with AWS credentials, not a Deepgram key."""
+        return endpoint_name(kwargs.get("sagemaker_endpoint")) is not None
+
     # ── Entry point ────────────────────────────────────────────────────
 
     def handle(
@@ -332,6 +363,8 @@ class ListenCommand(BaseCommand):
         # ── Gather options ─────────────────────────────────────────────
         model = kwargs.get("model") or "nova-3"
         language = kwargs.get("language") or "en-US"
+        sagemaker_endpoint = endpoint_name(kwargs.get("sagemaker_endpoint"))
+        sagemaker_region = region_name(kwargs.get("sagemaker_region"))
 
         # flux-* models require listen.v2; everything else uses v1.
         api_version = 2 if model.startswith("flux-") else 1
@@ -382,7 +415,11 @@ class ListenCommand(BaseCommand):
         # REST endpoint, so a file/URL routes to /v1/listen and the server
         # rejects it ("Flux models are not supported on /v1/listen") wrapped in
         # a header dump. Say so up front instead.
-        if api_version >= 2 and mode in ("prerecorded_file", "prerecorded_url"):
+        if (
+            api_version >= 2
+            and not sagemaker_endpoint
+            and mode in ("prerecorded_file", "prerecorded_url")
+        ):
             raise click.ClickException(
                 f"Flux STT ({model}) is streaming-only and cannot transcribe "
                 "a file or URL. Use a live source (--mic, stdin, or '-'), or "
@@ -424,6 +461,54 @@ class ListenCommand(BaseCommand):
 
         if guided_flow and mode in ("prerecorded_file", "prerecorded_url"):
             diarize, summarize, topics, sentiment = self._interactive_features()
+
+        if sagemaker_endpoint:
+            if mode == "prerecorded_url":
+                raise click.ClickException(
+                    "SageMaker supports only bidirectional streaming input. "
+                    "Pass a local file, stdin, or --mic; URLs require the "
+                    "Deepgram Cloud pre-recorded API."
+                )
+            unsupported = [
+                name
+                for name, enabled in (
+                    ("--summarize", summarize),
+                    ("--topics", topics),
+                    ("--sentiment", sentiment),
+                    ("--probe", probe),
+                )
+                if enabled
+            ]
+            if unsupported:
+                raise click.ClickException(
+                    f"{', '.join(unsupported)} is not available through SageMaker "
+                    "streaming. These are pre-recorded REST features."
+                )
+            if caption_format:
+                raise click.ClickException(
+                    "--webvtt and --srt are not available through SageMaker "
+                    "streaming. Use the structured transcript output instead."
+                )
+            return self._stream_sagemaker(
+                endpoint=sagemaker_endpoint,
+                region=sagemaker_region,
+                source=source,
+                mode=mode,
+                model=model,
+                language=language,
+                api_version=api_version,
+                diarize=diarize,
+                smart_format=smart_format,
+                punctuate=punctuate,
+                interim=interim,
+                redact=redact,
+                numerals=numerals,
+                encoding=encoding,
+                sample_rate=sample_rate,
+                channels=channels,
+                save_to=save_to,
+                caption_format=caption_format,
+            )
 
         # ── Dispatch ───────────────────────────────────────────────────
         if mode == "prerecorded_file":
@@ -507,6 +592,299 @@ class ListenCommand(BaseCommand):
                 save_to=save_to,
                 caption_format=caption_format,
             )
+
+    # ── SageMaker streaming ─────────────────────────────────────────────
+
+    def _stream_sagemaker(
+        self,
+        *,
+        endpoint: str,
+        region: str,
+        source: str | None,
+        mode: str,
+        model: str,
+        language: str,
+        api_version: int,
+        diarize: bool,
+        smart_format: bool,
+        punctuate: bool,
+        interim: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
+        encoding: str | None,
+        sample_rate: int,
+        channels: int,
+        save_to: str | None,
+        caption_format: str | None,
+    ) -> BaseResult:
+        """Run Listen over the published SageMaker HTTP/2 transport."""
+        if mode == "prerecorded_file":
+            assert source is not None
+            if not Path(source).is_file():
+                raise click.ClickException(f"File not found: {source}")
+
+        if mode == "stream_mic":
+            source_label = "mic"
+        elif mode == "stream_stdin":
+            source_label = "stdin"
+        else:
+            source_label = "file"
+
+        if caption_format:
+            status.print(
+                f"[green]✓[/green] SageMaker streaming {source_label} · Ctrl+C to stop"
+            )
+        else:
+            status.print(
+                f"[green]✓[/green] SageMaker streaming {source_label} · "
+                f"{model} · endpoint {endpoint}"
+            )
+
+        try:
+            result = asyncio.run(
+                self._sagemaker_listen(
+                    endpoint=endpoint,
+                    region=region,
+                    source=source,
+                    mode=mode,
+                    model=model,
+                    language=language,
+                    api_version=api_version,
+                    diarize=diarize,
+                    smart_format=smart_format,
+                    punctuate=punctuate,
+                    interim=interim,
+                    redact=redact,
+                    numerals=numerals,
+                    encoding=encoding,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                    caption_format=caption_format,
+                )
+            )
+        except SageMakerTransportError as exc:
+            raise click.ClickException(str(exc)) from exc
+        except KeyboardInterrupt:
+            status.print("\n[yellow]Stopped.[/yellow]")
+            result = ListenResult(status="success", source=source_label, mode="live")
+
+        if save_to and result.transcript:
+            self._save_transcript(result.transcript, save_to)
+            status.print(f"[green]✓[/green] Saved to {save_to}")
+            result.saved_to = save_to
+        return result
+
+    async def _sagemaker_listen(
+        self,
+        *,
+        endpoint: str,
+        region: str,
+        source: str | None,
+        mode: str,
+        model: str,
+        language: str,
+        api_version: int,
+        diarize: bool,
+        smart_format: bool,
+        punctuate: bool,
+        interim: bool,
+        redact: tuple[str, ...],
+        numerals: bool,
+        encoding: str | None,
+        sample_rate: int,
+        channels: int,
+        caption_format: str | None,
+    ) -> ListenResult:
+        """Send audio and receive transcripts through an SDK transport connection."""
+        from deepgram.core.events import EventType
+
+        client = create_sagemaker_client(endpoint, region)
+        params: dict[str, Any] = {"model": model}
+        # Containerized files are self-describing (the published SageMaker
+        # examples send WAV bytes with no raw-audio params). stdin and mic are
+        # raw by default, as are explicitly encoded local files.
+        raw_audio = mode != "prerecorded_file" or encoding is not None
+        if raw_audio:
+            params["encoding"] = encoding or "linear16"
+            params["sample_rate"] = str(sample_rate)
+        if api_version == 1:
+            params.update(
+                {
+                    "language": language,
+                    "smart_format": "true" if smart_format else "false",
+                    "punctuate": "true" if punctuate else "false",
+                }
+            )
+            if raw_audio:
+                params["channels"] = str(channels)
+            if diarize:
+                params["diarize"] = "true"
+            if interim:
+                params["interim_results"] = "true"
+        if redact:
+            params["redact"] = list(redact)
+        if numerals:
+            params["numerals"] = "true"
+
+        transcript: list[str] = []
+        errors: list[str] = []
+        show_output = get_output_format() == "default"
+        v2_turns: dict[Any, str] = {}
+        completed_v2_turns: set[Any] = set()
+        closed = asyncio.Event()
+        source_label = (
+            "mic"
+            if mode == "stream_mic"
+            else "stdin"
+            if mode == "stream_stdin"
+            else "file"
+        )
+
+        def on_message(message: Any) -> None:
+            data = self._sagemaker_message_data(message)
+            if data.get("type") in ("Error", "FatalError"):
+                code = data.get("code") or data.get("event") or "UNKNOWN_ERROR"
+                errors.append(
+                    f"{code}: {data.get('description') or data.get('message') or data}"
+                )
+                return
+            if api_version == 2:
+                turn_index = data.get("turn_index", 0)
+                text = str(data.get("transcript") or "")
+                if text:
+                    v2_turns[turn_index] = text
+                event = str(data.get("event") or "")
+                if event == "EndOfTurn" and text:
+                    if turn_index not in completed_v2_turns:
+                        completed_v2_turns.add(turn_index)
+                        transcript.append(text)
+                        if show_output:
+                            print(text, flush=True)
+                elif event == "Update" and interim and text and show_output:
+                    print(f"\r{text}          ", end="", flush=True)
+                return
+
+            channel = data.get("channel") or {}
+            alternatives = channel.get("alternatives") or []
+            if not alternatives:
+                return
+            alternative = alternatives[0]
+            text = str(alternative.get("transcript") or "")
+            if data.get("is_final") and text:
+                transcript.append(text)
+                if show_output:
+                    print(text, flush=True)
+            elif interim and text and show_output:
+                print(f"\r{text}          ", end="", flush=True)
+
+        def on_error(error: Any) -> None:
+            errors.append(str(error))
+
+        def on_close(_: Any) -> None:
+            closed.set()
+
+        connection_api = client.listen.v2 if api_version == 2 else client.listen.v1
+        async with connection_api.connect(**params) as connection:
+            connection.on(EventType.MESSAGE, on_message)
+            connection.on(EventType.ERROR, on_error)
+            connection.on(EventType.CLOSE, on_close)
+            listen_task = asyncio.create_task(connection.start_listening())
+            try:
+                await asyncio.sleep(0)
+                if mode == "prerecorded_file":
+                    assert source is not None
+                    with Path(source).open("rb") as audio:
+                        while chunk := audio.read(8192):
+                            await connection.send_media(chunk)
+                elif mode == "stream_stdin":
+                    while chunk := await asyncio.to_thread(sys.stdin.buffer.read, 4096):
+                        await connection.send_media(chunk)
+                else:
+                    async for chunk in self._sagemaker_mic_chunks(
+                        sample_rate, channels
+                    ):
+                        await connection.send_media(chunk)
+                await connection.send_close_stream()
+                close_task = asyncio.create_task(closed.wait())
+                done, _ = await asyncio.wait(
+                    (listen_task, close_task),
+                    timeout=30,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    raise click.ClickException(
+                        "Timed out waiting for SageMaker to finish transcription."
+                    )
+                if not close_task.done():
+                    close_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await close_task
+                if not listen_task.done():
+                    await asyncio.wait_for(listen_task, timeout=5)
+            finally:
+                if not listen_task.done():
+                    listen_task.cancel()
+                    await _cancel_and_drain(listen_task)
+
+        if errors:
+            raise click.ClickException(f"SageMaker Listen error: {errors[-1]}")
+        if api_version == 2:
+            for turn_index, text in v2_turns.items():
+                if turn_index not in completed_v2_turns:
+                    completed_v2_turns.add(turn_index)
+                    transcript.append(text)
+                    if show_output:
+                        print(text, flush=True)
+        return ListenResult(
+            status="success",
+            source=source_label,
+            source_path=source or "",
+            mode="live",
+            model=model,
+            language=language,
+            diarized=diarize,
+            transcript=" ".join(transcript),
+            caption_format=caption_format,
+        )
+
+    @staticmethod
+    def _sagemaker_message_data(message: Any) -> dict[str, Any]:
+        """Convert SDK event models without tying imports to the optional extra."""
+        if hasattr(message, "model_dump"):
+            return cast("dict[str, Any]", message.model_dump(mode="json"))
+        if isinstance(message, dict):
+            return message
+        return cast("dict[str, Any]", vars(message))
+
+    async def _sagemaker_mic_chunks(
+        self, sample_rate: int, channels: int
+    ) -> AsyncIterator[bytes]:
+        """Yield microphone frames without a WebSocket-specific dependency."""
+        import numpy as np
+        import sounddevice as sd
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        def callback(indata: Any, frames: int, time: Any, status_info: Any) -> None:
+            if status_info:
+                status.print(f"[yellow]Audio warning: {status_info}[/yellow]")
+            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+
+        stream = sd.RawInputStream(
+            samplerate=sample_rate,
+            channels=channels,
+            dtype=np.int16,
+            callback=callback,
+            blocksize=int(sample_rate * 0.1),
+        )
+        stream.start()
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            stream.stop()
+            stream.close()
 
     # ── Interactive helpers ────────────────────────────────────────────
 
