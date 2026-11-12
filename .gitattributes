@@ -5,4 +5,5 @@ packages/deepctl-core/src/deepctl_core/base_command.py whitespace=cr-at-eol
 packages/deepctl-core/src/deepctl_core/config.py whitespace=cr-at-eol
 packages/deepctl-core/src/deepctl_core/output.py whitespace=cr-at-eol
 packages/deepctl-core/src/deepctl_core/plugin_manager.py whitespace=cr-at-eol
+packages/deepctl-shared-utils/src/deepctl_shared_utils/validation.py whitespace=cr-at-eol
 packages/deepctl-core/tests/unit/fixtures/legacy_v03/** -text

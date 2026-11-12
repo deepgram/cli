@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 is_agentic = agents.is_agentic
 is_ai_agent = agents.is_ai_agent
 AI_AGENT_ENV_MARKERS: tuple[str, ...] = agents.HARD_ENV_VARS
+# Backward-compatible export for callers that clear the value-gated markers.
+AI_AGENT_ENV_VALUES: dict[str, tuple[str, ...]] = agents.HARD_ENV_VALUES
 
 
 def agent_mode() -> bool:

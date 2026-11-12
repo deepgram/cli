@@ -57,7 +57,10 @@ SOURCES: dict[str, str] = {
 }
 
 _AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
-_AGENT_VALUES = ("amp", "goose")
+HARD_ENV_VALUES: dict[str, tuple[str, ...]] = {
+    "AGENT": ("amp", "goose"),
+    "CURSOR_EXTENSION_HOST_ROLE": ("agent-exec",),
+}
 
 # A file some agent sandboxes create (POSIX only). A module attribute so
 # tests can point it elsewhere.
@@ -110,11 +113,14 @@ def _ai_agent(env: Mapping[str, str]) -> Match | None:
 
 def _agent_value(env: Mapping[str, str]) -> Match | None:
     value = env.get("AGENT", "")
-    return Match(value, "AGENT") if value in _AGENT_VALUES else None
+    return Match(value, "AGENT") if value in HARD_ENV_VALUES["AGENT"] else None
 
 
 def _cursor_role(env: Mapping[str, str]) -> Match | None:
-    if env.get("CURSOR_EXTENSION_HOST_ROLE", "") == "agent-exec":
+    if (
+        env.get("CURSOR_EXTENSION_HOST_ROLE", "")
+        in HARD_ENV_VALUES["CURSOR_EXTENSION_HOST_ROLE"]
+    ):
         return Match("cursor-cli", "CURSOR_EXTENSION_HOST_ROLE")
     return None
 
@@ -238,6 +244,7 @@ HARD_ENV_VARS: tuple[str, ...] = (
     "GEMINI_CLI",
     "COPILOT_CLI",
     "OPENCODE",
+    "OPENCODE_CLIENT",
     "ANTIGRAVITY_AGENT",
     "AUGMENT_AGENT",
     "CURSOR_AGENT",
