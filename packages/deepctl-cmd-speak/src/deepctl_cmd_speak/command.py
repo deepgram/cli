@@ -730,6 +730,8 @@ class SpeakCommand(BaseCommand):
                 try:
                     for chunk in stream:
                         pcm.extend(chunk)
+                except click.ClickException:
+                    raise
                 except Exception as e:
                     raise click.ClickException(f"Flux streaming failed: {e}")
 
@@ -794,6 +796,8 @@ class SpeakCommand(BaseCommand):
                         wrote_header = True
                     out.write(chunk)
                     out.flush()
+            except click.ClickException:
+                raise
             except Exception as e:
                 raise click.ClickException(f"Flux streaming failed: {e}")
 

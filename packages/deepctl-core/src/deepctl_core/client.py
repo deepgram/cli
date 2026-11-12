@@ -5,11 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlencode
 
 from deepgram import DeepgramClient as DGClient
 from deepgram import DeepgramClientEnvironment
 from deepgram.core.api_error import ApiError
 
+from .hosts import DEFAULT_BASE_URL
 from .output import stderr_console
 
 if TYPE_CHECKING:
@@ -33,9 +35,9 @@ def _split_base_url(base_url: str) -> tuple[str, str, str]:
     REST and ``ws`` for WebSocket; anything else (including a bare host) maps
     to ``https``/``wss``. The host is returned without scheme or trailing slash.
     """
-    match = re.match(r"^([a-z]+)://", base_url)
-    scheme = match.group(1) if match else "https"
-    host = re.sub(r"^[a-z]+://", "", base_url).rstrip("/")
+    match = re.match(r"^([a-z]+)://", base_url, re.IGNORECASE)
+    scheme = match.group(1).lower() if match else "https"
+    host = re.sub(r"^[a-z]+://", "", base_url, flags=re.IGNORECASE).rstrip("/")
     if scheme in ("http", "ws"):
         return "http", "ws", host
     return "https", "wss", host
@@ -49,6 +51,8 @@ class DeepgramClient:
         self.auth_manager = auth_manager
         self._client: DGClient | None = None
         self._project_id: str | None = None
+        # The REST base the SDK client was given (for redirect errors).
+        self._rest_base: str = DEFAULT_BASE_URL
 
     @property
     def client(self) -> DGClient:
@@ -76,28 +80,33 @@ class DeepgramClient:
         if not api_key:
             raise ApiError(body="No API key available")
 
-        current_profile = self.config.get_profile()
+        # The SDK sends the key to whatever environment it is given, so the
+        # base URL goes through the same host check as every other path.
+        base_url = self.auth_manager.check_base_url()
 
         try:
             kwargs: dict[str, Any] = {"api_key": api_key}
 
-            if (
-                current_profile.base_url
-                and current_profile.base_url != "https://api.deepgram.com"
-            ):
+            if base_url and base_url != DEFAULT_BASE_URL:
                 # Derive both the REST and WebSocket endpoints from the
                 # configured base URL, so a custom base works for batch REST
                 # *and* streaming. Preserve the transport implied by the input
                 # scheme (http→ws, https→wss) so a plaintext local/staging
                 # endpoint isn't forced onto TLS. agent_rest is required by the
                 # SDK environment.
-                rest_scheme, ws_scheme, host = _split_base_url(current_profile.base_url)
+                rest_scheme, ws_scheme, host = _split_base_url(base_url)
+                self._rest_base = f"{rest_scheme}://{host}"
                 kwargs["environment"] = DeepgramClientEnvironment(
                     base=f"{rest_scheme}://{host}",
                     production=f"{ws_scheme}://{host}",
                     agent=f"{ws_scheme}://{host}",
                     agent_rest=f"{rest_scheme}://{host}",
                 )
+
+            # A redirect would take the request body (audio, text) to
+            # another host, and with the SDK's default the key too on a
+            # same-origin hop. Refuse it; _failed() words the error.
+            kwargs["follow_redirects"] = False
 
             client = DGClient(**kwargs)
             self._project_id = project_id
@@ -106,6 +115,37 @@ class DeepgramClient:
         except Exception as e:
             console.print(f"[red]Error creating Deepgram client:[/red] {e}")
             raise ApiError(body=f"Failed to create client: {e}")
+
+    def _failed(self, what: str, e: Exception) -> Exception:
+        """The error to raise for a failed SDK call.
+
+        A refused redirect passes through unchanged, and a 3xx answer
+        (the SDK client doesn't follow redirects) becomes the same refusal.
+        Anything else is wrapped as before.
+        """
+        from .websocket import RedirectRefused, redirect_refused
+
+        if isinstance(e, RedirectRefused):
+            return e
+        status = getattr(e, "status_code", None)
+        if isinstance(e, ApiError) and status is not None and 300 <= status < 400:
+            headers = {k.lower(): v for k, v in (e.headers or {}).items()}
+            return redirect_refused(
+                self._rest_base, headers.get("location"), command="dg", payload=None
+            )
+        return ApiError(body=f"{what}: {e}")
+
+    def _refuse_redirects_in(self, chunks: Iterator[bytes]) -> Iterator[bytes]:
+        """Iterate ``chunks``, turning a 3xx answer into the refusal."""
+        from .websocket import RedirectRefused
+
+        try:
+            yield from chunks
+        except Exception as e:
+            refused = self._failed("", e)
+            if isinstance(refused, RedirectRefused):
+                raise refused from e
+            raise
 
     # ── Speech-to-Text (pre-recorded) ──────────────────────────────
 
@@ -137,7 +177,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Transcription failed: {e}")
+            raise self._failed("Transcription failed", e)
 
     def transcribe_url(
         self, url: str, options: dict[str, Any] | None = None
@@ -158,7 +198,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Transcription failed: {e}")
+            raise self._failed("Transcription failed", e)
 
     # ── Text-to-Speech ─────────────────────────────────────────────
 
@@ -180,12 +220,14 @@ class DeepgramClient:
             if sample_rate:
                 kwargs["sample_rate"] = sample_rate
 
-            return cast(
+            audio = cast(
                 "Iterator[bytes]", self.client.speak.v1.audio.generate(**kwargs)
             )
+            # The request runs when the caller starts iterating.
+            return self._refuse_redirects_in(audio)
 
         except Exception as e:
-            raise ApiError(body=f"Text-to-speech failed: {e}")
+            raise self._failed("Text-to-speech failed", e)
 
     def speak_text_stream(
         self,
@@ -196,7 +238,7 @@ class DeepgramClient:
         speed: float | None = None,
         expressivity: int | None = None,
     ) -> Iterator[bytes]:
-        """Stream TTS audio over the Flux v2 WebSocket (speak.v2.connect).
+        """Stream TTS audio over the Flux v2 WebSocket (/v2/speak).
 
         Yields raw audio chunks as they arrive. The streaming transport emits
         raw (non-containerized) audio, so only linear16/mulaw/alaw encodings
@@ -205,20 +247,37 @@ class DeepgramClient:
         ``speed`` (0.85-1.15) and beta ``expressivity`` (-2..2, default 0) are
         Flux connect query parameters; they are only sent when set.
         """
+        from deepgram.speak.v2.socket_client import V2SocketClient
         from deepgram.speak.v2.types.speak_v2speak import SpeakV2Speak
 
-        connect_kwargs: dict[str, Any] = {"model": model}
-        if encoding:
-            connect_kwargs["encoding"] = encoding
-        if sample_rate:
-            connect_kwargs["sample_rate"] = str(int(sample_rate))
-        if speed is not None:
-            connect_kwargs["speed"] = speed
-        if expressivity is not None:
-            connect_kwargs["expressivity"] = expressivity
+        from .websocket import connect_sync
 
+        query: dict[str, str] = {"model": model}
+        if encoding:
+            query["encoding"] = encoding
+        if sample_rate:
+            query["sample_rate"] = str(int(sample_rate))
+        if speed is not None:
+            query["speed"] = str(speed)
+        if expressivity is not None:
+            query["expressivity"] = str(expressivity)
+
+        # Opened here rather than through the SDK's speak.v2.connect, so a
+        # redirect on the upgrade is refused instead of followed: the text
+        # goes only to the host that passed the host check.
+        # The SDK's own headers (User-Agent, X-Fern-*, Authorization), as
+        # its connect sent them; creating the client runs the key and host
+        # checks.
+        headers = dict(self.client._client_wrapper.get_headers())
+        url = f"{self.ws_base_url()}/v2/speak?{urlencode(query)}"
         try:
-            with self.client.speak.v2.connect(**connect_kwargs) as conn:
+            with connect_sync(
+                url,
+                headers,
+                command="dg speak",
+                payload="text",
+            ) as ws:
+                conn = V2SocketClient(websocket=ws)
                 conn.send_speak(SpeakV2Speak(type="Speak", text=text))
                 conn.send_flush()
                 conn.send_close()
@@ -228,7 +287,15 @@ class DeepgramClient:
                     if isinstance(message, bytes):
                         yield message
         except Exception as e:
-            raise ApiError(body=f"Text-to-speech streaming failed: {e}")
+            raise self._failed("Text-to-speech streaming failed", e)
+
+    def ws_base_url(self) -> str:
+        """The WebSocket base for the checked base URL, without a slash."""
+        base_url = self.auth_manager.check_base_url()
+        if not base_url or base_url == DEFAULT_BASE_URL:
+            base_url = DEFAULT_BASE_URL
+        _rest, ws_scheme, host = _split_base_url(str(base_url))
+        return f"{ws_scheme}://{host}"
 
     # ── Text Intelligence (Read) ───────────────────────────────────
 
@@ -262,7 +329,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Text analysis failed: {e}")
+            raise self._failed("Text analysis failed", e)
 
     # ── Models ─────────────────────────────────────────────────────
 
@@ -277,7 +344,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to list models: {e}")
+            raise self._failed("Failed to list models", e)
 
     def get_model(self, model_id: str) -> dict[str, Any]:
         """Get a specific model by ID."""
@@ -286,7 +353,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get model: {e}")
+            raise self._failed("Failed to get model", e)
 
     # ── Projects ───────────────────────────────────────────────────
 
@@ -297,7 +364,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get projects: {e}")
+            raise self._failed("Failed to get projects", e)
 
     def get_project(self, project_id: str | None = None) -> dict[str, Any]:
         """Get specific project."""
@@ -307,7 +374,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get project: {e}")
+            raise self._failed("Failed to get project", e)
 
     def create_project(self, name: str, company: str | None = None) -> dict[str, Any]:
         """Create a new project."""
@@ -320,7 +387,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to create project: {e}")
+            raise self._failed("Failed to create project", e)
 
     # ── Usage ──────────────────────────────────────────────────────
 
@@ -345,7 +412,7 @@ class DeepgramClient:
             return result
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get usage: {e}")
+            raise self._failed("Failed to get usage", e)
 
     # ── API Keys ───────────────────────────────────────────────────
 
@@ -365,7 +432,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to list keys: {e}")
+            raise self._failed("Failed to list keys", e)
 
     def create_key(
         self,
@@ -396,7 +463,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to create key: {e}")
+            raise self._failed("Failed to create key", e)
 
     def get_key(self, key_id: str, project_id: str | None = None) -> dict[str, Any]:
         """Get a specific API key."""
@@ -406,7 +473,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get key: {e}")
+            raise self._failed("Failed to get key", e)
 
     def delete_key(self, key_id: str, project_id: str | None = None) -> dict[str, Any]:
         """Delete an API key."""
@@ -416,7 +483,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to delete key: {e}")
+            raise self._failed("Failed to delete key", e)
 
     # ── Requests ───────────────────────────────────────────────────
 
@@ -454,7 +521,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to list requests: {e}")
+            raise self._failed("Failed to list requests", e)
 
     def get_request(
         self, request_id: str, project_id: str | None = None
@@ -466,7 +533,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get request: {e}")
+            raise self._failed("Failed to get request", e)
 
     # ── Billing ────────────────────────────────────────────────────
 
@@ -494,7 +561,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get billing breakdown: {e}")
+            raise self._failed("Failed to get billing breakdown", e)
 
     def get_balances(self, project_id: str | None = None) -> dict[str, Any]:
         """Get project balances."""
@@ -504,7 +571,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to get balances: {e}")
+            raise self._failed("Failed to get balances", e)
 
     # ── Members ────────────────────────────────────────────────────
 
@@ -516,7 +583,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to list members: {e}")
+            raise self._failed("Failed to list members", e)
 
     def remove_member(
         self, member_id: str, project_id: str | None = None
@@ -528,7 +595,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to remove member: {e}")
+            raise self._failed("Failed to remove member", e)
 
     def list_member_scopes(
         self, member_id: str, project_id: str | None = None
@@ -542,7 +609,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to list member scopes: {e}")
+            raise self._failed("Failed to list member scopes", e)
 
     def update_member_scopes(
         self, member_id: str, scope: str, project_id: str | None = None
@@ -556,7 +623,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to update member scopes: {e}")
+            raise self._failed("Failed to update member scopes", e)
 
     # ── Invites ────────────────────────────────────────────────────
 
@@ -568,7 +635,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to list invites: {e}")
+            raise self._failed("Failed to list invites", e)
 
     def create_invite(
         self, email: str, scope: str, project_id: str | None = None
@@ -582,7 +649,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to create invite: {e}")
+            raise self._failed("Failed to create invite", e)
 
     def delete_invite(
         self, email: str, project_id: str | None = None
@@ -594,7 +661,7 @@ class DeepgramClient:
             return cast("dict[str, Any]", response.model_dump())
 
         except Exception as e:
-            raise ApiError(body=f"Failed to delete invite: {e}")
+            raise self._failed("Failed to delete invite", e)
 
     # ── Utilities ──────────────────────────────────────────────────
 

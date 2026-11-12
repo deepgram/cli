@@ -247,7 +247,7 @@ class VersionChecker:
         self.config._set_config_value(
             "update.cached_version_info", info.model_dump(mode="json")
         )
-        self.config.save()
+        self.config.save(implicit=True)
 
 
 def format_version_message(info: VersionInfo) -> str:

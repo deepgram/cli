@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from typing import TYPE_CHECKING
 
 import aiohttp
 from aiohttp import web
+from deepctl_core.websocket import RedirectRefused, redirect_refused
 from deepctl_shared_utils import probe_buffer
 from rich.console import Console
+from rich.markup import escape
 
 from .models import ProbeConnectionStats, ProbeSnapshot
 
@@ -19,6 +22,37 @@ if TYPE_CHECKING:
     from deepctl_core import Config
 
 console = Console()
+
+# Browsers send Origin on every WebSocket handshake; native clients usually
+# send none. Only pages served from this machine may use the proxy.
+_LOOPBACK_ORIGIN = re.compile(
+    r"https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?"
+)
+
+
+def _refuse_redirects(upstream_url: str) -> aiohttp.TraceConfig:
+    """A trace hook that stops aiohttp before it follows a redirect.
+
+    aiohttp's ws_connect has no allow_redirects switch; it follows a 3xx
+    on the upgrade and would then stream the audio to the new host. The
+    hook runs after the 3xx arrives and before any request to the new
+    location, so nothing reaches it.
+    """
+
+    async def on_redirect(
+        _session: aiohttp.ClientSession,
+        _ctx: object,
+        params: aiohttp.TraceRequestRedirectParams,
+    ) -> None:
+        location = params.response.headers.get("Location")
+        params.response.close()
+        raise redirect_refused(
+            upstream_url, location, command="dg debug probe", payload="audio"
+        )
+
+    trace = aiohttp.TraceConfig()
+    trace.on_request_redirect.append(on_redirect)
+    return trace
 
 
 class ProbeProxy:
@@ -55,8 +89,42 @@ class ProbeProxy:
             return "agent"
         return "unknown"
 
-    async def handle_connection(self, request: web.Request) -> web.WebSocketResponse:
+    def _refusal_reason(self, request: web.Request) -> str | None:
+        """Return why a connection is refused, or None to accept it.
+
+        Host must name this listener as 127.0.0.1:PORT or localhost:PORT.
+        Origin may be absent (native clients) or a loopback page origin;
+        anything else, including "null", is refused.
+        """
+        sockname = (
+            request.transport.get_extra_info("sockname")
+            if request.transport is not None
+            else None
+        )
+        if not sockname:
+            return "host"
+        port = sockname[1]
+        allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if port == 80:
+            allowed_hosts |= {"127.0.0.1", "localhost"}
+        hosts = request.headers.getall("Host", [])
+        if len(hosts) != 1 or hosts[0].lower() not in allowed_hosts:
+            return "host"
+        origins = request.headers.getall("Origin", [])
+        if not origins:
+            return None
+        if len(origins) != 1 or not _LOOPBACK_ORIGIN.fullmatch(origins[0].lower()):
+            return "origin"
+        return None
+
+    async def handle_connection(self, request: web.Request) -> web.StreamResponse:
         """Handle an incoming WebSocket connection."""
+        # Checked before the handshake and before anything is sent upstream.
+        reason = self._refusal_reason(request)
+        if reason is not None:
+            console.print(escape(f"[conn] refused: {reason} not allowed"))
+            return web.Response(status=403, text="Forbidden\n")
+
         ws_client = web.WebSocketResponse()
         await ws_client.prepare(request)
 
@@ -91,7 +159,9 @@ class ProbeProxy:
 
         try:
             async with (
-                aiohttp.ClientSession() as session,
+                aiohttp.ClientSession(
+                    trace_configs=[_refuse_redirects(upstream_url)]
+                ) as session,
                 session.ws_connect(
                     upstream_url,
                     headers=upstream_headers,
@@ -179,6 +249,11 @@ class ProbeProxy:
                     # Suppress CancelledError from the cancelled task
                     await asyncio.gather(task_c2u, task_u2c, return_exceptions=True)
 
+        except RedirectRefused as e:
+            console.print(
+                f"[red]Upstream connection refused[/red] [{conn_id}]: "
+                f"{escape(e.message)}"
+            )
         except aiohttp.ClientError as e:
             console.print(f"[red]Upstream connection failed[/red] [{conn_id}]: {e}")
         except Exception as e:

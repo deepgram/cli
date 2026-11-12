@@ -5,19 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deepctl-cmd-mcp"
 version = "0.1.15" # x-release-please-version
-description = "MCP proxy command for deepctl — connects to Deepgram's developer API"
+description = "MCP server for deepctl: Deepgram documentation search over stdio"
 readme = "README.md"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
     "deepctl-core>=0.1.10",
-    "deepgram-mcp>=0.1.0",
-    # deepgram-mcp declares an unbounded `mcp>=1.0.0`, but mcp 2.0 removed
-    # `streamablehttp_client` from mcp.client.streamable_http, which
-    # deepgram-mcp still imports — so a fresh resolve breaks `dg mcp` with an
-    # ImportError. Cap here until deepgram-mcp supports mcp 2.x.
-    "mcp>=1.0.0,<2.0.0",
+    # The stdio proxy lives in deepctl_cmd_mcp.proxy (vendored from
+    # deepgram-mcp), so installing deepctl adds no deepgram-mcp console
+    # script. 1.22 is the oldest mcp that runs dg mcp with current pydantic
+    # (1.19-1.21 fail on import with pydantic 2.14), passes a returned
+    # CallToolResult through whole and takes httpx_client_factory, which
+    # dg mcp uses to refuse redirects. mcp 2.0 removed streamablehttp_client.
+    "mcp>=1.22.0,<2.0.0",
     "rich>=13.9.4",
     "click>=8.1.7",
     "pydantic>=2.10.1",

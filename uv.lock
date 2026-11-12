@@ -1250,7 +1250,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = ">=3.8.0" },
+    { name = "aiohttp", specifier = ">=3.11.0" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "deepctl-shared-utils", editable = "packages/deepctl-shared-utils" },
@@ -1384,7 +1384,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "sounddevice", specifier = ">=0.4.6" },
-    { name = "websockets", specifier = ">=11.0" },
+    { name = "websockets", specifier = ">=13.1" },
 ]
 
 [[package]]
@@ -1415,7 +1415,6 @@ source = { editable = "packages/deepctl-cmd-mcp" }
 dependencies = [
     { name = "click" },
     { name = "deepctl-core" },
-    { name = "deepgram-mcp" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "rich" },
@@ -1435,8 +1434,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1.7" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
-    { name = "deepgram-mcp", specifier = ">=0.1.0" },
-    { name = "mcp", specifier = ">=1.0.0,<2.0.0" },
+    { name = "mcp", specifier = ">=1.22.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
     { name = "pydantic", specifier = ">=2.10.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.3" },
@@ -1770,7 +1768,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "rich", specifier = ">=13.0.0" },
-    { name = "sentry-sdk", specifier = ">=2.0.0" },
+    { name = "sentry-sdk", specifier = ">=2.35.0,<3" },
 ]
 
 [[package]]
@@ -1780,21 +1778,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ee/af/7e184a69de5a83e03a1b5d3d325d82bc19156618011ae366079fda556180/deepgram_captions-2.0.0.tar.gz", hash = "sha256:0f0bde3391c3f40be9fdfc9e42a7cf89a82b8a460aa62d24ddd8e55a100a6dd3", size = 21598, upload-time = "2026-03-29T09:09:45.98Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/99/01/fa0e03f821a480363704477db9a277c5bbed0bf58b3b8fdc7a732810ac29/deepgram_captions-2.0.0-py3-none-any.whl", hash = "sha256:25710f6e931ae13b7c4e70bcf7c02d48318e9aff25574d92105bab470eb6df30", size = 16387, upload-time = "2026-03-29T09:09:44.847Z" },
-]
-
-[[package]]
-name = "deepgram-mcp"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "mcp" },
-    { name = "pydantic" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/ad/828d8a554df8125c5e63d9056c1765705b6e64a139e5cac36fe31d27e859/deepgram_mcp-0.1.1.tar.gz", hash = "sha256:907955b48130f57d91a81342f1adeeb7a37153d042e1e7affc8fc85f90e3bf54", size = 6203, upload-time = "2026-04-04T12:07:14.502Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e8/f1/aeeb3fe25c34d7d23c052bfec9a98f7410bf2b4771de5038f0e94dac6e77/deepgram_mcp-0.1.1-py3-none-any.whl", hash = "sha256:eff4904eaee6d424c5201f949e308bc29bd2c2621c74ce38839e2ba180dc4d9a", size = 6828, upload-time = "2026-04-04T12:07:13.276Z" },
 ]
 
 [[package]]

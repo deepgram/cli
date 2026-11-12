@@ -1,10 +1,19 @@
 """Tests for ffprobe command."""
 
+import os
 from unittest.mock import Mock, patch
 
 import pytest
 from deepctl_cmd_ffprobe.command import FfprobeCommand
 from deepctl_cmd_ffprobe.models import FfprobeResult
+
+
+@pytest.fixture(autouse=True)
+def _person_at_terminal(monkeypatch):
+    """Tests run as a person unless they say otherwise."""
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
+    monkeypatch.setattr(ffprobe_module, "is_ai_agent", lambda: False)
 
 
 class TestFfprobeCommand:
@@ -48,16 +57,38 @@ class TestFfprobeCommand:
             returncode=0, stdout="ffprobe version 6.0\n"
         )
 
+        path = os.path.abspath("/opt/homebrew/bin/ffprobe")
         result = self.cmd.handle(
             self.config, self.auth, self.client,
-            path="/opt/homebrew/bin/ffprobe",
+            path=path,
         )
 
         assert result.status == "success"
         assert isinstance(result, FfprobeResult)
-        assert result.stored_path == "/opt/homebrew/bin/ffprobe"
+        assert result.stored_path == path
         assert result.available is True
         self.config.save.assert_called_once()
+
+    @patch("deepctl_cmd_ffprobe.command.subprocess.run")
+    @patch("deepctl_cmd_ffprobe.command.os.access")
+    @patch("deepctl_cmd_ffprobe.command.os.path.isfile")
+    def test_set_path_stores_absolute_path(
+        self, mock_isfile, mock_access, mock_run, tmp_path, monkeypatch
+    ):
+        """Only absolute stored paths are used, so a relative one is resolved."""
+        mock_isfile.return_value = True
+        mock_access.return_value = True
+        mock_run.return_value = Mock(returncode=0, stdout="ffprobe version 6.0\n")
+        monkeypatch.chdir(tmp_path)
+
+        result = self.cmd.handle(
+            self.config, self.auth, self.client, path="bin/ffprobe"
+        )
+
+        assert result.stored_path == str(tmp_path / "bin" / "ffprobe")
+        assert self.config._config.tools.ffprobe_path == str(
+            tmp_path / "bin" / "ffprobe"
+        )
 
     @patch("deepctl_cmd_ffprobe.command.os.path.isfile")
     def test_set_path_not_found(self, mock_isfile):
@@ -84,7 +115,7 @@ class TestFfprobeCommand:
 
         assert result.status == "error"
 
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     def test_reset(self, mock_which):
         mock_which.return_value = "/usr/bin/ffprobe"
 
@@ -99,7 +130,7 @@ class TestFfprobeCommand:
         self.config.save.assert_called_once()
 
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     @patch("deepctl_cmd_ffprobe.command.subprocess.run")
     def test_status_available(self, mock_run, mock_which, mock_get_path):
         mock_which.return_value = "/usr/bin/ffprobe"
@@ -116,7 +147,7 @@ class TestFfprobeCommand:
 
     @patch("deepctl_cmd_ffprobe.command.print_ffprobe_install_instructions")
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     def test_status_not_available(
         self, mock_which, mock_get_path, mock_print
     ):
@@ -176,7 +207,7 @@ class TestOutputChannels:
 
     @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="json")
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     @patch("deepctl_cmd_ffprobe.command.subprocess.run")
     def test_status_summary_is_suppressed_for_machines(
         self, mock_run, mock_which, mock_get_path, mock_format, capsys
@@ -193,7 +224,7 @@ class TestOutputChannels:
 
     @patch("deepctl_cmd_ffprobe.command.get_output_format", return_value="default")
     @patch("deepctl_cmd_ffprobe.command.get_ffprobe_path")
-    @patch("deepctl_cmd_ffprobe.command.shutil.which")
+    @patch("deepctl_cmd_ffprobe.command.find_executable")
     @patch("deepctl_cmd_ffprobe.command.subprocess.run")
     def test_status_summary_still_prints_for_humans(
         self, mock_run, mock_which, mock_get_path, mock_format, capsys
@@ -206,3 +237,46 @@ class TestOutputChannels:
         captured = capsys.readouterr()
 
         assert "ffprobe is available" in captured.out
+
+
+def test_set_path_refused_in_agent_sessions(monkeypatch, tmp_path):
+    """A stored tool path runs later; an AI agent session can't set it."""
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
+    monkeypatch.setattr(ffprobe_module, "is_ai_agent", lambda: True)
+    config = Mock()
+    tool = tmp_path / "ffprobe"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+    result = FfprobeCommand().handle(config, Mock(), Mock(), path=str(tool))
+    assert result.code == "confirmation_required"
+    assert result.hint == (
+        "A person must run this command. If you are an AI agent, ask the user."
+    )
+    config.save.assert_not_called()
+
+
+def test_set_path_allowed_for_scripts_and_ci(monkeypatch, tmp_path):
+    """No TTY, or CI=true, alone isn't refused."""
+    from deepctl_core import output
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(output, "is_agentic", lambda: True)
+    config = Mock()
+    tool = tmp_path / "ffprobe"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o755)
+    with patch("deepctl_cmd_ffprobe.command.subprocess.run", Mock()):
+        result = FfprobeCommand().handle(config, Mock(), Mock(), path=str(tool))
+    assert getattr(result, "code", None) != "confirmation_required"
+    config.save.assert_called_once()
+
+
+def test_reset_allowed_in_agent_sessions(monkeypatch):
+    from deepctl_cmd_ffprobe import command as ffprobe_module
+
+    monkeypatch.setattr(ffprobe_module, "is_ai_agent", lambda: True)
+    config = Mock()
+    result = FfprobeCommand().handle(config, Mock(), Mock(), reset=True)
+    assert result.status == "success"
+    config.save.assert_called_once()

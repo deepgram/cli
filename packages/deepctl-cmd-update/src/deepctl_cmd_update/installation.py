@@ -98,7 +98,7 @@ class InstallationDetector:
                 "--upgrade",
                 "deepctl",
             ],
-            InstallMethod.HOMEBREW: ["brew", "upgrade", "deepctl"],
+            InstallMethod.HOMEBREW: ["brew", "upgrade", "deepgram"],
             InstallMethod.UV_TOOL: [
                 "uv",
                 "tool",
@@ -124,7 +124,7 @@ class InstallationDetector:
             Human-readable update instructions
         """
         if info.method == InstallMethod.HOMEBREW:
-            return "Please update using Homebrew: brew upgrade deepctl"
+            return "Please update using Homebrew: brew update && brew upgrade deepgram"
 
         # The launcher's venv or uv cache is private to it, so pip/uv run
         # from inside would update the wrong thing; only npm can update it.
@@ -157,7 +157,9 @@ class InstallationDetector:
         if info.method == InstallMethod.SYSTEM:
             # Try to detect the system package manager
             if sys.platform.startswith("darwin"):
-                return "Please update using Homebrew: brew upgrade deepctl"
+                return (
+                    "Please update using Homebrew: brew update && brew upgrade deepgram"
+                )
             elif sys.platform.startswith("linux"):
                 # Check for common package managers
                 if Path("/etc/debian_version").exists():

@@ -68,6 +68,55 @@ def is_agentic() -> bool:
     return score >= 3
 
 
+# Environment markers set by AI coding agents themselves. Used, instead of
+# is_agentic(), wherever the CLI decides whom to trust with the API key: a
+# hard signal only. CI, a missing TTY or a missing TERM are never on this
+# list, so CI jobs, cron and containers keep the environment they were given.
+# An exact list; is_agentic() above is for output formatting and is broader.
+# Variables a person's own shell sets too (Cursor's CURSOR_TRACE_ID, Replit's
+# REPL_ID) are left out.
+AI_AGENT_ENV_MARKERS: tuple[str, ...] = (
+    "AI_AGENT",
+    "ANTIGRAVITY_AGENT",
+    "AUGMENT_AGENT",
+    "CLAUDECODE",
+    "CLAUDE_CODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_IS_COWORK",
+    "CODEX_CI",
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CODEX_THREAD_ID",
+    "COPILOT_CLI",
+    "CURSOR_AGENT",
+    "GEMINI_CLI",
+    "GOOSE_TERMINAL",
+    "OPENCODE",
+    "OPENCODE_CLIENT",
+)
+# Markers that count only with one of these values.
+AI_AGENT_ENV_VALUES: dict[str, tuple[str, ...]] = {
+    "AGENT": ("amp", "goose"),
+    "CURSOR_EXTENSION_HOST_ROLE": ("agent-exec",),
+}
+
+
+def is_ai_agent() -> bool:
+    """True only when an AI coding agent marked the environment.
+
+    Hard signals: any non-empty variable in ``AI_AGENT_ENV_MARKERS``, a
+    variable in ``AI_AGENT_ENV_VALUES`` with one of its values, or Aider
+    (``OR_APP_NAME=Aider`` or "aider" in ``OR_SITE_URL``). Never ``CI``,
+    TTY state, ``TERM`` or command-line flags.
+    """
+    env = os.environ
+    if any(env.get(name) for name in AI_AGENT_ENV_MARKERS):
+        return True
+    if any(env.get(name) in values for name, values in AI_AGENT_ENV_VALUES.items()):
+        return True
+    return env.get("OR_APP_NAME") == "Aider" or "aider" in env.get("OR_SITE_URL", "")
+
+
 _agentic = is_agentic()
 
 # Global console instance — plain when agentic, rich when interactive
@@ -364,19 +413,58 @@ def print_success(message: str) -> None:
 def print_error(message: str) -> None:
     """Print error message."""
     if _output_config["agentic"]:
-        stderr_console.print(f"ERROR: {message}")
+        stderr_console.print(f"ERROR: {message}", soft_wrap=True)
     else:
-        stderr_console.print(f"[red]✗[/red] {message}")
+        stderr_console.print(f"[red]✗[/red] {message}", soft_wrap=True)
+
+
+def print_security_warning(message: str) -> None:
+    """Print a warning to stderr even under ``--quiet``.
+
+    For warnings about where credentials go or what a project file tried
+    to set; those must never be silenced.
+    """
+    if _output_config["agentic"]:
+        stderr_console.print(f"WARN: {message}", soft_wrap=True)
+    else:
+        stderr_console.print(f"[yellow]⚠[/yellow] {message}", soft_wrap=True)
+
+
+# Hints already printed in this process (one run of dg).
+_hints_shown: set[str] = set()
+
+
+def print_hint(message: str) -> None:
+    """Print the hint line that follows an error or warning (always stderr).
+
+    A hint prints once per run: a later warning or error with the same hint
+    relies on the first one.
+    """
+    if message in _hints_shown:
+        return
+    _hints_shown.add(message)
+    if _output_config["agentic"]:
+        stderr_console.print(f"HINT: {message}", soft_wrap=True)
+    else:
+        stderr_console.print(f"  [dim]{message}[/dim]", soft_wrap=True)
+
+
+def print_error_hint(error: BaseException) -> None:
+    """Print the hint an error carries, if any (a refused config save says
+    who fixes the file)."""
+    hint = getattr(error, "hint", None)
+    if hint:
+        print_hint(str(hint))
 
 
 def print_warning(message: str, *, stderr: bool = False) -> None:
     """Print a warning; ``stderr=True`` keeps it off stdout outside agentic mode too."""
     if not _output_config["quiet"]:
         if _output_config["agentic"]:
-            stderr_console.print(f"WARN: {message}")
+            stderr_console.print(f"WARN: {message}", soft_wrap=True)
         else:
             (stderr_console if stderr else console).print(
-                f"[yellow]⚠[/yellow] {message}"
+                f"[yellow]⚠[/yellow] {message}", soft_wrap=True
             )
 
 
@@ -384,9 +472,11 @@ def print_info(message: str, *, stderr: bool = False) -> None:
     """Print info message."""
     if not _output_config["quiet"]:
         if _output_config["agentic"]:
-            stderr_console.print(f"INFO: {message}")
+            stderr_console.print(f"INFO: {message}", soft_wrap=True)
         else:
-            (stderr_console if stderr else console).print(f"[blue]ℹ[/blue] {message}")
+            (stderr_console if stderr else console).print(
+                f"[blue]ℹ[/blue] {message}", soft_wrap=True
+            )
 
 
 def print_debug(message: str) -> None:

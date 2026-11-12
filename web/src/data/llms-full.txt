@@ -244,8 +244,6 @@ dg api /v1/projects/PROJECT_ID/usage/requests | jq '.requests[].path'
 
 ```bash
 dg mcp                               # Start MCP server (stdio transport)
-dg mcp --transport sse               # SSE transport
-dg mcp --transport streamable-http   # HTTP transport
 ```
 
 Used with Claude Code, Cursor, VS Code Copilot, and other MCP-compatible editors.
@@ -284,10 +282,12 @@ dg plugin install deepctl-plugin-example  # Install from PyPI
 dg plugin list                            # List installed plugins
 dg plugin update deepctl-plugin-example   # Update plugin
 dg plugin remove deepctl-plugin-example   # Uninstall
-dg plugin search <term>                   # Search registry
+dg plugin search <term>                   # Search Deepgram-published plugins
 ```
 
 Plugins install into an isolated venv at `~/.deepctl/plugins/venv/`.
+`dg plugin install`, `update` and `remove` are refused in an AI agent session:
+a person runs them in their own terminal.
 
 ---
 
@@ -314,7 +314,7 @@ Most of these go on `dg` itself, before the command: `dg --profile staging liste
 | `--verbose`, `-v` | Enable verbose/debug output |
 | `--profile`, `-p` | Use named credential profile |
 | `--config`, `-c` | Path to config file |
-| `--base-url` | Override the API base URL |
+| `--base-url` | Override the API base URL (a non-Deepgram host is refused unless listed in `api.allowed_hosts`) |
 | `--api-key` | Explicit API key (overrides profile) |
 | `--timing`, `--timing-detailed` | Show performance timing |
 | `--non-interactive` | Skip prompts; use defaults |
@@ -359,6 +359,25 @@ Per-command flags, which go after the command:
 - JSON output format by default
 - Exit codes: 0 = success, 1 = error, 2 = user interrupt
 
+**In an AI agent session:**
+An AI agent session is one an agent marked: `AI_AGENT`, `ANTIGRAVITY_AGENT`,
+`AUGMENT_AGENT`, `CLAUDECODE`, `CLAUDE_CODE`, `CLAUDE_CODE_ENTRYPOINT`,
+`CLAUDE_CODE_IS_COWORK`, `CODEX_CI`, `CODEX_SANDBOX`,
+`CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_THREAD_ID`, `COPILOT_CLI`,
+`CURSOR_AGENT`, `GEMINI_CLI`, `GOOSE_TERMINAL`, `OPENCODE` or
+`OPENCODE_CLIENT` set, `AGENT=amp` or `AGENT=goose`,
+`CURSOR_EXTENSION_HOST_ROLE=agent-exec`, or Aider. `CI`, TTY state and flags
+don't make one.
+- `dg plugin install`, `update` and `remove`, and `dg ffprobe --path <path>`, are
+  refused. A person runs them in their own terminal.
+- `DEEPGRAM_BASE_URL` can't send your API key to a host that isn't a Deepgram
+  API host or listed in `api.allowed_hosts`: the command is refused.
+- `DEEPGRAM_CLI_INSECURE` is ignored, so TLS verification stays on.
+- `api.allowed_hosts` and the other settings that widen trust are read only
+  from the user config at its standard path under your real home directory
+  (`HOME` and `XDG_CONFIG_HOME` don't move it). A config file you don't own,
+  or that others can write, keeps its API key unused.
+
 **`--agent-friendly` flag:**
 Available on every command. Outputs a JSON contract describing the command:
 ```json
@@ -380,11 +399,28 @@ Available on every command. Outputs a JSON contract describing the command:
 
 Config file location:
 - macOS: `~/Library/Application Support/deepctl/config.yaml`
-- Linux: `~/.config/deepctl/config.yaml`
+- Linux: `~/.config/deepctl/config.yaml` (`$XDG_CONFIG_HOME/deepctl/config.yaml` when `XDG_CONFIG_HOME` is set)
 - Windows: `%LOCALAPPDATA%\deepgram\deepctl\config.yaml`
 
+dg sends your API key only to Deepgram API hosts, to hosts you list in
+`api.allowed_hosts` in your own `config.yaml`, or to `DEEPGRAM_BASE_URL` (not in
+an AI agent session). Anything else is refused before a request is made. Plain
+http works only for localhost, 127.0.0.0/8 and [::1]; other hosts must use https.
+For a proxy or self-hosted deployment, add its host (and port, to approve only
+that port):
+
+```yaml
+api:
+  allowed_hosts:
+    - my-proxy.example.com
+    - localhost:8080
+```
+
+A project's `deepgram.yaml` can't set credentials, a project ID, a profile or a
+non-Deepgram `base_url`, and can't approve hosts.
+
 Environment variables:
-- `DEEPGRAM_API_KEY` — API key (overrides profile)
+- `DEEPGRAM_API_KEY` — API key (used when there's no `--api-key` and no key that `dg login` saved in the system keyring)
 - `DEEPGRAM_PROJECT_ID` — Project ID (overrides profile)
 - `DEEPGRAM_CLI_BASE_URL` — Custom auth endpoint
 

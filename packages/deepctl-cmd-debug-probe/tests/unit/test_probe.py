@@ -1,9 +1,13 @@
 """Tests for debug probe command and proxy."""
 
+import asyncio
+import io
 import json
 from unittest.mock import Mock, patch
 
+import aiohttp
 import pytest
+from aiohttp import web
 from deepctl_cmd_debug_probe.command import ProbeCommand, _find_available_port
 from deepctl_cmd_debug_probe.models import (
     ProbeConnectionStats,
@@ -11,6 +15,7 @@ from deepctl_cmd_debug_probe.models import (
     ProbeSnapshot,
 )
 from deepctl_cmd_debug_probe.proxy import ProbeProxy
+from rich.console import Console
 
 
 class TestModels:
@@ -75,9 +80,7 @@ class TestProbeProxy:
 
         data = {
             "channel": {
-                "alternatives": [
-                    {"transcript": "hello world", "confidence": 0.99}
-                ]
+                "alternatives": [{"transcript": "hello world", "confidence": 0.99}]
             },
             "is_final": True,
         }
@@ -91,9 +94,7 @@ class TestProbeProxy:
         stats = ProbeConnectionStats(connection_id="test")
 
         data = {
-            "channel": {
-                "alternatives": [{"transcript": "hello"}]
-            },
+            "channel": {"alternatives": [{"transcript": "hello"}]},
             "is_final": False,
         }
 
@@ -188,3 +189,255 @@ class TestFindAvailablePort:
 
         port = _find_available_port(3100, 3100)
         assert port is None
+
+
+_REAL_SESSION = aiohttp.ClientSession
+
+
+class _PlainUpstream:
+    """A real aiohttp session whose ws_connect goes over plain http to a
+    loopback stub instead of wss. It takes the same arguments as
+    ClientSession, so the proxy's trace hook is installed as usual."""
+
+    def __init__(self, *args, **kwargs):
+        self._session = _REAL_SESSION(*args, **kwargs)
+
+    async def __aenter__(self):
+        await self._session.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc):
+        return await self._session.__aexit__(*exc)
+
+    def ws_connect(self, url, **kwargs):
+        return self._session.ws_connect(url.replace("wss://", "http://", 1), **kwargs)
+
+
+def _probe_through_redirect(location: str):
+    """Proxy one client stream to an upstream that answers the upgrade with
+    a redirect. Returns (origin requests, target requests, console text)."""
+    origin_reqs: list[bytes] = []
+    target_reqs: list[bytes] = []
+
+    async def read_head(reader):
+        try:
+            return await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError):
+            return b""
+
+    async def run():
+        ports = {}
+
+        async def origin(reader, writer):
+            origin_reqs.append(await read_head(reader))
+            loc = location.format(target=f"127.0.0.1:{ports['target']}")
+            writer.write(
+                f"HTTP/1.1 302 Found\r\nLocation: {loc}\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n".encode()
+            )
+            await writer.drain()
+            writer.close()
+
+        async def target(reader, writer):
+            target_reqs.append(await read_head(reader) or b"<conn>")
+            writer.close()
+
+        for name, handler in (("origin", origin), ("target", target)):
+            srv = await asyncio.start_server(handler, "127.0.0.1", 0)
+            ports[name] = srv.sockets[0].getsockname()[1]
+
+        proxy = ProbeProxy(
+            api_key="fa1ce0000000000000000000000000000000000d",
+            upstream_host=f"127.0.0.1:{ports['origin']}",
+        )
+        app = web.Application()
+        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        try:
+            async with _REAL_SESSION() as client:
+                ws = await client.ws_connect(f"http://127.0.0.1:{port}/v1/listen?x=1")
+                await ws.send_bytes(b"\0\0" * 800)
+                await asyncio.wait_for(ws.receive(), 5)
+                await ws.close()
+        finally:
+            await runner.cleanup()
+
+    out = io.StringIO()
+    with (
+        patch("deepctl_cmd_debug_probe.proxy.aiohttp.ClientSession", _PlainUpstream),
+        patch(
+            "deepctl_cmd_debug_probe.proxy.console",
+            Console(file=out, force_terminal=False, width=300),
+        ),
+    ):
+        asyncio.run(run())
+    return origin_reqs, target_reqs, out.getvalue()
+
+
+class TestProbeUpstreamRedirect:
+    """The upstream connect never follows a redirect."""
+
+    # aiohttp follows http(s) Locations itself; ws:// ones it rejects.
+    @pytest.mark.parametrize(
+        "location", ["http://{target}/second", "ws://{target}/second", "/second"]
+    )
+    def test_redirect_refused_and_nothing_reaches_the_target(self, location):
+        origin, target, text = _probe_through_redirect(location)
+        assert target == []
+        assert len(origin) == 1
+        assert "Upstream connection refused" in text
+        assert "dg debug probe doesn't follow redirects, so no audio was sent." in (
+            " ".join(text.split())
+        )
+        assert "fa1ce0" not in text
+
+
+class _CountingSession:
+    """Stands in for aiohttp.ClientSession; counts upstream connect attempts."""
+
+    connects = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def ws_connect(self, *args, **kwargs):
+        type(self).connects += 1
+        raise aiohttp.ClientError("no upstream in tests")
+
+
+def _handshake(headers: list[tuple[str, str]] | None, host: str | None = None):
+    """Start a real proxy on 127.0.0.1, send one upgrade request, return
+    (status line, response bytes, upstream connects, console text).
+
+    host is a format string; {port} becomes the listener's port.
+    """
+
+    async def run():
+        proxy = ProbeProxy(api_key="fa1ce0000000000000000000000000000000000d")
+        app = web.Application()
+        app.router.add_route("GET", "/{path:.*}", proxy.handle_connection)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            lines = [
+                "GET /v1/listen?encoding=linear16 HTTP/1.1",
+                "Host: " + (host or "127.0.0.1:{port}").format(port=port),
+                "Upgrade: websocket",
+                "Connection: Upgrade",
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                "Sec-WebSocket-Version: 13",
+            ]
+            lines += [f"{k}: {v}" for k, v in (headers or [])]
+            writer.write(("\r\n".join(lines) + "\r\n\r\n").encode())
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(4096), 5)
+            # Let an accepted handler reach the upstream connect.
+            for _ in range(50):
+                if _CountingSession.connects or not data.startswith(b"HTTP/1.1 101"):
+                    break
+                await asyncio.sleep(0.01)
+            writer.close()
+            return data
+        finally:
+            await runner.cleanup()
+
+    _CountingSession.connects = 0
+    out = io.StringIO()
+    with (
+        patch("deepctl_cmd_debug_probe.proxy.aiohttp.ClientSession", _CountingSession),
+        patch(
+            "deepctl_cmd_debug_probe.proxy.console",
+            Console(file=out, force_terminal=False, width=200),
+        ),
+    ):
+        data = asyncio.run(run())
+    status = data.split(b"\r\n", 1)[0].decode()
+    return status, data, _CountingSession.connects, out.getvalue()
+
+
+class TestProbeConnectionChecks:
+    """Only local pages and native clients may use the proxy."""
+
+    def test_foreign_origin_refused_before_upstream(self):
+        status, data, connects, text = _handshake([("Origin", "https://evil.example")])
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+        assert b"evil" not in data
+        assert "[conn] refused: origin not allowed" in text
+        assert "evil" not in text
+
+    def test_null_origin_refused(self):
+        status, _, connects, _ = _handshake([("Origin", "null")])
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "http://localhost:5173",
+            "https://127.0.0.1",
+            "http://[::1]:8080",
+            "HTTP://LOCALHOST:3000",
+        ],
+    )
+    def test_loopback_origin_allowed(self, origin):
+        status, _, connects, text = _handshake([("Origin", origin)])
+        assert status == "HTTP/1.1 101 Switching Protocols"
+        assert connects == 1
+        assert "refused" not in text
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "http://localhost.evil.example",
+            "http://127.0.0.1.evil.example:80",
+            "http://evil.example#http://localhost",
+            "file://",
+            "",
+        ],
+    )
+    def test_lookalike_origin_refused(self, origin):
+        status, _, connects, _ = _handshake([("Origin", origin)])
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+
+    def test_two_origins_refused(self):
+        status, _, connects, _ = _handshake(
+            [("Origin", "http://localhost:5173"), ("Origin", "https://evil.example")]
+        )
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+
+    def test_no_origin_allowed(self):
+        status, _, connects, _ = _handshake([])
+        assert status == "HTTP/1.1 101 Switching Protocols"
+        assert connects == 1
+
+    def test_localhost_host_allowed_any_case(self):
+        status, _, connects, _ = _handshake([], host="LocalHost:{port}")
+        assert status == "HTTP/1.1 101 Switching Protocols"
+        assert connects == 1
+
+    @pytest.mark.parametrize(
+        "host", ["evil.example:3100", "evil.example", "localhost", "127.0.0.1:1"]
+    )
+    def test_foreign_host_refused(self, host):
+        status, data, connects, text = _handshake([], host=host)
+        assert status == "HTTP/1.1 403 Forbidden"
+        assert connects == 0
+        assert b"evil" not in data
+        assert "[conn] refused: host not allowed" in text

@@ -55,9 +55,10 @@ def _install_flux_error_websockets(monkeypatch, ready=None):
         async def __aexit__(self, *_args):
             return False
 
-    fake_websockets = types.ModuleType("websockets")
-    fake_websockets.connect = lambda *_args, **_kwargs: _FakeConnect()
-    monkeypatch.setitem(sys.modules, "websockets", fake_websockets)
+    monkeypatch.setattr(
+        "deepctl_cmd_listen.command._live_connect",
+        lambda *_args, **_kwargs: _FakeConnect(),
+    )
 
 
 class TestListenCommand:
@@ -87,7 +88,13 @@ class TestListenCommand:
         )
         mock_config.get_profile.return_value.base_url = "https://api.deepgram.com"
         click_command = PluginManager()._create_click_command(command)
-        with patch("deepctl_core.base_command.AuthManager.guard"):
+        with (
+            patch("deepctl_core.base_command.AuthManager.guard"),
+            patch(
+                "deepctl_core.base_command.AuthManager.check_base_url",
+                return_value="https://api.deepgram.com",
+            ),
+        ):
             return CliRunner().invoke(
                 click_command,
                 args,
@@ -526,6 +533,7 @@ class TestListenCommand:
         ws_client.config.get_profile.return_value = Mock(
             base_url="https://api.deepgram.com"
         )
+        ws_client.auth_manager.check_base_url.return_value = "https://api.deepgram.com"
         url = command._ws_url(
             ws_client,
             api_version=1,
@@ -549,6 +557,7 @@ class TestListenCommand:
         ws_client.config.get_profile.return_value = Mock(
             base_url="https://api.deepgram.com"
         )
+        ws_client.auth_manager.check_base_url.return_value = "https://api.deepgram.com"
 
         url = command._ws_url(
             ws_client,
@@ -576,6 +585,7 @@ class TestListenCommand:
         ws_client.config.get_profile.return_value = Mock(
             base_url="https://api.deepgram.com"
         )
+        ws_client.auth_manager.check_base_url.return_value = "https://api.deepgram.com"
 
         url = command._ws_url(
             ws_client,
@@ -946,9 +956,10 @@ class TestFluxV2TurnHandling:
             async def __aexit__(self, *a):
                 return False
 
-        fake_ws = types.ModuleType("websockets")
-        fake_ws.connect = lambda *a, **k: _FakeConnect()
-        monkeypatch.setitem(sys.modules, "websockets", fake_ws)
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command._live_connect",
+            lambda *a, **k: _FakeConnect(),
+        )
 
         # A turn received but never finalized (no EndOfTurn before the interrupt).
         seeded = {
@@ -1202,9 +1213,10 @@ class TestFluxV2TurnHandling:
             async def __aexit__(self, *_args):
                 return False
 
-        fake_websockets = types.ModuleType("websockets")
-        fake_websockets.connect = lambda *_args, **_kwargs: _FakeConnect()
-        monkeypatch.setitem(sys.modules, "websockets", fake_websockets)
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command._live_connect",
+            lambda *_args, **_kwargs: _FakeConnect(),
+        )
 
         client = MagicMock()
         client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
@@ -1281,9 +1293,10 @@ class TestFluxV2TurnHandling:
             async def __aexit__(self, *a):
                 return False
 
-        fake_ws = types.ModuleType("websockets")
-        fake_ws.connect = lambda *a, **k: _FakeConnect()
-        monkeypatch.setitem(sys.modules, "websockets", fake_ws)
+        monkeypatch.setattr(
+            "deepctl_cmd_listen.command._live_connect",
+            lambda *a, **k: _FakeConnect(),
+        )
 
         # A turn received but never finalized before the interrupt.
         seeded = {

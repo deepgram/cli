@@ -10,10 +10,14 @@ import httpx
 import keyring
 from keyring.errors import PasswordDeleteError
 from pydantic import BaseModel
+from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from . import hosts, output
+from . import messages as msg
 from .client import _split_base_url
 from .config import Config
+from .hosts import check_credential_host, check_identity_host
 from .models import ProfileInfo, ProfilesResult
 from .output import stderr_console
 
@@ -22,10 +26,8 @@ from .output import stderr_console
 # command writes to stdout. See get_status_console() in output.py.
 console = stderr_console
 
-# Auth provider base URL (dx-id OIDC provider)
-AUTH_BASE_URL = os.getenv("DEEPGRAM_CLI_BASE_URL", "https://id.dx.deepgram.com")
-DEVICE_CODE_URL = f"{AUTH_BASE_URL}/device/code"
-TOKEN_POLL_URL = f"{AUTH_BASE_URL}/device/token"
+# Auth provider (dx-id OIDC) base URL: hosts.DEFAULT_IDENTITY_URL, or
+# DEEPGRAM_CLI_BASE_URL, resolved per login through check_identity_host().
 
 # Registered OIDC client ID for the CLI
 CLIENT_ID = "deepgram-cli"
@@ -54,6 +56,54 @@ class TokenResponse(BaseModel):
     dg_expires_in: int | None = None
 
 
+def _insecure_allowed() -> bool:
+    """Whether DEEPGRAM_CLI_INSECURE may turn off TLS verification.
+
+    Only ``1`` or ``true`` count (``0``, ``false`` or anything else keeps
+    verification on), and never in an AI agent session. Even then it only
+    applies to localhost, 127.0.0.1 and [::1]: see ``_insecure_mounts``.
+    """
+    value = os.getenv("DEEPGRAM_CLI_INSECURE", "").strip().lower()
+    if value not in ("1", "true"):
+        return False
+    if output.is_ai_agent():
+        if hosts._first_time(("W-INSECURE-AGENT", "")):
+            output.print_security_warning(msg.W_INSECURE_AGENT)
+        return False
+    return True
+
+
+#: Hosts DEEPGRAM_CLI_INSECURE applies to: local dev servers only. Other
+#: 127.0.0.0/8 addresses keep verification (mounts match exact hosts).
+_INSECURE_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _insecure_mounts() -> dict[str, httpx.BaseTransport]:
+    """Unverified transports for the loopback hosts only.
+
+    Host-specific mounts take precedence over the scheme-wide proxy mounts
+    httpx builds from HTTPS_PROXY/ALL_PROXY/NO_PROXY, so every other host
+    keeps both certificate verification and the proxy settings.
+    """
+    unverified = httpx.HTTPTransport(verify=False)
+    return {
+        f"all://{'[::1]' if host == '::1' else host}": unverified
+        for host in _INSECURE_HOSTS
+    }
+
+
+def _warn_if_verified(request: httpx.Request) -> None:
+    """Say once per host that DEEPGRAM_CLI_INSECURE did not apply to it."""
+    host = request.url.host
+    if host in _INSECURE_HOSTS:
+        return
+    if hosts._first_time(("W-INSECURE-REMOTE", host)):
+        output.print_security_warning(
+            escape(msg.W_INSECURE_REMOTE.format(host=msg.display(host)))
+        )
+        output.print_hint(escape(msg.W_INSECURE_REMOTE_HINT))
+
+
 class AuthenticationError(Exception):
     """Authentication related errors."""
 
@@ -79,9 +129,27 @@ class AuthManager:
         self.config = config
         self.explicit_api_key = explicit_api_key
         self.explicit_project_id = explicit_project_id
-        # Disable SSL verification for local dev (DEEPGRAM_CLI_INSECURE=1)
-        verify = not bool(os.getenv("DEEPGRAM_CLI_INSECURE"))
-        self.client = httpx.Client(timeout=30.0, verify=verify)
+        # DEEPGRAM_CLI_INSECURE=1 skips TLS verification for localhost,
+        # 127.0.0.1 and [::1] (local dev), never for any other host and never
+        # in an AI agent session: the agent may have set it. Proxy settings
+        # from the environment still apply to every other host.
+        if _insecure_allowed():
+            self.client = httpx.Client(
+                timeout=30.0,
+                verify=True,
+                mounts=_insecure_mounts(),
+                event_hooks={"request": [_warn_if_verified]},
+            )
+        else:
+            self.client = httpx.Client(timeout=30.0, verify=True)
+
+    def check_base_url(self) -> str:
+        """Return the base URL credentials may be sent to.
+
+        Raises ``hosts.CredentialHostError`` (already reported on stderr)
+        when the effective host isn't trusted; nothing has been sent.
+        """
+        return check_credential_host(self.config)
 
     def has_env_credentials(self) -> tuple[bool, bool]:
         """Check if environment variables are set.
@@ -294,17 +362,19 @@ class AuthManager:
         if not api_key:
             return False, "No API key provided or stored", "auth"
 
+        # Verify against the configured base URL (not hardcoded prod), so a
+        # custom base (e.g. staging) validates its own keys correctly -- but
+        # only once that host is trusted with the key.
+        base = self.check_base_url()
+
         try:
             headers = {
                 "Authorization": f"Token {api_key}",
                 "Content-Type": "application/json",
             }
 
-            # Verify against the configured base URL (not hardcoded prod), so a
-            # custom base (e.g. staging) validates its own keys correctly.
             # Preserve the input scheme so a plaintext endpoint isn't forced
             # onto TLS.
-            base = self.config.get_profile().base_url or "https://api.deepgram.com"
             rest_scheme, _, host = _split_base_url(base)
             response = self.client.get(
                 f"{rest_scheme}://{host}/v1/projects",
@@ -362,6 +432,8 @@ class AuthManager:
         if not api_key:
             return False, "No API key provided or stored", "auth"
 
+        base = self.check_base_url()
+
         # If no project_id, just verify the API key alone
         if not project_id:
             return self.verify_api_key(api_key)
@@ -373,9 +445,10 @@ class AuthManager:
                 "Content-Type": "application/json",
             }
 
-            # Make request to get project details
+            # Project details from the same (checked) base URL as the key
+            rest_scheme, _, host = _split_base_url(base)
             response = self.client.get(
-                f"https://api.deepgram.com/v1/projects/{project_id}",
+                f"{rest_scheme}://{host}/v1/projects/{project_id}",
                 headers=headers,
             )
 
@@ -412,9 +485,23 @@ class AuthManager:
 
         Only validates that the API key works. Project ID validation
         is handled separately by requires_project on BaseCommand.
+        Refuses first, before reading or sending any key, when the base URL
+        isn't trusted with credentials.
         """
+        self.check_base_url()
         api_key = self.get_api_key()
 
+        if not api_key and getattr(self.config, "api_key_untrusted", False) is True:
+            # The file's key was left unused (W-PERM-AGENT / W-CFG-UNTRUSTED):
+            # say so, and send the agent to a person, not to dg login.
+            from rich.markup import escape
+
+            text = msg.E_KEY_UNTRUSTED.format(
+                user_config=msg.display_path(self.config.config_path)
+            )
+            output.print_error(escape(text))
+            output.print_hint(msg.W_CFG_UNTRUSTED_FILE_HINT)
+            raise AuthenticationError(text)
         if not api_key:
             console.print(
                 "[red]Error:[/red] DEEPGRAM_API_KEY is not set in the "
@@ -488,6 +575,8 @@ class AuthManager:
         # Store API key in keyring for security
         profile_name = self.config.profile or "default"
         keyring_available = False
+        # Nothing goes to the keyring when the profile can't be saved.
+        self.config.check_saveable()
 
         try:
             keyring.set_password(KEYRING_SERVICE, f"api-key.{profile_name}", api_key)
@@ -504,7 +593,6 @@ class AuthManager:
             profile_name,
             api_key=api_key if not keyring_available else None,
             project_id=project_id,  # Always store project ID in config
-            base_url=self.config.get_profile(profile_name).base_url,
         )
 
         console.print("[green]✓[/green] Successfully logged in with API key")
@@ -517,12 +605,15 @@ class AuthManager:
         """Login using device flow (interactive method)."""
         console.print("[blue]Starting device flow authentication...[/blue]")
 
+        # The token exchange mints the API key: check the identity host first.
+        identity_url = check_identity_host(self.config)
+
         try:
             # Get hostname for device identification
             hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
 
             # Request device code from dx-id auth provider
-            device_response = self._request_device_code()
+            device_response = self._request_device_code(identity_url)
 
             verification_uri = (
                 device_response.verification_uri_complete
@@ -549,7 +640,9 @@ class AuthManager:
             )
 
             # Poll for token (starts immediately — user may have clicked the link)
-            token_response = self._poll_for_token(device_response, hostname)
+            token_response = self._poll_for_token(
+                device_response, hostname, identity_url
+            )
 
             # Store token and get user info
             self._store_token(token_response)
@@ -561,7 +654,9 @@ class AuthManager:
             console.print(f"[red]Error during device flow:[/red] {e}")
             raise AuthenticationError(f"Device flow failed: {e}")
 
-    def _request_device_code(self) -> DeviceCodeResponse:
+    def _request_device_code(
+        self, identity_url: str | None = None
+    ) -> DeviceCodeResponse:
         """Request device code from auth provider.
 
         Returns:
@@ -576,8 +671,9 @@ class AuthManager:
         }
 
         try:
+            base = identity_url or check_identity_host(self.config)
             response = self.client.post(
-                DEVICE_CODE_URL,
+                f"{base}/device/code",
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )
@@ -596,6 +692,7 @@ class AuthManager:
         self,
         device_response: DeviceCodeResponse,
         hostname: str,
+        identity_url: str | None = None,
     ) -> TokenResponse:
         """Poll for token using device code."""
         console.print("\n[blue]Waiting for authentication...[/blue]")
@@ -608,7 +705,8 @@ class AuthManager:
             "hostname": hostname,
         }
 
-        poll_url = f"{TOKEN_POLL_URL}?{urlencode(query_params)}"
+        base = identity_url or check_identity_host(self.config)
+        poll_url = f"{base}/device/token?{urlencode(query_params)}"
 
         with Progress(
             SpinnerColumn(),
@@ -666,6 +764,8 @@ class AuthManager:
             ).isoformat()
 
             keyring_available = False
+            # Nothing goes to the keyring when the profile can't be saved.
+            self.config.check_saveable()
             try:
                 keyring.set_password(
                     KEYRING_SERVICE, f"api-key.{profile_name}", api_key
@@ -684,7 +784,6 @@ class AuthManager:
                 profile_name,
                 api_key=api_key if not keyring_available else None,
                 project_id=token_response.project_id,
-                base_url=self.config.get_profile(profile_name).base_url,
             )
             profile = self.config.get_profile(profile_name)
             profile.dg_token_expires_at = expires_at
@@ -711,6 +810,8 @@ class AuthManager:
                         and only clear credentials. If False, remove profile completely.
         """
         profile_name = self.config.profile or "default"
+        # Nothing is cleared from the keyring when the profile can't be saved.
+        self.config.check_saveable()
 
         # Clear all credential types from keyring.
         for keyring_key in (
@@ -727,12 +828,9 @@ class AuthManager:
         if keep_config:
             # Clear sensitive data from config but keep profile
             if profile_name in self.config.list_profiles():
-                profile = self.config.get_profile(profile_name)
-                self.config.create_profile(
-                    profile_name,
-                    api_key=None,  # Clear API key
-                    project_id=profile.project_id,  # Keep project ID
-                    base_url=profile.base_url,  # Keep base URL
+                # Only the credential changes; project ID and base URL stay.
+                self.config.update_profile(
+                    profile_name, api_key=None, dg_token_expires_at=None
                 )
         else:
             # Clear profile completely from config

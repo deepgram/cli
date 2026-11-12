@@ -1,5 +1,10 @@
-# output.py is CRLF on main and ruff format keeps it that way; let git diff --check accept it.
+# These files are CRLF on main and ruff format keeps it that way; let git diff --check accept it.
+packages/deepctl-cmd-projects/src/deepctl_cmd_projects/command.py whitespace=cr-at-eol
+packages/deepctl-core/src/deepctl_core/__init__.py whitespace=cr-at-eol
+packages/deepctl-core/src/deepctl_core/base_command.py whitespace=cr-at-eol
+packages/deepctl-core/src/deepctl_core/config.py whitespace=cr-at-eol
 packages/deepctl-core/src/deepctl_core/output.py whitespace=cr-at-eol
+packages/deepctl-core/src/deepctl_core/plugin_manager.py whitespace=cr-at-eol
 # .gitignore is CRLF on main too; same treatment so new entries match the file.
 .gitignore whitespace=cr-at-eol
 packages/deepctl-core/tests/unit/fixtures/legacy_v03/** -text

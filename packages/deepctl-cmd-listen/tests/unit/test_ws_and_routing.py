@@ -23,6 +23,7 @@ def command():
 def mock_client():
     client = MagicMock()
     client.config.get_profile.return_value.base_url = "https://api.deepgram.com"
+    client.auth_manager.check_base_url.return_value = "https://api.deepgram.com"
     client.auth_manager.get_api_key.return_value = "test-key"
     return client
 
@@ -137,6 +138,9 @@ class TestWsUrl:
     def test_custom_base_url(self, command):
         client = MagicMock()
         client.config.get_profile.return_value.base_url = (
+            "https://custom.api.example.com"
+        )
+        client.auth_manager.check_base_url.return_value = (
             "https://custom.api.example.com"
         )
         assert self._url(command, client).startswith("wss://custom.api.example.com")
@@ -620,3 +624,17 @@ class TestHandleWsMessage:
         )
         capsys.readouterr()
         assert acc == ["First", "Second"]
+
+
+class TestWsUrlHostCheck:
+    def test_ws_url_uses_the_checked_base_url(self, command):
+        """The streaming URL goes through the same host check as every path."""
+        from deepctl_core.hosts import CredentialHostError
+
+        client = MagicMock()
+        client.config.get_profile.return_value.base_url = "https://evil.example"
+        client.auth_manager.check_base_url.side_effect = CredentialHostError(
+            "E-FH-FLAG", "foreign_host", "refused", "hint"
+        )
+        with pytest.raises(CredentialHostError):
+            TestWsUrl()._url(command, client)

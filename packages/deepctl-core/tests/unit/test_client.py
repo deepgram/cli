@@ -40,6 +40,7 @@ class TestDeepgramClient:
         auth_manager = Mock(spec=AuthManager)
         auth_manager.get_api_key.return_value = "sk-test"
         auth_manager.get_project_id.return_value = "test-project"
+        auth_manager.check_base_url.return_value = "https://api.deepgram.com"
         return auth_manager
 
     @pytest.fixture
@@ -70,9 +71,10 @@ class TestDeepgramClient:
         # Verify auth guard was called
         mock_auth_manager.guard.assert_called_once()
 
-        # Verify DGClient was created with keyword args
+        # Verify DGClient was created with keyword args, without redirects
         assert mock_dg_client.called
         assert mock_dg_client.call_args.kwargs["api_key"] == "sk-test"
+        assert mock_dg_client.call_args.kwargs["follow_redirects"] is False
 
         # Verify client is cached
         assert client._client == mock_instance
@@ -104,6 +106,7 @@ class TestDeepgramClient:
         # Set custom base URL
         mock_profile = Mock()
         mock_profile.base_url = "https://custom.deepgram.com"
+        mock_auth_manager.check_base_url.return_value = "https://custom.deepgram.com"
         mock_config.get_profile.return_value = mock_profile
 
         client = DeepgramClient(mock_config, mock_auth_manager)
@@ -126,6 +129,7 @@ class TestDeepgramClient:
         mock_dg_client.assert_called_once_with(
             api_key="sk-test",
             environment=mock_env.return_value,
+            follow_redirects=False,
         )
 
     @patch("deepctl_core.client.DGClient")
@@ -136,6 +140,7 @@ class TestDeepgramClient:
         """A plaintext (http) base URL keeps http/ws — it isn't forced to TLS."""
         mock_profile = Mock()
         mock_profile.base_url = "http://localhost:8080"
+        mock_auth_manager.check_base_url.return_value = "http://localhost:8080"
         mock_config.get_profile.return_value = mock_profile
 
         client = DeepgramClient(mock_config, mock_auth_manager)
@@ -338,20 +343,39 @@ class TestDeepgramClient:
 
         result = client.speak_text("Hello world", model="aura-2-asteria-en")
 
-        assert result is mock_audio_iter
+        assert list(result) == [b"audio"]
         mock_instance.speak.v1.audio.generate.assert_called_once_with(
             text="Hello world", model="aura-2-asteria-en"
         )
 
-    def test_speak_text_stream_forwards_flux_controls(self, client):
-        """Speed and expressivity reach the SDK's Speak v2 connect call."""
-        mock_sdk_client = MagicMock()
-        mock_connection = MagicMock()
-        mock_connection.__iter__.return_value = iter([b"audio"])
-        mock_sdk_client.speak.v2.connect.return_value.__enter__.return_value = (
-            mock_connection
-        )
-        client._client = mock_sdk_client
+    @staticmethod
+    def _fake_ws(monkeypatch, frames):
+        """Stand in for the redirect-refusing connect; record its arguments."""
+        from contextlib import contextmanager
+
+        from deepctl_core import websocket
+
+        calls = []
+        sent = []
+
+        class _WS:
+            def send(self, data):
+                sent.append(data)
+
+            def __iter__(self):
+                return iter(frames)
+
+        @contextmanager
+        def fake_connect(url, headers, **kwargs):
+            calls.append((url, headers, kwargs))
+            yield _WS()
+
+        monkeypatch.setattr(websocket, "connect_sync", fake_connect)
+        return calls, sent
+
+    def test_speak_text_stream_forwards_flux_controls(self, client, monkeypatch):
+        """Speed and expressivity reach the Speak v2 connect URL."""
+        calls, sent = self._fake_ws(monkeypatch, [b"audio"])
 
         result = list(
             client.speak_text_stream(
@@ -365,29 +389,37 @@ class TestDeepgramClient:
         )
 
         assert result == [b"audio"]
-        mock_sdk_client.speak.v2.connect.assert_called_once_with(
-            model="flux-alexis-en",
-            encoding="linear16",
-            sample_rate="24000",
-            speed=0.9,
-            expressivity=2,
+        [(url, headers, kwargs)] = calls
+        assert url == (
+            "wss://api.deepgram.com/v2/speak?model=flux-alexis-en"
+            "&encoding=linear16&sample_rate=24000&speed=0.9&expressivity=2"
         )
+        # The SDK's own headers, as its connect sent them.
+        assert headers["Authorization"] == "Token sk-test"
+        assert headers["User-Agent"].startswith("deepgram-sdk/")
+        assert headers["X-Fern-SDK-Name"] == "deepgram-sdk"
+        assert kwargs == {"command": "dg speak", "payload": "text"}
+        assert '"text": "Hello world"' in sent[0]
 
-    def test_speak_text_stream_omits_unset_flux_controls(self, client):
+    def test_speak_text_stream_omits_unset_flux_controls(self, client, monkeypatch):
         """Unset controls are omitted rather than sent as null query values."""
-        mock_sdk_client = MagicMock()
-        mock_connection = MagicMock()
-        mock_connection.__iter__.return_value = iter([])
-        mock_sdk_client.speak.v2.connect.return_value.__enter__.return_value = (
-            mock_connection
-        )
-        client._client = mock_sdk_client
+        calls, _ = self._fake_ws(monkeypatch, [])
 
         assert (
             list(client.speak_text_stream("Hello world", model="flux-alexis-en")) == []
         )
 
-        mock_sdk_client.speak.v2.connect.assert_called_once_with(model="flux-alexis-en")
+        assert calls[0][0] == "wss://api.deepgram.com/v2/speak?model=flux-alexis-en"
+
+    def test_speak_text_stream_follows_a_custom_base_url(
+        self, client, mock_auth_manager, monkeypatch
+    ):
+        calls, _ = self._fake_ws(monkeypatch, [])
+        mock_auth_manager.check_base_url.return_value = "http://127.0.0.1:8001/"
+
+        list(client.speak_text_stream("Hi", model="flux-alexis-en"))
+
+        assert calls[0][0].startswith("ws://127.0.0.1:8001/v2/speak?")
 
     @patch("deepctl_core.client.DGClient")
     def test_analyze_text(self, mock_dg_client, client):

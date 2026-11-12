@@ -19,12 +19,22 @@ from deepctl_cmd_plugin.models import (
     PluginOperationResult,
 )
 from deepctl_cmd_update.installation import InstallMethod
+from deepctl_core import config as config_module
 from deepctl_core import output, skill_bundle
 from deepctl_core import skill_generator as sg
 from deepctl_core.auth import AuthManager
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
+from deepctl_core.output import AI_AGENT_ENV_MARKERS
 from deepctl_core.skill_bundle import RepoSkill, SkillFetchError
+
+
+@pytest.fixture(autouse=True)
+def _person_at_terminal(monkeypatch):
+    """Tests run as a person unless they say otherwise."""
+    from deepctl_cmd_plugin import command as _plugin_command
+
+    monkeypatch.setattr(_plugin_command, "is_ai_agent", lambda: False)
 
 REF = skill_bundle.DEFAULT_SKILLS_COMMIT
 RETRY = "run 'dg skills update' to try again"
@@ -99,7 +109,9 @@ def bundle(tmp_path, monkeypatch):
         for name in ("api", "docs"):
             folder = tmp_path / "bundle" / "skills" / name
             folder.mkdir(parents=True, exist_ok=True)
-            (folder / "SKILL.md").write_bytes(f"---\nname: {name}\n---\n{ref}\n".encode())
+            (folder / "SKILL.md").write_bytes(
+                f"---\nname: {name}\n---\n{ref}\n".encode()
+            )
             skills.append(RepoSkill(name, folder))
         return skills
 
@@ -198,8 +210,7 @@ class TestPluginCommand:
         assert self.command.help == "Manage deepctl plugins"
         assert self.command._plugin_dir == Path.home() / ".deepctl" / "plugins"
         assert (
-            self.command._plugin_venv
-            == Path.home() / ".deepctl" / "plugins" / "venv"
+            self.command._plugin_venv == Path.home() / ".deepctl" / "plugins" / "venv"
         )
         assert (
             self.command._plugin_state_file
@@ -207,23 +218,51 @@ class TestPluginCommand:
         )
 
     @patch("deepctl_cmd_plugin.command.subprocess.run")
-    def test_ensure_plugin_environment_creates_venv(
-        self, mock_run: MagicMock
-    ) -> None:
+    def test_ensure_plugin_environment_creates_venv(self, mock_run: MagicMock) -> None:
         """Test that plugin environment is created when it doesn't exist."""
         # Mock that venv doesn't exist
         with patch.object(Path, "exists", return_value=False):
             with patch.object(Path, "mkdir"):
                 mock_run.return_value.returncode = 0
 
-                success, python_path = (
-                    self.command._ensure_plugin_environment()
-                )
+                success, python_path = self.command._ensure_plugin_environment()
 
                 assert success is True
                 assert "python" in python_path
                 # Should call: venv creation, pip upgrade, deepctl-core install
                 assert mock_run.call_count == 3
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX modes")
+    def test_ensure_plugin_environment_creates_an_owner_only_venv(
+        self, tmp_path: Path
+    ) -> None:
+        """Under umask 0002 the plugin dir and venv still come out 0700,
+        and an open plugin dir from an earlier version is narrowed."""
+        import stat
+
+        home = tmp_path / "home"
+        (home / ".deepctl" / "plugins").mkdir(parents=True)
+        (home / ".deepctl" / "plugins").chmod(0o775)
+        venv = home / ".deepctl" / "plugins" / "venv"
+        self.command._plugin_dir = venv.parent
+        self.command._plugin_venv = venv
+
+        def fake_run(args: list[str], **kwargs: object) -> MagicMock:
+            if args[1:3] == ["-m", "venv"]:
+                (Path(args[3]) / "bin").mkdir(parents=True, exist_ok=True)
+                (Path(args[3]) / "bin" / "python").write_text("")
+            return MagicMock(returncode=0)
+
+        old = os.umask(0o002)
+        try:
+            with patch("deepctl_cmd_plugin.command.subprocess.run", fake_run):
+                ok, _ = self.command._ensure_plugin_environment()
+        finally:
+            os.umask(old)
+        assert ok is True
+        assert stat.S_IMODE(venv.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(venv.parent.parent.stat().st_mode) & 0o022 == 0
 
     def test_ensure_plugin_environment_existing(self) -> None:
         """Test that existing plugin environment is used."""
@@ -240,15 +279,13 @@ class TestPluginCommand:
             state = self.command._get_plugin_state()
             assert state == {"plugins": {}}
 
-    def test_get_plugin_state_existing(self) -> None:
+    def test_get_plugin_state_existing(self, tmp_path: Path) -> None:
         """Test getting plugin state from existing file."""
         test_state = {"plugins": {"test-plugin": {"version": "1.0.0"}}}
-
-        with patch.object(Path, "exists", return_value=True), patch.object(
-            Path, "read_text", return_value=json.dumps(test_state)
-        ):
-            state = self.command._get_plugin_state()
-            assert state == test_state
+        state_file = tmp_path / "plugins.json"
+        state_file.write_text(json.dumps(test_state))
+        self.command._plugin_state_file = state_file
+        assert self.command._get_plugin_state() == test_state
 
     def test_save_plugin_state(self) -> None:
         """Test saving plugin state."""
@@ -261,9 +298,7 @@ class TestPluginCommand:
             assert written_data == test_state
 
     @patch("deepctl_cmd_plugin.strategies.subprocess.run")
-    def test_install_plugin_pip_environment(
-        self, mock_strategy_run: MagicMock
-    ) -> None:
+    def test_install_plugin_pip_environment(self, mock_strategy_run: MagicMock) -> None:
         """Test installing plugin in pip environment."""
         # Mock pip installation detection
         with patch.object(self.command.detector, "detect") as mock_detect:
@@ -302,20 +337,18 @@ class TestPluginCommand:
                 )
 
                 # Mock state and version operations
-                with patch.object(
-                    self.command, "_get_plugin_state"
-                ) as mock_get_state, patch.object(
-                    self.command, "_save_plugin_state"
-                ) as mock_save_state, patch.object(
-                    self.command,
-                    "_get_package_version",
-                    return_value="1.0.0",
+                with (
+                    patch.object(self.command, "_get_plugin_state") as mock_get_state,
+                    patch.object(self.command, "_save_plugin_state") as mock_save_state,
+                    patch.object(
+                        self.command,
+                        "_get_package_version",
+                        return_value="1.0.0",
+                    ),
                 ):
                     mock_get_state.return_value = {"plugins": {}}
 
-                    options = PluginInstallOptions(
-                        package="test-plugin"
-                    )
+                    options = PluginInstallOptions(package="test-plugin")
                     result = self.command.install_plugin(
                         self.config,
                         self.auth_manager,
@@ -339,9 +372,7 @@ class TestPluginCommand:
             with patch(
                 "deepctl_cmd_plugin.strategies.subprocess.run"
             ) as mock_strategy_run:
-                mock_strategy_run.return_value = MagicMock(
-                    returncode=0, stdout="OK"
-                )
+                mock_strategy_run.return_value = MagicMock(returncode=0, stdout="OK")
 
                 # Mock _get_package_version to return a version string
                 with patch.object(
@@ -368,9 +399,7 @@ class TestPluginCommand:
             from deepctl_cmd_plugin.models import PluginPackage
 
             mock_discover.return_value = [
-                PluginPackage(
-                    name="test-plugin", version="1.0.0", is_builtin=False
-                )
+                PluginPackage(name="test-plugin", version="1.0.0", is_builtin=False)
             ]
 
             # Mock pip environment
@@ -525,15 +554,12 @@ class TestPluginCommand:
             ),
         ]
 
-        with patch.object(
-            self.command, "_discover_plugins", return_value=test_plugins
-        ), patch(
-            "deepctl_cmd_plugin.command.console.print"
-        ) as mock_print, patch(
-            "deepctl_cmd_plugin.command.print_info"
-        ) as mock_print_info, patch.object(
-            self.command.detector, "detect"
-        ) as mock_detect:
+        with (
+            patch.object(self.command, "_discover_plugins", return_value=test_plugins),
+            patch("deepctl_cmd_plugin.command.console.print") as mock_print,
+            patch("deepctl_cmd_plugin.command.print_info") as mock_print_info,
+            patch.object(self.command.detector, "detect") as mock_detect,
+        ):
             mock_detect.return_value.method = InstallMethod.SYSTEM
 
             self.command.list_plugins(
@@ -547,8 +573,7 @@ class TestPluginCommand:
             mock_print.assert_called_once()
             # Should show system installation info via print_info
             assert any(
-                "system" in str(call).lower()
-                for call in mock_print_info.call_args_list
+                "system" in str(call).lower() for call in mock_print_info.call_args_list
             )
 
     def test_setup_commands(self) -> None:
@@ -566,9 +591,7 @@ class TestPluginCommand:
     def test_handle_search(self) -> None:
         """Test the search command functionality."""
         # Mock the registry
-        with patch.object(
-            self.command, "_get_plugin_registry"
-        ) as mock_registry:
+        with patch.object(self.command, "_get_plugin_registry") as mock_registry:
             from deepctl_cmd_plugin.models import PluginRegistryEntry
 
             mock_registry.return_value = [
@@ -589,23 +612,18 @@ class TestPluginCommand:
             ]
 
             # Mock discover_plugins to simulate one installed
-            with patch.object(
-                self.command, "_discover_plugins"
-            ) as mock_discover:
+            with patch.object(self.command, "_discover_plugins") as mock_discover:
                 from deepctl_cmd_plugin.models import PluginPackage
 
                 mock_discover.return_value = [
-                    PluginPackage(
-                        name="test-plugin", version="1.0.0", is_builtin=False
-                    )
+                    PluginPackage(name="test-plugin", version="1.0.0", is_builtin=False)
                 ]
 
                 # Test search all
-                with patch(
-                    "deepctl_cmd_plugin.command.console.print"
-                ) as mock_print, patch(
-                    "deepctl_cmd_plugin.command.print_info"
-                ) as mock_info:
+                with (
+                    patch("deepctl_cmd_plugin.command.console.print") as mock_print,
+                    patch("deepctl_cmd_plugin.command.print_info") as mock_info,
+                ):
                     self.command._handle_search(
                         self.config, self.auth_manager, self.client
                     )
@@ -614,14 +632,11 @@ class TestPluginCommand:
                     mock_print.assert_called_once()
                     # Should show install hint
                     assert any(
-                        "install" in str(call)
-                        for call in mock_info.call_args_list
+                        "install" in str(call) for call in mock_info.call_args_list
                     )
 
                 # Test search with query
-                with patch(
-                    "deepctl_cmd_plugin.command.console.print"
-                ) as mock_print:
+                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
                     self.command._handle_search(
                         self.config,
                         self.auth_manager,
@@ -633,9 +648,7 @@ class TestPluginCommand:
                     mock_print.assert_called_once()
 
                 # Test search installed only
-                with patch(
-                    "deepctl_cmd_plugin.command.console.print"
-                ) as mock_print:
+                with patch("deepctl_cmd_plugin.command.console.print") as mock_print:
                     self.command._handle_search(
                         self.config,
                         self.auth_manager,
@@ -647,13 +660,62 @@ class TestPluginCommand:
                     mock_print.assert_called_once()
 
     def test_get_plugin_registry(self) -> None:
-        """Test that plugin registry returns hardcoded plugins."""
+        """The registry lists only the Deepgram-published example plugin."""
         registry = self.command._get_plugin_registry()
 
-        assert len(registry) > 0
-        assert any(p.name == "deepctl-plugin-example" for p in registry)
-        assert all(hasattr(p, "description") for p in registry)
-        assert all(hasattr(p, "version") for p in registry)
+        assert [p.name for p in registry] == ["deepctl-plugin-example"]
+        assert all(p.install_name == p.name for p in registry)
+
+    def test_registry_lists_no_unpublished_names(self) -> None:
+        """The registry lists none of the six placeholder names."""
+        removed = {
+            "deepctl-plugin-tts",
+            "deepctl-plugin-analyze",
+            "deepctl-plugin-batch",
+            "deepctl-plugin-export",
+            "deepctl-plugin-realtime",
+            "deepctl-plugin-translate",
+        }
+        for p in self.command._get_plugin_registry():
+            assert p.name not in removed
+            assert p.install_name not in removed
+            assert "deepgram-community" not in (p.url or "")
+            assert "deepgram-labs" not in (p.url or "")
+
+    def test_search_output_lists_none_of_the_removed_names(self) -> None:
+        with (
+            patch.object(self.command, "_discover_plugins", return_value=[]),
+            patch("deepctl_cmd_plugin.command.console") as mock_console,
+        ):
+            self.command._handle_search(
+                self.config, self.auth_manager, self.client, query=""
+            )
+        table = mock_console.print.call_args[0][0]
+        names = [str(cell) for cell in table.columns[0]._cells]
+        assert names == ["deepctl-plugin-example"]
+        # No version column: a hardcoded version would drift from releases.
+        assert [c.header for c in table.columns] == ["Name", "Description", "Status"]
+
+    def test_registry_entry_points_at_the_example_package(self) -> None:
+        (entry,) = self.command._get_plugin_registry()
+        assert entry.url == (
+            "https://github.com/deepgram/cli/tree/main/packages/deepctl-plugin-example"
+        )
+        assert entry.author == "Deepgram"
+        assert entry.version is None
+
+    def test_search_install_hint(self) -> None:
+        with (
+            patch.object(self.command, "_discover_plugins", return_value=[]),
+            patch("deepctl_cmd_plugin.command.console"),
+            patch("deepctl_cmd_plugin.command.print_info") as info,
+        ):
+            self.command._handle_search(
+                self.config, self.auth_manager, self.client, query=""
+            )
+        info.assert_called_once_with(
+            "To install one, run: dg plugin install <name>", stderr=True
+        )
 
     def test_uses_shared_plugin_env_constants(self) -> None:
         """Test that PluginCommand uses shared constants from plugin_env."""
@@ -682,9 +744,7 @@ class TestPluginCommand:
                     "deepctl_cmd_plugin.command.get_venv_python",
                     return_value="/fake/venv/bin/python",
                 ):
-                    success, python_path = (
-                        self.command._ensure_plugin_environment()
-                    )
+                    success, python_path = self.command._ensure_plugin_environment()
 
                     assert success is True
                     # Should use system python to create the venv
@@ -703,9 +763,7 @@ class TestPluginCommand:
         """Test that frozen binary fails gracefully when no system Python found."""
         with patch.object(Path, "exists", return_value=False):
             with patch.object(Path, "mkdir"):
-                success, python_path = (
-                    self.command._ensure_plugin_environment()
-                )
+                success, python_path = self.command._ensure_plugin_environment()
 
                 assert success is False
                 assert python_path == ""
@@ -727,9 +785,7 @@ class TestPluginCommand:
         """Test that install_plugin delegates to strategy."""
         with patch.object(self.command.detector, "detect") as mock_detect:
             mock_detect.return_value.method = InstallMethod.PIP
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="Installed"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="Installed")
 
             options = PluginInstallOptions(package="test-plugin")
             result = self.command.install_plugin(
@@ -745,16 +801,12 @@ class TestPluginCommand:
 
         with patch.object(self.command, "_discover_plugins") as mock_discover:
             mock_discover.return_value = [
-                PluginPackage(
-                    name="test-plugin", version="1.0.0", is_builtin=False
-                )
+                PluginPackage(name="test-plugin", version="1.0.0", is_builtin=False)
             ]
 
             with patch.object(self.command.detector, "detect") as mock_detect:
                 mock_detect.return_value.method = InstallMethod.PIP
-                mock_run.return_value = MagicMock(
-                    returncode=0, stdout="Removed"
-                )
+                mock_run.return_value = MagicMock(returncode=0, stdout="Removed")
 
                 result = self.command.remove_plugin(
                     self.config, self.auth_manager, self.client, "test-plugin"
@@ -1150,3 +1202,248 @@ class TestSkillsRefresh:
         out, err = refresh(capsys)
         assert err.splitlines() == ["⚠ " + sg._msg("E12", staging=staging)]
         assert out == ""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX venv layout")
+class TestPluginEnvUnderAgent:
+    """Under an AI-agent marker, `dg plugin` never runs a venv python found
+    through $HOME, and refuses the plugin environment
+    when the real-home one can't be used."""
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        from deepctl_core import plugin_env
+
+        for var in (*AI_AGENT_ENV_MARKERS, "OR_APP_NAME", "OR_SITE_URL"):
+            monkeypatch.delenv(var, raising=False)
+        repo_home = tmp_path / "repohome"
+        plugins = repo_home / ".deepctl" / "plugins"
+        venv = plugins / "venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\nversion = 3.12.0\n")
+        (plugins / "plugins.json").write_text(
+            '{"plugins": {"repo-plugin": {"version": "9.9"}}}'
+        )
+        marker = tmp_path / "exec-marker"
+        python = venv / "bin" / "python"
+        python.write_text(
+            "#!/bin/sh\n"
+            f'echo "EXEC key=$DEEPGRAM_API_KEY" >> {marker}\n'
+            'exec python3 "$@"\n'
+        )
+        python.chmod(0o755)
+        # The process started with HOME pointing at the repo directory.
+        monkeypatch.setattr(plugin_env, "PLUGIN_DIR", plugins)
+        monkeypatch.setattr(plugin_env, "PLUGIN_VENV", venv)
+        monkeypatch.setattr(plugin_env, "PLUGIN_STATE_FILE", plugins / "plugins.json")
+        real_home = tmp_path / "realhome"
+        real_home.mkdir()
+        monkeypatch.setattr(config_module, "_real_home", lambda: str(real_home))
+        monkeypatch.setenv("DEEPGRAM_API_KEY", "sk-FAKEKEYSENTINEL123")
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        return {"marker": marker, "real_home": real_home, "tmp": tmp_path}
+
+    def _run(self, action) -> None:
+        command = PluginCommand()
+        config = MagicMock(spec=Config)
+        auth = MagicMock(spec=AuthManager)
+        client = MagicMock(spec=DeepgramClient)
+        with patch("deepctl_cmd_plugin.command.console"):
+            if action == "search":
+                command._handle_search(config, auth, client, query="")
+            elif action == "list":
+                command.list_plugins(config, auth, client, verbose=True)
+            else:
+                command.remove_plugin(config, auth, client, "repo-plugin")
+
+    @pytest.mark.parametrize("action", ["search", "list", "remove"])
+    def test_home_venv_python_never_runs(self, env, action):
+        self._run(action)
+        assert not env["marker"].exists()
+
+    def test_uses_real_home_paths(self, env):
+        command = PluginCommand()
+        expected = env["real_home"].resolve() / ".deepctl" / "plugins"
+        assert command._plugin_dir == expected
+        assert command._plugin_venv == expected / "venv"
+        assert command._plugin_state_file == expected / "plugins.json"
+
+    def test_list_never_reads_the_home_plugins_json(self, env):
+        """$HOME's plugins.json (a repo file) isn't read or shown."""
+        command = PluginCommand()
+        assert command._skipped_plugins() == []
+
+    @staticmethod
+    def _skipped_real_home(env, monkeypatch, state: str) -> None:
+        """A real-home venv that lists plugins, refused because the working
+        directory contains the home directory."""
+        plugins = env["real_home"] / ".deepctl" / "plugins"
+        (plugins / "venv").mkdir(parents=True)
+        (plugins / "plugins.json").write_text(state)
+        monkeypatch.chdir(env["tmp"])
+
+    def _list_cells(self):
+        command = PluginCommand()
+        with (
+            patch("deepctl_cmd_plugin.command.console") as console_mock,
+            patch.object(command, "_discover_from_environment", return_value=[]),
+        ):
+            command.list_plugins(
+                MagicMock(spec=Config),
+                MagicMock(spec=AuthManager),
+                MagicMock(spec=DeepgramClient),
+                verbose=True,
+            )
+        table = console_mock.print.call_args[0][0]
+        return [[str(cell) for cell in column._cells] for column in table.columns]
+
+    def test_list_shows_skipped_real_home_plugins(self, env, monkeypatch):
+        self._skipped_real_home(
+            env, monkeypatch, '{"plugins": {"rv-good-plugin": {"version": "1.0"}}}'
+        )
+        cells = self._list_cells()
+        assert cells[0] == ["rv-good-plugin"]
+        assert cells[1] == ["1.0"]
+        assert cells[2] == ["Skipped"]
+
+    @pytest.mark.parametrize(
+        "evil",
+        [
+            "\x1b]8;;https://evil.example\x1b\\deepctl-plugin-example\x1b]8;;\x1b\\",
+            "\x1b]0;owned\x07name",
+            "\x1b]52;c;ZXZpbA==\x07",
+            "\x1b[2Jcleared",
+            "real\nforged-row",
+            "[bold red]markup[/bold red]",
+        ],
+    )
+    def test_list_shows_plugin_fields_literally(self, env, monkeypatch, evil):
+        import json as _json
+
+        self._skipped_real_home(
+            env,
+            monkeypatch,
+            _json.dumps({"plugins": {evil: {"version": evil}}}),
+        )
+        cells = self._list_cells()
+        assert len(cells[0]) == 1  # no forged row
+        for column in cells:
+            for cell in column:
+                text = str(cell)
+                assert "\x1b" not in text and "\x07" not in text
+                assert "\n" not in text
+
+    @pytest.mark.parametrize(
+        "kind", ["dev-zero", "fifo", "big", "not-object", "symlink"]
+    )
+    def test_state_file_is_read_defensively(self, env, monkeypatch, kind, tmp_path):
+        from deepctl_core.plugin_env import (
+            MAX_STATE_FILE_BYTES,
+            read_plugin_state_file,
+        )
+
+        path = tmp_path / "plugins.json"
+        if kind == "dev-zero":
+            path.symlink_to("/dev/zero")
+        elif kind == "fifo":
+            os.mkfifo(path)
+        elif kind == "big":
+            path.write_text(
+                '{"plugins": {"a": {"version": "' + "x" * MAX_STATE_FILE_BYTES + '"}}}'
+            )
+        elif kind == "not-object":
+            path.write_text("[1, 2, 3]")
+        else:
+            target = tmp_path / "real.json"
+            target.write_text('{"plugins": {"a": {}}}')
+            path.symlink_to(target)
+        assert read_plugin_state_file(path) == {"plugins": {}}
+
+    def test_remove_of_a_skipped_plugin_says_why(self, env, monkeypatch):
+        """Under an agent, removing a plugin from the skipped environment
+        reports the environment, not 'not installed'."""
+        self._skipped_real_home(
+            env, monkeypatch, '{"plugins": {"rv-good-plugin": {"version": "1.0"}}}'
+        )
+        command = PluginCommand()
+        with patch.object(command, "_discover_from_environment", return_value=[]):
+            result = command.remove_plugin(
+                MagicMock(spec=Config),
+                MagicMock(spec=AuthManager),
+                MagicMock(spec=DeepgramClient),
+                "rv-good-plugin",
+            )
+        assert result.success is False
+        assert result.error is not None
+        assert result.error.startswith("Can't use the plugin environment")
+
+    def test_install_under_agent_prints_one_error_and_the_hint(
+        self, env, monkeypatch, capsys
+    ):
+        from deepctl_cmd_update.installation import InstallMethod
+
+        monkeypatch.chdir(env["tmp"])  # the real home is inside cwd
+        command = PluginCommand()
+        info = MagicMock()
+        info.method = InstallMethod.SYSTEM
+        with (
+            patch.object(command.detector, "detect", return_value=info),
+            patch("deepctl_cmd_plugin.command.subprocess.run") as run,
+            pytest.raises(click.ClickException),
+        ):
+            command._handle_install(
+                MagicMock(spec=Config),
+                MagicMock(spec=AuthManager),
+                MagicMock(spec=DeepgramClient),
+                package="deepctl-plugin-example",
+            )
+        run.assert_not_called()
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Could not create isolated environment" not in err
+        assert err.count("Can't use the plugin environment") == 1
+        assert (
+            "A person must run this command in their own terminal. If you are an "
+            "AI agent, ask the user." in err
+        )
+
+    def test_refused_environment_runs_no_subprocess(self, env, monkeypatch):
+        monkeypatch.chdir(env["tmp"])  # the real home is inside cwd
+        command = PluginCommand()
+        assert command._plugin_venv is None
+        with patch("deepctl_cmd_plugin.command.subprocess.run") as run:
+            ok, python = command._ensure_plugin_environment()
+        assert (ok, python) == (False, "")
+        run.assert_not_called()
+        assert command._get_plugin_state() == {"plugins": {}}
+        with pytest.raises(RuntimeError):
+            command._save_plugin_state({"plugins": {}})
+        assert not (env["real_home"] / ".deepctl").exists()
+
+    def test_list_cells_render_emoji_codes_literally(self, env, monkeypatch):
+        from rich.console import Console
+
+        self._skipped_real_home(
+            env,
+            monkeypatch,
+            '{"plugins": {":white_check_mark: verified": {"version": ":x:"}}}',
+        )
+        command = PluginCommand()
+        with (
+            patch("deepctl_cmd_plugin.command.console") as console_mock,
+            patch.object(command, "_discover_from_environment", return_value=[]),
+        ):
+            command.list_plugins(
+                MagicMock(spec=Config),
+                MagicMock(spec=AuthManager),
+                MagicMock(spec=DeepgramClient),
+            )
+        table = console_mock.print.call_args[0][0]
+        out = Console(width=200, record=True)
+        with out.capture() as captured:
+            out.print(table)
+        text = captured.get()
+        assert ":white_check_mark: verified" in text and ":x:" in text
+        assert "\u2705" not in text and "\u274c" not in text

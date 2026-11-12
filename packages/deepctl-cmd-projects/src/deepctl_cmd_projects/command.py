@@ -315,7 +315,6 @@ class ProjectsCommand(BaseCommand):
         try:
             # Update current profile
             profile_name = config.profile or "default"
-            current_profile = config.get_profile(profile_name)
 
             # Test if project exists by trying to get it
             client = DeepgramClient(config, auth_manager)
@@ -329,13 +328,8 @@ class ProjectsCommand(BaseCommand):
                 if not self.confirm("Continue anyway?", default=False):
                     return BaseResult(status="cancelled", message="Cancelled by user")
 
-            # Update profile
-            config.create_profile(
-                profile_name,
-                api_key=current_profile.api_key,
-                project_id=project_id,
-                base_url=current_profile.base_url,
-            )
+            # Update only the project ID of the profile
+            config.update_profile(profile_name, project_id=project_id)
 
             status_console.print(
                 f"[green]✓[/green] Default project set to: {project_id}"
@@ -348,4 +342,7 @@ class ProjectsCommand(BaseCommand):
 
         except Exception as e:
             status_console.print(f"[red]Failed to set default project:[/red] {e}")
+            from deepctl_core.output import print_error_hint
+
+            print_error_hint(e)
             return BaseResult(status="error", message=str(e))

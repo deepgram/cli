@@ -167,7 +167,7 @@ dg requests --status failed --endpoint listen   # Debug failed requests
 dg api /v1/projects --jq '.projects[0].name'
 
 # MCP server for AI editors (Claude Code, Cursor, etc.)
-dg mcp --transport sse --port 8000
+dg mcp
 ```
 
 ## Features
@@ -277,11 +277,11 @@ dg debug probe --port 3100                # Live stream audio analysis
 
 ### MCP Server
 
-Connect Deepgram tools to AI coding assistants (Claude Code, Cursor, etc.).
+Give AI coding assistants (Claude Code, Cursor, etc.) Deepgram documentation
+search over stdio.
 
 ```bash
 dg mcp                                    # Start MCP server (stdio)
-dg mcp --transport sse --port 8000        # SSE transport
 ```
 
 Add to your editor's MCP config:
@@ -432,9 +432,53 @@ dg plugin remove <package>              # Remove
 
 Create your own — see the [plugin example](packages/deepctl-plugin-example).
 
+A plugin can't replace a built-in command such as `login` or `debug audio`.
+dg runs the built-in and prints a warning that names the plugin's package.
+A plugin whose entry point is named like a built-in command is skipped before
+it's imported, so none of its code runs; give the entry point a different name.
+To use a plugin's version anyway, list the command in the user config file
+at its standard location (`~/.config/deepctl/config.yaml` on Linux, or
+`$XDG_CONFIG_HOME/deepctl/config.yaml` when `XDG_CONFIG_HOME` is set;
+`~/Library/Application Support/deepctl/config.yaml` on macOS;
+`%LOCALAPPDATA%\deepgram\deepctl\config.yaml` on Windows):
+
+```yaml
+plugins:
+  allow_override:
+    - login
+    - debug audio
+```
+
+dg reads this setting only from that file, never from `deepgram.yaml` or a
+`--config` file. Only allow a plugin you trust: it receives everything you
+pass to that command, including API keys.
+
 ## Configuration
 
-**Priority:** CLI flags > environment variables > profile config > project config
+**Priority:** CLI flags > environment variables > project `deepgram.yaml` > user
+config. A project `deepgram.yaml` is read after the user config, but it can set
+only `output.*` settings and a regional Deepgram `base_url` (see below).
+
+The API key is the exception: dg uses `--api-key`, then the key `dg login` saved
+in your system keyring, then `DEEPGRAM_API_KEY`, then an `api_key` in the config
+file (where `dg login` saves it when no keyring is available).
+
+dg sends your API key only to Deepgram API hosts, to hosts you list in
+`api.allowed_hosts` in your own `config.yaml`, or to `DEEPGRAM_BASE_URL` (not in
+an AI agent session). Anything else is refused before a request is made. Hosts
+must use https: plain http works only for localhost, 127.0.0.0/8 and [::1]. For
+a proxy or self-hosted deployment, add its host (and port, to approve only that
+port):
+
+```yaml
+api:
+  allowed_hosts:
+    - my-proxy.example.com
+    - localhost:8080
+```
+
+A project's `deepgram.yaml` can't set credentials, a project ID, a profile or a
+non-Deepgram `base_url`, and can't approve hosts.
 
 ```bash
 dg login                                 # Interactive or --api-key
@@ -450,39 +494,9 @@ flag: `dg --output json <command>`. `dg speak --output FILE` writes audio to
 
 ## Telemetry
 
-The CLI phones home anonymous error reports to help us catch crashes and regressions before users have to file an issue. It's **on by default** and easy to turn off.
+This version of dg sends no telemetry: no error reports, usage data or other telemetry, whether a command succeeds or fails. dg still contacts the Deepgram API for the commands you run, and pypi.org to check for updates.
 
-**What's collected:** Python exceptions, stack traces, the CLI version, and the Python runtime. Request bodies, headers, cookies, API keys, email addresses, IP addresses, and usernames are scrubbed before send. No performance traces, no profiling, no replays — errors only.
-
-**Where it goes:** the `dx-cli` Sentry project owned by the Deepgram DX team.
-
-### Opt out
-
-Persistent (recommended) — add this to your `config.yaml`
-(`~/.config/deepctl/config.yaml` on Linux,
-`~/Library/Application Support/deepctl/config.yaml` on macOS,
-`%LOCALAPPDATA%\deepgram\deepctl\config.yaml` on Windows):
-
-```yaml
-telemetry:
-  enabled: false
-```
-
-One-shot (CI, scripts, single command):
-
-```bash
-DEEPCTL_TELEMETRY_DISABLED=1 dg listen recording.wav
-```
-
-### Override the destination
-
-For forks or self-hosted Sentry, point telemetry at your own DSN:
-
-```bash
-export DEEPCTL_TELEMETRY_DSN='https://<key>@<your-sentry>/<project>'
-```
-
-`DEEPCTL_TELEMETRY_DISABLED` always wins. The default DSN is baked into the package and only used when the override is unset.
+The `DEEPCTL_TELEMETRY_DISABLED` environment variable and the `telemetry.enabled` setting in `config.yaml` are still accepted, and the new `--no-telemetry` flag is accepted too, but none of them has an effect in this version. `DEEPCTL_TELEMETRY_DSN` is now ignored unless it points at the local machine, which is for tests. The last line of `dg --help` says that dg sends no telemetry.
 
 ## Development
 
@@ -514,7 +528,7 @@ cli/
 │   ├── deepctl-cmd-keys/             # API keys management command for deepctl
 │   ├── deepctl-cmd-listen/           # Listen (live speech-to-text) command for deepctl
 │   ├── deepctl-cmd-login/            # Login command for deepctl
-│   ├── deepctl-cmd-mcp/              # MCP proxy command for deepctl — connects to Deepgram's developer API
+│   ├── deepctl-cmd-mcp/              # MCP server for deepctl: Deepgram documentation search over stdio
 │   ├── deepctl-cmd-members/          # Members management command for deepctl
 │   ├── deepctl-cmd-models/           # Models command for deepctl
 │   ├── deepctl-cmd-plugin/           # Plugin management command for deepctl
@@ -529,7 +543,7 @@ cli/
 │   ├── deepctl-core/                 # Core components for deepctl
 │   ├── deepctl-plugin-example/       # Example plugin for deepctl
 │   ├── deepctl-shared-utils/         # Shared utilities for deepctl
-│   └── deepctl-telemetry/            # Opt-out phone-home telemetry for deepctl
+│   └── deepctl-telemetry/            # Error reporting for deepctl; this version sends no telemetry
 ├── tests/                            # Integration tests
 └── Makefile                          # Development tasks
 ```
@@ -555,7 +569,7 @@ cli/
 | `deepctl listen` | Listen (live speech-to-text) command for deepctl |
 | `deepctl login` | Login command for deepctl |
 | `deepctl logout` | Login command for deepctl |
-| `deepctl mcp` | MCP proxy command for deepctl — connects to Deepgram's developer API |
+| `deepctl mcp` | MCP server for deepctl: Deepgram documentation search over stdio |
 | `deepctl members` | Members management command for deepctl |
 | `deepctl models` | Models command for deepctl |
 | `deepctl plugin` | Plugin management command for deepctl |
@@ -590,7 +604,7 @@ cli/
 | [`deepctl-cmd-keys`](packages/deepctl-cmd-keys) | API keys management command for deepctl |
 | [`deepctl-cmd-listen`](packages/deepctl-cmd-listen) | Listen (live speech-to-text) command for deepctl |
 | [`deepctl-cmd-login`](packages/deepctl-cmd-login) | Login command for deepctl |
-| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP proxy command for deepctl — connects to Deepgram's developer API |
+| [`deepctl-cmd-mcp`](packages/deepctl-cmd-mcp) | MCP server for deepctl: Deepgram documentation search over stdio |
 | [`deepctl-cmd-members`](packages/deepctl-cmd-members) | Members management command for deepctl |
 | [`deepctl-cmd-models`](packages/deepctl-cmd-models) | Models command for deepctl |
 | [`deepctl-cmd-plugin`](packages/deepctl-cmd-plugin) | Plugin management command for deepctl |
@@ -605,7 +619,7 @@ cli/
 | [`deepctl-core`](packages/deepctl-core) | Core components for deepctl |
 | [`deepctl-plugin-example`](packages/deepctl-plugin-example) | Example plugin for deepctl |
 | [`deepctl-shared-utils`](packages/deepctl-shared-utils) | Shared utilities for deepctl |
-| [`deepctl-telemetry`](packages/deepctl-telemetry) | Opt-out phone-home telemetry for deepctl |
+| [`deepctl-telemetry`](packages/deepctl-telemetry) | Error reporting for deepctl; this version sends no telemetry |
 <!-- END:packages -->
 
 ## Release

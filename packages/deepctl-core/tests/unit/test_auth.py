@@ -667,7 +667,9 @@ class TestFiniteCredentialFlow:
 
         assert mock_config.create_profile.call_args.kwargs["api_key"] is None
 
-    def test_store_token_preserves_profile_base_url(self, mock_config):
+    def test_store_token_leaves_profile_base_url_to_config(self, mock_config):
+        # create_profile keeps the profile's own base_url; login never passes
+        # one, so a URL from --base-url or the environment can't be saved.
         from deepctl_core.auth import TokenResponse
 
         mock_config.get_profile.return_value.base_url = "https://staging.example.com"
@@ -682,10 +684,7 @@ class TestFiniteCredentialFlow:
         with patch("deepctl_core.auth.keyring"):
             auth._store_token(token)
 
-        assert (
-            mock_config.create_profile.call_args.kwargs["base_url"]
-            == "https://staging.example.com"
-        )
+        assert "base_url" not in mock_config.create_profile.call_args.kwargs
 
     def test_store_token_legacy_response_requires_reauthentication(self, mock_config):
         from deepctl_core.auth import TokenResponse

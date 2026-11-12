@@ -166,7 +166,7 @@ const commandCards: CommandCard[] = [
   // ── MCP & agents ────────────────────────────────────────────────────────
   { cmd: 'mcp', icon: 'bolt', color: 'brand',
     title: 'Run as MCP server',
-    desc: 'Expose every CLI command to Claude, Cursor, and other MCP clients.',
+    desc: 'Give Claude, Cursor and other MCP clients Deepgram documentation search.',
     lines: ['dg mcp'] },
   { cmd: 'skills', icon: 'robot', color: 'brand',
     title: 'Regenerate AI skill files',
@@ -175,8 +175,8 @@ const commandCards: CommandCard[] = [
 
   // ── plugins & updates ───────────────────────────────────────────────────
   { cmd: 'plugin', icon: 'puzzle', color: 'subtle',
-    title: 'Install a community plugin',
-    lines: ['dg plugin install deepctl-cmd-studio'] },
+    title: 'Install a plugin',
+    lines: ['dg plugin install deepctl-plugin-example'] },
   { cmd: 'update', icon: 'refresh', color: 'subtle',
     title: 'Self-update the CLI',
     desc: 'Detects your install method and runs the right upgrade command.',
@@ -1056,9 +1056,9 @@ import consentTrackersJs from '../consent/trackers.js?raw';
     ],
     // ── MCP server for AI editors ─────────────────
     [
-      { p: '❯ ', t: 'dg mcp --transport sse --port 8000', c: '' },
-      { p: '',   t: 'Starting MCP proxy (sse) on 127.0.0.1:8000…', c: '#13ef95' },
-      { p: '',   t: '  Add to your AI editor: http://127.0.0.1:8000/sse', c: '#949498' },
+      { p: '❯ ', t: 'claude mcp add deepgram -- dg mcp', c: '' },
+      { p: '',   t: 'Added stdio MCP server deepgram with command: dg mcp', c: '#13ef95' },
+      { p: '',   t: '  Your editor starts dg mcp over stdio', c: '#949498' },
       { p: '',   t: '', c: '' },
     ],
   ];

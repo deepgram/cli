@@ -338,6 +338,87 @@ class TestGlobalOptionHint:
         assert "Error" in captured.err
 
 
+class TestRichTraceback:
+    """The rich excepthook installed at import doesn't render frame locals."""
+
+    def test_excepthook_does_not_render_locals(self, capsys):
+        assert sys.excepthook.__module__ == "rich.traceback"
+        # Built at runtime so the source-context lines rich prints can't
+        # contain it; only a rendered local variable could.
+        sentinel = "-".join(["LOCALS", "SENTINEL", "KEY"])
+
+        def crash() -> None:
+            value = sentinel  # noqa: F841
+            raise RuntimeError("boom")
+
+        try:
+            crash()
+        except RuntimeError:
+            sys.excepthook(*sys.exc_info())
+
+        captured = capsys.readouterr()
+        assert "RuntimeError" in captured.err
+        assert sentinel not in captured.err
+
+
+class TestHyphenatedCommands:
+    """`group-subcommand` is expanded only where the command name goes."""
+
+    @pytest.fixture
+    def expand(self):
+        from types import SimpleNamespace
+
+        from deepctl.main import preprocess_hyphenated_commands
+
+        def select(group):
+            if group == "deepctl.commands":
+                return [SimpleNamespace(name="debug"), SimpleNamespace(name="listen")]
+            if group == "deepctl.subcommands.debug":
+                return [SimpleNamespace(name="audio")]
+            return []
+
+        with patch("importlib.metadata.entry_points") as mock_eps:
+            mock_eps.return_value.select.side_effect = select
+            yield preprocess_hyphenated_commands
+
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            (["debug-audio", "--help"], ["debug", "audio", "--help"]),
+            (["--quiet", "debug-audio"], ["--quiet", "debug", "audio"]),
+            (["-qv", "debug-audio"], ["-qv", "debug", "audio"]),
+            (["--output=json", "debug-audio"], ["--output=json", "debug", "audio"]),
+            (
+                ["--profile", "debug-x", "debug-audio"],
+                ["--profile", "debug-x", "debug", "audio"],
+            ),
+            (["listen", "debug-call.wav"], ["listen", "debug-call.wav"]),
+            (
+                ["speak", "-v", "debug-voice", "hello"],
+                ["speak", "-v", "debug-voice", "hello"],
+            ),
+            (
+                ["debug-audio", "debug-audio.wav"],
+                ["debug", "audio", "debug-audio.wav"],
+            ),
+            (["--", "debug-audio"], ["--", "debug-audio"]),
+            (["-ojson", "debug-audio"], ["-ojson", "debug", "audio"]),
+            (["-pq", "debug-audio"], ["-pq", "debug", "audio"]),
+            (["-qpprod", "debug-audio"], ["-qpprod", "debug", "audio"]),
+            (["-cconfig.yaml", "debug-audio"], ["-cconfig.yaml", "debug", "audio"]),
+            (
+                ["-qp", "debug-x", "debug-audio"],
+                ["-qp", "debug-x", "debug", "audio"],
+            ),
+            (["-o", "json", "debug-audio"], ["-o", "json", "debug", "audio"]),
+            (["listen-now"], ["listen-now"]),
+            ([], []),
+        ],
+    )
+    def test_expansion(self, expand, args, expected):
+        assert expand(args) == expected
+
+
 def test_launcher_marker_is_captured_and_not_inherited():
     """DEEPCTL_LAUNCHER describes this process only; children must not see it."""
     import os
