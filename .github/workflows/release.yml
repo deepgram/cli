@@ -350,6 +350,13 @@ jobs:
       needs.release-please.outputs.release_created == 'true' &&
       startsWith(needs.release-please.outputs.tag_name, 'v')
     runs-on: ubuntu-latest
+    # Two root releases in quick succession would otherwise race on the tap:
+    # both read the same "current" formula and the older one could land
+    # last. Serialize; the version guard below makes the later job a no-op
+    # if a newer bump already merged.
+    concurrency:
+      group: homebrew-tap-bump
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
@@ -381,7 +388,7 @@ jobs:
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Open bump PR against homebrew-tap
+      - name: Open and merge bump PR against homebrew-tap
         working-directory: homebrew-tap
         env:
           GH_TOKEN: ${{ secrets.CLI_TAP_SYNC_PAT }}
@@ -390,6 +397,34 @@ jobs:
           set -euo pipefail
           VERSION="${TAG_NAME#v}"
           BRANCH="bump-deepctl-${VERSION}"
+
+          # sort -V is not PEP 440 aware, so only ever compare plain X.Y.Z,
+          # which is all release-please cuts for the root package.
+          is_plain_version() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+          version_gt() { [ "$1" != "$2" ] && [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]; }
+          formula_version() { sed -nE 's|^  url ".*/deepctl-([0-9][^/"]*)\.tar\.gz"$|\1|p'; }
+
+          # HEAD is the tap's main as checked out; the regenerate step only
+          # rewrote the working tree, so HEAD still holds what the tap serves.
+          CURRENT="$(git show HEAD:Formula/deepgram.rb | formula_version)"
+          GENERATED="$(formula_version < Formula/deepgram.rb)"
+          for v in "${VERSION}" "${CURRENT}" "${GENERATED}"; do
+            if ! is_plain_version "${v}"; then
+              echo "::error::Expected a plain X.Y.Z deepctl version, got '${v}'; check the tag and the formula template"
+              exit 1
+            fi
+          done
+          if [ "${GENERATED}" != "${VERSION}" ]; then
+            echo "::error::Regenerated formula points at deepctl ${GENERATED}, expected ${VERSION}"
+            exit 1
+          fi
+          # Never let a re-run of an older release replace a newer formula.
+          # Equal skips too: that bump already landed, and re-pinning resources
+          # under an unchanged version would not reach existing installs.
+          if ! version_gt "${VERSION}" "${CURRENT}"; then
+            echo "::warning::Tap already serves deepctl ${CURRENT}; not bumping to ${VERSION}"
+            exit 0
+          fi
 
           # Attribute the bump commit to whoever owns CLI_TAP_SYNC_PAT so the
           # homebrew-tap PR has a clear, linkable author. Using ${{ github.actor }}
@@ -401,14 +436,15 @@ jobs:
           git config user.email "${PAT_ID}+${PAT_LOGIN}@users.noreply.github.com"
           git checkout -b "${BRANCH}"
 
-          if git diff --quiet -- Formula/deepgram.rb; then
-            echo "::warning::Formula/deepgram.rb already at ${VERSION}; nothing to bump"
-            exit 0
-          fi
+          # Syntax check only: catches a broken template or a mangled resource
+          # block, not a wrong sha256 or a failing `brew install`.
+          ruby -c Formula/deepgram.rb
 
           git add Formula/deepgram.rb
           git commit -m "Bump deepctl to ${VERSION}"
-          git push -u origin "${BRANCH}"
+          # --force: a re-run must be able to replace the branch an earlier,
+          # failed attempt pushed, with the formula it just regenerated.
+          git push --force -u origin "${BRANCH}"
 
           BODY_FILE="$(mktemp)"
           cat > "${BODY_FILE}" <<EOF
@@ -419,11 +455,62 @@ jobs:
           If this PR breaks \`brew test\` or \`brew install\`, do not edit the formula directly — the file is auto-generated. Fix the template in [\`scripts/templates/deepgram.rb.template\`](https://github.com/deepgram/cli/blob/main/scripts/templates/deepgram.rb.template) and let the next release regenerate it. For emergency fixes, run \`scripts/bump_brew_formula.py\` locally and push directly.
           EOF
 
-          gh pr create \
-            --base main \
-            --head "${BRANCH}" \
-            --title "Bump deepctl to ${VERSION}" \
-            --body-file "${BODY_FILE}"
+          # Reuse the PR an earlier attempt opened, if any. Only trust a
+          # same-repo PR from the PAT owner: anyone can open a fork PR whose
+          # head branch has this name. $login is a jq variable, not shell.
+          # shellcheck disable=SC2016
+          OURS='[.[] | select((.isCrossRepository | not) and .author.login == $login)]'
+          PR_URL="$(gh pr list --head "${BRANCH}" --state open --json url,author,isCrossRepository \
+            | jq -r --arg login "${PAT_LOGIN}" "${OURS}"' | .[0].url // empty')"
+          if [ -z "${PR_URL}" ]; then
+            PR_URL="$(gh pr create \
+              --base main \
+              --head "${BRANCH}" \
+              --title "Bump deepctl to ${VERSION}" \
+              --body-file "${BODY_FILE}")"
+          fi
+          if [[ ! "${PR_URL}" =~ ^https://github\.com/deepgram/homebrew-tap/pull/[0-9]+$ ]]; then
+            echo "::error::Unexpected PR URL '${PR_URL}'"
+            exit 1
+          fi
+
+          # Merge it immediately. The formula is generated from PyPI metadata,
+          # and the tap has no checks or reviewers, so an open PR only delays
+          # Homebrew users: the 0.3.1, 0.3.2 and 0.3.3 bumps all sat unmerged
+          # while the tap served 0.2.26. The merged PR remains the audit trail.
+          # GitHub computes mergeability after the PR is created and gh does
+          # not wait for it, so retry a few times before giving up loudly.
+          for attempt in 1 2 3 4 5; do
+            if gh pr merge "${PR_URL}" --merge --delete-branch; then
+              break
+            fi
+            # Someone merged it by hand mid-loop, or gh merged it and then
+            # failed to delete the branch. Either way the bump landed.
+            if [ "$(gh pr view "${PR_URL}" --json state --jq .state || true)" = "MERGED" ]; then
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "::error::Could not merge ${PR_URL} after 5 attempts; merge it by hand"
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+          # Close older bump PRs this credential opened that never merged:
+          # they could only downgrade the tap now. Best effort; a cleanup
+          # failure must not fail a bump that already landed.
+          STALE="$(mktemp)"
+          gh pr list --state open --limit 100 --json url,headRefName,author,isCrossRepository \
+            | jq -r --arg login "${PAT_LOGIN}" "${OURS}"' | .[] | [.url, .headRefName] | @tsv' > "${STALE}" \
+            || { echo "::warning::Could not list stale bump PRs"; : > "${STALE}"; }
+          while IFS=$'\t' read -r url head; do
+            old="${head#bump-deepctl-}"
+            if ! { [ "${old}" != "${head}" ] && is_plain_version "${old}" && version_gt "${VERSION}" "${old}"; }; then
+              continue
+            fi
+            gh pr close "${url}" --delete-branch --comment "Superseded by ${PR_URL}." < /dev/null \
+              || echo "::warning::Could not close ${url}"
+          done < "${STALE}"
 
   publish-npm:
     name: Publish @deepgram/cli to npm
