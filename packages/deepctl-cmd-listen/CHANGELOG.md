@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.15](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.14...deepctl-cmd-listen-v0.0.15) (2026-11-12)
+
+
+### Bug Fixes
+
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+
 ## [0.0.14](https://github.com/deepgram/cli/compare/deepctl-cmd-listen-v0.0.13...deepctl-cmd-listen-v0.0.14) (2026-08-17)
 
 

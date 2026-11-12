@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.15](https://github.com/deepgram/cli/compare/deepctl-cmd-plugin-v0.1.14...deepctl-cmd-plugin-v0.1.15) (2026-11-12)
+
+
+### Features
+
+* **cli:** detect npm launcher installs in update, plugin and skills ([07e6fd9](https://github.com/deepgram/cli/commit/07e6fd9f8ba337a743e6a50ad96a2b29de53d37d))
+* **npm:** make @deepgram/cli the real Deepgram CLI ([#146](https://github.com/deepgram/cli/issues/146)) ([8ed20ee](https://github.com/deepgram/cli/commit/8ed20ee349c635e7a4b5c3d8ecbae8a4fa558fe1))
+
+
+### Bug Fixes
+
+* **cli:** keep ffprobe path and plugin changes out of AI agent sessions ([2df96f0](https://github.com/deepgram/cli/commit/2df96f0ee9cee8953f7e9f8ca4bf23f8c7ccea19))
+* **plugin:** keep plugins from replacing built-in commands ([dff78a2](https://github.com/deepgram/cli/commit/dff78a233a255b17f831e599bf417f125d0e5b7f))
+* **plugin:** make the plugin folders private ([6b9c257](https://github.com/deepgram/cli/commit/6b9c2576f116d81df1a6ed5015a7ae598aa04aa6))
+
 ## [0.1.14](https://github.com/deepgram/cli/compare/deepctl-cmd-plugin-v0.1.13...deepctl-cmd-plugin-v0.1.14) (2026-10-09)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.4](https://github.com/deepgram/cli/compare/deepctl-cmd-ffprobe-v0.0.3...deepctl-cmd-ffprobe-v0.0.4) (2026-11-12)
+
+
+### Bug Fixes
+
+* **cli:** keep ffprobe path and plugin changes out of AI agent sessions ([2df96f0](https://github.com/deepgram/cli/commit/2df96f0ee9cee8953f7e9f8ca4bf23f8c7ccea19))
+* **ffprobe:** never run an ffprobe found in the current directory or a relative PATH entry ([37d56c6](https://github.com/deepgram/cli/commit/37d56c60c8ea0ce46eb6f1beca15221328ade4c3))
+
 ## [0.0.3](https://github.com/deepgram/cli/compare/deepctl-cmd-ffprobe-v0.0.2...deepctl-cmd-ffprobe-v0.0.3) (2026-09-29)
 
 

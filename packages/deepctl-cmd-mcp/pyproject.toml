@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-mcp"
-version = "0.1.15" # x-release-please-version
+version = "0.1.16" # x-release-please-version
 description = "MCP server for deepctl: Deepgram documentation search over stdio"
 readme = "README.md"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
