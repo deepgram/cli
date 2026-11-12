@@ -16,6 +16,11 @@
       "extra-files": [
         "src/deepctl/__init__.py",
         {
+          "type": "json",
+          "path": "npm/package.json",
+          "jsonpath": "$.version"
+        },
+        {
           "type": "generic",
           "path": "pyproject.toml"
         },

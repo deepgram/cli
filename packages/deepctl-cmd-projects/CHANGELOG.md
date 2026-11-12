@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/deepgram/cli/compare/deepctl-cmd-projects-v0.2.0...deepctl-cmd-projects-v0.2.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+* **config:** read and write the config file safely ([36805f2](https://github.com/deepgram/cli/commit/36805f21c99b1554180fe90a4bcd8a5671e2bd38))
+
 ## [0.2.0](https://github.com/deepgram/cli/compare/deepctl-cmd-projects-v0.1.13...deepctl-cmd-projects-v0.2.0) (2026-08-19)
 
 

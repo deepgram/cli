@@ -138,8 +138,7 @@ def test_scans_the_shipped_text() -> None:
     assert "README.md" in names
     assert "packages/deepctl-cmd-mcp/README.md" in names
     assert "packages/deepctl-cmd-mcp/src/deepctl_cmd_mcp/command.py" in names
-    if (REPO / "web" / "public" / "llms-full.txt").exists():
-        assert "web/public/llms-full.txt" in names
+    assert "web/src/data/llms-full.txt" in names
 
 
 def test_no_untrue_mcp_text() -> None:

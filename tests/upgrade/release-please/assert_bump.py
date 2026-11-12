@@ -49,6 +49,7 @@ allowed = {
     "pyproject.toml",
     "CHANGELOG.md",
     ".github/.release-please-manifest.json",
+    "npm/package.json",
     *(f"{s}/pyproject.toml" for s in siblings),
     *version_files,
 }

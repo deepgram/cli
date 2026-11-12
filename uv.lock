@@ -1554,7 +1554,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "deepctl-plugin-example"
-version = "0.1.12"
+version = "0.1.13"
 source = { editable = "packages/deepctl-plugin-example" }
 dependencies = [
     { name = "click" },

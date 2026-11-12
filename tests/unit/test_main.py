@@ -634,3 +634,38 @@ class TestMcpServerRun:
             for opt in param.opts
         }
         assert takes_value == main_module._ROOT_VALUE_OPTIONS
+
+
+def test_launcher_captured_by_main_reaches_deepctl_core():
+    """main() takes DEEPCTL_LAUNCHER before deepctl_core is imported.
+
+    deepctl_core._launcher (the npm launcher's reader since 0.4.1) and
+    deepctl_cmd_update.channel must still see the value main() kept, and a
+    child process must not inherit the variable.
+    """
+    import os
+    import subprocess
+
+    code = (
+        "import os, subprocess, sys\n"
+        "import deepctl.main as m\n"
+        "sys.argv = ['dg', '--version']\n"
+        "m.main()\n"
+        "early = 'deepctl_core' in sys.modules\n"
+        "from deepctl_core import _launcher\n"
+        "from deepctl_cmd_update import channel\n"
+        "child = subprocess.run([sys.executable, '-c', "
+        "'import os; print(os.environ.get(\"DEEPCTL_LAUNCHER\"))'], "
+        "capture_output=True, text=True).stdout.strip()\n"
+        "print(early, m.LAUNCHER, _launcher.get_launcher(), "
+        "_launcher.launched_via_npm(), channel.launcher(), "
+        "'DEEPCTL_LAUNCHER' in os.environ, child, file=sys.stderr)\n"
+    )
+    env = {**os.environ, "DEEPCTL_LAUNCHER": "npm"}
+    out = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stderr.split() == [
+        "False", "npm", "npm", "True", "npm", "False", "None"
+    ]

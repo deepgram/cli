@@ -995,6 +995,23 @@ class TestSkillsStartupCheck:
         startup_check.check_and_notify(quiet=True)
         assert startup_check._thread is None
 
+    def test_npm_launcher_is_not_oneshot(self):
+        """npm runs deepctl via uv, but the npm install persists."""
+        from deepctl_cmd_skills import startup_check
+
+        env = {
+            "UV_INTERNAL__PARENT_INTERPRETER": "/usr/bin/python3",
+            "DEEPCTL_LAUNCHER": "npm",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            assert startup_check._is_oneshot() is False
+        from deepctl_core._launcher import reset_launcher_for_tests
+
+        reset_launcher_for_tests()
+        with patch.dict(os.environ, env, clear=False):
+            del os.environ["DEEPCTL_LAUNCHER"]
+            assert startup_check._is_oneshot() is True
+
     def test_suppressed_when_stderr_is_not_a_terminal(self):
         from deepctl_cmd_skills import startup_check
 

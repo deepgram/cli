@@ -98,6 +98,31 @@ def _fresh_credentials_state():
     credentials._reset_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_launcher_capture():
+    """Re-read DEEPCTL_LAUNCHER in each test, so env patches take effect.
+
+    deepctl.main.main() keeps the value it captured in LAUNCHER and sets
+    LAUNCHER_CAPTURED, and both readers (deepctl_core._launcher and
+    deepctl_cmd_update.channel) prefer that over the environment. A test that
+    ran main() in this process would otherwise decide what later tests see.
+    """
+    import sys
+
+    from deepctl_core._launcher import reset_launcher_for_tests
+
+    def forget() -> None:
+        reset_launcher_for_tests()
+        entry = sys.modules.get("deepctl.main")
+        if entry is not None:
+            entry.LAUNCHER_CAPTURED = False
+            entry.LAUNCHER = None
+
+    forget()
+    yield
+    forget()
+
+
 # ── Tests that send this process a real signal run in a child process ──────
 #
 # A test marked ``signals_in_child`` sends SIGTERM, SIGINT or SIGHUP to its

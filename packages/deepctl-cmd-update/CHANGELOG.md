@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.8](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.7...deepctl-cmd-update-v0.2.8) (2026-11-12)
+
+
+### Features
+
+* **cli:** detect npm launcher installs in update, plugin and skills ([07e6fd9](https://github.com/deepgram/cli/commit/07e6fd9f8ba337a743e6a50ad96a2b29de53d37d))
+* **npm:** make @deepgram/cli the real Deepgram CLI ([#146](https://github.com/deepgram/cli/issues/146)) ([8ed20ee](https://github.com/deepgram/cli/commit/8ed20ee349c635e7a4b5c3d8ecbae8a4fa558fe1))
+
+
+### Bug Fixes
+
+* **config:** read and write the config file safely ([36805f2](https://github.com/deepgram/cli/commit/36805f21c99b1554180fe90a4bcd8a5671e2bd38))
+* **npm:** address devrel-review findings on platform support, tests and docs ([1eb7b64](https://github.com/deepgram/cli/commit/1eb7b64e31aef26735857a47ef25f524ebf8aba5))
+* **update:** upgrade the deepgram Homebrew formula, not deepctl ([f41226f](https://github.com/deepgram/cli/commit/f41226ff61986f9b4658c06d98f2627e9ed78b30))
+
 ## [0.2.7](https://github.com/deepgram/cli/compare/deepctl-cmd-update-v0.2.6...deepctl-cmd-update-v0.2.7) (2026-09-23)
 
 

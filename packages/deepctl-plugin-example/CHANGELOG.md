@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-plugin-example-v0.1.12...deepctl-plugin-example-v0.1.13) (2026-11-12)
+
+
+### Documentation
+
+* tell plugin authors not to name an entry point like a built-in command ([371fb7a](https://github.com/deepgram/cli/commit/371fb7aec5f8a87ba3af277f226b75c75dbf8967))
+
 ## [0.1.12](https://github.com/deepgram/cli/compare/deepctl-plugin-example-v0.1.11...deepctl-plugin-example-v0.1.12) (2026-05-09)
 
 

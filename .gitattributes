@@ -6,4 +6,6 @@ packages/deepctl-core/src/deepctl_core/config.py whitespace=cr-at-eol
 packages/deepctl-core/src/deepctl_core/output.py whitespace=cr-at-eol
 packages/deepctl-core/src/deepctl_core/plugin_manager.py whitespace=cr-at-eol
 packages/deepctl-shared-utils/src/deepctl_shared_utils/validation.py whitespace=cr-at-eol
+# .gitignore is CRLF on main too; same treatment so new entries match the file.
+.gitignore whitespace=cr-at-eol
 packages/deepctl-core/tests/unit/fixtures/legacy_v03/** -text

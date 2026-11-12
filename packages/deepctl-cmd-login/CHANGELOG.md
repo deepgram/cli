@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.2.0...deepctl-cmd-login-v0.2.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+
 ## [0.2.0](https://github.com/deepgram/cli/compare/deepctl-cmd-login-v0.1.20...deepctl-cmd-login-v0.2.0) (2026-10-14)
 
 
