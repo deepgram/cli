@@ -38,10 +38,7 @@ def make_workspace(
 
     deps = ", ".join(f'"{dep}"' for dep in root_deps)
     (tmp_path / "pyproject.toml").write_text(
-        "[project]\n"
-        'name = "deepctl"\n'
-        'version = "1.0.0"\n'
-        f"dependencies = [{deps}]\n",
+        f'[project]\nname = "deepctl"\nversion = "1.0.0"\ndependencies = [{deps}]\n',
         encoding="utf-8",
     )
 
@@ -240,3 +237,223 @@ def test_final_release_floor_above_a_pre_release_is_unsatisfiable(
     result = run_guard(workspace)
     assert result.returncode == 1
     assert "exceeds workspace version 0.4.0rc1 (unsatisfiable)" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Rule 4: coupled sibling floors (SIBLING_FLOORS) track the sibling's
+# workspace version. deepctl-cmd-update imports deepctl_core._launcher, which
+# no published deepctl-core had; with a stale floor pip can pair the new
+# update package with an old core and `dg` fails at import.
+# ---------------------------------------------------------------------------
+
+COUPLED = {
+    "deepctl-core": "0.4.0",
+    "deepctl-cmd-update": "0.3.0",
+    "deepctl-cmd-skills": "0.1.0",
+    "deepctl-cmd-plugin": "0.2.0",
+}
+
+
+def write_package(workspace: Path, name: str, deps: list[str]) -> Path:
+    pyproject = workspace / "packages" / name / "pyproject.toml"
+    quoted = ", ".join(f'"{dep}"' for dep in deps)
+    pyproject.write_text(
+        f'[project]\nname = "{name}"\nversion = "{COUPLED[name]}"\n'
+        f"dependencies = [{quoted}]\n",
+        encoding="utf-8",
+    )
+    return pyproject
+
+
+def coupled_workspace(tmp_path: Path, update: str, skills: str, plugin: str) -> Path:
+    workspace = make_workspace(
+        tmp_path,
+        root_deps=[f"{name}>={version}" for name, version in COUPLED.items()],
+        packages=COUPLED,
+    )
+    write_package(workspace, "deepctl-cmd-update", [update])
+    write_package(workspace, "deepctl-cmd-skills", [skills])
+    write_package(workspace, "deepctl-cmd-plugin", ["deepctl-core>=0.1.0", plugin])
+    return workspace
+
+
+def package_dependencies(workspace: Path, name: str) -> list[str]:
+    text = (workspace / "packages" / name / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"^dependencies = (\[.*\])$", text, re.MULTILINE)
+    assert match, text
+    deps: list[str] = ast.literal_eval(match.group(1))
+    return deps
+
+
+def test_stale_sibling_floor_fails(tmp_path: Path) -> None:
+    """The 0.3.0-era floor that let pip pick a core without launcher.py."""
+    workspace = coupled_workspace(
+        tmp_path,
+        update="deepctl-core>=0.1.10",
+        skills="deepctl-core>=0.4.0",
+        plugin="deepctl-cmd-update>=0.3.0",
+    )
+
+    result = run_guard(workspace)
+    assert result.returncode == 1
+    assert (
+        "deepctl-cmd-update: floor deepctl-core>=0.1.10 != workspace version 0.4.0"
+        in result.stderr
+    )
+
+
+def test_missing_sibling_dependency_fails(tmp_path: Path) -> None:
+    """plugin imports deepctl_cmd_update, so it has to declare it."""
+    workspace = coupled_workspace(
+        tmp_path,
+        update="deepctl-core>=0.4.0",
+        skills="deepctl-core>=0.4.0",
+        plugin="packaging>=21.0",
+    )
+
+    result = run_guard(workspace)
+    assert result.returncode == 1
+    assert "deepctl-cmd-plugin must declare deepctl-cmd-update>=0.3.0" in result.stderr
+
+
+def test_fix_raises_sibling_floors_then_check_passes(tmp_path: Path) -> None:
+    """--fix rewrites every SIBLING_FLOORS pair and leaves other deps alone."""
+    workspace = coupled_workspace(
+        tmp_path,
+        update="deepctl-core>=0.1.10",
+        skills="deepctl-core[extra]>=0.2.19,<1",
+        plugin="deepctl-cmd-update>=0.2.7",
+    )
+
+    fix = run_guard(workspace, "--fix")
+    assert fix.returncode == 0, fix.stderr
+    assert package_dependencies(workspace, "deepctl-cmd-update") == [
+        "deepctl-core>=0.4.0"
+    ]
+    assert package_dependencies(workspace, "deepctl-cmd-skills") == [
+        "deepctl-core[extra]>=0.4.0,<1"
+    ]
+    # Not a SIBLING_FLOORS pair: still hand-maintained, untouched.
+    assert package_dependencies(workspace, "deepctl-cmd-plugin") == [
+        "deepctl-core>=0.1.0",
+        "deepctl-cmd-update>=0.3.0",
+    ]
+
+    check = run_guard(workspace)
+    assert check.returncode == 0, check.stderr
+
+
+def test_fix_does_not_invent_a_missing_sibling_dependency(tmp_path: Path) -> None:
+    """Adding a dependency is a code change; --fix only moves floors."""
+    workspace = coupled_workspace(
+        tmp_path,
+        update="deepctl-core>=0.4.0",
+        skills="deepctl-core>=0.4.0",
+        plugin="packaging>=21.0",
+    )
+
+    fix = run_guard(workspace, "--fix")
+    assert fix.returncode == 1
+    assert "deepctl-cmd-plugin must declare deepctl-cmd-update" in fix.stderr
+
+
+def test_sibling_floor_names_exist_in_the_real_manifest() -> None:
+    """A rename must not quietly turn rule 4 off.
+
+    The guard skips SIBLING_FLOORS entries whose package is absent so the
+    trimmed workspaces above stay valid; this pins the real names instead.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("floors_guard", SCRIPT)
+    assert spec and spec.loader
+    guard = importlib.util.module_from_spec(spec)
+    # @dataclass resolves annotations through sys.modules[cls.__module__].
+    sys.modules[spec.name] = guard
+    try:
+        spec.loader.exec_module(guard)
+    finally:
+        del sys.modules[spec.name]
+
+    names = set(guard.workspace_versions())
+    for pkg_name, siblings in guard.SIBLING_FLOORS.items():
+        assert pkg_name in names, pkg_name
+        for sibling in siblings:
+            assert sibling in names, sibling
+
+
+def test_real_workspace_passes_the_guard() -> None:
+    """`make floors-check` on the repo itself, as CI and the release run it."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "deepctl-core==0.3.0",
+        "deepctl-core~=0.3.0",
+        "deepctl-core<0.4",
+        "deepctl-core>=0.1,!=0.4.0",
+    ],
+)
+def test_non_floor_sub_package_specifier_that_excludes_the_sibling_fails(
+    tmp_path: Path, spec: str
+) -> None:
+    """Rule 2 used to skip anything that was not a plain `>=`."""
+    workspace = make_workspace(
+        tmp_path,
+        root_deps=["deepctl-core>=0.4.0", "deepctl-cmd-keys>=0.1.0"],
+        packages={"deepctl-core": "0.4.0", "deepctl-cmd-keys": "0.1.0"},
+    )
+    keys = workspace / "packages" / "deepctl-cmd-keys" / "pyproject.toml"
+    keys.write_text(
+        '[project]\nname = "deepctl-cmd-keys"\nversion = "0.1.0"\n'
+        f'dependencies = ["{spec}"]\n',
+        encoding="utf-8",
+    )
+
+    result = run_guard(workspace)
+    assert result.returncode == 1
+    assert f"{spec!r} excludes workspace version 0.4.0" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "spec", ["deepctl-core~=0.4.0", "deepctl-core<1", "deepctl-core==0.4.*"]
+)
+def test_non_floor_sub_package_specifier_that_admits_the_sibling_passes(
+    tmp_path: Path, spec: str
+) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        root_deps=["deepctl-core>=0.4.0", "deepctl-cmd-keys>=0.1.0"],
+        packages={"deepctl-core": "0.4.0", "deepctl-cmd-keys": "0.1.0"},
+    )
+    keys = workspace / "packages" / "deepctl-cmd-keys" / "pyproject.toml"
+    keys.write_text(
+        '[project]\nname = "deepctl-cmd-keys"\nversion = "0.1.0"\n'
+        f'dependencies = ["{spec}"]\n',
+        encoding="utf-8",
+    )
+
+    result = run_guard(workspace)
+    assert result.returncode == 0, result.stderr
+
+
+def test_pinned_sibling_floor_is_named_for_what_it_is(tmp_path: Path) -> None:
+    """A `==` pin on a SIBLING_FLOORS pair is not a missing dependency."""
+    workspace = coupled_workspace(
+        tmp_path,
+        update="deepctl-core==0.4.0",
+        skills="deepctl-core>=0.4.0",
+        plugin="deepctl-cmd-update>=0.3.0",
+    )
+
+    result = run_guard(workspace)
+    assert result.returncode == 1
+    assert "'deepctl-core==0.4.0' must be a `>=` floor" in result.stderr
+    assert "must declare" not in result.stderr

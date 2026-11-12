@@ -57,13 +57,22 @@ iwr https://deepgram.com/install.ps1 -useb | iex
 pip install deepctl          # pip
 uv tool install deepctl      # uv
 pipx install deepctl         # pipx
+npm install -g @deepgram/cli # npm (installs dg and deepgram)
 ```
+
+The npm package is a launcher for the same Python CLI. It needs
+Node.js 20+ and either [uv](https://docs.astral.sh/uv/) or Python 3.10-3.14
+with `venv`, and sets the CLI up on first run. It installs prebuilt wheels
+only, so it (and `npx`) fails on Intel Macs and Windows on ARM64, where
+`cryptography` has none; on an Intel Mac, use Homebrew. See
+[npm/README.md](npm/README.md).
 
 ### Try Without Installing
 
 ```bash
 uvx deepctl --help
 pipx run deepctl --help
+npx @deepgram/cli --help
 ```
 
 ## Getting Started

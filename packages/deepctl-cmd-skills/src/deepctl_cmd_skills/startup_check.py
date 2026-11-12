@@ -11,6 +11,8 @@ import sys
 import threading
 from pathlib import Path
 
+from deepctl_core._launcher import launched_via_npm
+
 # Environment variables that indicate a CI environment
 _CI_ENV_VARS = (
     "CI",
@@ -33,6 +35,10 @@ def _is_ci() -> bool:
 
 
 def _is_oneshot() -> bool:
+    # The npm launcher may run deepctl via `uv tool run`, but its install
+    # persists, so a one-time prompt is worth showing there too.
+    if launched_via_npm():
+        return False
     if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
         return True
     exe_path = str(Path(sys.executable).resolve())
@@ -110,7 +116,7 @@ def print_pending_notification() -> None:
         try:
             sys.stderr.write(
                 "\033[36mAI coding assistants detected. "
-                "Run 'deepctl skills install' to set up integration.\033[0m\n"
+                "Run 'dg skills install' to set up integration.\033[0m\n"
             )
         except (BrokenPipeError, OSError, ValueError):
             # The output stream closed (e.g. an MCP host disconnected stdio

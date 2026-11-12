@@ -261,7 +261,7 @@ def print_pending_plugin_notifications() -> None:
             u = updates[0]
             sys.stderr.write(
                 f"\033[33mPlugin update available: {u['name']} {u['current']} → {u['latest']}"
-                f"  —  run 'deepctl plugin update {u['name']}' to upgrade\033[0m\n"
+                f"  —  run 'dg plugin update {u['name']}' to upgrade\033[0m\n"
             )
         else:
             sys.stderr.write("\033[33mPlugin updates available:\033[0m\n")
@@ -270,7 +270,7 @@ def print_pending_plugin_notifications() -> None:
                     f"\033[33m  {u['name']} {u['current']} → {u['latest']}\033[0m\n"
                 )
             sys.stderr.write(
-                "\033[33mRun 'deepctl plugin update <name>' to upgrade\033[0m\n"
+                "\033[33mRun 'dg plugin update <name>' to upgrade\033[0m\n"
             )
     except (BrokenPipeError, OSError, ValueError):
         # The output stream closed (e.g. an MCP host disconnected stdio
