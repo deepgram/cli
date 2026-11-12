@@ -9,7 +9,7 @@ This test demonstrates the pytest suite capabilities including:
 - Custom assertions
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -191,7 +191,7 @@ class TestFileInfo:
     def test_file_info_modified_timestamp(self):
         """Test modified timestamp handling."""
         # Test with Unix timestamp
-        timestamp = 1704067200.0  # 2024-01-01 00:00:00
+        timestamp = 1704067200.0  # 2024-01-01 00:00:00 UTC
         file_data = {
             "path": "/tmp/file.txt",
             "exists": True,
@@ -201,8 +201,9 @@ class TestFileInfo:
         file_info = FileInfo(**file_data)
         assert file_info.modified == timestamp
 
-        # Verify timestamp represents expected date
-        dt = datetime.fromtimestamp(timestamp)
+        # Verify timestamp represents expected date (in UTC, so the check
+        # doesn't depend on the machine's local timezone)
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         assert dt.year == 2024
         assert dt.month == 1
         assert dt.day == 1
