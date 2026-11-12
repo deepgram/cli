@@ -30,8 +30,8 @@ pipx run deepctl --help
 ## Dependencies
 
 - `sentry-sdk>=2.35.0,<3`
-- `click>=8.0.0`
-- `rich>=13.0.0`
+- `click>=8.2.0,<9`
+- `rich>=13.0.0,<16`
 
 ## License
 

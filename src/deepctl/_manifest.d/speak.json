@@ -1,0 +1,378 @@
+{
+  "name": "speak",
+  "module": "deepctl_cmd_speak.command",
+  "attr": "SpeakCommand",
+  "dist": "deepctl-cmd-speak",
+  "summary": "Text-to-speech",
+  "hidden": false,
+  "requires_auth": true,
+  "help": {
+    "name": "speak",
+    "help": "Convert text to speech using Deepgram TTS\n\nExamples:\n  dg speak \"Hello from Deepgram\" --play\n  dg speak --list-voices\n  dg speak \"Hello world\"\n  dg speak \"Hello world\" --out-file hello.wav\n  dg speak \"Hello world\" --out-file hello.wav --play\n  dg speak --file message.txt --out-file output.wav\n  dg speak \"Hello\" | ffplay -loglevel error -nodisp -autoexit -\n  dg speak \"A little slower, please\" --speed 0.9 --out-file slow.wav\n  dg speak \"So exciting!\" --expressivity 2 --out-file lively.wav  # beta; default: 0\n  dg speak \"Hello\" -m aura-2-asteria-en --out-file hello.mp3\n  dg speak \"Hello\" -m aura-2-luna-en --out-file hello.wav --encoding linear16 --container wav\n  echo \"Hello\" | dg speak - --out-file hello.mp3 -m aura-2-asteria-en\n  dg speak \"Hola, mundo\" -m aura-2-selena-es --out-file hola.mp3\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Text-to-speech",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": false,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "list_voices",
+        "opts": [
+          "--list-voices"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "List available TTS voices and exit (no speech generated)"
+      },
+      {
+        "class": "option",
+        "name": "play",
+        "opts": [
+          "--play"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Play the audio through your system player (ffplay, afplay, paplay, or aplay). Can be combined with --out-file to save and play."
+      },
+      {
+        "class": "option",
+        "name": "file",
+        "opts": [
+          "--file",
+          "-f"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Read text from file"
+      },
+      {
+        "class": "option",
+        "name": "expressivity",
+        "opts": [
+          "--expressivity"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "integer"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Flux TTS (v2) only, beta. Expressive range: -2, -1, 0, 1, or 2 (default 0 = nominal; negative flatter, positive more animated). Fixed for the connection."
+      },
+      {
+        "class": "option",
+        "name": "speed",
+        "opts": [
+          "--speed"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "float"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Flux TTS (v2) only. Speech-rate multiplier: 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, or 1.15 (1.00 = nominal)."
+      },
+      {
+        "class": "option",
+        "name": "sample_rate",
+        "opts": [
+          "--sample-rate"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "float"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Audio sample rate in Hz"
+      },
+      {
+        "class": "option",
+        "name": "container",
+        "opts": [
+          "--container"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Audio container (none, wav, ogg). Aura (v1) only; ignored for flux-* (linear16 is auto-wrapped in WAV)."
+      },
+      {
+        "class": "option",
+        "name": "encoding",
+        "opts": [
+          "--encoding"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Audio encoding. Aura (v1): mp3, linear16, flac, mulaw, alaw, opus, aac. Flux (v2) streaming is raw only: linear16 (default), mulaw, alaw."
+      },
+      {
+        "class": "option",
+        "name": "model",
+        "opts": [
+          "--model",
+          "-m"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Voice model: flux-* voices stream as they speak (default flux-alexis-en); aura-* voices return the whole file. See voices: dg speak --list-voices"
+      },
+      {
+        "class": "option",
+        "name": "output",
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": "FILE",
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Deprecated: use --out-file. Saves the audio to FILE and overwrites it. In 1.0, -o will set the output format."
+      },
+      {
+        "class": "option",
+        "name": "force",
+        "opts": [
+          "--force"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "With --out-file, overwrite FILE if it already exists."
+      },
+      {
+        "class": "option",
+        "name": "out_file",
+        "opts": [
+          "--out-file"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": "FILE",
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Save the audio to FILE. An existing file isn't overwritten unless you add --force."
+      },
+      {
+        "class": "argument",
+        "name": "text",
+        "opts": [
+          "text"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true
+      },
+      {
+        "class": "option",
+        "name": "agent_friendly",
+        "opts": [
+          "--agent-friendly"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": true,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output machine-readable JSON metadata for this command and exit."
+      },
+      {
+        "class": "option",
+        "name": "non_interactive",
+        "opts": [
+          "--non-interactive"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip interactive prompts; use defaults for any optional features."
+      },
+      {
+        "class": "option",
+        "name": "quiet",
+        "opts": [
+          "--quiet",
+          "-q"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Suppress non-essential output."
+      },
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose output."
+      }
+    ]
+  }
+}

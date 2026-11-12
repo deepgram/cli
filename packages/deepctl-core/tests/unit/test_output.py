@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 import yaml
 from deepctl_core.output import (
+    AI_AGENT_ENV_MARKERS,
     OutputFormatter,
     get_console,
     is_agentic,
@@ -27,16 +28,7 @@ class TestIsAgentic:
         monkeypatch.setattr("sys.argv", ["dg", "listen", "foo.wav"])
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr("sys.stdout.isatty", lambda: True)
-        for var in (
-            "CI",
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "CODEX_SANDBOX",
-            "CODEX_SANDBOX_NETWORK_DISABLED",
-            "OR_APP_NAME",
-            "OR_SITE_URL",
-            "NO_COLOR",
-        ):
+        for var in (*AI_AGENT_ENV_MARKERS, "CI", "NO_COLOR", "DG_AGENT"):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("TERM", "xterm-256color")
 
@@ -51,9 +43,7 @@ class TestIsAgentic:
             ["dg", "listen", "foo.wav", "--non-interactive"],
         ],
     )
-    def test_non_interactive_flag_anywhere_in_argv(
-        self, baseline, monkeypatch, argv
-    ):
+    def test_non_interactive_flag_anywhere_in_argv(self, baseline, monkeypatch, argv):
         monkeypatch.setattr("sys.argv", argv)
         assert is_agentic() is True
 
@@ -64,24 +54,20 @@ class TestIsAgentic:
             ["dg", "listen", "--agent-friendly", "foo.wav"],
         ],
     )
-    def test_agent_friendly_flag_anywhere_in_argv(
-        self, baseline, monkeypatch, argv
-    ):
+    def test_agent_friendly_flag_anywhere_in_argv(self, baseline, monkeypatch, argv):
         monkeypatch.setattr("sys.argv", argv)
         assert is_agentic() is True
 
-    @pytest.mark.parametrize("ci_value", ["1", "true"])
+    @pytest.mark.parametrize("ci_value", ["1", "true", "TRUE", " True "])
     def test_ci_env_var_is_hard_signal(self, baseline, monkeypatch, ci_value):
         monkeypatch.setenv("CI", ci_value)
         assert is_agentic() is True
 
     @pytest.mark.parametrize(
         "ci_value",
-        ["false", "0", "", "yes", "TRUE"],
+        ["false", "0", "", "yes"],
     )
-    def test_other_ci_values_do_not_count(
-        self, baseline, monkeypatch, ci_value
-    ):
+    def test_other_ci_values_do_not_count(self, baseline, monkeypatch, ci_value):
         monkeypatch.setenv("CI", ci_value)
         assert is_agentic() is False
 
@@ -94,9 +80,7 @@ class TestIsAgentic:
             "CODEX_SANDBOX_NETWORK_DISABLED",
         ],
     )
-    def test_ai_tool_env_var_is_hard_signal(
-        self, baseline, monkeypatch, env_var
-    ):
+    def test_ai_tool_env_var_is_hard_signal(self, baseline, monkeypatch, env_var):
         monkeypatch.setenv(env_var, "1")
         assert is_agentic() is True
 
@@ -117,11 +101,13 @@ class TestIsAgentic:
         monkeypatch.setattr("sys.stdout.isatty", lambda: False)
         assert is_agentic() is False
 
-    def test_three_soft_signals_trip_threshold(self, baseline, monkeypatch):
+    def test_no_color_is_not_a_soft_signal(self, baseline, monkeypatch):
+        # NO_COLOR asks for no colour, nothing more: it never adds to the
+        # score that switches output to JSON.
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         monkeypatch.setattr("sys.stdout.isatty", lambda: False)
         monkeypatch.setenv("NO_COLOR", "1")
-        assert is_agentic() is True
+        assert is_agentic() is False
 
     def test_dumb_term_counts_as_soft_signal(self, baseline, monkeypatch):
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -401,9 +387,7 @@ class TestPrintOutput:
         mock_console.print.assert_called_once()
 
     @patch("deepctl_core.output.console")
-    @patch(
-        "deepctl_core.output._output_config", {"quiet": True, "format": "json"}
-    )
+    @patch("deepctl_core.output._output_config", {"quiet": True, "format": "json"})
     def test_print_output_quiet(self, mock_console):
         """Test printing in quiet mode."""
         print_output({"test": "value"})
@@ -438,9 +422,7 @@ class TestPrintOutput:
         assert mock_console.print.call_count >= 1
 
     @patch("deepctl_core.output.console")
-    @patch(
-        "deepctl_core.output._output_config", {"quiet": False, "format": "csv"}
-    )
+    @patch("deepctl_core.output._output_config", {"quiet": False, "format": "csv"})
     def test_print_output_csv(self, mock_console):
         """Test printing as CSV."""
         data = [{"name": "Alice", "age": 30}]
@@ -460,3 +442,101 @@ class TestGetConsole:
         # Should return Rich Console instance
         assert console is not None
         assert hasattr(console, "print")
+
+
+class TestLazyQuiet:
+    """setup_output() records --quiet without building the rich Console, so
+    a run that prints nothing (``dg <cmd> --help``) never imports rich."""
+
+    def test_quiet_waits_for_the_console(self):
+        from deepctl_core.output import _LazyConsole
+
+        console = _LazyConsole(stderr=True)
+        console.quiet = True
+        assert object.__getattribute__(console, "_deepctl_console") is None
+        assert console.quiet is True
+        assert object.__getattribute__(console, "_deepctl_console").quiet is True
+        console.quiet = False
+        assert object.__getattribute__(console, "_deepctl_console").quiet is False
+
+    def test_unset_quiet_keeps_the_default(self):
+        from deepctl_core.output import _LazyConsole
+
+        assert _LazyConsole().quiet is False
+
+    def test_setup_output_imports_no_rich(self, tmp_path):
+        import os
+        import subprocess
+        import sys
+
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+        # Windows Python can't seed its hash randomization without SYSTEMROOT.
+        # Only that one variable is passed on, so what the child imports stays
+        # independent of the CI and agent variables in this process.
+        if "SYSTEMROOT" in os.environ:
+            env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+        code = (
+            "import sys\n"
+            "from deepctl_core.output import console, setup_output\n"
+            "setup_output(format_type='default', quiet=True)\n"
+            "assert 'rich' not in sys.modules\n"
+            "assert console.quiet is True\n"
+            "console.print('hidden')\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == ""
+
+
+class TestProgAndColour:
+    def test_invoked_prog_prefers_prog_name_env(self, monkeypatch):
+        from deepctl_core.output import invoked_prog
+
+        monkeypatch.setenv("DEEPCTL_PROG_NAME", "deepgram")
+        assert invoked_prog() == "deepgram"
+
+    def test_invoked_prog_falls_back_to_dg(self, monkeypatch):
+        from deepctl_core.output import invoked_prog
+
+        monkeypatch.delenv("DEEPCTL_PROG_NAME", raising=False)
+        monkeypatch.setattr("sys.argv", ["/opt/python3", "-c"])
+        assert invoked_prog() == "dg"
+
+    @pytest.mark.parametrize(
+        "value", ["/tmp/x;rm -rf ~", "dg\x1b[2J", "a/b", "dg name", "$(id)", "-h"]
+    )
+    def test_invoked_prog_ignores_a_name_that_isnt_plain(self, monkeypatch, value):
+        from deepctl_core.output import invoked_prog
+
+        monkeypatch.setenv("DEEPCTL_PROG_NAME", value)
+        monkeypatch.setattr("sys.argv", ["/opt/python3", "-c"])
+        assert invoked_prog() == "dg"
+
+    @pytest.mark.parametrize(
+        ("agentic", "tty", "env", "expected"),
+        [
+            (False, True, {}, True),
+            (False, True, {"NO_COLOR": "1"}, False),
+            (False, True, {"TERM": "dumb"}, False),
+            (False, False, {}, False),
+            (False, False, {"FORCE_COLOR": "1"}, True),
+            (True, True, {}, False),
+        ],
+    )
+    def test_stderr_color(self, monkeypatch, agentic, tty, env, expected):
+        from deepctl_core import output
+
+        monkeypatch.setitem(output._output_config, "agentic", agentic)
+        for name in ("NO_COLOR", "FORCE_COLOR"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("TERM", "xterm")
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr("sys.stderr.isatty", lambda: tty, raising=False)
+        assert output.stderr_color() is expected

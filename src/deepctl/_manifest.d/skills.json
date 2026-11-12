@@ -1,0 +1,23 @@
+{
+  "name": "skills",
+  "module": "deepctl_cmd_skills.command",
+  "attr": "SkillsCommand",
+  "dist": "deepctl-cmd-skills",
+  "summary": "Manage AI coding assistant integrations for deepctl",
+  "hidden": false,
+  "group": true,
+  "requires_auth": false,
+  "help": {
+    "name": "skills",
+    "help": "Manage AI coding assistant integrations for deepctl",
+    "short_help": "Manage AI coding assistant integrations for deepctl",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": true,
+    "options_metavar": "[OPTIONS]",
+    "params": [],
+    "group": true,
+    "subcommand_metavar": "COMMAND [ARGS]..."
+  }
+}

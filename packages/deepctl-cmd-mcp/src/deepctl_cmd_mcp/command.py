@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import signal
-import sys
 from typing import TYPE_CHECKING, Any
 
 from deepctl_core import AuthManager, BaseCommand, Config, DeepgramClient, output
@@ -23,47 +21,26 @@ from rich.markup import escape
 
 from . import messages as mcp_msg
 from .models import MCPServerResult, TransportType
-from .proxy import (
-    CANT_START,
-    DEFAULT_BASE_URL,
-    NO_KEY,
-    isolate_stdout,
-    reason,
-    report_error,
-    run_proxy,
-)
+from .proxy import DEFAULT_BASE_URL, report_error, run_proxy
 
 if TYPE_CHECKING:
     pass
+
+
+# asyncio (and with it ssl) loads only when the proxy runs, so `dg mcp
+# --help` doesn't import it.
+def __getattr__(name: str) -> Any:
+    if name == "asyncio":
+        import asyncio
+
+        return asyncio
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Use stderr for all output: when `dg mcp --transport stdio` is invoked by an
 # MCP host (Claude Desktop, Codex, etc.), stdout is the JSON-RPC protocol
 # channel and must not receive any human-readable messages.
 console = stderr_console
-
-
-def key_or_error(config: Any, auth_manager: Any) -> str:
-    """The API key, or RuntimeError with the complete text for the client."""
-    from contextlib import redirect_stdout
-
-    from deepctl_core import messages as msg
-
-    try:
-        with redirect_stdout(sys.stderr):
-            api_key = auth_manager.get_api_key()
-    except Exception as exc:
-        raise RuntimeError(CANT_START.format(reason=reason(exc))) from exc
-    if api_key:
-        return str(api_key)
-    if getattr(config, "api_key_untrusted", False) is True:
-        # The config file's key was left unused (W-PERM-AGENT /
-        # W-CFG-UNTRUSTED): send the agent to a person, never to dg login.
-        raise RuntimeError(
-            msg.E_KEY_UNTRUSTED.format(user_config=msg.display_path(config.config_path))
-            + " "
-            + msg.W_CFG_UNTRUSTED_FILE_HINT
-        )
-    raise RuntimeError(CANT_START.format(reason=NO_KEY))
 
 
 def _refuse_transport(transport: str) -> None:
@@ -78,14 +55,15 @@ def _refuse_transport(transport: str) -> None:
 
 
 class McpCommand(BaseCommand):
-    """MCP server that serves Deepgram documentation search over stdio."""
+    """Local stdio MCP server that searches Deepgram's documentation."""
 
     name = "mcp"
     help = (
-        "Run an MCP server that exposes Deepgram documentation search to "
-        "your AI editor over stdio"
+        "Run a local MCP server over stdio that lets AI editors search "
+        "Deepgram's documentation, using your API key from dg login or "
+        "DEEPGRAM_API_KEY"
     )
-    short_help = "Serve Deepgram docs search over MCP"
+    short_help = "Run an MCP server that searches Deepgram's docs"
 
     # No credential check at startup: the server answers the handshake with
     # or without a key, and a missing or refused key is a tool error on the
@@ -100,9 +78,13 @@ class McpCommand(BaseCommand):
         "dg mcp --base-url https://api.dx.deepgram.com",
     ]
     agent_help = (
-        "Run an MCP (Model Context Protocol) server that exposes Deepgram "
-        "documentation search to your AI editor. Configure "
-        "in your AI editor's MCP settings. It runs over stdio."
+        "Run a local MCP (Model Context Protocol) server over stdio for AI "
+        "editors. It has one tool, search_deepgram_knowledge_sources, which "
+        "searches Deepgram's documentation through Deepgram's hosted search "
+        "and returns passages with their source URLs. Register it with "
+        'command "dg" and args ["mcp"]. The API key comes from dg login or '
+        "DEEPGRAM_API_KEY; don't put it in the MCP config's args. Without a "
+        "key the server still starts and each search returns a tool error."
     )
 
     def __init__(self) -> None:
@@ -142,7 +124,12 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--base-url"],
-                "help": "Base URL for Deepgram developer API",
+                "help": (
+                    "Base URL of Deepgram's documentation search service. It "
+                    "must use https unless the host is localhost, and any host "
+                    "other than Deepgram's must be in api.allowed_hosts in your "
+                    "user config"
+                ),
                 "type": str,
                 "default": DEFAULT_BASE_URL,
                 "required": False,
@@ -150,7 +137,7 @@ class McpCommand(BaseCommand):
             },
             {
                 "names": ["--debug"],
-                "help": "Enable debug logging",
+                "help": "Log each documentation search request to stderr",
                 "is_flag": True,
                 "is_option": True,
             },
@@ -176,7 +163,7 @@ class McpCommand(BaseCommand):
         """Handle shutdown signals gracefully."""
         if not self._shutdown_requested:
             self._shutdown_requested = True
-            console.print("\n[yellow]MCP server stopped by user[/yellow]")
+            console.print("\n[yellow]MCP server stopped.[/yellow]")
             os._exit(0)
 
     def handle(
@@ -211,6 +198,10 @@ class McpCommand(BaseCommand):
                 report(err)
                 raise SystemExit(1) from err
 
+        from deepctl.mcp._fast import protocol_stdout
+
+        from .handoff import key_or_error
+
         debug = kwargs.get("debug", False)
 
         # Set up signal handling for graceful shutdown
@@ -219,9 +210,7 @@ class McpCommand(BaseCommand):
         )
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
-        # From here on only JSON-RPC reaches the client: anything else
-        # written to stdout (fd 1) goes to stderr.
-        protocol = isolate_stdout()
+        import asyncio
 
         try:
             asyncio.run(
@@ -229,7 +218,7 @@ class McpCommand(BaseCommand):
                     base_url=canonical_url(base_url),
                     api_key=lambda: key_or_error(config, auth_manager),
                     debug=debug,
-                    stdout=protocol,
+                    stdout=protocol_stdout(),
                 )
             )
 
@@ -241,7 +230,7 @@ class McpCommand(BaseCommand):
         except KeyboardInterrupt:
             return MCPServerResult(
                 status="cancelled",
-                message="MCP server stopped by user",
+                message="MCP server stopped.",
                 transport=TransportType.STDIO,
             )
         except Exception as e:

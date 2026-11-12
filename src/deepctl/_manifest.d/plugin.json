@@ -1,0 +1,23 @@
+{
+  "name": "plugin",
+  "module": "deepctl_cmd_plugin.command",
+  "attr": "PluginCommand",
+  "dist": "deepctl-cmd-plugin",
+  "summary": "Manage deepctl plugins",
+  "hidden": false,
+  "group": true,
+  "requires_auth": false,
+  "help": {
+    "name": "plugin",
+    "help": "Manage deepctl plugins",
+    "short_help": "Manage deepctl plugins",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": true,
+    "options_metavar": "[OPTIONS]",
+    "params": [],
+    "group": true,
+    "subcommand_metavar": "COMMAND [ARGS]..."
+  }
+}

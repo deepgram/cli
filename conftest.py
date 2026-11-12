@@ -38,8 +38,10 @@ def _clean_ai_agent_env(monkeypatch):
     """Run as a person would, even when an AI coding agent launched pytest.
 
     Agent markers (AI_AGENT_ENV_MARKERS, Aider's OR_*) switch dg into its
-    agent trust mode. Tests that cover that mode set them, or patch
-    is_ai_agent, themselves.
+    agent trust mode and its agent output rules, and a developer's own shell
+    may set them (CLAUDECODE=1). Tests that cover agent mode set them, or
+    patch is_ai_agent or agent_mode, themselves. DG_AGENT is cleared with
+    the DEEPGRAM_* variables below.
     """
     from deepctl_core.output import AI_AGENT_ENV_MARKERS, AI_AGENT_ENV_VALUES
 
@@ -50,10 +52,12 @@ def _clean_ai_agent_env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clean_deepgram_env(monkeypatch):
-    """Remove all DEEPGRAM_* environment variables for test isolation."""
+    """Remove all DEEPGRAM_* environment variables, and the DG_AGENT
+    override, for test isolation."""
     for key in list(os.environ):
         if key.startswith("DEEPGRAM_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("DG_AGENT", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -65,13 +69,109 @@ def _disable_telemetry(monkeypatch):
     """
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DISABLED", "1")
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DSN", "http://k@127.0.0.1:9/1")
+    # A developer's DO_NOT_TRACK or DEEPCTL_TELEMETRY=log must not change
+    # what telemetry's own tests see. (CI is cleared only by those tests:
+    # other suites read it as an automation signal.)
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.delenv("DEEPCTL_TELEMETRY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_sigint():
+    """`main()` installs its own SIGINT handler; put pytest's back."""
+    import signal
+
+    before = signal.getsignal(signal.SIGINT)
+    yield
+    if before is not None:
+        signal.signal(signal.SIGINT, before)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_credentials_state():
+    """Forget per-process resolver state (placeholder warnings, a keyring
+    timeout) between tests, as each dg run starts without it."""
+    from deepctl_core import credentials
+
+    credentials._reset_for_tests()
+    yield
+    credentials._reset_for_tests()
 
 
 @pytest.fixture(autouse=True)
 def _fresh_launcher_capture():
-    """Re-read DEEPCTL_LAUNCHER in each test, so env patches take effect."""
+    """Re-read DEEPCTL_LAUNCHER in each test, so env patches take effect.
+
+    deepctl.main.main() keeps the value it captured in LAUNCHER and sets
+    LAUNCHER_CAPTURED, and both readers (deepctl_core._launcher and
+    deepctl_cmd_update.channel) prefer that over the environment. A test that
+    ran main() in this process would otherwise decide what later tests see.
+    """
+    import sys
+
     from deepctl_core._launcher import reset_launcher_for_tests
 
-    reset_launcher_for_tests()
+    def forget() -> None:
+        reset_launcher_for_tests()
+        entry = sys.modules.get("deepctl.main")
+        if entry is not None:
+            entry.LAUNCHER_CAPTURED = False
+            entry.LAUNCHER = None
+
+    forget()
     yield
-    reset_launcher_for_tests()
+    forget()
+
+
+# ── Tests that send this process a real signal run in a child process ──────
+#
+# A test marked ``signals_in_child`` sends SIGTERM, SIGINT or SIGHUP to its
+# own process. If the handler it relies on isn't installed (a bug, or a
+# signal that arrives late), that signal would end or interrupt the whole
+# pytest run. So the test runs in a pytest child of its own; this process
+# only checks that the child passed.
+
+_CHILD_NODE_ENV = "DEEPCTL_TEST_CHILD_NODE"
+_BASE_ENV = dict(os.environ)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "signals_in_child: the test sends its own process a real signal; "
+        "it runs in a child pytest process",
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    if pyfuncitem.get_closest_marker("signals_in_child") is None:
+        return None
+    if os.environ.get(_CHILD_NODE_ENV) == pyfuncitem.nodeid:
+        return None  # this is the child: run the test here
+    import subprocess
+    import sys
+
+    config = pyfuncitem.config
+    node = str(pyfuncitem.path) + "::" + pyfuncitem.nodeid.split("::", 1)[1]
+    argv = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    argv += ["-p", "no:warnings"]
+    argv += ["--rootdir", str(config.rootpath)]
+    if config.inipath is not None:
+        argv += ["-c", str(config.inipath)]
+    argv += [node]
+    proc = subprocess.run(
+        argv,
+        cwd=config.invocation_params.dir,
+        env={**_BASE_ENV, _CHILD_NODE_ENV: pyfuncitem.nodeid},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    output = proc.stdout[-5000:] + proc.stderr[-1000:]
+    if proc.returncode < 0:
+        pytest.fail(f"the child test process was killed by signal {-proc.returncode}:\n{output}")
+    if proc.returncode != 0 or " passed" not in proc.stdout:
+        pytest.fail(f"the child test process failed ({proc.returncode}):\n{output}")
+    return True

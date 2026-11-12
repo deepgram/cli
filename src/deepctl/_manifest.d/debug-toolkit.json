@@ -1,0 +1,26 @@
+{
+  "name": "toolkit",
+  "parent": "debug",
+  "module": "deepctl_cmd_debug_toolkit.command",
+  "attr": "ToolkitCommand",
+  "dist": "deepctl-cmd-debug-toolkit",
+  "summary": "Field support scripts (deepgram/support-toolkit)",
+  "hidden": false,
+  "requires_auth": false,
+  "aliases": [
+    "debug-toolkit"
+  ],
+  "help": {
+    "name": "toolkit",
+    "help": "Run field engineering diagnostic scripts fetched from deepgram/support-toolkit. Scripts are downloaded on first use, verified against their GitHub blob SHA, and cached locally.",
+    "short_help": "Field support scripts (deepgram/support-toolkit)",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": true,
+    "options_metavar": "[OPTIONS]",
+    "params": [],
+    "group": true,
+    "subcommand_metavar": "COMMAND [ARGS]..."
+  }
+}

@@ -29,3 +29,9 @@ W_API_REDIRECT = (
     "{origin} answered with a redirect to {location_origin}. dg api doesn't "
     "follow redirects."
 )
+# After a TLS failure on localhost, 127.0.0.1 or [::1] while a person has
+# DEEPGRAM_CLI_INSECURE set: dg api always verifies TLS (as in 0.4.1).
+H_API_INSECURE_IGNORED = (
+    "DEEPGRAM_CLI_INSECURE doesn't apply to dg api, which always verifies TLS "
+    "certificates."
+)

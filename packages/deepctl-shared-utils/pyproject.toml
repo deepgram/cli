@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-shared-utils"
-version = "0.1.14" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "Shared utilities for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,13 @@ classifiers = [
 ]
 keywords = ["deepgram", "utilities", "validation", "helpers"]
 requires-python = ">=3.10"
-dependencies = ["pydantic>=2.0.0", "click>=8.0.0", "httpx>=0.24.0", "rich>=13.0.0"]
+dependencies = [
+    "deepctl==0.4.1", # x-release-please-version
+    "pydantic>=2.0.0,<3",
+    "click>=8.2.0,<9",
+    "httpx>=0.24.0,<1",
+    "rich>=13.0.0,<16",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -28,3 +34,6 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["deepctl_shared_utils*"]
+
+[tool.uv.sources]
+deepctl = { workspace = true }

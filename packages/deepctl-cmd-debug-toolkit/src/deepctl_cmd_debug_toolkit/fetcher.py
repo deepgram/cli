@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import httpx
 import platformdirs
 from rich.console import Console
 
@@ -50,6 +49,8 @@ def _fetch_github_contents(path: str) -> tuple[str, bytes]:
 
     Returns (blob_sha, raw_bytes). Raises on any HTTP error or SHA mismatch.
     """
+    import httpx
+
     url = f"{GITHUB_API_BASE}/{path}"
     resp = httpx.get(
         url,
@@ -72,10 +73,18 @@ def _fetch_github_contents(path: str) -> tuple[str, bytes]:
 
 
 def get_cached_manifest() -> ToolkitManifest | None:
-    """Return the cached manifest if it exists and is fresh, else None."""
-    if not _MANIFEST_CACHE.exists():
+    """Return the cached manifest if it exists and is fresh, else None.
+
+    An unreadable cache (a HOME the user can't read) counts as no cache:
+    loading the debug group, and every `dg debug <sub> --help`, reads this.
+    """
+    try:
+        if not _MANIFEST_CACHE.exists():
+            return None
+        has_age = _MANIFEST_AGE.exists()
+    except OSError:
         return None
-    if _MANIFEST_AGE.exists():
+    if has_age:
         try:
             age = float(_MANIFEST_AGE.read_text().strip())
             if time.time() - age > _MANIFEST_TTL:

@@ -1,0 +1,264 @@
+{
+  "name": "billing",
+  "module": "deepctl_cmd_billing.command",
+  "attr": "BillingCommand",
+  "dist": "deepctl-cmd-billing",
+  "summary": "Billing info",
+  "hidden": false,
+  "requires_auth": true,
+  "help": {
+    "name": "billing",
+    "help": "View Deepgram billing and balances\n\nExamples:\n  dg billing\n  dg billing --balances\n  dg billing --breakdown --start 2025-01-01 --end 2025-01-31\n  dg billing --breakdown --grouping tags\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Billing info",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": false,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "project_id",
+        "opts": [
+          "--project-id",
+          "-p"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Project ID (uses configured project if not provided)"
+      },
+      {
+        "class": "option",
+        "name": "grouping",
+        "opts": [
+          "--grouping"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Grouping for breakdown (accessor, deployment, line_item, tags)"
+      },
+      {
+        "class": "option",
+        "name": "end",
+        "opts": [
+          "--end"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "End date for breakdown (YYYY-MM-DD)"
+      },
+      {
+        "class": "option",
+        "name": "start",
+        "opts": [
+          "--start"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Start date for breakdown (YYYY-MM-DD)"
+      },
+      {
+        "class": "option",
+        "name": "breakdown",
+        "opts": [
+          "--breakdown"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Show billing breakdown"
+      },
+      {
+        "class": "option",
+        "name": "balances",
+        "opts": [
+          "--balances",
+          "-b"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Show account balances"
+      },
+      {
+        "class": "option",
+        "name": "agent_friendly",
+        "opts": [
+          "--agent-friendly"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": true,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output machine-readable JSON metadata for this command and exit."
+      },
+      {
+        "class": "option",
+        "name": "non_interactive",
+        "opts": [
+          "--non-interactive"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip interactive prompts; use defaults for any optional features."
+      },
+      {
+        "class": "option",
+        "name": "output",
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "choice",
+          "choices": [
+            "json",
+            "yaml",
+            "table",
+            "csv"
+          ],
+          "case_sensitive": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Output format (same as the global -o before the command)."
+      },
+      {
+        "class": "option",
+        "name": "quiet",
+        "opts": [
+          "--quiet",
+          "-q"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Suppress non-essential output."
+      },
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose output."
+      }
+    ]
+  }
+}

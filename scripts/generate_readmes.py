@@ -32,8 +32,10 @@ PACKAGES_DIR = ROOT / "packages"
 # Skip packages with comprehensive manual READMEs
 SKIP_PACKAGES: set[str] = set()
 
-# Internal package prefixes to exclude from dependency lists
-INTERNAL_PREFIXES = ("deepctl-core", "deepctl-cmd-", "deepctl-shared-")
+# Internal packages to exclude from dependency lists: the root and every
+# first-party sibling (all pinned to the same lockstep version).
+INTERNAL_PREFIXES = ("deepctl-",)
+INTERNAL_NAMES = {"deepctl"}
 
 
 def load_pyproject(package_dir: Path) -> dict[str, Any]:
@@ -60,7 +62,7 @@ def get_external_deps(deps: list[str]) -> list[str]:
     external = []
     for dep in deps:
         dep_name = re.split(r"[><=!;\[]", dep)[0].strip()
-        if any(dep_name.startswith(p) for p in INTERNAL_PREFIXES):
+        if dep_name in INTERNAL_NAMES or dep_name.startswith(INTERNAL_PREFIXES):
             continue
         external.append(dep)
     return external
@@ -487,10 +489,7 @@ def main() -> None:
             stale.append("README.md")
 
     if args.check and stale:
-        print(
-            f"\n{len(stale)} README(s) out of date. "
-            "Run: python scripts/generate_readmes.py"
-        )
+        print(f"\n{len(stale)} README(s) out of date. Run: make readmes")
         sys.exit(1)
 
     if not args.check and not args.dry_run:

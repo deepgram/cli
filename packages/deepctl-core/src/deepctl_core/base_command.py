@@ -1,24 +1,97 @@
 """Base command class for deepctl commands."""
 
+import sys
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TextIO
 
 import click
 
+from . import credentials
 from .auth import AuthManager
 from .client import DeepgramClient
 from .config import Config, flush_config_notices
 from .hosts import CredentialHostError
 from .models import CodedErrorResult, ErrorResult
-from .output import _agentic, print_error, print_error_hint, stderr_console
+from .output import (
+    _agentic,
+    _output_config,
+    print_error,
+    print_error_hint,
+    print_hint,
+    stderr_console,
+)
 from .output import console as stdout_console
 from .timing import TimingContext
+from .transport import TransportError
 
 # The PAYLOAD console -- stdout, deliberately. Tables, JSON and raw text
 # written by _output_* are the machine-readable result and belong there.
 # Shared instance rather than a bare Console() so it honours the agentic
 # no-color/highlight settings; diagnostics use stderr_console instead.
 console = stdout_console
+
+
+# Mode A stderr grammar: every line starts with one of
+# these. Lines that start with "Error"/"Warning" are 0.4.0 error text a
+# command printed itself, kept until a later release codes them.
+_MODE_A_PREFIXES = (
+    "ERROR: ",
+    "WARN: ",
+    "INFO: ",
+    "HINT: ",
+    "OK: ",
+    "DEPRECATED: ",
+    "Error",
+    "Warning",
+)
+
+# Built-in commands whose requests go through DeepgramClient and the shared
+# Transport. In mode A their handlers run without status chrome on
+# stderr. Other commands print things the caller needs there (login's device
+# code, dg api's response errors, debug-probe's proxy address), so they keep
+# it. Built-in names can't be taken by plugins.
+_CHROME_FREE_COMMANDS = frozenset(
+    {
+        "billing",
+        "keys",
+        "listen",
+        "members",
+        "models",
+        "projects",
+        "read",
+        "requests",
+        "speak",
+        "transcribe",
+        "usage",
+    }
+)
+
+
+class _ModeAStderr:
+    """``sys.stderr`` for a command's handler in mode A: drops status chrome.
+
+    Each write that starts a line is kept or dropped as a whole, so one
+    ``print`` that wraps over several lines stays together.
+    """
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+        self._keep = True
+        self._line_start = True
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        if self._line_start:
+            first = text.lstrip("\n").split("\n", 1)[0]
+            self._keep = bool(first.strip()) and first.startswith(_MODE_A_PREFIXES)
+        if self._keep:
+            self._stream.write(text)
+        self._line_start = text.endswith("\n")
+        return len(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
 
 
 class UnexpectedCommandError(click.ClickException):
@@ -37,6 +110,9 @@ class BaseCommand(ABC):
     help: str = ""
     short_help: str | None = None
     hidden: bool = False  # set True to hide from dg --help (e.g. deprecated aliases)
+    # Output formats this command takes after its name, beyond the root
+    # -o's json, yaml, table and csv (``dg listen -o text``).
+    extra_output_formats: tuple[str, ...] = ()
 
     # Command requirements
     requires_auth: bool = False
@@ -81,6 +157,7 @@ class BaseCommand(ABC):
         with TimingContext(f"command_{self.name}_total"):
             # Output mode is set up by now; print queued config notices.
             flush_config_notices()
+            credentials.flush_warnings()
             with TimingContext("command_setup"):
                 # Get configuration from context
                 config = ctx.obj.get("config")
@@ -100,7 +177,7 @@ class BaseCommand(ABC):
                 )
 
                 # Create Deepgram client
-                client = DeepgramClient(config, auth_manager)
+                client = self._make_client(config, auth_manager)
 
             # Refusals that need no credentials come before the auth check,
             # so a refused command sends nothing at all.
@@ -117,39 +194,12 @@ class BaseCommand(ABC):
                 with TimingContext("authentication_check"):
                     try:
                         auth_manager.guard()
-
-                        # Log credential source and project ID for transparency
-                        if not config.get("output.quiet", False):
-                            source = auth_manager.get_credential_source()
-                            project_id = auth_manager.get_project_id()
-
-                            # Only log if not using a profile (i.e., using env vars or flags)
-                            if source in [
-                                "explicit flags",
-                                "environment variables",
-                            ]:
-                                # Diagnostics, not the result. print_info /
-                                # print_warning still write to stdout outside
-                                # agentic mode, so with an explicit `-o json`
-                                # these three lines landed in front of the
-                                # payload and broke `| jq` (#104, success
-                                # path). Route them straight to stderr; the
-                                # prefixes mirror output.py so the rendering
-                                # is unchanged in both modes.
-                                info = "INFO:" if _agentic else "[blue]ℹ[/blue]"
-                                stderr_console.print(
-                                    f"{info} Using credentials from {source}"
-                                )
-                                if project_id:
-                                    stderr_console.print(
-                                        f"{info} Affecting project: {project_id}"
-                                    )
-                                else:
-                                    warn = "WARN:" if _agentic else "[yellow]⚠[/yellow]"
-                                    stderr_console.print(
-                                        f"{warn} No project ID specified"
-                                    )
-
+                        self._print_credential_source(config, auth_manager)
+                    except TransportError as e:
+                        # auth_required: the coded result on stdout and two
+                        # stderr lines, like any other coded error.
+                        self._report_transport_error(e, ctx, config, auth_manager)
+                        raise SystemExit(1) from None
                     except Exception as auth_error:
                         # guard() already wrote the human-readable diagnosis to
                         # stderr, so don't duplicate it -- but stdout must still
@@ -189,7 +239,7 @@ class BaseCommand(ABC):
             # Execute the command
             try:
                 with TimingContext(f"command_{self.name}_handler"):
-                    result = self.handle(config, auth_manager, client, **kwargs)
+                    result = self._run_handler(config, auth_manager, client, **kwargs)
 
                 # Handle command result
                 if result is not None:
@@ -209,6 +259,10 @@ class BaseCommand(ABC):
             except KeyboardInterrupt:
                 stderr_console.print("\n[yellow]Command cancelled by user[/yellow]")
                 raise click.Abort()
+
+            except TransportError as e:
+                self._report_transport_error(e, ctx, config, auth_manager)
+                raise SystemExit(1) from None
 
             except CredentialHostError as e:
                 # Already reported on stderr; nothing was sent.
@@ -233,6 +287,83 @@ class BaseCommand(ABC):
             exit_code = self.exit_code_for(result)
             if exit_code:
                 raise SystemExit(exit_code)
+
+    def _make_client(self, config: Config, auth_manager: AuthManager) -> Any:
+        """The Deepgram client handed to ``handle``."""
+        return DeepgramClient(config, auth_manager)
+
+    def _print_credential_source(
+        self, config: Config, auth_manager: AuthManager
+    ) -> None:
+        """Say where the credentials came from when no profile supplied them.
+
+        Diagnostics, not the result: straight to stderr, so `-o json`
+        output stays parseable (#104). The source is the resolver's, so a
+        key from DEEPGRAM_API_KEY is reported as the environment's even
+        though Config merges it into the profile.
+        "No project ID specified" only for commands that need one.
+        """
+        if config.get("output.quiet", False):
+            return
+        source = auth_manager.get_credential_source()
+        if source not in ("explicit flags", "environment variables"):
+            return
+        project_id = auth_manager.get_project_id()
+        info = "INFO:" if _agentic else "[blue]ℹ[/blue]"
+        stderr_console.print(f"{info} Using credentials from {source}")
+        if project_id:
+            from rich.markup import escape
+
+            stderr_console.print(f"{info} Affecting project: {escape(project_id)}")
+        elif self.requires_project:
+            warn = "WARN:" if _agentic else "[yellow]⚠[/yellow]"
+            stderr_console.print(f"{warn} No project ID specified")
+
+    def _run_handler(
+        self,
+        config: Config,
+        auth_manager: AuthManager,
+        client: DeepgramClient,
+        **kwargs: Any,
+    ) -> Any:
+        """Run ``handle``; in mode A, without status chrome on stderr."""
+        if (
+            not _output_config["agentic"]
+            or _output_config["verbose"]
+            or self.name not in _CHROME_FREE_COMMANDS
+        ):
+            return self.handle(config, auth_manager, client, **kwargs)
+        real = sys.stderr
+        sys.stderr = _ModeAStderr(real)
+        try:
+            return self.handle(config, auth_manager, client, **kwargs)
+        finally:
+            sys.stderr = real
+
+    def _report_transport_error(
+        self,
+        error: TransportError,
+        ctx: click.Context,
+        config: Config,
+        auth_manager: AuthManager,
+    ) -> None:
+        """Two stderr lines, and the coded result on stdout."""
+        from rich.markup import escape
+
+        from . import transport
+
+        command_path = " ".join(ctx.command_path.split()[1:])
+        result = transport.render(
+            error, command_path=command_path, auth_manager=auth_manager
+        )
+        print_error(escape(result.error))
+        print_hint(escape(result.hint))
+        if self.stdout_is_protocol:
+            return
+        try:
+            self.output_result(result, config)
+        except (OSError, ValueError):
+            pass
 
     def pre_auth_check(self, config: Config, **kwargs: Any) -> Any | None:
         """Return a result to stop with before authentication, or ``None``.
@@ -402,7 +533,22 @@ class BaseCommand(ABC):
             return str(obj)
 
         if isinstance(result, dict | list):
-            console.print_json(json.dumps(result, indent=2, default=_default))
+            if console.is_terminal:
+                # A person reading a terminal: highlighted.
+                console.print_json(json.dumps(result, indent=2, default=_default))
+                return
+            # A pipe or file: the same text rich would print, in one write
+            # (rich's renderer takes seconds on a large result).
+            from .output import _output_config
+
+            if _output_config["quiet"]:
+                return
+            stream = console.file
+            stream.write(
+                json.dumps(result, indent=2, ensure_ascii=False, default=_default)
+                + "\n"
+            )
+            stream.flush()
         else:
             console.print(
                 json.dumps({"result": str(result)}, indent=2, default=_default)
@@ -479,6 +625,18 @@ class BaseCommand(ABC):
             # Fallback to JSON
             self._output_json(result)
 
+    def can_prompt(self) -> bool:
+        """Whether this run may ask a question at all.
+
+        False in an agentic or non-interactive context, for a command that
+        isn't CI-friendly, and when the command was given any input (see
+        ``is_guided``). A command that must not fall back to a default
+        answers an unanswerable prompt itself (``confirmation_required``).
+        """
+        return not (
+            _agentic or not self.ci_friendly or not getattr(self, "_guided", True)
+        )
+
     def confirm(self, message: str, default: bool = False) -> bool:
         """Ask for user confirmation.
 
@@ -487,9 +645,10 @@ class BaseCommand(ABC):
             default: Default value if user just presses Enter
 
         Returns:
-            True if confirmed, False otherwise
+            True if confirmed, False otherwise; ``default`` when
+            ``can_prompt()`` is False
         """
-        if _agentic or not self.ci_friendly or not getattr(self, "_guided", True):
+        if not self.can_prompt():
             return default
 
         try:

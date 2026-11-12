@@ -29,16 +29,17 @@ pipx run deepctl --help
 
 ## Dependencies
 
-- `click>=8.0.0`
+- `click>=8.2.0,<9`
 - `deepgram-sdk>=7.7.0,<8`
-- `pydantic>=2.0.0`
-- `rich>=13.0.0`
-- `httpx>=0.24.0`
+- `pydantic>=2.0.0,<3`
+- `rich>=13.0.0,<16`
+- `httpx>=0.24.0,<1`
 - `pyjwt>=2.8.0`
-- `keyring>=24.0.0`
+- `keyring>=24.0.0,<26`
 - `pyyaml>=6.0.0`
-- `platformdirs>=3.0.0`
+- `platformdirs>=3.0.0,<5`
 - `packaging>=21.0`
+- `websockets>=13.1,<18`
 
 ## License
 

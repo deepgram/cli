@@ -97,9 +97,7 @@ class FfprobeCommand(BaseCommand):
         reset = kwargs.get("reset", False)
 
         if path and reset:
-            status_console.print(
-                "[red]Error:[/red] Cannot use --path and --reset together"
-            )
+            print_error("Cannot use --path and --reset together")
             return BaseResult(
                 status="error",
                 message="Cannot use --path and --reset together",
@@ -126,13 +124,15 @@ class FfprobeCommand(BaseCommand):
 
     def _handle_set_path(self, config: Config, path: str) -> BaseResult:
         """Store a custom ffprobe path."""
+        from rich.markup import escape
+
         # Validate the path
         if not os.path.isfile(path):
-            status_console.print(f"[red]Error:[/red] File not found: {path}")
+            print_error(f"File not found: {escape(path)}")
             return BaseResult(status="error", message=f"File not found: {path}")
 
         if not os.access(path, os.X_OK):
-            status_console.print(f"[red]Error:[/red] File is not executable: {path}")
+            print_error(f"File is not executable: {escape(path)}")
             return BaseResult(status="error", message=f"File is not executable: {path}")
 
         # Store in config. Only absolute paths are used, so resolve it now.

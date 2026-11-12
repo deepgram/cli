@@ -1,0 +1,80 @@
+AGENT MODE
+
+  dg runs in agent mode when an AI coding agent runs it. In agent mode dg
+  writes JSON unless you pick a format with -o, never asks questions, shows
+  no update or setup notices, and starts each line it writes to stderr with
+  ERROR:, WARN:, INFO:, HINT:, OK: or DEPRECATED:.
+
+HOW IT DECIDES
+
+  1. DG_AGENT=1 turns agent mode on. DG_AGENT=0 turns it off.
+  2. Otherwise the first signal below that matches turns it on.
+  3. Otherwise CI=true, --non-interactive, --agent-friendly, or no
+     terminal at all (stdin and stdout not terminals, TERM unset or
+     dumb) switch to JSON output and turn questions off.
+  NO_COLOR only turns color off.
+
+SIGNALS
+
+  Signal                          Condition       Here  Source
+  AI_AGENT                        set             -     gh, vercel, vscode
+  AGENT                           amp or goose    -     gh, goose
+  GOOSE_TERMINAL                  set             -     goose
+  CLAUDECODE                      set             yes   gh, vercel
+  CLAUDE_CODE                     set             -     gh, vercel
+  CLAUDE_CODE_IS_COWORK           set             -     gh
+  CLAUDE_CODE_ENTRYPOINT          set             -     claude-agent-sdk
+  CODEX_SANDBOX                   set             -     gh, vercel
+  CODEX_CI                        set             -     gh, vercel
+  CODEX_THREAD_ID                 set             -     gh, vercel
+  CODEX_SANDBOX_NETWORK_DISABLED  set             -     codex
+  GEMINI_CLI                      set             -     gh, vercel
+  COPILOT_CLI                     set             -     gh
+  OPENCODE                        set             -     gh
+  OPENCODE_CLIENT                 set             -     gh
+  ANTIGRAVITY_AGENT               set             -     gh, vercel
+  AUGMENT_AGENT                   set             -     gh, vercel
+  CURSOR_AGENT                    set             -     gh, vercel
+  CURSOR_EXTENSION_HOST_ROLE      agent-exec      -     gh, vercel
+  OR_APP_NAME / OR_SITE_URL       Aider / aider   -     aider
+  /opt/.devin                     exists          -     vercel
+  PATH                            has .pi/agent   -     gh
+
+  "set" means present and not empty.
+
+THIS PROCESS
+
+  Agent mode: on, because CLAUDECODE is set.
+
+IF YOU ARE A PERSON
+
+  If a signal is set in your own shell by mistake, remove it from your
+  environment, and from the shell profile, alias or wrapper that sets it:
+
+    sh, bash, zsh   unset CLAUDECODE
+    fish            set -e CLAUDECODE
+    PowerShell      Remove-Item Env:CLAUDECODE
+    cmd             set CLAUDECODE=
+
+  For /opt/.devin or a .pi/agent entry in PATH, run with DG_AGENT=0 for
+  human output. The config file rules below still apply.
+
+CONFIG FILES IN AGENT SESSIONS
+
+  While any signal above is set, dg won't read the user config
+  (~/.config/deepctl/config.yaml), or the API key in it, if other users can
+  change the file or another user owns it. It won't save to that file
+  either. DG_AGENT=0 doesn't change this. To fix the file, make sure you own
+  it, then run this yourself, not through an agent:
+
+    chmod 600 ~/.config/deepctl/config.yaml
+
+SOURCES
+
+  gh                https://github.com/cli/cli/blob/trunk/internal/agents/detect.go
+  vercel            https://github.com/vercel/vercel/blob/main/packages/detect-agent/src/index.ts
+  vscode            https://github.com/microsoft/vscode/blob/main/src/vs/platform/chat/common/aiAgentEnv.ts
+  goose             https://github.com/block/goose/blob/main/documentation/docs/guides/environment-variables.md
+  codex             https://github.com/openai/codex/blob/main/codex-rs/core/src/spawn.rs
+  aider             https://github.com/Aider-AI/aider/blob/main/aider/llm.py
+  claude-agent-sdk  https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/transport/subprocess_cli.py

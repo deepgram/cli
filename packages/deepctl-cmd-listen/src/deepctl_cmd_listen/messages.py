@@ -1,0 +1,151 @@
+"""User-facing strings for ``dg listen``'s live path, keyed by message ID.
+
+Every ID and string matches the error catalogue (``error_codes.json``)
+exactly; the attribute name is the ID with ``-`` as ``_``.
+"""
+
+from __future__ import annotations
+
+# ── Catalogue ──────────────────────────────────────────────────────────────
+
+CODE_INVALID_ARGUMENT = "invalid_argument"
+CODE_STREAM_DRAIN_TIMEOUT = "stream_drain_timeout"
+CODE_SERVER_ERROR = "server_error"
+CODE_NETWORK_UNAVAILABLE = "network_unavailable"
+CODE_OUTPUT_UNWRITABLE = "output_unwritable"
+
+# invalid_argument: a hard agent signal, no SOURCE, no --mic.
+E_LISTEN_NO_SOURCE = (
+    "{prog} listen needs a file, a URL, --mic, or - to read audio from stdin."
+)
+H_LISTEN_NO_SOURCE = (
+    "Pass a file path or URL. To stream audio from stdin, pass - explicitly."
+)
+
+# invalid_argument: reading stdin failed.
+E_LISTEN_STDIN_UNREADABLE = "Couldn't read audio from stdin: {os_error}."
+H_LISTEN_STDIN_UNREADABLE = (
+    "Pass a file path or URL instead, or make sure stdin is an open pipe "
+    "or file with audio in it."
+)
+A_LISTEN_STDIN_UNREADABLE = (
+    "Pass the audio file path or URL as SOURCE instead of reading stdin, then retry."
+)
+
+# stream_drain_timeout: end of input, then the idle deadline or the cap.
+E_DRAIN_TIMEOUT = (
+    "The server sent nothing for {limit_s} s after the audio ended, "
+    "so results may be incomplete."
+)
+E_DRAIN_CAP = (
+    "The server was still sending results {limit_s} s after the audio ended, "
+    "so results may be incomplete."
+)
+H_DRAIN_TIMEOUT = "Results received so far were kept. Try again if you need the rest."
+
+# server_error / network_unavailable hints (the error text is the stream's own).
+H_SERVER = (
+    "Try again in a moment. If it keeps failing, contact Deepgram support "
+    "with the request ID in details."
+)
+A_SERVER = (
+    "Retry once after a few seconds. If it fails again, tell the user and "
+    "include details.request_id."
+)
+H_NETWORK = "Check your network connection and proxy settings, then try again."
+A_NETWORK = (
+    "{prog} can't reach Deepgram from this environment. If you run in a "
+    "sandbox, ask the user to allow network access for {prog}."
+)
+
+# ── Live-stream messages ───────────────────────────────────────────────────
+
+# Ctrl-C or SIGTERM: the server didn't finish within the 1 s drain.
+W_LISTEN_STOP_INCOMPLETE = (
+    "The server hadn't sent its last results after 1 s, "
+    "so the transcript may be incomplete."
+)
+
+# Microphone: audio dropped because sending fell behind. Once per stream.
+W_MIC_DROPPED = (
+    "Dropped {seconds} s of microphone audio because the connection couldn't keep up."
+)
+
+# server_error: the server closed the stream with an error close code.
+E_LISTEN_SERVER_CLOSED = (
+    "The server ended the stream with an error ({close_code}): {close_reason}"
+)
+E_LISTEN_SERVER_CLOSED_NO_REASON = (
+    "The server ended the stream with an error ({close_code})."
+)
+
+# server_error: Flux (listen v2) reported an error in an Error frame.
+E_LISTEN_FLUX_ERROR = "Flux STT error ({flux_code}): {description}"
+
+# network_unavailable: the connection dropped without a closing handshake.
+E_LISTEN_CONNECTION_LOST = "The connection to the server was lost."
+
+# output_unwritable: writing the transcript or the final result to stdout
+# failed with an error other than EPIPE (ENOSPC, EIO, ...).
+# {reason} is details.reason. The texts are shared with speak.
+E_OUTPUT_UNWRITABLE = "Couldn't write the output to {output}: {reason}."
+H_OUTPUT_UNWRITABLE = (
+    "Choose another destination, or fix this one (free space, permissions), "
+    "then try again."
+)
+A_OUTPUT_UNWRITABLE = (
+    "If you chose this destination, choose another one. Otherwise tell the "
+    "user {prog} couldn't write its output ({reason}), and don't retry until "
+    "it's fixed."
+)
+
+# ── Prerecorded output (0.5.0) ─────────────────────────────────────────────
+
+# DEEPCTL_LISTEN_JSON set to anything but "sdk": ignored, once per run.
+W_LISTEN_JSON_UNKNOWN = (
+    "Ignoring DEEPCTL_LISTEN_JSON={value}: the only value it takes is sdk."
+)
+
+# Agent-mode compaction. N-COMPACT is printed after "INFO: ".
+CODE_STATE_UNWRITABLE = "state_unwritable"
+N_COMPACT = (
+    "The result is {full_result_bytes_human} so it was saved to "
+    "{full_result_path}; stdout has a summary. Pass --full-output to print "
+    "all of it."
+)
+A_COMPACT = (
+    "The full result is in full_result_path and the plain transcript in "
+    "transcript_path. Read those files in parts instead of printing them "
+    "whole. For jq pipelines, pass -o json."
+)
+E_COMPACT_UNWRITABLE = (
+    "The result is {full_result_bytes_human}, too large to print here, and "
+    "{prog} couldn't save it to {dir} or the temp directory."
+)
+H_COMPACT_UNWRITABLE = (
+    "Pass -o json and redirect stdout to a file, or pass --full-output to "
+    "print it all. Either one transcribes (and bills) the audio again."
+)
+A_COMPACT_UNWRITABLE = (
+    "Ask the user for a writable directory. Rerunning with -o json "
+    "redirected to a file there transcribes (and bills) the audio again. "
+    "Don't pass --full-output: the result is too large to read whole."
+)
+# The shared temp directory for results was another user's or a symlink;
+# a fresh private directory is used for this run instead.
+W_COMPACT_TEMP_REFUSED = (
+    "Not using {path} for saved results: it isn't a private directory owned "
+    "by you. Using a new temporary directory instead."
+)
+
+# The microphone was refused (a PortAudio "invalid input device" or "no
+# default input"). Catalogue mic_not_allowed; the code itself ships later.
+E_MIC_DENIED = "{prog} can't use the microphone: access was denied."
+H_MIC_DENIED = (
+    "Allow microphone access for your terminal app in your system privacy "
+    "settings, then try again."
+)
+A_MIC_DENIED = (
+    "Ask the user to allow microphone access for their terminal, or "
+    "transcribe a file instead."
+)

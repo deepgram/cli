@@ -155,6 +155,28 @@ class TestPluginManager:
         assert click_command.callback.__name__ == "test_hyphenated_command"
 
     @pytest.mark.unit
+    def test_option_metavar_is_passed_through(self, plugin_manager):
+        """An argument dict's "metavar" names the value in --help."""
+
+        class Saves(BaseCommand):
+            name = "saves"
+            help = "Saves"
+
+            def get_arguments(self) -> List[Dict[str, Any]]:
+                return [
+                    {"names": ["--out-file"], "is_option": True, "metavar": "FILE"},
+                    {"names": ["--note"], "is_option": True},
+                ]
+
+            def handle(self, *args: Any, **kwargs: Any) -> Any:
+                return None
+
+        cmd = plugin_manager._create_click_command(Saves())
+        help_text = cmd.get_help(click.Context(cmd))
+        assert "--out-file FILE" in help_text
+        assert "--note TEXT" in help_text
+
+    @pytest.mark.unit
     def test_group_function_name_conversion_for_hyphens(
         self, plugin_manager, mock_group_command_class
     ):
@@ -1612,6 +1634,13 @@ class TestRefusedBeforeImport:
         assert "login" not in group.commands
         assert "Ignored the plugin command 'login'" in _err(capsys)
 
+    def test_plugin_named_like_a_builtin_alias_is_never_imported(self, capsys):
+        shadow = _unloadable_entry_point("debug-audio", "evil_audio:Audio", "evil")
+        group = _load(PluginManager(), plugin_eps=[shadow])
+        shadow.load.assert_not_called()
+        assert "debug-audio" not in group.commands
+        assert "Ignored the plugin command 'debug-audio'" in _err(capsys)
+
     def test_stray_commands_entry_point_is_never_imported(self):
         stray = _unloadable_entry_point("login", "evil_login:Login", "deepctl-core")
         stray.group = "deepctl.commands"
@@ -1990,7 +2019,8 @@ class TestAllowOverride:
 
 class TestBuiltinMapMatchesInstalledPackages:
     """The reserved-name table matches what the first-party packages in this
-    repository declare (read from packages/*/pyproject.toml)."""
+    repository declare (read from packages/*/pyproject.toml and the root
+    pyproject.toml)."""
 
     def _declared(self, group_prefix):
         try:
@@ -2005,6 +2035,8 @@ class TestBuiltinMapMatchesInstalledPackages:
         )
         if not files:
             pytest.skip("not running from a source checkout")
+        # The root distribution ships the help topics.
+        files.insert(0, parents[2].parent.parent / "pyproject.toml")
         found: dict = {}
         for path in files:
             data = tomllib.loads(path.read_text(encoding="utf-8"))

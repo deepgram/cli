@@ -1,0 +1,280 @@
+{
+  "name": "read",
+  "module": "deepctl_cmd_read.command",
+  "attr": "ReadCommand",
+  "dist": "deepctl-cmd-read",
+  "summary": "Text intelligence",
+  "hidden": false,
+  "requires_auth": true,
+  "help": {
+    "name": "read",
+    "help": "Analyze text using Deepgram text intelligence\n\nExamples:\n  dg read \"The product is amazing and works perfectly.\"\n  dg read --file article.txt --summarize\n  dg read --sentiment --topics --intents \"Customer called about billing issue.\"\n  cat review.txt | dg read --sentiment --summarize\n\n\nFor agents, use --agent-friendly.",
+    "short_help": "Text intelligence",
+    "epilog": null,
+    "hidden": false,
+    "deprecated": false,
+    "no_args_is_help": false,
+    "options_metavar": "[OPTIONS]",
+    "params": [
+      {
+        "class": "option",
+        "name": "language",
+        "opts": [
+          "--language",
+          "-l"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Language code (e.g., en)"
+      },
+      {
+        "class": "option",
+        "name": "intents",
+        "opts": [
+          "--intents"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Detect intents"
+      },
+      {
+        "class": "option",
+        "name": "topics",
+        "opts": [
+          "--topics"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Detect topics"
+      },
+      {
+        "class": "option",
+        "name": "summarize",
+        "opts": [
+          "--summarize"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Generate summary"
+      },
+      {
+        "class": "option",
+        "name": "sentiment",
+        "opts": [
+          "--sentiment"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Analyze sentiment"
+      },
+      {
+        "class": "option",
+        "name": "file",
+        "opts": [
+          "--file",
+          "-f"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Read text from file"
+      },
+      {
+        "class": "argument",
+        "name": "text",
+        "opts": [
+          "text"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "text"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": true
+      },
+      {
+        "class": "option",
+        "name": "agent_friendly",
+        "opts": [
+          "--agent-friendly"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": true,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Output machine-readable JSON metadata for this command and exit."
+      },
+      {
+        "class": "option",
+        "name": "non_interactive",
+        "opts": [
+          "--non-interactive"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Skip interactive prompts; use defaults for any optional features."
+      },
+      {
+        "class": "option",
+        "name": "output",
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "choice",
+          "choices": [
+            "json",
+            "yaml",
+            "table",
+            "csv"
+          ],
+          "case_sensitive": false
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": false,
+        "count": false,
+        "hidden": false,
+        "help": "Output format (same as the global -o before the command)."
+      },
+      {
+        "class": "option",
+        "name": "quiet",
+        "opts": [
+          "--quiet",
+          "-q"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Suppress non-essential output."
+      },
+      {
+        "class": "option",
+        "name": "verbose",
+        "opts": [
+          "--verbose",
+          "-v"
+        ],
+        "secondary_opts": [],
+        "type": {
+          "name": "boolean"
+        },
+        "required": false,
+        "nargs": 1,
+        "metavar": null,
+        "eager": false,
+        "expose": false,
+        "multiple": false,
+        "is_flag": true,
+        "count": false,
+        "hidden": false,
+        "help": "Enable verbose output."
+      }
+    ]
+  }
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-update"
-version = "0.2.8" # x-release-please-version
+version = "0.4.1" # x-release-please-version
 description = "Update command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -22,12 +22,13 @@ classifiers = [
 keywords = ["deepgram", "cli", "update", "self-update"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl-core>=0.3.1",
-    "click>=8.0.0",
-    "pydantic>=2.0.0",
-    "rich>=13.0.0",
+    "deepctl==0.4.1", # x-release-please-version
+    "deepctl-core==0.4.1", # x-release-please-version
+    "click>=8.2.0,<9",
+    "pydantic>=2.0.0,<3",
+    "rich>=13.0.0,<16",
     "packaging>=21.0",
-    "httpx>=0.24.0",
+    "httpx>=0.24.0,<1",
 ]
 
 [project.entry-points."deepctl.commands"]
@@ -50,3 +51,4 @@ include = ["deepctl_cmd_update*"]
 
 [tool.uv.sources]
 deepctl-core = { workspace = true }
+deepctl = { workspace = true }

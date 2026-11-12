@@ -1,0 +1,35 @@
+{
+  "_meta": {
+    "agent": null,
+    "captured": true,
+    "sanitising": "Captured with `env` in the terminal named, then sanitised: variables whose name contains KEY, TOKEN, SECRET or NONCE, DEEPGRAM_* and the user's own tool variables dropped; per-user and OS housekeeping names (HOME, USER, PWD, TMPDIR, XPC_*, __CF* and similar) dropped; every value replaced with \"x\" except TERM, TERM_PROGRAM, COLORTERM, LANG, SHELL, SHLVL, VSCODE_INJECTION, CLAUDECODE, CLAUDE_CODE_ENTRYPOINT and AI_AGENT; PATH replaced with a generic one.",
+    "source": "capture 2026-11-01; Claude Code's own variables removed (CLAUDE*, AI_AGENT)",
+    "terminal": "VS Code integrated terminal (macOS)"
+  },
+  "env": {
+    "COLORTERM": "truecolor",
+    "COMMAND_MODE": "unix2003",
+    "COREPACK_ENABLE_AUTO_PIN": "x",
+    "GEMINI_CLI_IDE_SERVER_PORT": "x",
+    "GEMINI_CLI_IDE_WORKSPACE_PATH": "x",
+    "GIT_ASKPASS": "x",
+    "GIT_EDITOR": "x",
+    "LANG": "C.UTF-8",
+    "LIBRARY_PATH": "x",
+    "NoDefaultCurrentDirectoryInExePath": "x",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "SHELL": "/bin/zsh",
+    "SHLVL": "2",
+    "SSH_AUTH_SOCK": "x",
+    "TERM": "xterm-256color",
+    "TERM_PROGRAM": "vscode",
+    "TERM_PROGRAM_VERSION": "x",
+    "VSCODE_GIT_ASKPASS_EXTRA_ARGS": "x",
+    "VSCODE_GIT_ASKPASS_MAIN": "x",
+    "VSCODE_GIT_ASKPASS_NODE": "x",
+    "VSCODE_GIT_IPC_HANDLE": "x",
+    "VSCODE_INJECTION": "1",
+    "VSCODE_PROFILE_INITIALIZED": "x",
+    "VSCODE_PYTHON_AUTOACTIVATE_GUARD": "x"
+  }
+}

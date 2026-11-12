@@ -7,8 +7,11 @@ import sys
 from enum import Enum
 from pathlib import Path
 
-from deepctl_core._launcher import get_launcher, launched_via_npm
 from pydantic import BaseModel
+
+from . import channel
+
+NPM_UPDATE_COMMAND = "npm i -g @deepgram/cli@latest"
 
 
 class InstallMethod(str, Enum):
@@ -99,15 +102,16 @@ class InstallationDetector:
                 "deepctl",
             ],
             InstallMethod.HOMEBREW: ["brew", "upgrade", "deepgram"],
+            # `uv tool upgrade` leaves a pinned install where it is.
             InstallMethod.UV_TOOL: [
                 "uv",
                 "tool",
-                "upgrade",
-                "deepctl",
+                "install",
+                "deepctl@latest",
             ],
             InstallMethod.UVX: None,  # Ephemeral, no update needed
             InstallMethod.PIPX_RUN: None,  # Ephemeral, no update needed
-            InstallMethod.NPM: None,  # Updated through npm, see instructions
+            InstallMethod.NPM: None,  # Printed, not run: npm owns the install
             InstallMethod.SYSTEM: None,  # Handled separately
             InstallMethod.DEVELOPMENT: None,  # Can't auto-update
             InstallMethod.UNKNOWN: None,
@@ -126,27 +130,23 @@ class InstallationDetector:
         if info.method == InstallMethod.HOMEBREW:
             return "Please update using Homebrew: brew update && brew upgrade deepgram"
 
-        # The launcher's venv or uv cache is private to it, so pip/uv run
-        # from inside would update the wrong thing; only npm can update it.
-        if info.method == InstallMethod.NPM:
-            if get_launcher() == "npx":
-                return (
-                    "Running via npx. Use the latest version with: "
-                    "npx @deepgram/cli@latest"
-                )
-            return (
-                "Installed via npm. Update with: "
-                "npm install -g @deepgram/cli@latest "
-                "(or run npx @deepgram/cli@latest). "
-                "If @deepgram/cli is a dependency of your project, update it "
-                "there instead: npm install @deepgram/cli@latest"
-            )
-
         if info.method == InstallMethod.UVX:
             return (
-                "You are running deepctl via uvx (one-shot execution). "
-                "The latest version will be used automatically on next run."
+                "uvx runs the latest deepctl each time, so there's nothing to "
+                "update. If you also installed deepctl with uv tool install, "
+                "uvx runs that copy instead; update it with: "
+                "uv tool install deepctl@latest. "
+                "To pin a version, run uvx deepctl@<version>."
             )
+
+        if info.method == InstallMethod.NPM:
+            if channel.launcher() == "npx":
+                return (
+                    "npx runs the latest @deepgram/cli each time, so there's "
+                    "nothing to update. To pin a version, run "
+                    "npx @deepgram/cli@<version>."
+                )
+            return f"Run: {NPM_UPDATE_COMMAND}"
 
         if info.method == InstallMethod.PIPX_RUN:
             return (
@@ -282,7 +282,7 @@ class InstallationDetector:
     ) -> InstallMethod:
         """Detect the installation method.
 
-        Priority: npm > development > oneshot > homebrew > uv_tool >
+        Priority: development > npm > oneshot > homebrew > uv_tool >
                   pipx > uv > system > pip > unknown
 
         Args:
@@ -293,14 +293,13 @@ class InstallationDetector:
         Returns:
             Detected installation method
         """
-        # The npm launcher runs deepctl through uv or its own venv, which
-        # would otherwise be detected as uvx or pip.
-        if launched_via_npm():
-            return InstallMethod.NPM
-
         # Development installation
         if is_editable:
             return InstallMethod.DEVELOPMENT
+
+        # Started by the @deepgram/cli npm package (npm or npx)
+        if channel.launcher() is not None:
+            return InstallMethod.NPM
 
         # One-shot execution (uvx / pipx run)
         oneshot = self._detect_oneshot_execution()
@@ -337,24 +336,16 @@ class InstallationDetector:
         return InstallMethod.UNKNOWN
 
     def _is_homebrew_install(self) -> bool:
-        """Check if installed via Homebrew.
+        """Check if installed by Homebrew's ``deepgram`` formula.
 
-        Detects Apple Silicon (/opt/homebrew), Intel Mac
-        (/usr/local/Cellar), and Linux Homebrew paths.
+        Only ``sys.prefix`` under ``Cellar/deepgram/`` counts: a pipx or
+        uv tool environment on Homebrew's Python resolves its interpreter
+        into the Cellar too, and isn't a Homebrew install of deepctl.
 
         Returns:
             True if Homebrew installation
         """
-        exe_path = Path(sys.executable).resolve()
-        exe_str = str(exe_path)
-
-        homebrew_prefixes = [
-            "/opt/homebrew",  # Apple Silicon
-            "/usr/local/Cellar",  # Intel Mac
-            "/home/linuxbrew/.linuxbrew",  # Linux
-        ]
-
-        return any(exe_str.startswith(prefix) for prefix in homebrew_prefixes)
+        return channel.is_brew()
 
     def _is_uv_tool_install(self) -> bool:
         """Check if installed via ``uv tool install``.
@@ -362,24 +353,7 @@ class InstallationDetector:
         Returns:
             True if uv tool installation
         """
-        # Use sys.prefix (the venv root), not sys.executable — uv's Python
-        # interpreter is a symlink to a shared binary pool outside tools/,
-        # so resolve() on the executable breaks the path check.
-        prefix_str = str(Path(sys.prefix))
-        exe_str = str(Path(sys.executable))
-
-        # Check custom UV_TOOL_DIR env var first
-        uv_tool_dir = os.environ.get("UV_TOOL_DIR")
-        if uv_tool_dir and (
-            prefix_str.startswith(uv_tool_dir) or exe_str.startswith(uv_tool_dir)
-        ):
-            return True
-
-        # Default uv tool location
-        default_uv_tools = str(Path.home() / ".local" / "share" / "uv" / "tools")
-        return prefix_str.startswith(default_uv_tools) or exe_str.startswith(
-            default_uv_tools
-        )
+        return channel.is_uv_tool()
 
     def _detect_oneshot_execution(self) -> InstallMethod | None:
         """Detect ephemeral one-shot execution (uvx / pipx run).
@@ -387,17 +361,10 @@ class InstallationDetector:
         Returns:
             UVX or PIPX_RUN if detected, None otherwise
         """
-        # uvx sets UV_INTERNAL__PARENT_INTERPRETER
-        if "UV_INTERNAL__PARENT_INTERPRETER" in os.environ:
+        if channel.is_uvx():
             return InstallMethod.UVX
-
-        # pipx run uses a cache directory
-        exe_path = str(Path(sys.executable).resolve())
-        pipx_home = os.environ.get("PIPX_HOME", str(Path.home() / ".local" / "pipx"))
-        pipx_cache = str(Path(pipx_home) / ".cache")
-        if exe_path.startswith(pipx_cache):
+        if channel.is_pipx_run():
             return InstallMethod.PIPX_RUN
-
         return None
 
     def _is_pipx_install(self) -> bool:
@@ -406,13 +373,7 @@ class InstallationDetector:
         Returns:
             True if pipx installation
         """
-        # Check for pipx environment variables
-        if "PIPX_HOME" in os.environ or "PIPX_BIN_DIR" in os.environ:
-            return True
-
-        # Check if executable is in a pipx-managed location
-        exe_path = Path(sys.executable)
-        return "pipx" in str(exe_path) or (exe_path.parent.parent / ".pipx").exists()
+        return channel.is_pipx()
 
     def _is_uv_install(self) -> bool:
         """Check if installed via uv.

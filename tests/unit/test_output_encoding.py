@@ -80,7 +80,10 @@ def test_closed_stream_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     safe_output_streams()
 
 
-@pytest.mark.parametrize("args", [["--help"], ["ffprobe", "--help"], ["--version"]])
+@pytest.mark.parametrize(
+    "args",
+    [["--help"], ["ffprobe", "--help"], ["help", "agent-mode"], ["--version"]],
+)
 def test_redirected_cp1252_output_does_not_crash(
     tmp_path: Path, args: list[str]
 ) -> None:

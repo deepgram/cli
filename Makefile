@@ -143,15 +143,15 @@ verify-packages: ## Verify built packages with twine
 	twine check dist/*
 
 readmes: ## Generate sub-package READMEs from pyproject.toml metadata
-	python3 scripts/generate_readmes.py
+	uv run python scripts/generate_readmes.py
 
 readmes-check: ## Check sub-package READMEs are up to date
-	python3 scripts/generate_readmes.py --check
+	uv run python scripts/generate_readmes.py --check
 
-floors-check: ## Check intra-workspace dependency floors (root and SIBLING_FLOORS must pin workspace versions)
+floors-check: ## Check lockstep versions: every package at the root version, every first-party pin ==
 	uv run python scripts/check_dependency_floors.py
 
-floors-fix: ## Pin root and SIBLING_FLOORS dependency floors to the current workspace versions
+floors-fix: ## Set every package version, first-party pin and back-edge to the root version
 	uv run python scripts/check_dependency_floors.py --fix
 
 # ===================================================================

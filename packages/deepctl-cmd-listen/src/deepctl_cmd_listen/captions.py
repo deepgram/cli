@@ -95,8 +95,10 @@ class StreamingCaptionWriter:
     word-level speaker data is present.
     """
 
-    def __init__(self, fmt: str) -> None:
+    def __init__(self, fmt: str, *, echo: bool = True) -> None:
         self.fmt = fmt  # "webvtt" | "srt"
+        # False under a machine format: collect words, print nothing.
+        self.echo = echo
         self._count = 0
         self._all_words: list[dict[str, Any]] = []
 
@@ -106,13 +108,13 @@ class StreamingCaptionWriter:
         For WebVTT, an optional NOTE block can carry metadata (model, language,
         etc.) in a spec-compliant way. SRT has no header equivalent.
         """
-        if self.fmt == "webvtt":
-            print("WEBVTT")
-            print()
+        if self.echo and self.fmt == "webvtt":
+            print("WEBVTT", flush=True)
+            print(flush=True)
             if note:
-                print("NOTE")
-                print(note)
-                print()
+                print("NOTE", flush=True)
+                print(note, flush=True)
+                print(flush=True)
 
     def write_entry(
         self,
@@ -132,22 +134,24 @@ class StreamingCaptionWriter:
 
         self._count += 1
         self._all_words.extend(words)
+        if not self.echo:
+            return
 
         text = " ".join(w.get("punctuated_word") or w.get("word", "") for w in words)
         first_speaker: int | None = words[0].get("speaker") if words else None
 
         if self.fmt == "webvtt":
-            print(f"{_fmt_webvtt(start)} --> {_fmt_webvtt(end)}")
+            print(f"{_fmt_webvtt(start)} --> {_fmt_webvtt(end)}", flush=True)
             prefix = f"<v Speaker {first_speaker}>" if first_speaker is not None else ""
-            print(f"{prefix}{text}")
-            print()
+            print(f"{prefix}{text}", flush=True)
+            print(flush=True)
         else:
-            print(self._count)
-            print(f"{_fmt_srt(start)} --> {_fmt_srt(end)}")
+            print(self._count, flush=True)
+            print(f"{_fmt_srt(start)} --> {_fmt_srt(end)}", flush=True)
             if first_speaker is not None:
-                print(f"[Speaker {first_speaker}]")
-            print(text)
-            print()
+                print(f"[Speaker {first_speaker}]", flush=True)
+            print(text, flush=True)
+            print(flush=True)
 
     @property
     def accumulated_words(self) -> list[dict[str, Any]]:

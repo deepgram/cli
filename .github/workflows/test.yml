@@ -13,6 +13,9 @@ jobs:
   test:
     name: Test Python ${{ matrix.python-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A full run takes under 10 minutes; a deadlocked test must fail the
+    # job, not hold a runner until the 6-hour Actions limit.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -36,9 +39,13 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-telemetry/tests packages/deepctl-cmd-api/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-debug-probe/tests packages/deepctl-cmd-ffprobe/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-cmd-skills/tests packages/deepctl-cmd-init/tests packages/deepctl-cmd-models/tests packages/deepctl-cmd-speak/tests packages/deepctl-cmd-keys/tests packages/deepctl-cmd-read/tests packages/deepctl-cmd-listen/tests packages/deepctl-cmd-requests/tests packages/deepctl-cmd-billing/tests packages/deepctl-cmd-members/tests packages/deepctl-cmd-completion/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v
+          uv run pytest tests packages/deepctl-core/tests packages/deepctl-shared-utils/tests packages/deepctl-telemetry/tests packages/deepctl-cmd-api/tests packages/deepctl-cmd-login/tests packages/deepctl-cmd-projects/tests packages/deepctl-cmd-transcribe/tests packages/deepctl-cmd-usage/tests packages/deepctl-cmd-debug/tests packages/deepctl-cmd-debug-audio/tests packages/deepctl-cmd-debug-browser/tests packages/deepctl-cmd-debug-network/tests packages/deepctl-cmd-debug-toolkit/tests packages/deepctl-cmd-debug-probe/tests packages/deepctl-cmd-ffprobe/tests packages/deepctl-cmd-mcp/tests packages/deepctl-cmd-update/tests packages/deepctl-cmd-plugin/tests packages/deepctl-cmd-skills/tests packages/deepctl-cmd-init/tests packages/deepctl-cmd-models/tests packages/deepctl-cmd-speak/tests packages/deepctl-cmd-keys/tests packages/deepctl-cmd-read/tests packages/deepctl-cmd-listen/tests packages/deepctl-cmd-requests/tests packages/deepctl-cmd-billing/tests packages/deepctl-cmd-members/tests packages/deepctl-cmd-completion/tests packages/deepctl-plugin-example/tests --cov --cov-report=term-missing -v --timeout=300
 
+      # Outside pytest, so conftest.py's telemetry opt-out doesn't apply.
       - name: Test CLI installation
+        env:
+          DEEPCTL_TELEMETRY_DISABLED: "1"
+          DEEPCTL_TELEMETRY_DSN: "http://k@127.0.0.1:9/1"
         run: |
           uv run python -c "from deepctl.main import main; print('Import successful')"
           uv run deepctl --version
@@ -69,8 +76,8 @@ jobs:
       - name: Type check
         run: uv run mypy src/ packages/*/src scripts/
 
-  floors:
-    name: Dependency floors
+  lockstep:
+    name: Lockstep versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
@@ -83,10 +90,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
 
-      # Root floors must equal workspace versions or `pip install --upgrade
-      # deepctl` (what `dg update` runs) silently skips the packages whose
-      # fixes the release advertises. See scripts/check_dependency_floors.py.
-      - name: Check dependency floors
+      # Every first-party package ships at the root's version: every version,
+      # every first-party pin `==` it, every package's `deepctl==` back-edge,
+      # and root lists every package. A mismatch lets pip pair packages from
+      # two releases. The release PR has to pass it like any other.
+      # See scripts/check_dependency_floors.py.
+      - name: Check lockstep versions and pins
         run: make floors-check
 
   build-test:
@@ -111,6 +120,39 @@ jobs:
 
       - name: Verify packages
         run: make verify-packages
+
+  lowest-direct:
+    name: Lowest direct dependencies / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          version: "0.13.6"
+
+      - name: Build every package
+        run: uv build --all-packages --wheel --out-dir dist
+
+      # One environment: the whole lockstep closure with every third-party
+      # dependency at the lowest version the 30 pyprojects together allow.
+      # The CLI's --help tree and the unit tests run in it; floors that sit
+      # below what the closure resolves are listed in the log.
+      - name: Install the closure at its floors, then run the CLI and unit tests
+        env:
+          DEEPCTL_TELEMETRY_DISABLED: "1"
+          DEEPCTL_TELEMETRY_DSN: "http://k@127.0.0.1:9/1"
+        run: tests/upgrade/lowest_direct.sh dist python
 
   # The launcher's unit tests on every Node version package.json's engines
   # field admits. Linux only: the cross-OS job below covers platforms.
@@ -305,34 +347,6 @@ jobs:
             [ "${CACHED}" = "marker" ] || { echo "::error::the uv cache in ${PLANTED} was used: ${CACHED}"; exit 1; }
           fi
 
-  # The release PR's bump gate (scripts/check_release_bumps.py), for commits
-  # people push to the release PR, such as a CHANGELOG edit. Commits from
-  # release-please and the release workflow's sync job use GITHUB_TOKEN and
-  # trigger no workflows; release.yml's sync-release-pr posts the same
-  # `release-bump-gate` context as a commit status on those. Skipped on
-  # every other PR, which a required check treats as passing. Deliberately
-  # not in all-checks: on non-release PRs it never runs.
-  release-bump-gate:
-    name: release-bump-gate
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          # The PR head, not the merge commit, and every release tag.
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
-        with:
-          python-version: "3.12"
-
-      - name: Check every changed package is being released
-        run: |
-          pip install packaging==26.3
-          python scripts/check_release_bumps.py
-
   # Single rollup so branch protection needs exactly one required check.
   # Requiring the matrix contexts directly means editing repo settings every
   # time a Python version or OS is added or dropped, and a required context
@@ -344,7 +358,7 @@ jobs:
   # cancelled and skipped prerequisites are failures here too.
   all-checks:
     name: All checks
-    needs: [test, lint, floors, build-test, launcher-node, launcher, launcher-hashed]
+    needs: [test, lint, lockstep, lowest-direct, build-test, launcher-node, launcher, launcher-hashed]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -352,7 +366,8 @@ jobs:
         run: |
           echo "test:       ${{ needs.test.result }}"
           echo "lint:       ${{ needs.lint.result }}"
-          echo "floors:     ${{ needs.floors.result }}"
+          echo "lockstep:   ${{ needs.lockstep.result }}"
+          echo "lowest-direct: ${{ needs.lowest-direct.result }}"
           echo "build-test: ${{ needs.build-test.result }}"
           echo "launcher-node: ${{ needs.launcher-node.result }}"
           echo "launcher:   ${{ needs.launcher.result }}"

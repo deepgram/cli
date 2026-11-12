@@ -243,10 +243,21 @@ dg api /v1/projects/PROJECT_ID/usage/requests | jq '.requests[].path'
 ## MCP Server (AI Editor Integration)
 
 ```bash
-dg mcp                               # Start MCP server (stdio transport)
+dg mcp                               # Start MCP server (stdio only)
 ```
 
 Used with Claude Code, Cursor, VS Code Copilot, and other MCP-compatible editors.
+The editor starts `dg mcp` (command `dg`, args `["mcp"]`) and talks to it over
+stdin and stdout; SSE and HTTP transports aren't supported. The server has one
+tool, `search_deepgram_knowledge_sources`, which searches Deepgram's
+documentation and returns passages with their source URLs. It doesn't call
+other Deepgram APIs.
+
+The API key comes from `dg login` or `DEEPGRAM_API_KEY`. Don't put the API key
+in the MCP config's `args`. Without a key the server still starts, and each
+search returns a tool error (`isError: true`) that says to run `dg login` or set
+`DEEPGRAM_API_KEY`; if the error says a person must fix the config file, an AI
+agent should ask the user rather than act on it.
 
 ---
 

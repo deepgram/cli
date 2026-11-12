@@ -1,0 +1,128 @@
+{
+  "_doc": "Benchmark subjects. 'dg' is built from a git ref of this repo; every other subject is a pinned public release. Tarballs are verified by sha256 at image build time. Pins are arm64 (the bench runner is ubuntu-24.04-arm). Bump a pin by PR; the PR's bench run is the measured delta.",
+  "images": {
+    "python": "python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337",
+    "python313": "python:3.13-slim-bookworm@sha256:281d39ff02e3b389401586134ff9e6572954687822a58055ec07a60ded4e0b7f",
+    "debian": "debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3",
+    "node": "node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da",
+    "uv": "ghcr.io/astral-sh/uv:0.9.5@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40ec34b39a1ab469acd6e289b7",
+    "dropcaches": "alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+  },
+  "hyperfine": {
+    "version": "1.19.0",
+    "sha256": {
+      "arm64": "7f9c0522e1acf869e0558e085c43f2cea3e30e4f7a4b7bc3d5540cbdee7b4273",
+      "amd64": "d5550bbdc240d2aaa8f43ea2dc8b03a306afb30ea8464cd8b2faa9486ed1019e"
+    }
+  },
+  "groups": {
+    "voice": ["openai", "gladia", "lk", "elevenlabs", "assembly"],
+    "all": ["gh", "stripe", "supabase", "flyctl", "vercel", "wrangler", "openai", "gladia", "lk", "elevenlabs", "assembly"],
+    "mcp": ["gladia-mcp", "cartesia-mcp", "elevenlabs-mcp", "azure-mcp", "github-mcp", "flyctl", "supabase-mcp", "stripe-mcp"],
+    "voice_mcp": ["gladia-mcp", "cartesia-mcp", "elevenlabs-mcp"]
+  },
+  "subjects": {
+    "dg": {
+      "kind": "dg",
+      "cli": {
+        "version": ["/home/u/.local/bin/dg", "--version"],
+        "help": ["/home/u/.local/bin/dg", "--help"],
+        "subhelp": ["/home/u/.local/bin/dg", "transcribe", "--help"]
+      },
+      "mcp": {"cmd": ["/home/u/.local/bin/dg", "mcp"], "env": {"DEEPGRAM_API_KEY": "dummy"}},
+      "python": "/home/u/.local/share/uv/tools/deepctl/bin/python"
+    },
+    "gh": {
+      "kind": "bin", "version": "2.103.3",
+      "url": "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_arm64.tar.gz",
+      "sha256": "ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63",
+      "cli": {"version": ["/opt/gh/gh_2.103.3_linux_arm64/bin/gh", "--version"], "help": ["/opt/gh/gh_2.103.3_linux_arm64/bin/gh", "--help"]}
+    },
+    "stripe": {
+      "kind": "bin", "version": "1.55.4",
+      "url": "https://github.com/stripe/stripe-cli/releases/download/v1.55.4/stripe_1.55.4_linux_arm64.tar.gz",
+      "sha256": "dadbb6c62532b4886ae3f38969175f720ff711b10d513bd52eee050d43428a4a",
+      "cli": {"version": ["/opt/stripe/stripe", "--version"], "help": ["/opt/stripe/stripe", "--help"]}
+    },
+    "supabase": {
+      "kind": "bin", "version": "2.122.0",
+      "url": "https://github.com/supabase/cli/releases/download/v2.122.0/supabase_2.122.0_linux_arm64.tar.gz",
+      "sha256": "8980b46044aba0863f26a1b4134a498d2c74df0dadf24289bb4faa86729511cc",
+      "cli": {"version": ["/opt/supabase/supabase", "--version"], "help": ["/opt/supabase/supabase", "--help"]}
+    },
+    "flyctl": {
+      "kind": "bin", "version": "0.5.1",
+      "url": "https://github.com/superfly/flyctl/releases/download/v0.5.1/flyctl_0.5.1_Linux_arm64.tar.gz",
+      "sha256": "f37c08ce42520b0dc65008874f8df5147e959f34f30438a4d476dfb07dd3abaa",
+      "cli": {"version": ["/opt/flyctl/flyctl", "version"], "help": ["/opt/flyctl/flyctl", "--help"]},
+      "mcp": {"cmd": ["/opt/flyctl/flyctl", "mcp", "server"], "env": {"FLY_API_TOKEN": "dummy"}}
+    },
+    "lk": {
+      "kind": "bin", "version": "2.19.2",
+      "url": "https://github.com/livekit/livekit-cli/releases/download/v2.19.2/lk_2.19.2_linux_arm64.tar.gz",
+      "sha256": "edcbd3ce453b420a9b59b0207869e6b1321026f4a24beb7013fef7cd9287cd9b",
+      "cli": {"version": ["/opt/lk/lk", "--version"], "help": ["/opt/lk/lk", "--help"]}
+    },
+    "openai": {
+      "kind": "bin", "version": "1.46.0",
+      "url": "https://github.com/openai/openai-cli/releases/download/v1.46.0/openai_1.46.0_linux_arm64.tar.gz",
+      "sha256": "2e8304b67215744f032e4edc006bbee7a329a6a4d709c62a5f1115f4d316c624",
+      "cli": {"version": ["/opt/openai/openai", "--version"], "help": ["/opt/openai/openai", "--help"]}
+    },
+    "gladia": {
+      "kind": "bin", "version": "1.0.5",
+      "url": "https://github.com/gladiaio/gladia-cli/releases/download/v1.0.5/gladia_1.0.5_linux_arm64.tar.gz",
+      "sha256": "3c4c842da56526544390312aef929a6b264a4c8823a9e7971c64e250060f3e2e",
+      "cli": {"version": ["/opt/gladia/gladia", "--version"], "help": ["/opt/gladia/gladia", "--help"]}
+    },
+    "elevenlabs": {
+      "kind": "bin", "version": "1.8.0",
+      "url": "https://github.com/elevenlabs/cli/releases/download/v1.8.0/elevenlabs-cli-aarch64-unknown-linux-gnu.tar.gz",
+      "sha256": "f40bf0243c302fefa661fc1008931d4e4d870b5c6a75e94e5a12d8f68c9c3ebd",
+      "cli": {"version": ["/opt/elevenlabs/elevenlabs-cli-aarch64-unknown-linux-gnu/elevenlabs", "--version"], "help": ["/opt/elevenlabs/elevenlabs-cli-aarch64-unknown-linux-gnu/elevenlabs", "--help"]}
+    },
+    "github-mcp": {
+      "kind": "bin", "version": "2.0.3",
+      "url": "https://github.com/github/github-mcp-server/releases/download/v2.0.3/github-mcp-server_Linux_arm64.tar.gz",
+      "sha256": "5d2ddc71273fec8917e8f42cf19f26a6bd7acbb679b3a57de2917018b2eadf82",
+      "mcp": {"cmd": ["/opt/github-mcp/github-mcp-server", "stdio"], "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "dummy"}}
+    },
+    "vercel": {
+      "kind": "npm", "version": "65.8.0", "package": "vercel",
+      "cli": {"version": ["/usr/local/bin/vercel", "--version"], "help": ["/usr/local/bin/vercel", "--help"]}
+    },
+    "wrangler": {
+      "kind": "npm", "version": "4.156.0", "package": "wrangler",
+      "cli": {"version": ["/usr/local/bin/wrangler", "--version"], "help": ["/usr/local/bin/wrangler", "--help"]}
+    },
+    "gladia-mcp": {
+      "kind": "npm", "version": "0.1.1", "package": "@gladiaio/mcp",
+      "mcp": {"cmd": ["/usr/local/bin/gladia-mcp"], "env": {"GLADIA_API_KEY": "dummy"}}
+    },
+    "stripe-mcp": {
+      "kind": "npm", "version": "0.3.3", "package": "@stripe/mcp",
+      "mcp": {"cmd": ["/usr/local/bin/mcp", "--api-key=sk_test_dummy"], "env": {"STRIPE_SECRET_KEY": "sk_test_dummy"}}
+    },
+    "supabase-mcp": {
+      "kind": "npm", "version": "0.15.0", "package": "@supabase/mcp-server-supabase",
+      "mcp": {"cmd": ["/usr/local/bin/mcp-server-supabase", "--read-only"], "env": {"SUPABASE_ACCESS_TOKEN": "dummy"}}
+    },
+    "azure-mcp": {
+      "kind": "npm", "version": "4.0.0-beta.4", "package": "@azure/mcp",
+      "mcp": {"cmd": ["/usr/local/bin/azmcp", "server", "start"], "env": {"AZURE_MCP_COLLECT_TELEMETRY": "false", "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT": "1"}}
+    },
+    "assembly": {
+      "kind": "uv", "version": "a4a7760ad7925f5feb1f4776d56b5ffd299f3d54",
+      "spec": "git+https://github.com/AssemblyAI/cli.git@a4a7760ad7925f5feb1f4776d56b5ffd299f3d54",
+      "cli": {"version": ["/home/u/.local/bin/assembly", "--version"], "help": ["/home/u/.local/bin/assembly", "--help"]}
+    },
+    "cartesia-mcp": {
+      "kind": "uv", "version": "0.28.0", "spec": "cartesia-mcp==0.28.0", "python_image": "python313",
+      "mcp": {"cmd": ["/home/u/.local/bin/cartesia-mcp"], "env": {"CARTESIA_API_KEY": "dummy"}}
+    },
+    "elevenlabs-mcp": {
+      "kind": "uv", "version": "0.12.2", "spec": "elevenlabs-mcp==0.12.2",
+      "mcp": {"cmd": ["/home/u/.local/bin/elevenlabs-mcp"], "env": {"ELEVENLABS_API_KEY": "dummy"}}
+    }
+  }
+}

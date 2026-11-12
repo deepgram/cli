@@ -1,66 +1,93 @@
-"""Tests for scripts/check_dependency_floors.py.
+"""Tests for scripts/check_dependency_floors.py, the lockstep check.
 
-The guard runs in CI (`make floors-check`) and, with `--fix`, twice in the
-release workflow's sync job: fix, `uv lock`, check. Those two commands run
-back to back, so anything that makes `--fix` disagree with the following
-check wedges the release PR -- the exact wall the guard exists to remove.
-The tests below drive the real script over throwaway workspaces.
+The check is a required status on every PR, and the release workflow's
+fix-up job runs it with `--fix`, then `uv lock`, then plain. Anything that
+makes `--fix` disagree with the next check wedges the release PR, so these
+tests drive the real script over throwaway workspaces.
 """
 
 from __future__ import annotations
 
-import ast
 import json
-import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_dependency_floors.py"
+MARKER = "# x-release-please-version"
+SIBLINGS = ["deepctl-core", "deepctl-cmd-keys", "deepctl-cmd-listen"]
 
 
-def make_workspace(
-    tmp_path: Path,
-    root_deps: list[str],
-    packages: dict[str, str],
-) -> Path:
-    """Build a minimal workspace the guard can be pointed at.
+def pin(name: str, version: str) -> str:
+    return f'    "{name}=={version}", {MARKER}\n'
 
-    `packages` maps package name -> version; each becomes
-    packages/<name>/pyproject.toml and a manifest entry.
-    """
+
+def project_toml(name: str, version: str, deps: list[str], sources: list[str]) -> str:
+    text = (
+        "[project]\n"
+        f'name = "{name}"\n'
+        f'version = "{version}" {MARKER}\n'
+        "dependencies = [\n" + "".join(deps) + '    "click>=8.0.0,<9",\n]\n'
+    )
+    if sources:
+        text += "\n[tool.uv.sources]\n" + "".join(
+            f"{s} = {{ workspace = true }}\n" for s in sources
+        )
+    return text
+
+
+def make_workspace(tmp_path: Path, version: str = "1.0.0") -> Path:
+    """A correct lockstep workspace: root, three siblings, the plugin example."""
     (tmp_path / "scripts").mkdir()
     shutil.copy(SCRIPT, tmp_path / "scripts" / SCRIPT.name)
-
-    deps = ", ".join(f'"{dep}"' for dep in root_deps)
     (tmp_path / "pyproject.toml").write_text(
-        f'[project]\nname = "deepctl"\nversion = "1.0.0"\ndependencies = [{deps}]\n',
+        project_toml(
+            "deepctl", version, [pin(s, version) for s in SIBLINGS], sources=SIBLINGS
+        ),
         encoding="utf-8",
     )
-
-    manifest: dict[str, str] = {".": "1.0.0"}
-    for name, version in packages.items():
-        pkg_dir = tmp_path / "packages" / name
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "pyproject.toml").write_text(
-            f'[project]\nname = "{name}"\nversion = "{version}"\n',
-            encoding="utf-8",
+    for name in SIBLINGS:
+        deps = [pin("deepctl", version)]
+        sources = ["deepctl"]
+        if name != "deepctl-core":
+            deps.append(pin("deepctl-core", version))
+            sources.append("deepctl-core")
+        pkg = tmp_path / "packages" / name
+        pkg.mkdir(parents=True)
+        (pkg / "pyproject.toml").write_text(
+            project_toml(name, version, deps, sources), encoding="utf-8"
         )
-        manifest[f"packages/{name}"] = version
-
-    github = tmp_path / ".github"
-    github.mkdir()
-    (github / ".release-please-manifest.json").write_text(
-        json.dumps(manifest), encoding="utf-8"
+    example = tmp_path / "packages" / "deepctl-plugin-example"
+    example.mkdir(parents=True)
+    (example / "pyproject.toml").write_text(
+        project_toml(
+            "deepctl-plugin-example",
+            "0.1.12",
+            ['    "deepctl-core>=0.1.10",\n'],
+            sources=["deepctl-core"],
+        ),
+        encoding="utf-8",
+    )
+    init = tmp_path / "src" / "deepctl" / "__init__.py"
+    init.parent.mkdir(parents=True)
+    init.write_text(f'__version__ = "{version}"  {MARKER}\n', encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / ".release-please-manifest.json").write_text(
+        json.dumps({".": version, "packages/deepctl-plugin-example": "0.1.12"}),
+        encoding="utf-8",
     )
     return tmp_path
 
 
-def run_guard(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run_check(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(workspace / "scripts" / SCRIPT.name), *args],
         capture_output=True,
@@ -68,392 +95,360 @@ def run_guard(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def root_dependencies(workspace: Path) -> list[str]:
-    """Read back the dependency list this module wrote, after --fix.
-
-    Parsed with ast rather than tomllib so the test itself runs on 3.10,
-    where the guard uses its tomli fallback.
-    """
-    text = (workspace / "pyproject.toml").read_text(encoding="utf-8")
-    match = re.search(r"^dependencies = (\[.*\])$", text, re.MULTILINE)
-    assert match, text
-    deps: list[str] = ast.literal_eval(match.group(1))
-    return deps
+def edit(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert old in text, (old, text)
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    "version",
-    ["0.4.0rc1", "1.0.0.dev1", "0.3.0.post1", "0.4.0b2"],
-)
-def test_fix_then_check_round_trips_on_pre_release_versions(
-    tmp_path: Path, version: str
-) -> None:
-    """`--fix` must produce a tree the very next check accepts.
-
-    The version regex used to stop at the first non-digit, so a workspace
-    version of 0.4.0rc1 was read as a floor of "0.4.0": --fix wrote
-    `deepctl-core>=0.4.0rc1` and reported success, and the check that runs
-    immediately after it in the release sync job exited 1 on the floor it
-    had just written. `make floors-check` could then never be made to pass.
-    """
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.1.0"],
-        packages={"deepctl-core": version},
-    )
-
-    fix = run_guard(workspace, "--fix")
-    assert fix.returncode == 0, fix.stderr
-    assert root_dependencies(workspace) == [f"deepctl-core>={version}"]
-
-    check = run_guard(workspace)
-    assert check.returncode == 0, check.stderr
-    assert "dependency floors OK" in check.stdout
+def sibling(workspace: Path, name: str) -> Path:
+    return workspace / "packages" / name / "pyproject.toml"
 
 
-def test_fix_is_idempotent_when_already_pinned(tmp_path: Path) -> None:
-    """A second --fix on an already-correct tree changes nothing."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.4.0rc1"],
-        packages={"deepctl-core": "0.4.0rc1"},
-    )
-    before = (workspace / "pyproject.toml").read_text(encoding="utf-8")
-
-    assert run_guard(workspace, "--fix").returncode == 0
-    assert (workspace / "pyproject.toml").read_text(encoding="utf-8") == before
-
-
-def test_fix_preserves_upper_bounds_and_extras(tmp_path: Path) -> None:
-    """Only the floor is rewritten; the rest of the spec survives."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core[speech]>=0.1.0,<2"],
-        packages={"deepctl-core": "0.4.0rc1"},
-    )
-
-    assert run_guard(workspace, "--fix").returncode == 0
-    assert root_dependencies(workspace) == ["deepctl-core[speech]>=0.4.0rc1,<2"]
-    assert run_guard(workspace).returncode == 0
-
-
-def test_extras_do_not_look_like_a_missing_root_dependency(tmp_path: Path) -> None:
-    """A correctly pinned dep with extras is not reported as missing.
-
-    Rule 3's "published but is not a root dependency" message is derived
-    from what rule 1's parser saw. When that parser only matched bare
-    `name>=version`, writing an extras group made the guard tell the
-    maintainer to add a dependency that was already right there.
-    """
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core[speech]>=0.4.0"],
-        packages={"deepctl-core": "0.4.0"},
-    )
-
-    result = run_guard(workspace)
+def test_lockstep_workspace_passes(tmp_path: Path) -> None:
+    result = run_check(make_workspace(tmp_path))
     assert result.returncode == 0, result.stderr
-    assert "is not a root dependency" not in result.stderr
+    assert "lockstep OK: 4 packages at 1.0.0" in result.stdout
 
 
-def test_non_floor_specifier_is_named_for_what_it_is(tmp_path: Path) -> None:
-    """`==` is reported as an unsupported specifier, not as an omission."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core==0.4.0"],
-        packages={"deepctl-core": "0.4.0"},
+def test_real_repository_is_in_lockstep() -> None:
+    """The tree this test ships in passes its own required check."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True
     )
-
-    result = run_guard(workspace)
-    assert result.returncode == 1
-    assert "does not pin a `>=` floor" in result.stderr
-    assert "is not a root dependency" not in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "lockstep OK: 30 packages at" in result.stdout
 
 
-def test_stale_root_floor_still_fails(tmp_path: Path) -> None:
-    """Positive control: rule 1 keeps catching what it was written for."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.3.0"],
-        packages={"deepctl-core": "0.4.0"},
-    )
-
-    result = run_guard(workspace)
-    assert result.returncode == 1
-    assert "root floor deepctl-core>=0.3.0 != workspace version 0.4.0" in result.stderr
+# -- each drift fails closed, naming the file ----------------------------------
 
 
-def test_missing_root_dependency_still_fails(tmp_path: Path) -> None:
-    """Positive control: rule 3 keeps catching an unlisted package."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.4.0"],
-        packages={"deepctl-core": "0.4.0", "deepctl-cmd-keys": "0.1.0"},
-    )
-
-    result = run_guard(workspace)
-    assert result.returncode == 1
-    assert "deepctl-cmd-keys is published but is not a root dependency" in result.stderr
+def break_old_pin(ws: Path) -> str:
+    keys = sibling(ws, "deepctl-cmd-keys")
+    edit(keys, '"deepctl-core==1.0.0"', '"deepctl-core==0.9.0"')
+    return "packages/deepctl-cmd-keys/pyproject.toml: 'deepctl-core==0.9.0' must be exactly 'deepctl-core==1.0.0'"
 
 
-def test_unsatisfiable_sub_package_floor_still_fails(tmp_path: Path) -> None:
-    """Positive control: rule 2 keeps catching a floor above the sibling."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.4.0", "deepctl-cmd-keys>=0.1.0"],
-        packages={"deepctl-core": "0.4.0", "deepctl-cmd-keys": "0.1.0"},
-    )
-    keys = workspace / "packages" / "deepctl-cmd-keys" / "pyproject.toml"
-    keys.write_text(
-        '[project]\nname = "deepctl-cmd-keys"\nversion = "0.1.0"\n'
-        'dependencies = ["deepctl-core>=9.9.9"]\n',
-        encoding="utf-8",
-    )
-
-    result = run_guard(workspace)
-    assert result.returncode == 1
-    assert "exceeds workspace version 0.4.0 (unsatisfiable)" in result.stderr
+def break_back_edge(ws: Path) -> str:
+    edit(sibling(ws, "deepctl-cmd-listen"), pin("deepctl", "1.0.0"), "")
+    return "packages/deepctl-cmd-listen/pyproject.toml: missing the back-edge deepctl==1.0.0"
 
 
-def test_final_release_floor_above_a_pre_release_is_unsatisfiable(
-    tmp_path: Path,
-) -> None:
-    """0.4.0 is not satisfied by 0.4.0rc1, and the guard must say so.
-
-    Comparing only the numeric segments made these two look identical.
-    """
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.4.0rc1", "deepctl-cmd-keys>=0.1.0"],
-        packages={"deepctl-core": "0.4.0rc1", "deepctl-cmd-keys": "0.1.0"},
-    )
-    keys = workspace / "packages" / "deepctl-cmd-keys" / "pyproject.toml"
-    keys.write_text(
-        '[project]\nname = "deepctl-cmd-keys"\nversion = "0.1.0"\n'
-        'dependencies = ["deepctl-core>=0.4.0"]\n',
-        encoding="utf-8",
-    )
-
-    result = run_guard(workspace)
-    assert result.returncode == 1
-    assert "exceeds workspace version 0.4.0rc1 (unsatisfiable)" in result.stderr
+def break_floor(ws: Path) -> str:
+    edit(sibling(ws, "deepctl-core"), '"deepctl==1.0.0"', '"deepctl>=1.0.0"')
+    return "packages/deepctl-core/pyproject.toml: 'deepctl>=1.0.0' must be exactly 'deepctl==1.0.0'"
 
 
-# ---------------------------------------------------------------------------
-# Rule 4: coupled sibling floors (SIBLING_FLOORS) track the sibling's
-# workspace version. deepctl-cmd-update imports deepctl_core._launcher, which
-# no published deepctl-core had; with a stale floor pip can pair the new
-# update package with an old core and `dg` fails at import.
-# ---------------------------------------------------------------------------
+def break_root_list(ws: Path) -> str:
+    edit(ws / "pyproject.toml", pin("deepctl-cmd-listen", "1.0.0"), "")
+    return "pyproject.toml: missing deepctl-cmd-listen==1.0.0"
 
-COUPLED = {
-    "deepctl-core": "0.4.0",
-    "deepctl-cmd-update": "0.3.0",
-    "deepctl-cmd-skills": "0.1.0",
-    "deepctl-cmd-plugin": "0.2.0",
+
+BREAKS = {
+    "sibling pin ==V-1": break_old_pin,
+    "sibling missing deepctl==V": break_back_edge,
+    "floor >= instead of ==": break_floor,
+    "root missing a sibling": break_root_list,
 }
 
 
-def write_package(workspace: Path, name: str, deps: list[str]) -> Path:
-    pyproject = workspace / "packages" / name / "pyproject.toml"
-    quoted = ", ".join(f'"{dep}"' for dep in deps)
-    pyproject.write_text(
-        f'[project]\nname = "{name}"\nversion = "{COUPLED[name]}"\n'
-        f"dependencies = [{quoted}]\n",
-        encoding="utf-8",
-    )
-    return pyproject
+@pytest.mark.parametrize("breaker", BREAKS.values(), ids=BREAKS.keys())
+def test_each_drift_fails_naming_the_file(
+    tmp_path: Path, breaker: Callable[[Path], str]
+) -> None:
+    ws = make_workspace(tmp_path)
+    expected = breaker(ws)
+
+    result = run_check(ws)
+
+    assert result.returncode == 1
+    assert expected in result.stderr, result.stderr
 
 
-def coupled_workspace(tmp_path: Path, update: str, skills: str, plugin: str) -> Path:
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=[f"{name}>={version}" for name, version in COUPLED.items()],
-        packages=COUPLED,
-    )
-    write_package(workspace, "deepctl-cmd-update", [update])
-    write_package(workspace, "deepctl-cmd-skills", [skills])
-    write_package(workspace, "deepctl-cmd-plugin", ["deepctl-core>=0.1.0", plugin])
-    return workspace
+def test_fix_repairs_all_four_at_once(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    clean = {p: p.read_text("utf-8") for p in ws.rglob("pyproject.toml")}
+    for breaker in BREAKS.values():
+        breaker(ws)
+    assert run_check(ws).returncode == 1
+
+    fix = run_check(ws, "--fix")
+
+    assert fix.returncode == 0, fix.stderr
+    assert run_check(ws).returncode == 0
+    # Order inside the dependency array may differ; the set of lines may not.
+    for path, text in clean.items():
+        assert sorted(path.read_text("utf-8").splitlines()) == sorted(
+            text.splitlines()
+        ), path
 
 
-def package_dependencies(workspace: Path, name: str) -> list[str]:
-    text = (workspace / "packages" / name / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
-    match = re.search(r"^dependencies = (\[.*\])$", text, re.MULTILINE)
-    assert match, text
-    deps: list[str] = ast.literal_eval(match.group(1))
-    return deps
+def test_fix_is_idempotent(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    before = {p: p.read_bytes() for p in ws.rglob("*") if p.is_file()}
+
+    assert run_check(ws, "--fix").returncode == 0
+
+    assert {p: p.read_bytes() for p in ws.rglob("*") if p.is_file()} == before
 
 
-def test_stale_sibling_floor_fails(tmp_path: Path) -> None:
-    """The 0.3.0-era floor that let pip pick a core without launcher.py."""
-    workspace = coupled_workspace(
-        tmp_path,
-        update="deepctl-core>=0.1.10",
-        skills="deepctl-core>=0.4.0",
-        plugin="deepctl-cmd-update>=0.3.0",
-    )
+# -- the rest of the contract ------------------------------------------------
 
-    result = run_guard(workspace)
+
+def test_floor_equal_to_the_version_is_still_a_failure(tmp_path: Path) -> None:
+    """`>=V` lets pip pair this package with a newer sibling later on."""
+    ws = make_workspace(tmp_path)
+    edit(ws / "pyproject.toml", '"deepctl-core==1.0.0"', '"deepctl-core>=1.0.0"')
+
+    result = run_check(ws)
+
+    assert result.returncode == 1
+    assert "'deepctl-core>=1.0.0' must be exactly" in result.stderr
+
+
+def test_pin_above_the_version_fails(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    edit(sibling(ws, "deepctl-cmd-keys"), '"deepctl==1.0.0"', '"deepctl==1.0.1"')
+    assert run_check(ws).returncode == 1
+
+
+def test_sibling_version_drift_fails_and_is_fixed(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    edit(sibling(ws, "deepctl-cmd-keys"), 'version = "1.0.0"', 'version = "0.9.0"')
+
+    result = run_check(ws)
     assert result.returncode == 1
     assert (
-        "deepctl-cmd-update: floor deepctl-core>=0.1.10 != workspace version 0.4.0"
+        "packages/deepctl-cmd-keys/pyproject.toml: version '0.9.0' must be '1.0.0'"
+        in result.stderr
+    )
+
+    assert run_check(ws, "--fix").returncode == 0
+    assert 'version = "1.0.0"' in sibling(ws, "deepctl-cmd-keys").read_text("utf-8")
+
+
+def test_pin_without_marker_fails(tmp_path: Path) -> None:
+    """release-please only moves lines carrying the marker."""
+    ws = make_workspace(tmp_path)
+    edit(
+        sibling(ws, "deepctl-cmd-keys"),
+        pin("deepctl-core", "1.0.0"),
+        '    "deepctl-core==1.0.0",\n',
+    )
+
+    result = run_check(ws)
+
+    assert result.returncode == 1
+    assert "missing the `# x-release-please-version` marker" in result.stderr
+    assert run_check(ws, "--fix").returncode == 0
+
+
+def test_extras_and_markers_are_not_exact_pins(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    edit(
+        ws / "pyproject.toml",
+        '"deepctl-core==1.0.0"',
+        "\"deepctl-core==1.0.0; python_version >= '3.10'\"",
+    )
+    assert run_check(ws).returncode == 1
+
+
+def test_missing_workspace_source_fails(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    edit(sibling(ws, "deepctl-cmd-keys"), "deepctl = { workspace = true }\n", "")
+
+    result = run_check(ws)
+
+    assert result.returncode == 1
+    assert "has no `deepctl = { workspace = true }`" in result.stderr
+    assert run_check(ws, "--fix").returncode == 0
+
+
+def test_sibling_manifest_entry_fails(tmp_path: Path) -> None:
+    """Siblings no longer have their own release-please component."""
+    ws = make_workspace(tmp_path)
+    manifest = ws / ".github" / ".release-please-manifest.json"
+    data = json.loads(manifest.read_text("utf-8"))
+    data["packages/deepctl-cmd-keys"] = "1.0.0"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    result = run_check(ws)
+    assert result.returncode == 1
+    assert "'packages/deepctl-cmd-keys' is a lockstep package" in result.stderr
+
+    assert run_check(ws, "--fix").returncode == 0
+    assert set(json.loads(manifest.read_text("utf-8"))) == {
+        ".",
+        "packages/deepctl-plugin-example",
+    }
+
+
+def test_dunder_version_drift_fails(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    edit(ws / "src" / "deepctl" / "__init__.py", '"1.0.0"', '"0.9.0"')
+    assert run_check(ws).returncode == 1
+    assert run_check(ws, "--fix").returncode == 0
+
+
+def test_first_party_dependency_outside_the_lockstep_set_fails(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    edit(
+        sibling(ws, "deepctl-cmd-keys"),
+        '    "click>=8.0.0,<9",\n',
+        '    "click>=8.0.0,<9",\n    "deepctl-plugin-example>=0.1",\n',
+    )
+
+    result = run_check(ws)
+
+    assert result.returncode == 1
+    assert (
+        "depends on deepctl-plugin-example, which is not a lockstep package"
         in result.stderr
     )
 
 
-def test_missing_sibling_dependency_fails(tmp_path: Path) -> None:
-    """plugin imports deepctl_cmd_update, so it has to declare it."""
-    workspace = coupled_workspace(
-        tmp_path,
-        update="deepctl-core>=0.4.0",
-        skills="deepctl-core>=0.4.0",
-        plugin="packaging>=21.0",
-    )
+def test_plugin_example_is_not_pinned_but_must_accept_the_version(
+    tmp_path: Path,
+) -> None:
+    ws = make_workspace(tmp_path)
+    example = sibling(ws, "deepctl-plugin-example")
+    assert run_check(ws).returncode == 0  # its `>=` floor is fine
 
-    result = run_guard(workspace)
+    edit(example, '"deepctl-core>=0.1.10"', '"deepctl-core>=9.9.9"')
+    result = run_check(ws)
+
     assert result.returncode == 1
-    assert "deepctl-cmd-plugin must declare deepctl-cmd-update>=0.3.0" in result.stderr
+    assert "does not accept the lockstep version 1.0.0 (unsatisfiable)" in result.stderr
 
 
-def test_fix_raises_sibling_floors_then_check_passes(tmp_path: Path) -> None:
-    """--fix rewrites every SIBLING_FLOORS pair and leaves other deps alone."""
-    workspace = coupled_workspace(
-        tmp_path,
-        update="deepctl-core>=0.1.10",
-        skills="deepctl-core[extra]>=0.2.19,<1",
-        plugin="deepctl-cmd-update>=0.2.7",
-    )
+@pytest.mark.parametrize("version", ["1.0.0rc1", "1.0.0.dev1", "0.5.0.post1"])
+def test_fix_then_check_round_trips_on_pre_release_versions(
+    tmp_path: Path, version: str
+) -> None:
+    """A pre-release root version must not turn --fix into a loop."""
+    ws = make_workspace(tmp_path)
+    edit(ws / "pyproject.toml", 'version = "1.0.0"', f'version = "{version}"')
 
-    fix = run_guard(workspace, "--fix")
+    assert run_check(ws).returncode == 1
+    fix = run_check(ws, "--fix")
     assert fix.returncode == 0, fix.stderr
-    assert package_dependencies(workspace, "deepctl-cmd-update") == [
-        "deepctl-core>=0.4.0"
-    ]
-    assert package_dependencies(workspace, "deepctl-cmd-skills") == [
-        "deepctl-core[extra]>=0.4.0,<1"
-    ]
-    # Not a SIBLING_FLOORS pair: still hand-maintained, untouched.
-    assert package_dependencies(workspace, "deepctl-cmd-plugin") == [
-        "deepctl-core>=0.1.0",
-        "deepctl-cmd-update>=0.3.0",
-    ]
-
-    check = run_guard(workspace)
-    assert check.returncode == 0, check.stderr
+    assert f'"deepctl-core=={version}"' in (ws / "pyproject.toml").read_text("utf-8")
+    assert run_check(ws).returncode == 0
 
 
-def test_fix_does_not_invent_a_missing_sibling_dependency(tmp_path: Path) -> None:
-    """Adding a dependency is a code change; --fix only moves floors."""
-    workspace = coupled_workspace(
-        tmp_path,
-        update="deepctl-core>=0.4.0",
-        skills="deepctl-core>=0.4.0",
-        plugin="packaging>=21.0",
+def test_single_line_dependency_array_is_reported_not_guessed(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+    keys = sibling(ws, "deepctl-cmd-keys")
+    text = keys.read_text("utf-8")
+    start = text.index("dependencies = [")
+    end = text.index("]\n", start) + 2
+    keys.write_text(
+        text[:start] + 'dependencies = ["deepctl==1.0.0"]\n' + text[end:],
+        encoding="utf-8",
     )
 
-    fix = run_guard(workspace, "--fix")
-    assert fix.returncode == 1
-    assert "deepctl-cmd-plugin must declare deepctl-cmd-update" in fix.stderr
+    result = run_check(ws, "--fix")
+
+    assert result.returncode == 1
+    assert "must be a multi-line array" in result.stderr
 
 
-def test_sibling_floor_names_exist_in_the_real_manifest() -> None:
-    """A rename must not quietly turn rule 4 off.
+# -- layouts the line scan can't read must fail closed ------------------------
 
-    The guard skips SIBLING_FLOORS entries whose package is absent so the
-    trimmed workspaces above stay valid; this pins the real names instead.
-    """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("floors_guard", SCRIPT)
-    assert spec and spec.loader
-    guard = importlib.util.module_from_spec(spec)
-    # @dataclass resolves annotations through sys.modules[cls.__module__].
-    sys.modules[spec.name] = guard
-    try:
-        spec.loader.exec_module(guard)
-    finally:
-        del sys.modules[spec.name]
-
-    names = set(guard.workspace_versions())
-    for pkg_name, siblings in guard.SIBLING_FLOORS.items():
-        assert pkg_name in names, pkg_name
-        for sibling in siblings:
-            assert sibling in names, sibling
+LAYOUTS = {
+    "single quotes": "    'deepctl-cmd-listen==1.0.0',\n",
+    "two on one line": '    "deepctl-cmd-listen==1.0.0", "httpx>=0.24",\n',
+}
 
 
-def test_real_workspace_passes_the_guard() -> None:
-    """`make floors-check` on the repo itself, as CI and the release run it."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT)], capture_output=True, text=True
+@pytest.mark.parametrize("layout", ["single quotes", "two on one line"])
+def test_unreadable_first_party_line_fails_closed(tmp_path: Path, layout: str) -> None:
+    """A requirement the line scan skips must not pass as "lockstep OK"."""
+    ws = make_workspace(tmp_path)
+    edit(
+        sibling(ws, "deepctl-cmd-keys"),
+        '    "click>=8.0.0,<9",\n',
+        '    "click>=8.0.0,<9",\n' + LAYOUTS[layout],
     )
+
+    result = run_check(ws)
+
+    assert result.returncode == 1, result.stdout
+    assert (
+        "packages/deepctl-cmd-keys/pyproject.toml: deepctl-cmd-listen: a"
+        " first-party requirement must be on its own double-quoted line"
+    ) in result.stderr
+    # --fix can't safely rewrite it either; it stays a hand edit.
+    assert run_check(ws, "--fix").returncode == 1
+
+
+def test_well_formed_multi_line_array_passes(tmp_path: Path) -> None:
+    """Control: one double-quoted requirement per line, comments allowed."""
+    ws = make_workspace(tmp_path)
+    edit(
+        sibling(ws, "deepctl-cmd-keys"),
+        '    "click>=8.0.0,<9",\n',
+        '    # a comment line\n    "click>=8.0.0,<9",  # trailing comment\n',
+    )
+    result = run_check(ws)
     assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
     "spec",
-    [
-        "deepctl-core==0.3.0",
-        "deepctl-core~=0.3.0",
-        "deepctl-core<0.4",
-        "deepctl-core>=0.1,!=0.4.0",
-    ],
+    ["deepctl-core[speech]==1.0.0", "deepctl-core==1.0.0; python_version >= '3.10'"],
+    ids=["extras", "marker"],
 )
-def test_non_floor_sub_package_specifier_that_excludes_the_sibling_fails(
-    tmp_path: Path, spec: str
-) -> None:
-    """Rule 2 used to skip anything that was not a plain `>=`."""
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.4.0", "deepctl-cmd-keys>=0.1.0"],
-        packages={"deepctl-core": "0.4.0", "deepctl-cmd-keys": "0.1.0"},
-    )
-    keys = workspace / "packages" / "deepctl-cmd-keys" / "pyproject.toml"
-    keys.write_text(
-        '[project]\nname = "deepctl-cmd-keys"\nversion = "0.1.0"\n'
-        f'dependencies = ["{spec}"]\n',
-        encoding="utf-8",
-    )
+def test_extras_or_marker_on_a_pin_fail(tmp_path: Path, spec: str) -> None:
+    ws = make_workspace(tmp_path)
+    edit(sibling(ws, "deepctl-cmd-keys"), '"deepctl-core==1.0.0"', f'"{spec}"')
 
-    result = run_guard(workspace)
+    result = run_check(ws)
+
     assert result.returncode == 1
-    assert f"{spec!r} excludes workspace version 0.4.0" in result.stderr
+    assert "must be exactly 'deepctl-core==1.0.0'" in result.stderr
 
 
 @pytest.mark.parametrize(
-    "spec", ["deepctl-core~=0.4.0", "deepctl-core<1", "deepctl-core==0.4.*"]
+    "table",
+    [
+        '\n[project.optional-dependencies]\nspeech = ["deepctl-cmd-listen>=0.1"]\n',
+        '\n[dependency-groups]\ndev = ["deepctl-cmd-listen>=0.1"]\n',
+    ],
+    ids=["optional-dependencies", "dependency-groups"],
 )
-def test_non_floor_sub_package_specifier_that_admits_the_sibling_passes(
-    tmp_path: Path, spec: str
+def test_lockstep_package_outside_project_dependencies_fails(
+    tmp_path: Path, table: str
 ) -> None:
-    workspace = make_workspace(
-        tmp_path,
-        root_deps=["deepctl-core>=0.4.0", "deepctl-cmd-keys>=0.1.0"],
-        packages={"deepctl-core": "0.4.0", "deepctl-cmd-keys": "0.1.0"},
-    )
-    keys = workspace / "packages" / "deepctl-cmd-keys" / "pyproject.toml"
+    ws = make_workspace(tmp_path)
+    keys = sibling(ws, "deepctl-cmd-keys")
+    text = keys.read_text("utf-8")
+    # Put the table before [tool.uv.sources] so the TOML stays valid.
     keys.write_text(
-        '[project]\nname = "deepctl-cmd-keys"\nversion = "0.1.0"\n'
-        f'dependencies = ["{spec}"]\n',
-        encoding="utf-8",
+        text.replace("\n[tool.uv.sources]", table + "\n[tool.uv.sources]", 1), "utf-8"
     )
 
-    result = run_guard(workspace)
-    assert result.returncode == 0, result.stderr
+    result = run_check(ws)
 
-
-def test_pinned_sibling_floor_is_named_for_what_it_is(tmp_path: Path) -> None:
-    """A `==` pin on a SIBLING_FLOORS pair is not a missing dependency."""
-    workspace = coupled_workspace(
-        tmp_path,
-        update="deepctl-core==0.4.0",
-        skills="deepctl-core>=0.4.0",
-        plugin="deepctl-cmd-update>=0.3.0",
-    )
-
-    result = run_guard(workspace)
     assert result.returncode == 1
-    assert "'deepctl-core==0.4.0' must be a `>=` floor" in result.stderr
-    assert "must declare" not in result.stderr
+    assert "requires the lockstep package deepctl-cmd-listen" in result.stderr
+
+
+def test_short_version_is_not_an_exact_pin(tmp_path: Path) -> None:
+    """release-please rewrites X.Y.Z literally; `==1.0` would be left behind."""
+    ws = make_workspace(tmp_path)
+    edit(
+        sibling(ws, "deepctl-cmd-keys"), '"deepctl-core==1.0.0"', '"deepctl-core==1.0"'
+    )
+    assert run_check(ws).returncode == 1
+
+
+def test_version_outside_project_table_is_ignored(tmp_path: Path) -> None:
+    """Only [project].version counts, not the first `version =` in the file."""
+    ws = make_workspace(tmp_path)
+    keys = sibling(ws, "deepctl-cmd-keys")
+    keys.write_text(
+        '[tool.example]\nversion = "9.9.9"\n\n' + keys.read_text("utf-8"), "utf-8"
+    )
+    result = run_check(ws)
+    assert result.returncode == 0, result.stderr

@@ -146,7 +146,7 @@ def _reason(exc: BaseException) -> str:
 class SkillInstallError(Exception):
     """An install, remove or skills.json failure; the message is one sentence per problem."""
 
-    leftover: Path | None = None  # This run's staging, if cleanup left it (SF3).
+    leftover: Path | None = None  # This run's staging, if cleanup left it.
     kept: Path | None = None  # E4 or E6: where what was at dest was kept.
 
 
@@ -393,7 +393,7 @@ def _ownership(path: Path, cli: str, name: str, rec: dict[str, Any] | None) -> s
             return "unproven"
         fp = _fingerprint(path)
     except OSError:
-        return "unreadable"  # Never "edited", which would drop a record (SF4).
+        return "unreadable"  # Never "edited", which would drop a record.
     return "ok" if fp in want else "edited"
 
 
@@ -914,7 +914,7 @@ def _swap(gen: SkillGenerator, name: str, staging: Path, rec: Any) -> None:
             pass  # Vanished: install as absent.
         except OSError as exc:
             raise _err("E5", gen, reason=_reason(exc))
-    try:  # Starts right after the move, so the copy always goes back (SF1).
+    try:  # Starts right after the move, so the copy always goes back.
         if moved and (kind := _ownership(aside, cli, name, rec)) != "ok":
             raise (refusal := _refusal(gen, dest, kind, rec))  # The real proof.
         _place(staging / "new" / name, dest)
@@ -1039,7 +1039,7 @@ def install_tool(
                 ok = _marker_ok(dest, cli, s.name)
                 fp = _fingerprint(dest) if ok else None
             except OSError:
-                continue  # Unreadable keeps its record exactly as it is (SF4).
+                continue  # Unreadable keeps its record exactly as it is.
             if fp in want:
                 folders[s.name] = {"state": "installed", "fingerprint": fp}
             elif rec and rec.get("run", run) != run:
@@ -1064,7 +1064,7 @@ def install_tool(
         staging = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=root))
     except OSError as exc:
         raise _err("E5", gen, reason=_reason(exc))
-    try:  # Right after mkdtemp, so cleanup runs after any failure or Ctrl-C (SF1).
+    try:  # Right after mkdtemp, so cleanup runs after any failure or Ctrl-C.
         fps.update(_stage(gen, skills, staging))
         _update_state(mark, "E9", gen)  # Record before swap (B6): nothing moved.
         for s in skills:
@@ -1236,7 +1236,7 @@ def remove_tool(gen: SkillGenerator) -> RemoveResult:
                 continue
             try:  # Covers the move too, so a Ctrl-C right after it puts it back.
                 os.rename(dest, aside)
-                kind = _ownership(aside, cli, name, rec)  # The real proof (SF1).
+                kind = _ownership(aside, cli, name, rec)  # The real proof.
             except FileNotFoundError:
                 continue
             except OSError as exc:  # Nothing moved: _ownership never raises it.

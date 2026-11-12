@@ -25,7 +25,8 @@ def _isolated(monkeypatch):
 
 def client_kwargs(config) -> dict:
     with patch.object(auth_module.httpx, "Client") as client:
-        AuthManager(config)
+        # The client is built on first use (login's device flow and verify).
+        _ = AuthManager(config).client
     return dict(client.call_args.kwargs)
 
 
@@ -172,3 +173,87 @@ def test_other_loopback_addresses_keep_verification(capsys):
 
     _warn_if_verified(httpx.Request("GET", "https://127.0.0.2/"))
     assert "applies only to localhost" in capsys.readouterr().err
+
+
+# -- The shared API client (SDK) and dg api's verified client --------------
+
+
+@pytest.fixture
+def fresh_transport(monkeypatch):
+    from deepctl_core import transport
+
+    monkeypatch.setattr(transport, "_client", None)
+    monkeypatch.setattr(transport, "_client_insecure", False)
+    monkeypatch.setattr(transport, "_verified", None)
+    return transport
+
+
+def _verifies(client: httpx.Client, url: str) -> bool:
+    import ssl
+
+    pool = client._transport_for_url(httpx.URL(url))._pool  # type: ignore[attr-defined]
+    return pool._ssl_context.verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE"])
+def test_shared_client_skips_verification_for_loopback_only(fresh_transport, monkeypatch, value):
+    monkeypatch.setenv("DEEPGRAM_CLI_INSECURE", value)
+    shared = fresh_transport.shared_client()
+    assert not _verifies(shared, "https://127.0.0.1:8443/v1/models")
+    assert not _verifies(shared, "https://localhost:8443/v1/models")
+    assert not _verifies(shared, "https://[::1]:8443/v1/models")
+    for url in (
+        "https://api.deepgram.com/v1/models",
+        "https://mitm.example:8443/v1/models",
+        "https://127.0.0.2:8443/v1/models",
+    ):
+        assert _verifies(shared, url), url
+    # dg api's client verifies every host, loopback included (as in 0.4.1).
+    verified = fresh_transport.verified_client()
+    assert verified is not shared
+    assert _verifies(verified, "https://127.0.0.1:8443/v1/projects")
+    assert verified.follow_redirects is False
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", ""])
+def test_shared_client_verifies_for_other_values(fresh_transport, monkeypatch, value):
+    monkeypatch.setenv("DEEPGRAM_CLI_INSECURE", value)
+    shared = fresh_transport.shared_client()
+    assert _verifies(shared, "https://127.0.0.1:8443/v1/models")
+    assert _verifies(shared, "https://mitm.example:8443/v1/models")
+    assert fresh_transport.verified_client() is shared  # one client per process
+
+
+def test_shared_client_verifies_for_agents(fresh_transport, monkeypatch, capsys):
+    monkeypatch.setattr(output, "is_ai_agent", lambda: True)
+    shared = fresh_transport.shared_client()
+    assert _verifies(shared, "https://127.0.0.1:8443/v1/models")
+    assert "Ignoring DEEPGRAM_CLI_INSECURE" in capsys.readouterr().err
+
+
+def test_shared_client_loopback_goes_direct(fresh_transport, proxy, capsys):
+    server = _Recorder()
+    try:
+        try:
+            fresh_transport.shared_client().get(
+                f"https://127.0.0.1:{server.port}/v1/models", timeout=3
+            )
+        except httpx.HTTPError:
+            pass
+    finally:
+        server.close()
+    assert proxy.lines == []
+    assert len(server.lines) == 1  # TLS ClientHello, straight to the server
+
+
+def test_shared_client_remote_host_keeps_proxy_and_warns(fresh_transport, proxy, capsys):
+    for _ in range(2):
+        try:
+            fresh_transport.shared_client().get(
+                "https://api.deepgram.example/v1/models", timeout=3
+            )
+        except httpx.HTTPError:
+            pass
+    assert proxy.lines == ["CONNECT api.deepgram.example:443 HTTP/1.1"] * 2
+    err = capsys.readouterr().err
+    assert err.count("DEEPGRAM_CLI_INSECURE applies only to localhost") == 1

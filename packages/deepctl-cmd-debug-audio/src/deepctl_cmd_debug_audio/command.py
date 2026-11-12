@@ -8,8 +8,6 @@ import tempfile
 from typing import Any
 from urllib.parse import urlparse
 
-import ffmpeg  # type: ignore[import-untyped]
-import httpx
 from deepctl_core import (
     AuthManager,
     BaseCommand,
@@ -45,6 +43,32 @@ def _ffprobe_input(file_path: str) -> str:
 #   status_console -> stderr, always: progress lines and failure panels.
 console = get_console()
 status_console = get_status_console()
+
+# Seconds a single ffprobe run may take before it is abandoned.
+FFPROBE_TIMEOUT_S = 30
+
+
+def _probe_input(path: str) -> list[str]:
+    """ffprobe's input arguments, always last on the command line.
+
+    The input is always a local file (URLs are downloaded first), so ffprobe
+    may open it only through the file protocol: tcp:, concat:, pipe: and the
+    rest are refused. It is named as ``file:<absolute path>``
+    (``_ffprobe_input``), so ffprobe reads it as a file and never as an
+    option, whatever it is called.
+    """
+    return ["-protocol_whitelist", "file", _ffprobe_input(path)]
+
+
+def _run_ffprobe(cmd: list[str]) -> "subprocess.CompletedProcess[bytes]":
+    """Run ffprobe from an argv list: no shell, no stdin, bounded in time."""
+    return subprocess.run(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=FFPROBE_TIMEOUT_S,
+        check=False,
+    )
 
 
 def _human_output() -> bool:
@@ -125,6 +149,8 @@ class AudioCommand(BaseCommand):
 
     def _download_url(self, url: str) -> str:
         """Download a URL to a temporary file and return the path."""
+        import httpx
+
         status_console.print(f"[blue]Downloading:[/blue] {url}")
 
         parsed = urlparse(url)
@@ -238,17 +264,37 @@ class AudioCommand(BaseCommand):
                 # value stays one argument, and run ffprobe directly
                 cmd = [ffprobe_bin, "-v", "quiet", "-print_format", "json"]
                 cmd.extend(shlex.split(custom_args))
-                cmd.append(_ffprobe_input(file_path))
+                cmd.extend(_probe_input(file_path))
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                result = _run_ffprobe(cmd)
                 if result.returncode != 0:
-                    raise Exception(f"ffprobe failed: {result.stderr}")
+                    stderr = result.stderr.decode("utf-8", errors="replace")
+                    raise Exception(f"ffprobe failed: {stderr}")
 
-                return dict(json.loads(result.stdout))
-            else:
-                # Use python-ffmpeg for standard probe
-                probe = ffmpeg.probe(_ffprobe_input(file_path), cmd=ffprobe_bin)
-                return dict(probe)
+                return dict(json.loads(result.stdout.decode("utf-8")))
+            # The standard probe: the argv ffmpeg-python's probe() built,
+            # plus the file-only protocol whitelist.
+            cmd = [
+                ffprobe_bin,
+                "-show_format",
+                "-show_streams",
+                "-of",
+                "json",
+                *_probe_input(file_path),
+            ]
+            probe = _run_ffprobe(cmd)
+            if probe.returncode != 0:
+                # stderr is captured, so say what ffprobe said: its last line.
+                said = [
+                    line.strip()
+                    for line in (probe.stderr or b"")
+                    .decode("utf-8", "replace")
+                    .splitlines()
+                    if line.strip()
+                ]
+                why = said[-1][:300] if said else f"exit {probe.returncode}"
+                raise Exception(f"ffprobe couldn't read the file: {why}")
+            return dict(json.loads(probe.stdout.decode("utf-8")))
         except Exception as e:
             raise Exception(f"Failed to probe file: {e!s}")
 

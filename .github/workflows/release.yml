@@ -4,11 +4,35 @@ on:
   push:
     branches:
       - main
+  # A dispatch with no tag runs release-please, like a push. A dispatch
+  # with a tag rebuilds and publishes that existing release instead: the
+  # way to recover when a release was tagged but never reached PyPI.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Existing root release tag (vX.Y.Z) to rebuild and publish.
+          Leave empty to run release-please.
+        type: string
+        required: false
+        default: ""
+      index:
+        description: >-
+          Where a tag dispatch publishes. testpypi is the dry run of the
+          trusted-publishing setup and advertises nothing.
+        type: choice
+        options:
+          - pypi
+          - testpypi
+        default: pypi
 
 permissions:
   contents: write
   pull-requests: write
+
+# Keep CI from sending telemetry from anything this workflow runs.
+env:
+  DEEPCTL_TELEMETRY_DISABLED: "1"
 
 jobs:
   release-please:
@@ -26,31 +50,56 @@ jobs:
           token: ${{ github.token }}
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
+        # Only a push or a plain dispatch cuts a release. A tag dispatch
+        # republishes an existing tag, and a TestPyPI dry run must not
+        # create a real release.
+        if: ${{ github.event_name == 'push' || (inputs.tag == '' && inputs.index != 'testpypi') }}
 
+      - name: Refuse a TestPyPI dry run without a tag
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi' && inputs.tag == '' }}
+        run: |
+          echo "::error::a TestPyPI dry run needs a tag to publish"
+          exit 1
+
+  # The release PR's re-pin runs as two jobs so that no third-party code ever
+  # runs next to a write credential:
+  #   sync-release-pr  no token, no secrets. Runs uv and the lockstep check,
+  #                    and hands the resulting change over as a patch artifact.
+  #   push-release-pr  mints the release App token and runs no Python and no
+  #                    uv: it applies the patch, checks which files it touches,
+  #                    commits and pushes.
+  # A release-PR job that must run after the re-pin goes here as
+  # `needs: [release-please, push-release-pr]`. Benchmark gates report from the
+  # PR's own workflows, not from this file.
   sync-release-pr:
-    name: Sync lockfile and floors on the release PR
+    name: Re-pin lockstep versions on the release PR
     needs: release-please
     if: ${{ needs.release-please.outputs.prs_created == 'true' && needs.release-please.outputs.pr }}
     runs-on: ubuntu-latest
-    # This job pushes to the release branch. Two commits landing on main in
-    # quick succession would otherwise run two of these against the same
-    # branch and the loser fails on a non-fast-forward push, reddening the
-    # release workflow for no real reason. Serialize instead of cancelling:
-    # the second run still has work to do once the first one's commit lands.
+    permissions:
+      contents: read
+    # Two commits landing on main in quick succession would otherwise compute
+    # two patches against the same branch. Serialize instead of cancelling.
     concurrency:
       group: sync-release-pr
       cancel-in-progress: false
-    # contents: push the sync commit. statuses: report release-bump-gate on
-    # the release PR's head (see the last step).
-    permissions:
-      contents: write
-      statuses: write
+    outputs:
+      changed: ${{ steps.patch.outputs.changed }}
+      base: ${{ steps.patch.outputs.base }}
+    env:
+      BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+      - name: Refuse anything but a release-please branch
+        run: |
+          case "${BRANCH}" in
+            release-please--*) ;;
+            *) echo "::error::refusing to re-pin ${BRANCH}: not a release-please branch"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
-          # Every release tag, for the bump check below.
-          fetch-depth: 0
+          ref: ${{ env.BRANCH }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -59,79 +108,198 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.13.6"
+          # No cache: nothing this job writes may be restored by another job.
+          enable-cache: false
 
-      # release-please bumps every pyproject version but updates neither
-      # uv.lock (CI's `uv sync --locked` then fails all jobs at the install
-      # step -- the 0.2.28/0.3.0 wall, twice) nor the root dependency floors
-      # (without which `dg update` on pip delivers the wrapper and skips the
-      # sub-packages the changelog advertises). Both are mechanical
-      # consequences of the version bumps, so regenerate them here.
-      #
-      # Caveat: this push uses GITHUB_TOKEN, which does not retrigger the
-      # PR's checks. The routine hand-edit of the release notes retriggers
-      # them; for an untouched release PR, re-run checks from the UI. If
-      # releases ever need to go out unattended, switch this push to a
-      # dedicated PAT or GitHub App token.
-      - name: Regenerate uv.lock and pin root and sibling floors
+      # release-please moves every lockstep version and marked pin. --fix
+      # catches anything it could not (a package added since, an unmarked
+      # pin), uv.lock follows the new versions (CI's `uv sync --locked` fails
+      # every job without it), and the plain check proves the result. The
+      # check's one dependency is installed hash-pinned.
+      - name: Re-pin and regenerate uv.lock
         run: |
           set -euo pipefail
-          uv run python scripts/check_dependency_floors.py --fix
+          printf '%s\n' 'packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c' > "${RUNNER_TEMP}/check-requirements.txt"
+          uv venv -q "${RUNNER_TEMP}/check"
+          uv pip install -q --python "${RUNNER_TEMP}/check/bin/python" --require-hashes --only-binary :all: -r "${RUNNER_TEMP}/check-requirements.txt"
+          "${RUNNER_TEMP}/check/bin/python" scripts/check_dependency_floors.py --fix
           uv lock
-          uv run python scripts/check_dependency_floors.py
+          "${RUNNER_TEMP}/check/bin/python" scripts/check_dependency_floors.py
 
-      - name: Commit and push if changed
+      - name: Write the re-pin as a patch
+        id: patch
         run: |
           set -euo pipefail
-          if git diff --quiet; then
-            echo "uv.lock and floors already in sync"
+          echo "base=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          git add pyproject.toml packages/*/pyproject.toml uv.lock
+          # Anything else the re-pin touched means release-please and the
+          # check disagree about the tree; stop rather than push half of it.
+          if ! git diff --quiet; then
+            echo "::error::re-pin changed files outside the pyprojects and uv.lock:"
+            git diff --name-only
+            exit 1
+          fi
+          if git diff --cached --quiet; then
+            echo "versions, pins and uv.lock already in sync"
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uv.lock pyproject.toml packages/*/pyproject.toml
-          git commit -m "chore: sync uv.lock and dependency floors with release-please bumps"
-          git push
+          git diff --cached --no-renames --binary > repin.patch
+          git diff --cached --stat
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
 
-      # Is every package whose code or dependencies changed being bumped?
-      # This job runs on push to main, so failing it only reddens main; what
-      # can block the merge is a status on the release PR's own head commit.
-      # release-please and the push above both use GITHUB_TOKEN, whose
-      # commits trigger no pull_request workflows, so post that status here,
-      # on whatever HEAD this job left the branch at. Human pushes to the
-      # release PR do trigger workflows, and test.yml's release-bump-gate job
-      # reports the same context name for those commits. It only blocks the
-      # merge once `release-bump-gate` is a required check on main.
-      # Runs after the push so the lockfile sync above lands either way.
-      - name: Check every changed package is being released
+      - name: Hand the patch to the push job
+        if: ${{ steps.patch.outputs.changed == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: repin-patch
+          path: repin.patch
+          retention-days: 1
+
+  push-release-pr:
+    name: Push the re-pin with the release App
+    needs: [release-please, sync-release-pr]
+    if: ${{ needs.sync-release-pr.outputs.changed == 'true' }}
+    runs-on: ubuntu-latest
+    # The App's private key is a secret of the `release` environment, whose
+    # deployment branches are limited to main: a workflow on any other branch
+    # can't read it.
+    environment: release
+    permissions:
+      contents: read
+    concurrency:
+      group: push-release-pr
+      cancel-in-progress: false
+    env:
+      BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      BASE: ${{ needs.sync-release-pr.outputs.base }}
+    steps:
+      - name: Refuse anything but a release-please branch
         run: |
-          set -uo pipefail
-          if uv run python scripts/check_release_bumps.py; then
-            STATE=success
-            DESCRIPTION="Every changed package is being released"
-          else
-            STATE=failure
-            DESCRIPTION="A package changed without a version bump; see the run log"
+          case "${BRANCH}" in
+            release-please--*) ;;
+            *) echo "::error::refusing to push to ${BRANCH}: not a release-please branch"; exit 1 ;;
+          esac
+
+      # A token for this repository only, with contents: write and nothing
+      # else. Commits pushed with an App token trigger the PR's workflows, so
+      # the required checks (Lockstep versions among them) run on the release
+      # PR's final head. GITHUB_TOKEN pushes trigger nothing.
+      - name: Mint the release App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ env.BRANCH }}
+          persist-credentials: false
+
+      - name: Fetch the patch
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: repin-patch
+          path: ${{ runner.temp }}/repin
+
+      - name: Apply the patch and check what it touches
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "${BASE}" ]; then
+            echo "::error::${BRANCH} moved since the patch was computed; the next release-please run re-pins it"
+            exit 1
           fi
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/$(git rev-parse HEAD)" \
-            -f state="${STATE}" \
-            -f context=release-bump-gate \
-            -f description="${DESCRIPTION}" \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            || { echo "::error::Could not post the release-bump-gate status"; exit 1; }
-          [ "${STATE}" = success ]
+          git apply --check "${RUNNER_TEMP}/repin/repin.patch"
+          git apply --index "${RUNNER_TEMP}/repin/repin.patch"
+          # Only in-place edits of existing regular files, at exact paths:
+          # renames are listed as a delete plus an add, so neither a rename,
+          # a new file, a deletion, a symlink nor a mode change gets through.
+          git diff --cached --no-renames --raw | while read -r om nm _ _ st path; do
+            if [ "${om#:} ${nm} ${st}" != "100644 100644 M" ]; then
+              echo "::error::${path}: only in-place edits of existing files are allowed (${om#:} ${nm} ${st})"; exit 1
+            fi
+            if ! [[ "${path}" =~ ^(pyproject\.toml|uv\.lock|packages/[^/]+/pyproject\.toml)$ ]]; then
+              echo "::error::the patch touches ${path}"; exit 1
+            fi
+          done
+
+      # The token reaches git only through GIT_CONFIG_* environment entries:
+      # never in a URL, an argument or .git/config, and hooks are off.
+      - name: Commit and push with the release App token
         env:
-          GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          BOT_ID=$(GH_TOKEN="${APP_TOKEN}" gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git -c core.hooksPath=/dev/null \
+            -c user.name="${APP_SLUG}[bot]" \
+            -c user.email="${BOT_ID}+${APP_SLUG}[bot]@users.noreply.github.com" \
+            commit -m "chore: re-pin lockstep versions and regenerate uv.lock"
+          AUTH=$(printf 'x-access-token:%s' "${APP_TOKEN}" | base64 -w0)
+          echo "::add-mask::${AUTH}"
+          GIT_CONFIG_COUNT=2 \
+          GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${AUTH}" \
+          GIT_CONFIG_KEY_1="core.hooksPath" \
+          GIT_CONFIG_VALUE_1="/dev/null" \
+            git push origin "HEAD:refs/heads/${BRANCH}"
 
   build:
     name: Build packages
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
+    if: >-
+      ${{ needs.release-please.outputs.release_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
         with:
-          # Every release tag, for the bump check below.
-          fetch-depth: 0
+          persist-credentials: false
+          # A new release builds the tag release-please just created, not
+          # whatever the run's branch points at. A recovery checks out its
+          # tag below, and needs the branch history and its tags for that.
+          ref: ${{ (github.event_name != 'workflow_dispatch' || inputs.tag == '') && needs.release-please.outputs.tag_name || '' }}
+          fetch-depth: ${{ (github.event_name == 'workflow_dispatch' && inputs.tag != '') && '0' || '1' }}
+
+      # Only a root release tag that is already a published GitHub release
+      # and is in the history of the branch this run was started on. The
+      # publish environments accept only main, release/* and next/*.
+      - name: Check out the recovery tag
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Checked before TAG is printed anywhere.
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::the tag input is not a root release tag (vX.Y.Z)"; exit 1
+          fi
+          case "${GITHUB_REF}" in
+            refs/heads/main | refs/heads/release/* | refs/heads/next/*) ;;
+            *) echo "::error::start a recovery from main, release/* or next/*, not ${GITHUB_REF}"; exit 1 ;;
+          esac
+          if ! git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
+            echo "::error::no tag ${TAG}"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" "${GITHUB_SHA}"; then
+            echo "::error::${TAG} is not in the history of ${GITHUB_REF_NAME}"; exit 1
+          fi
+          if ! DRAFT=$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft); then
+            echo "::error::${TAG} has no GitHub release"; exit 1
+          fi
+          if [ "${DRAFT}" != "false" ]; then
+            echo "::error::${TAG}'s GitHub release is still a draft"; exit 1
+          fi
+          git checkout --detach "refs/tags/${TAG}^{commit}"
+          echo "Rebuilding ${TAG} at $(git rev-parse HEAD)"
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -141,31 +309,31 @@ jobs:
       - name: Install build dependencies
         run: pip install build==1.5.0 twine==7.0.0 packaging==26.3
 
-      # The sync job above pins root and sibling floors on the release PR,
-      # but its push uses GITHUB_TOKEN and does not retrigger the PR's
-      # checks, so nothing proves the merged tree still satisfies them.
-      # Check again here: a stale floor would let pip pair a new package
-      # with an older published sibling that lacks the API it imports.
-      - name: Check dependency floors before publishing
+      # The release PR passes the Lockstep versions check before it merges;
+      # check the tree being built once more, so nothing reaches PyPI with a
+      # package off the root version or a first-party pin that isn't ==.
+      - name: Check lockstep versions before publishing
         run: python scripts/check_dependency_floors.py
-
-      # Same check as the release PR's release-bump-gate status, again here
-      # as a last line of defence: that status only blocks the merge if it
-      # is a required check, and this run stops the PyPI upload regardless.
-      # Floors are compared with workspace versions, so they only hold if
-      # every package whose code changed is actually being released. A
-      # `chore:` commit under a package moves its code without a bump, and
-      # PyPI keeps serving the old code under the same version: a clean
-      # install then pairs new siblings with an old deepctl-core that has no
-      # deepctl_core._launcher. Refuse to publish in that state.
-      - name: Check every changed package is being released
-        run: python scripts/check_release_bumps.py
 
       - name: Build all packages
         run: make build
 
       - name: Verify built packages
         run: make verify-packages
+
+      # A tag name can move; the version inside the build can't. Publish
+      # only if the tree that was built carries the tag's version.
+      - name: Check the build matches the release tag
+        if: ${{ startsWith(inputs.tag || needs.release-please.outputs.tag_name, 'v') }}
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if ! compgen -G "dist/deepctl-${TAG#v}-*.whl" >/dev/null; then
+            echo "::error::the build has no deepctl ${TAG#v} wheel; ${TAG} does not point at that release"
+            ls dist/
+            exit 1
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -177,8 +345,12 @@ jobs:
     name: Test installation
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
@@ -297,9 +469,8 @@ jobs:
     needs: [release-please, publish, verify-published]
     # Re-assert latest on the root package tag (vX.Y.Z) after PyPI publish so
     # users clicking "latest" land on a tag whose artifact is actually
-    # installable. Also re-asserts after all sub-package releases since
-    # release-please processes them sequentially and a sub-package release
-    # created after the root tag can steal the pointer.
+    # installable. The plugin example's own release (its only other
+    # component) is created with make-latest false.
     if: |
       needs.release-please.outputs.release_created == 'true' &&
       startsWith(needs.release-please.outputs.tag_name, 'v')
@@ -323,10 +494,20 @@ jobs:
     uses: ./.github/workflows/web-production.yml
     secrets: inherit
 
+  # Trusted Publishing: each of the 31 PyPI projects names this file and
+  # the pypi environment as its publisher, and PyPI swaps the job's OIDC
+  # token for a short-lived upload token. There is no API token to read.
+  # The pypi environment deploys only from main, release/* and next/*.
   publish:
     name: Publish to PyPI
     needs: [build, test]
+    if: ${{ github.event_name == 'push' || inputs.index == 'pypi' }}
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/deepctl/
+    permissions:
+      id-token: write
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
@@ -334,11 +515,68 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Publish to PyPI
+      # The root package goes last: it pins every sub-package ==, so it must
+      # never be on the index before them. "deepctl-" sorts before
+      # "deepctl_", so one upload of dist/ would send it first.
+      - name: Hold the root package back
+        run: |
+          set -euo pipefail
+          mkdir root-dist
+          mv dist/deepctl-[0-9]* root-dist/
+          ls root-dist/
+
+      - name: Publish the sub-packages to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: dist/
+          skip-existing: true
+
+      - name: Publish the root package to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          packages-dir: root-dist/
+          skip-existing: true
+
+  # The same upload against TestPyPI, from its own environment so that its
+  # OIDC token can never match a production PyPI publisher. Nothing
+  # downstream needs this job, so a dry run advertises nothing.
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [build, test]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/deepctl/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      # Root package last, as in publish.
+      - name: Hold the root package back
+        run: |
+          set -euo pipefail
+          mkdir root-dist
+          mv dist/deepctl-[0-9]* root-dist/
+          ls root-dist/
+
+      - name: Publish the sub-packages to TestPyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true
+
+      - name: Publish the root package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: root-dist/
           skip-existing: true
 
   bump-brew-formula:

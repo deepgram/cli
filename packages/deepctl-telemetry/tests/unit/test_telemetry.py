@@ -37,6 +37,7 @@ def _telemetry_env(monkeypatch: pytest.MonkeyPatch, fresh_state: Any) -> None:
     the rest of the process.
     """
     monkeypatch.delenv(DISABLE_ENV_VAR, raising=False)
+    monkeypatch.delenv("CI", raising=False)
     # The default user config file: absent unless a test writes it.
     default = Path(tempfile.mkdtemp()) / "default-config.yaml"
     monkeypatch.setattr(fresh_state, "_default_config_path", lambda: default)
@@ -281,6 +282,8 @@ class TestRenderNotice:
         assert "--no-telemetry" in notice
         assert "DEEPCTL_TELEMETRY_DISABLED=1" in notice
         assert "telemetry.enabled: false" in notice
+        assert "DO_NOT_TRACK=1" in notice
+        assert "CI" in notice
         assert "dg config" not in notice
 
     def test_off_message_matches_golden(self) -> None:

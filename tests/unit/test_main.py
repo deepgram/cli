@@ -15,6 +15,16 @@ with patch("deepctl_core.PluginManager") as mock_pm_class:
     mock_pm.load_plugins = MagicMock()
     from deepctl.main import cli, load_commands
 
+# The Click CLI and run() live in deepctl._cli; deepctl.main is the light entry
+# point that imports it on the full path. Patch names there.
+import deepctl._cli as _cli_mod
+
+
+@pytest.fixture
+def reload_commands(monkeypatch):
+    """load_commands() runs once per process; let a test run it again."""
+    monkeypatch.setattr(_cli_mod, "_commands_loaded", False)
+
 
 class TestMainCLI:
     """Test suite for main CLI functionality."""
@@ -63,7 +73,7 @@ class TestMainCLI:
         assert "Invalid value" in result.output
 
     @patch("deepctl_core.PluginManager")
-    def test_load_commands_success(self, mock_plugin_manager_class):
+    def test_load_commands_success(self, mock_plugin_manager_class, reload_commands):
         """Test successful command loading from entry points."""
         # Mock the plugin manager instance
         mock_plugin_manager = Mock()
@@ -78,7 +88,9 @@ class TestMainCLI:
 
     @patch("deepctl_core.plugin_manager.console")
     @patch("deepctl_core.plugin_manager.metadata.entry_points")
-    def test_load_commands_error_handling(self, mock_entry_points, mock_console):
+    def test_load_commands_error_handling(
+        self, mock_entry_points, mock_console, reload_commands
+    ):
         """Test error handling during command loading."""
         # Mock entry point that raises error
         mock_entry_point = Mock()
@@ -117,13 +129,11 @@ class TestMainCLI:
         """Test main() handles KeyboardInterrupt."""
         from deepctl.main import main
 
-        # Patch the module-global `cli` that main() calls, going through
-        # sys.modules because deepctl/__init__ re-exports the `main` function
-        # as `deepctl.main`, shadowing the submodule attribute. (Patching the
-        # instance's __call__ is inert: dunder lookup bypasses instance
-        # attributes, so the old patch.object(cli, "__call__", ...) form
-        # exercised the bare-`dg` help path instead.)
-        main_mod = sys.modules["deepctl.main"]
+        # Patch the module-global `cli` that run() calls, in deepctl._cli.
+        # (Patching the instance's __call__ is inert: dunder lookup bypasses
+        # instance attributes, so the old patch.object(cli, "__call__", ...)
+        # form exercised the bare-`dg` help path instead.)
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(main_mod, "cli", side_effect=KeyboardInterrupt()):
                 with pytest.raises(SystemExit) as exc_info:
@@ -144,7 +154,7 @@ class TestMainCLI:
 
         from deepctl.main import main
 
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(
                 main_mod, "cli", side_effect=click.exceptions.Abort()
@@ -158,7 +168,7 @@ class TestMainCLI:
         """Test main() handles general exceptions."""
         from deepctl.main import main
 
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(main_mod, "cli", side_effect=Exception("Test error")):
                 with pytest.raises(SystemExit) as exc_info:
@@ -207,7 +217,8 @@ class TestMainCLI:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert captured.out == "", f"{label} polluted stdout: {captured.out!r}"
-        assert "Error" in captured.err
+        # "Error: ..." for people, "ERROR: ..." in agent mode.
+        assert "error" in captured.err.lower()
 
     def test_interrupt_message_goes_to_stderr(self, capsys):
         """The cancellation notice is a diagnostic, so it also stays off stdout."""
@@ -215,7 +226,7 @@ class TestMainCLI:
 
         from deepctl.main import main
 
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
         with patch("sys.argv", ["deepctl"]):
             with patch.object(
                 main_mod, "cli", side_effect=click.exceptions.Abort()
@@ -247,9 +258,7 @@ class TestSafeConsolePrint:
     )
     def test_swallows_closed_stream(self, error):
         """A broken console does not raise out of _safe_console_print."""
-        # deepctl/__init__ re-exports the `main` function as `deepctl.main`,
-        # shadowing the submodule attribute — fetch the real module directly.
-        main_mod = sys.modules["deepctl.main"]
+        main_mod = _cli_mod
 
         with patch.object(main_mod.console, "print", side_effect=error):
             # Must not raise.
@@ -261,7 +270,9 @@ class TestSafeConsolePrint:
         main() must still exit(1) cleanly rather than let rich's ValueError
         escape to the excepthook.
         """
-        main_mod = sys.modules["deepctl.main"]
+        from deepctl.main import main
+
+        main_mod = _cli_mod
 
         with (
             patch("sys.argv", ["deepctl"]),
@@ -273,7 +284,7 @@ class TestSafeConsolePrint:
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
-            main_mod.main()
+            main()
 
         assert exc_info.value.code == 1
 
@@ -301,7 +312,8 @@ class TestGlobalOptionHint:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert captured.out == ""
-        assert "Error" in captured.err
+        # "Error: ..." for people, "ERROR: ..." in agent mode.
+        assert "error" in captured.err.lower()
 
     def test_hint_names_global_option(self):
         """The helper recognizes root-group options and skips unknowns."""
@@ -310,7 +322,7 @@ class TestGlobalOptionHint:
         hint = _global_option_hint("No such option: '--api-key'")
         assert hint is not None
         assert "--api-key" in hint
-        assert "before the subcommand" in hint
+        assert "is a global option, so it goes before the command" in hint
 
         hint = _global_option_hint("No such option: '--profile'")
         assert hint is not None
@@ -335,14 +347,167 @@ class TestGlobalOptionHint:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert captured.out == ""
-        assert "Error" in captured.err
+        # "Error: ..." for people, "ERROR: ..." in agent mode.
+        assert "error" in captured.err.lower()
+
+
+def _no_such(token: str, *possible: str) -> str:
+    """Click's own "No such option" text: click 8.4 quotes the option and
+    ends with a period ("No such option '--x'."), earlier releases don't
+    ("No such option: --x")."""
+    import click
+
+    return click.NoSuchOption(token, possibilities=list(possible)).format_message()
+
+
+class TestUsageErrorModes:
+    """Usage/Try lines for people; two prefixed lines in agent mode."""
+
+    def _run(self, argv, capsys, *, agentic):
+        from deepctl.main import main
+
+        with (
+            # The name a launcher passes; pytest's argv[0] would show instead.
+            patch.dict("os.environ", {"DEEPCTL_PROG_NAME": "dg"}),
+            patch("sys.argv", argv),
+            patch("deepctl_core.output.is_agentic", return_value=agentic),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        return captured.err
+
+    def test_agent_mode_root_prints_error_and_hint_only(self, capsys):
+        err = self._run(["dg", "-o", "json", "--bogus"], capsys, agentic=True)
+        assert err.splitlines() == [
+            "ERROR: " + _no_such("--bogus", "--verbose"),
+            "HINT: Run dg --help to see valid options.",
+        ]
+
+    def test_agent_mode_subcommand_names_the_command(self, capsys):
+        err = self._run(["dg", "models", "--bogus"], capsys, agentic=True)
+        lines = err.splitlines()
+        assert lines[0].startswith("ERROR: No such option")
+        assert lines[1:] == ["HINT: Run dg models --help to see valid options."]
+
+    def test_agent_mode_global_option_hint_is_prefixed(self, capsys):
+        err = self._run(["dg", "models", "--profile", "staging"], capsys, agentic=True)
+        # Always exactly two lines: the placement hint replaces A-USAGE.
+        assert err.splitlines() == [
+            "ERROR: " + _no_such("--profile"),
+            "HINT: --profile is a global option, so it goes before the "
+            "command: dg --profile <value> models …",
+        ]
+
+    def test_human_mode_keeps_usage_and_try_lines(self, capsys):
+        err = self._run(["dg", "models", "--bogus"], capsys, agentic=False)
+        assert err.startswith("Usage: dg models [OPTIONS]")
+        assert "Try 'dg models --help' for help." in err
+        assert "Error: No such option" in err
+        assert "ERROR:" not in err and "HINT:" not in err
+
+    @pytest.mark.parametrize("token", ["--[/x]", "--[red]x"])
+    def test_human_mode_message_is_not_markup(self, capsys, token):
+        err = self._run(["dg", "models", token], capsys, agentic=False)
+        assert f"Error: {_no_such(token)}" in " ".join(err.split())
+        assert "Traceback" not in err and "MarkupError" not in err
+
+    def test_human_global_option_hint_uses_real_names(self, capsys):
+        err = self._run(["dg", "models", "--profile", "x"], capsys, agentic=False)
+        flat = " ".join(err.split())
+        assert (
+            "Hint: --profile is a global option, so it goes before the "
+            "command: dg --profile <value> models …"
+        ) in flat
+
+    def test_global_option_hint_leaves_out_value_for_flags(self):
+        import click
+
+        from deepctl.main import _global_option_hint, cli
+
+        flag = next(
+            opt
+            for p in cli.params
+            if getattr(p, "is_flag", False)
+            for opt in getattr(p, "opts", [])
+            if opt.startswith("--")
+        )
+        ctx = click.Context(cli, info_name="foo")
+        sub = click.Context(click.Command("models"), parent=ctx, info_name="models")
+        hint = _global_option_hint(f"No such option: '{flag}'", sub, markup=False)
+        assert hint == (
+            f"{flag} is a global option, so it goes before the command: "
+            f"foo {flag} models …"
+        )
+
+
+class TestRootHandlerMessages:
+    """Cancel and the catch-all print the catalogue's coded messages."""
+
+    def _run(self, capsys, error, *, agentic):
+        from deepctl.main import main
+
+        with (
+            patch("sys.argv", ["dg", "models"]),
+            patch("deepctl_core.output.is_agentic", return_value=agentic),
+            patch.object(_cli_mod, "cli", side_effect=error),
+            patch.object(_cli_mod, "_report_error"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        return exc_info.value.code, captured.err
+
+    def test_cancel_human(self, capsys):
+        code, err = self._run(capsys, click.exceptions.Abort(), agentic=False)
+        assert code == 2
+        assert err == "\nCancelled.\n"
+
+    def test_cancel_agent_mode_prints_two_prefixed_lines(self, capsys):
+        code, err = self._run(capsys, KeyboardInterrupt(), agentic=True)
+        assert code == 2
+        assert err.splitlines() == [
+            "ERROR: Cancelled.",
+            "HINT: The user cancelled. Don't retry unless they ask.",
+        ]
+
+    def test_unexpected_error_human_gives_next_step(self, capsys):
+        code, err = self._run(capsys, RuntimeError("boom [red]x"), agentic=False)
+        assert code == 1
+        flat = " ".join(err.split())
+        assert "Error: Command failed: boom [red]x" in flat
+        assert (
+            "Run the command again with --verbose for details, and report it "
+            "at https://github.com/deepgram/cli/issues."
+        ) in flat
+
+    def test_unexpected_error_agent_mode(self, capsys):
+        code, err = self._run(capsys, RuntimeError("boom"), agentic=True)
+        assert code == 1
+        assert err.splitlines() == [
+            "ERROR: Command failed: boom",
+            "HINT: This is a bug in dg. Tell the user and include the command you ran.",
+        ]
+
+    def test_unexpected_error_without_text_names_its_type(self, capsys):
+        _, err = self._run(capsys, RuntimeError(), agentic=True)
+        assert err.splitlines()[0] == "ERROR: Command failed: RuntimeError"
 
 
 class TestRichTraceback:
-    """The rich excepthook installed at import doesn't render frame locals."""
+    """An uncaught exception gets a rich traceback, without frame locals.
 
-    def test_excepthook_does_not_render_locals(self, capsys):
-        assert sys.excepthook.__module__ == "rich.traceback"
+    main() installs a stdlib excepthook on the full path; rich loads only
+    when an exception reaches it, and it never renders locals.
+    """
+
+    def test_excepthook_does_not_render_locals(self, capsys, monkeypatch):
+        from deepctl.main import _rich_excepthook
+
+        monkeypatch.setattr(sys, "excepthook", _rich_excepthook)
         # Built at runtime so the source-context lines rich prints can't
         # contain it; only a rendered local variable could.
         sentinel = "-".join(["LOCALS", "SENTINEL", "KEY"])
@@ -358,40 +523,42 @@ class TestRichTraceback:
 
         captured = capsys.readouterr()
         assert "RuntimeError" in captured.err
+        assert "Traceback" in captured.err
         assert sentinel not in captured.err
+        # Rich's hook replaced the lazy one, so later errors skip the import.
+        assert sys.excepthook.__module__ == "rich.traceback"
 
 
-class TestHyphenatedCommands:
-    """`group-subcommand` is expanded only where the command name goes."""
+def resolved_args(argv):
+    """The argv the root group resolves its command from (after root
+    options), with any hidden alias already rewritten; None when no command
+    is resolved."""
+    seen = []
 
-    @pytest.fixture
-    def expand(self):
-        from types import SimpleNamespace
+    def record(self, ctx, args):
+        seen.append(list(args))
+        raise click.exceptions.Exit(0)
 
-        from deepctl.main import preprocess_hyphenated_commands
+    with patch.object(click.Group, "resolve_command", record):
+        try:
+            cli.main(args=list(argv), prog_name="dg", standalone_mode=False)
+        except click.exceptions.Exit:
+            pass
+    return seen[0] if seen else None
 
-        def select(group):
-            if group == "deepctl.commands":
-                return [SimpleNamespace(name="debug"), SimpleNamespace(name="listen")]
-            if group == "deepctl.subcommands.debug":
-                return [SimpleNamespace(name="audio")]
-            return []
 
-        with patch("importlib.metadata.entry_points") as mock_eps:
-            mock_eps.return_value.select.side_effect = select
-            yield preprocess_hyphenated_commands
+class TestHiddenAliases:
+    """`group-subcommand` aliases come from the manifest and rewrite only the
+    command word."""
 
     @pytest.mark.parametrize(
         ("args", "expected"),
         [
             (["debug-audio", "--help"], ["debug", "audio", "--help"]),
-            (["--quiet", "debug-audio"], ["--quiet", "debug", "audio"]),
-            (["-qv", "debug-audio"], ["-qv", "debug", "audio"]),
-            (["--output=json", "debug-audio"], ["--output=json", "debug", "audio"]),
-            (
-                ["--profile", "debug-x", "debug-audio"],
-                ["--profile", "debug-x", "debug", "audio"],
-            ),
+            (["--quiet", "debug-audio"], ["debug", "audio"]),
+            (["-qv", "debug-audio"], ["debug", "audio"]),
+            (["--output=json", "debug-audio"], ["debug", "audio"]),
+            (["--profile", "debug-x", "debug-audio"], ["debug", "audio"]),
             (["listen", "debug-call.wav"], ["listen", "debug-call.wav"]),
             (
                 ["speak", "-v", "debug-voice", "hello"],
@@ -401,41 +568,104 @@ class TestHyphenatedCommands:
                 ["debug-audio", "debug-audio.wav"],
                 ["debug", "audio", "debug-audio.wav"],
             ),
-            (["--", "debug-audio"], ["--", "debug-audio"]),
-            (["-ojson", "debug-audio"], ["-ojson", "debug", "audio"]),
-            (["-pq", "debug-audio"], ["-pq", "debug", "audio"]),
-            (["-qpprod", "debug-audio"], ["-qpprod", "debug", "audio"]),
-            (["-cconfig.yaml", "debug-audio"], ["-cconfig.yaml", "debug", "audio"]),
-            (
-                ["-qp", "debug-x", "debug-audio"],
-                ["-qp", "debug-x", "debug", "audio"],
-            ),
-            (["-o", "json", "debug-audio"], ["-o", "json", "debug", "audio"]),
+            (["-ojson", "debug-audio"], ["debug", "audio"]),
+            (["-pq", "debug-audio"], ["debug", "audio"]),
+            (["-qpprod", "debug-audio"], ["debug", "audio"]),
+            (["-qp", "debug-x", "debug-audio"], ["debug", "audio"]),
+            (["-o", "json", "debug-audio"], ["debug", "audio"]),
+            (["debug-probe", "-x"], ["debug", "probe", "-x"]),
             (["listen-now"], ["listen-now"]),
-            ([], []),
+            (["transcribe", "debug-call.wav"], ["transcribe", "debug-call.wav"]),
         ],
     )
-    def test_expansion(self, expand, args, expected):
-        assert expand(args) == expected
+    def test_alias_rewrites_only_the_command_word(self, args, expected):
+        assert resolved_args(args) == expected
+
+    def test_every_alias_comes_from_the_manifest(self):
+        from deepctl import _manifest
+
+        aliases = _manifest.aliases()
+        assert aliases == {
+            f"debug-{name}": ["debug", name]
+            for name in ("audio", "browser", "network", "probe", "toolkit")
+        }
+        for alias in aliases:
+            assert alias not in cli.list_commands(click.Context(cli))
+
+    def test_preprocessor_is_gone(self):
+        assert not hasattr(_cli_mod, "preprocess_hyphenated_commands")
 
 
-def test_launcher_marker_is_captured_and_not_inherited():
-    """DEEPCTL_LAUNCHER describes this process only; children must not see it."""
+class TestMcpServerRun:
+    """Which argv runs `dg mcp` as a server (stdout isolated first)."""
+
+    @pytest.mark.parametrize(
+        ("argv", "expected"),
+        [
+            (["mcp"], True),
+            (["mcp", "--base-url", "https://x.example"], True),
+            (["mcp", "--debug"], True),
+            (["--profile", "staging", "mcp"], True),
+            (["-p", "mcp", "mcp"], True),
+            (["-o", "json", "--quiet", "mcp", "--transport", "sse"], True),
+            (["--profile=mcp", "mcp"], True),
+            (["mcp", "--help"], False),
+            (["mcp", "-h"], False),
+            (["mcp", "--agent-friendly"], False),
+            (["--help", "mcp"], False),
+            (["--profile", "mcp"], False),
+            (["models", "mcp"], False),
+            ([], False),
+        ],
+    )
+    def test_detection(self, argv, expected):
+        from deepctl import main as main_module
+
+        assert main_module._is_mcp_server_run(argv) is expected
+
+    def test_root_value_options_match_the_cli(self):
+        from deepctl import main as main_module
+        from deepctl._cli import cli
+
+        takes_value = {
+            opt
+            for param in cli.params
+            if isinstance(param, click.Option) and not param.is_flag
+            for opt in param.opts
+        }
+        assert takes_value == main_module._ROOT_VALUE_OPTIONS
+
+
+def test_launcher_captured_by_main_reaches_deepctl_core():
+    """main() takes DEEPCTL_LAUNCHER before deepctl_core is imported.
+
+    deepctl_core._launcher (the npm launcher's reader since 0.4.1) and
+    deepctl_cmd_update.channel must still see the value main() kept, and a
+    child process must not inherit the variable.
+    """
     import os
     import subprocess
 
     code = (
         "import os, subprocess, sys\n"
-        "import importlib\n"
-        "m = importlib.import_module('deepctl.main')\n"
+        "import deepctl.main as m\n"
+        "sys.argv = ['dg', '--version']\n"
+        "m.main()\n"
+        "early = 'deepctl_core' in sys.modules\n"
+        "from deepctl_core import _launcher\n"
+        "from deepctl_cmd_update import channel\n"
         "child = subprocess.run([sys.executable, '-c', "
         "'import os; print(os.environ.get(\"DEEPCTL_LAUNCHER\"))'], "
         "capture_output=True, text=True).stdout.strip()\n"
-        "print(m.LAUNCHER, child)\n"
+        "print(early, m.LAUNCHER, _launcher.get_launcher(), "
+        "_launcher.launched_via_npm(), channel.launcher(), "
+        "'DEEPCTL_LAUNCHER' in os.environ, child, file=sys.stderr)\n"
     )
     env = {**os.environ, "DEEPCTL_LAUNCHER": "npm"}
     out = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True
     )
     assert out.returncode == 0, out.stderr
-    assert out.stdout.split() == ["npm", "None"]
+    assert out.stderr.split() == [
+        "False", "npm", "npm", "True", "npm", "False", "None"
+    ]

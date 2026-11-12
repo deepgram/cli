@@ -412,12 +412,14 @@ class TestEnvKeptOutOfGit:
 
 class TestCloneTemplate:
     def test_url_is_passed_after_end_of_options(self, tmp_path):
-        with patch.object(lifecycle.subprocess, "run") as run:
+        with patch.object(lifecycle.subprocess, "run") as run, patch.object(
+            lifecycle.shutil, "which", return_value="/usr/bin/git"
+        ):
             run.return_value = MagicMock(returncode=0)
             lifecycle.clone_template("--upload-pack=touch /tmp/pwned", tmp_path / "d")
         argv = run.call_args.args[0]
-        assert argv[:3] == ["git", "clone", "--"]
-        assert argv[3] == "--upload-pack=touch /tmp/pwned"
+        clone = argv.index("clone")
+        assert argv[clone : clone + 3] == ["clone", "--", "--upload-pack=touch /tmp/pwned"]
 
     def test_option_like_url_is_not_run_as_an_option(self, tmp_path):
         """With real git: an option-like URL fails as a repository name."""
@@ -536,12 +538,16 @@ class TestInitCommand:
     ):
         mock_api.get_template.return_value = sample_detail
         mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.directory_in_use.return_value = False
+        mock_lifecycle.head_commit.return_value = None
         mock_lifecycle.clone_template.return_value = None
         mock_lifecycle.run_lifecycle_step.return_value = True
 
         target = str(tmp_path / "my-app")
 
-        with patch.object(init_command, "confirm", return_value=True):
+        with patch.object(init_command, "confirm", return_value=True), patch(
+            "deepctl_cmd_init.command._person_at_terminal", return_value=True
+        ):
             result = init_command.handle(
                 config=mock_config,
                 auth_manager=mock_auth_manager,
@@ -578,6 +584,8 @@ class TestInitCommand:
     ):
         mock_api.get_template.return_value = sample_detail
         mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.directory_in_use.return_value = False
+        mock_lifecycle.head_commit.return_value = None
         mock_lifecycle.clone_template.return_value = None
         mock_auth_manager.get_api_key.side_effect = AuthenticationError(
             "Your Deepgram credential has expired. Run `dg login` again."
@@ -644,12 +652,16 @@ class TestInitCommand:
     ):
         mock_api.get_template.return_value = sample_detail
         mock_lifecycle.check_prereqs.return_value = []
+        mock_lifecycle.directory_in_use.return_value = False
+        mock_lifecycle.head_commit.return_value = None
         mock_lifecycle.clone_template.return_value = None
         mock_auth_manager.get_api_key.return_value = "sk-my-key"
 
         target = str(tmp_path / "app")
 
-        with patch("deepctl_cmd_init.command._agentic", False):
+        with patch(
+            "deepctl_cmd_init.command._person_at_terminal", return_value=True
+        ):
             with patch.object(init_command, "confirm", return_value=False):
                 result = init_command.handle(
                     config=mock_config,
