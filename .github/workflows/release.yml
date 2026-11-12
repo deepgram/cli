@@ -139,7 +139,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install build dependencies
-        run: pip install build twine packaging
+        run: pip install build==1.5.0 twine==7.0.0 packaging==26.3
 
       # The sync job above pins root and sibling floors on the release PR,
       # but its push uses GITHUB_TOKEN and does not retrigger the PR's

@@ -330,7 +330,7 @@ jobs:
 
       - name: Check every changed package is being released
         run: |
-          pip install packaging
+          pip install packaging==26.3
           python scripts/check_release_bumps.py
 
   # Single rollup so branch protection needs exactly one required check.

@@ -29,6 +29,24 @@ def load_gate():
 
 gate = load_gate()
 
+
+def _is_git_checkout() -> bool:
+    """Whether git is installed and REPO is a git checkout it can read HEAD in."""
+    if shutil.which("git") is None:
+        return False
+    result = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "-q", "--verify", "HEAD"],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+needs_git_checkout = pytest.mark.skipif(
+    not _is_git_checkout(), reason="needs git and a git checkout of this repository"
+)
+
 CONFIG = {
     "include-v-in-tag": True,
     "packages": {
@@ -53,6 +71,7 @@ def test_tag_names_follow_the_release_please_config() -> None:
     )
 
 
+@needs_git_checkout
 def test_the_real_config_names_every_manifest_package() -> None:
     names = {pkg.path: pkg.tag for pkg in gate.packages(REPO)}
     assert names["."].startswith("v")
@@ -94,6 +113,7 @@ def test_only_shipped_paths_are_compared() -> None:
     ]
 
 
+@needs_git_checkout
 def test_the_root_ships_the_npm_package_files() -> None:
     root = next(pkg for pkg in gate.packages(REPO) if pkg.path == ".")
     assert root.npm == (
@@ -130,7 +150,7 @@ def test_npm_globs_without_a_slash_match_at_any_depth() -> None:
     assert gate.git_pathspec("npm/bin/") == "npm/bin/"
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@needs_git
 def test_an_npm_glob_matches_top_level_and_nested_files(tmp_path: Path) -> None:
     def git(*args: str) -> None:
         subprocess.run(
@@ -294,7 +314,7 @@ def test_only_hatch_build_tables_are_shipped_metadata() -> None:
     assert gate.shipped_metadata(HATCH) != gate.shipped_metadata(wheel)
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@needs_git
 def test_against_a_real_git_repository(tmp_path: Path) -> None:
     """The CLI end to end: tags, a bump, and a forgotten bump."""
 
@@ -381,7 +401,7 @@ def test_against_a_real_git_repository(tmp_path: Path) -> None:
     assert run().returncode == 0, run().stderr
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@needs_git
 def test_the_npm_package_and_root_metadata_against_a_real_git_repository(
     tmp_path: Path,
 ) -> None:
@@ -502,15 +522,15 @@ def test_the_npm_package_and_root_metadata_against_a_real_git_repository(
     assert run().returncode == 0, run().stderr
 
 
+@needs_git
 def test_a_repository_without_tags_fails_instead_of_passing(tmp_path: Path) -> None:
     """A shallow checkout has no tags; that must not read as "first release"."""
-    if shutil.which("git") is None:
-        pytest.skip("needs git")
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
     with pytest.raises(RuntimeError, match="no tags"):
         gate.git_tag_exists(tmp_path)
 
 
+@needs_git
 def test_not_a_repository_fails(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         gate.git_tag_exists(tmp_path)("v1.0.0")

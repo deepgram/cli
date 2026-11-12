@@ -60,13 +60,13 @@ working:
   inside that run's directory and is deleted afterwards.
 
 The launcher reuses that cache only when you own it, nobody else can write to
-it, and it isn't a symlink. The folders above it count too: on Linux, if
-your group can write to `~/.cache` (or `$XDG_CACHE_HOME`; umask 002 leaves it
-`0775`), the launcher keeps its cache in `$TMPDIR/deepgram-cli-<uid>`
-instead, until your temp directory is cleaned. `chmod g-w ~/.cache` brings it
-back to `~/.cache`. If no cache directory qualifies, each run builds a fresh
-environment in a private temporary directory and deletes it afterwards, and
-says why on stderr.
+it, and it isn't a symlink. The folders above it count too: if your group can
+write to `~/.cache` on Linux (or `$XDG_CACHE_HOME`; umask 002 leaves it
+`0775`) or to `~/Library/Caches` on macOS, the launcher keeps its cache in
+`$TMPDIR/deepgram-cli-<uid>` (`/tmp` when `TMPDIR` is unset) instead, until
+your temp directory is cleaned. `chmod g-w` on that folder brings it back.
+If no cache directory qualifies, each run builds a fresh environment in a
+private temporary directory and deletes it afterwards, and says why on stderr.
 
 On Windows, step 1 is skipped: the launcher can't verify who controls a cache
 directory there, so it never runs an environment left by an earlier run. Every
@@ -101,7 +101,40 @@ npm, uninstall the other first (for example `brew uninstall deepgram` or
 `pip uninstall deepctl`), then `npm install -g @deepgram/cli`.
 
 Update the npm version with `npm install -g @deepgram/cli@latest`, or run
-`npx @deepgram/cli@latest`.
+`npx @deepgram/cli@latest`. If you added it to a project instead
+(`npm install @deepgram/cli`), update it there with
+`npm install @deepgram/cli@latest`: `dg update` and the update notice can't
+tell the two apart, and show the global command.
+
+## Uninstall
+
+Your login is shared with every install method and stays after you remove
+the package. To remove it too, run `dg logout --all` first. Then:
+
+```bash
+npm uninstall -g @deepgram/cli
+```
+
+(or `npm uninstall @deepgram/cli` in a project that depends on it), and
+delete the launcher's cache.
+
+macOS:
+
+```bash
+rm -rf ~/Library/Caches/deepgram-cli "${TMPDIR:-/tmp}/deepgram-cli-$(id -u)"
+```
+
+Linux:
+
+```bash
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/deepgram-cli" "${TMPDIR:-/tmp}/deepgram-cli-$(id -u)"
+```
+
+Windows (PowerShell):
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\deepgram-cli" -ErrorAction SilentlyContinue
+```
 
 ## Environment variables
 
@@ -122,8 +155,10 @@ with "no matching distribution" or "no wheels":
 - Intel Macs and Windows on ARM64: `cryptography` has no wheel for them.
 - Python 3.15: not supported yet; the launcher picks Python 3.10 to 3.14.
 
-On those machines, install the CLI another way that can build those packages
-from source, such as `pipx install deepctl` or `brew install deepgram/tap/deepgram`.
+On those machines, install the CLI another way that builds those packages
+from source. On an Intel Mac, `brew install deepgram/tap/deepgram` brings the
+Rust toolchain that needs. `pipx install deepctl` and `uv tool install deepctl`
+work too, once a Rust toolchain and OpenSSL are installed.
 
 ### nohup and ignored signals
 

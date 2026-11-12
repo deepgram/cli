@@ -280,6 +280,7 @@ class TestGetUpdateInstructions:
         instructions = detector.get_update_instructions(info)
         assert "npm install -g @deepgram/cli@latest" in instructions
         assert "npx @deepgram/cli@latest" in instructions
+        assert "npm install @deepgram/cli@latest" in instructions
 
 
     @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npx"}, clear=False)

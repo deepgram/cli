@@ -1,7 +1,8 @@
 """Which wrapper, if any, started deepctl (internal; not a public API).
 
 The ``@deepgram/cli`` npm package runs deepctl from a private venv and says
-so in ``DEEPCTL_LAUNCHER``: ``npm`` for a global install, ``npx`` for
+so in ``DEEPCTL_LAUNCHER``: ``npm`` for an installed package (global, or a
+project dependency: the launcher can't tell them apart), ``npx`` for
 ``npx``/``npm exec``. Nothing else sets it.
 
 The variable is read once and removed from ``os.environ``, so it describes
@@ -24,9 +25,12 @@ _launcher: str | None = None
 def capture_launcher() -> str | None:
     """The launcher that started deepctl, captured on the first call.
 
-    If an entry point captured it first and says so (a ``deepctl.main``
-    module with ``LAUNCHER_CAPTURED`` set), use that value; otherwise read
-    and remove ``DEEPCTL_LAUNCHER`` here.
+    Reads and removes ``DEEPCTL_LAUNCHER``, unless ``deepctl.main`` already
+    did and says so with ``LAUNCHER_CAPTURED``: then its ``LAUNCHER`` is the
+    value. From 0.5.0 (#165), ``deepctl.main`` is stdlib-only and removes the
+    variable before deepctl_core is imported, so it is gone from
+    ``os.environ`` by the time this runs. A ``deepctl.main`` that calls this
+    function itself sets no flag, and the check falls through.
     """
     global _captured, _launcher
     if not _captured:

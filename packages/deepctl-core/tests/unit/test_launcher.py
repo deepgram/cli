@@ -47,7 +47,11 @@ def test_unknown_launcher_is_not_npm():
 
 @patch.dict(os.environ, {"DEEPCTL_LAUNCHER": "npx"}, clear=False)
 def test_uses_the_value_deepctl_main_captured_at_startup():
-    """An entry point that captured it first wins; the environment is left alone."""
+    """deepctl.main's captured value wins; the environment is left alone.
+
+    From 0.5.0 (#165), deepctl.main removes the variable before deepctl_core
+    is imported, so this is the only way the launcher reaches deepctl_core.
+    """
     import sys
     import types
 

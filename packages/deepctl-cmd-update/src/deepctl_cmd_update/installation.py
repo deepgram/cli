@@ -137,7 +137,9 @@ class InstallationDetector:
             return (
                 "Installed via npm. Update with: "
                 "npm install -g @deepgram/cli@latest "
-                "(or run npx @deepgram/cli@latest)"
+                "(or run npx @deepgram/cli@latest). "
+                "If @deepgram/cli is a dependency of your project, update it "
+                "there instead: npm install @deepgram/cli@latest"
             )
 
         if info.method == InstallMethod.UVX:
