@@ -148,10 +148,10 @@ readmes: ## Generate sub-package READMEs from pyproject.toml metadata
 readmes-check: ## Check sub-package READMEs are up to date
 	python3 scripts/generate_readmes.py --check
 
-floors-check: ## Check intra-workspace dependency floors (root must pin workspace versions)
+floors-check: ## Check intra-workspace dependency floors (root and SIBLING_FLOORS must pin workspace versions)
 	uv run python scripts/check_dependency_floors.py
 
-floors-fix: ## Pin root dependency floors to the current workspace versions
+floors-fix: ## Pin root and SIBLING_FLOORS dependency floors to the current workspace versions
 	uv run python scripts/check_dependency_floors.py --fix
 
 # ===================================================================

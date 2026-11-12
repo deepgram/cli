@@ -274,3 +274,14 @@ class TestFormatVersionMessage:
         assert "1.0.0" in msg
         assert "2.0.0" in msg
         assert "dg update" in msg
+
+    @patch.dict("os.environ", {"DEEPCTL_LAUNCHER": "npm"}, clear=False)
+    def test_update_available_under_npm_launcher(self):
+        info = VersionInfo(
+            current_version="1.0.0",
+            latest_version="2.0.0",
+            update_available=True,
+        )
+        msg = format_version_message(info)
+        assert "npm install -g @deepgram/cli@latest" in msg
+        assert "dg update" not in msg

@@ -65,3 +65,13 @@ def _disable_telemetry(monkeypatch):
     """
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DISABLED", "1")
     monkeypatch.setenv("DEEPCTL_TELEMETRY_DSN", "http://k@127.0.0.1:9/1")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_launcher_capture():
+    """Re-read DEEPCTL_LAUNCHER in each test, so env patches take effect."""
+    from deepctl_core._launcher import reset_launcher_for_tests
+
+    reset_launcher_for_tests()
+    yield
+    reset_launcher_for_tests()

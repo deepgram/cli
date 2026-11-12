@@ -1,7 +1,7 @@
 # Deepgram CLI — Full Reference
 
 > The official command-line interface for Deepgram's speech AI platform.
-> License: MIT | Python 3.10+ required
+> Version: {{CLI_VERSION}} | License: MIT | Python 3.10+ (uv, Homebrew and the install script can provide it)
 > GitHub: https://github.com/deepgram/cli
 
 ---
@@ -24,9 +24,13 @@ pip install deepctl       # pip
 pipx install deepctl      # pipx (isolated)
 uvx deepctl --help        # uvx (run without install)
 brew install deepgram/tap/deepgram  # Homebrew
+npm install -g @deepgram/cli        # npm (needs Node.js 20+ and uv or Python 3.10-3.14 with venv; installs dg, deepgram)
+npx @deepgram/cli --help            # npx (run without install)
 ```
 
-Aliases: `dg`, `deepctl`, `deepgram`
+npm and npx install prebuilt wheels only, so they fail on Intel Macs and Windows on ARM64 (`cryptography` has no wheel there). On an Intel Mac, use Homebrew.
+
+Aliases: `dg`, `deepctl`, `deepgram` (the npm package installs only `dg` and `deepgram`)
 
 ---
 

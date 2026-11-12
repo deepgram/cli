@@ -1489,6 +1489,7 @@ name = "deepctl-cmd-plugin"
 version = "0.1.14"
 source = { editable = "packages/deepctl-cmd-plugin" }
 dependencies = [
+    { name = "deepctl-cmd-update" },
     { name = "deepctl-core" },
     { name = "packaging" },
     { name = "toml" },
@@ -1496,6 +1497,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "deepctl-cmd-update", editable = "packages/deepctl-cmd-update" },
     { name = "deepctl-core", editable = "packages/deepctl-core" },
     { name = "packaging", specifier = ">=21.0" },
     { name = "toml", specifier = ">=0.10.2" },

@@ -70,13 +70,29 @@ only installs what root depends on, so a published package missing from that
 list never reaches anyone. `make floors-check` fails on both that omission and
 a floor left below the workspace version; run `make floors-fix` to pin floors.
 
+When a package starts importing a sibling API that only the sibling's newest
+release has, add the pair to `SIBLING_FLOORS` in
+`scripts/check_dependency_floors.py`. That floor then tracks the sibling's
+workspace version the same way root floors do, and the release workflow checks
+it again before building for PyPI.
+
+Floors only hold if every package whose code changed is released.
+`scripts/check_release_bumps.py` fails when a package's `src/` or dependencies
+changed since its last release tag but its version did not move (a `chore:` or
+`refactor:` commit does not bump it). On the release PR it reports as the
+`release-bump-gate` check: `sync-release-pr` posts it as a commit status on the
+bot's commits, and `test.yml` runs it for commits people push. It blocks the
+merge only while `release-bump-gate` is a required check on `main`. The build
+job runs it again before anything reaches PyPI. Land a `fix:` commit
+touching that package, or a `Release-As:` footer, and release again.
+
 ### Releasing
 
 Releases are driven by release-please. Two things are worth knowing before you
 run one:
 
 **Land your release-notes edits as a commit, not a PR description edit.**
-`sync-release-pr` regenerates `uv.lock` and the root dependency floors on the
+`sync-release-pr` regenerates `uv.lock` and the root and sibling dependency floors on the
 release branch automatically, but it pushes with `GITHUB_TOKEN`, which by
 design retriggers nothing — so the PR's checks still reflect the bot's first
 commit and stay red on content that is now correct. Editing `CHANGELOG.md` on
@@ -87,11 +103,16 @@ dedicated PAT or GitHub App token.
 
 **Nothing advertises a release until it is installable.** `verify-published`
 polls PyPI until `pip install deepctl==X` resolves its full closure, then
-installs it for real and runs the CLI. `mark-latest`, `deploy-web`, and the
-Homebrew bump all wait on it. If it times out, PyPI has not propagated or a
-sub-package failed to publish — re-run all jobs on that workflow run once
-PyPI has caught up; re-running only the failed job leaves the three
-downstream jobs skipped. Re-running all jobs is safe: the publish step uses
+installs it for real and runs the CLI. `mark-latest`, `deploy-web`, the
+Homebrew bump, and `publish-npm` all wait on it. `deploy-web` also waits on
+`publish-npm`, which publishes `@deepgram/cli` and smoke-tests it with `npx`,
+so the site never shows npm install instructions before the package works.
+If `verify-published` times out, PyPI has not propagated or a sub-package
+failed to publish — re-run all jobs on that workflow run once PyPI has caught
+up; re-running only the failed job leaves the downstream jobs skipped. If
+only `publish-npm` fails, fix the cause and re-run failed jobs: `deploy-web`
+stays skipped until it passes, and the npm publish step skips an
+already-published version. Re-running all jobs is safe: the publish step uses
 `skip-existing`.
 
 ### Testing

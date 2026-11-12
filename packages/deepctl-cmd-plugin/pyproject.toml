@@ -7,12 +7,17 @@ requires-python = ">=3.10"
 authors = [{ name = "Deepgram DevRel", email = "devrel@deepgram.com" }]
 dependencies = [
     "deepctl-core>=0.2.19",
+    "deepctl-cmd-update>=0.2.7",
     "packaging>=21.0",
     "toml>=0.10.2",
 ]
 
 [project.entry-points."deepctl.commands"]
 plugin = "deepctl_cmd_plugin.command:PluginCommand"
+
+[tool.uv.sources]
+deepctl-core = { workspace = true }
+deepctl-cmd-update = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -7,6 +7,8 @@ from deepctl_core import Config
 from packaging import version
 from pydantic import BaseModel, Field
 
+from .startup_check import upgrade_hint
+
 
 class VersionInfo(BaseModel):
     """Version information from PyPI."""
@@ -270,5 +272,5 @@ def format_version_message(info: VersionInfo) -> str:
         else:
             message += f" (released {days_old} days ago)"
 
-    message += "\nRun 'dg update' to upgrade"
+    message += f"\nRun '{upgrade_hint()}' to upgrade"
     return message

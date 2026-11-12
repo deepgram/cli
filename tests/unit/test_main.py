@@ -417,3 +417,25 @@ class TestHyphenatedCommands:
     )
     def test_expansion(self, expand, args, expected):
         assert expand(args) == expected
+
+
+def test_launcher_marker_is_captured_and_not_inherited():
+    """DEEPCTL_LAUNCHER describes this process only; children must not see it."""
+    import os
+    import subprocess
+
+    code = (
+        "import os, subprocess, sys\n"
+        "import importlib\n"
+        "m = importlib.import_module('deepctl.main')\n"
+        "child = subprocess.run([sys.executable, '-c', "
+        "'import os; print(os.environ.get(\"DEEPCTL_LAUNCHER\"))'], "
+        "capture_output=True, text=True).stdout.strip()\n"
+        "print(m.LAUNCHER, child)\n"
+    )
+    env = {**os.environ, "DEEPCTL_LAUNCHER": "npm"}
+    out = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ["npm", "None"]
