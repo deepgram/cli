@@ -4,6 +4,7 @@
 [![Version](https://img.shields.io/pypi/v/deepctl)](https://pypi.org/project/deepctl/)
 [![Python](https://img.shields.io/pypi/pyversions/deepctl)](https://pypi.org/project/deepctl/)
 [![License](https://img.shields.io/github/license/deepgram/cli)](https://github.com/deepgram/cli/blob/main/LICENSE)
+
 ```sh
 Usage: dg [OPTIONS] COMMAND [ARGS]...
 
