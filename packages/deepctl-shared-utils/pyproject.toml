@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-shared-utils"
-version = "0.4.1" # x-release-please-version
+version = "0.5.0" # x-release-please-version
 description = "Shared utilities for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ classifiers = [
 keywords = ["deepgram", "utilities", "validation", "helpers"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl==0.4.1", # x-release-please-version
+    "deepctl==0.5.0", # x-release-please-version
     "pydantic>=2.0.0,<3",
     "click>=8.2.0,<9",
     "httpx>=0.24.0,<1",

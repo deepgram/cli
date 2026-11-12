@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl"
-version = "0.4.1" # x-release-please-version
+version = "0.5.0" # x-release-please-version
 description = "Official Deepgram CLI for speech recognition and audio intelligence"
 readme = "README.md"
 license = "MIT"
@@ -35,35 +35,35 @@ requires-python = ">=3.10"
 dependencies = [
     "click>=8.2.0,<9",
     "deepgram-sdk>=7.7.0,<8",
-    "deepctl-core==0.4.1", # x-release-please-version
-    "deepctl-cmd-login==0.4.1", # x-release-please-version
-    "deepctl-cmd-projects==0.4.1", # x-release-please-version
-    "deepctl-cmd-transcribe==0.4.1", # x-release-please-version
-    "deepctl-cmd-usage==0.4.1", # x-release-please-version
-    "deepctl-cmd-mcp==0.4.1", # x-release-please-version
-    "deepctl-cmd-api==0.4.1", # x-release-please-version
-    "deepctl-cmd-debug==0.4.1", # x-release-please-version
-    "deepctl-cmd-debug-browser==0.4.1", # x-release-please-version
-    "deepctl-cmd-debug-network==0.4.1", # x-release-please-version
-    "deepctl-cmd-debug-audio==0.4.1", # x-release-please-version
-    "deepctl-cmd-debug-probe==0.4.1", # x-release-please-version
-    "deepctl-cmd-debug-toolkit==0.4.1", # x-release-please-version
-    "deepctl-cmd-ffprobe==0.4.1", # x-release-please-version
-    "deepctl-cmd-update==0.4.1", # x-release-please-version
-    "deepctl-cmd-plugin==0.4.1", # x-release-please-version
-    "deepctl-cmd-skills==0.4.1", # x-release-please-version
-    "deepctl-cmd-init==0.4.1", # x-release-please-version
-    "deepctl-cmd-models==0.4.1", # x-release-please-version
-    "deepctl-cmd-speak==0.4.1", # x-release-please-version
-    "deepctl-cmd-keys==0.4.1", # x-release-please-version
-    "deepctl-cmd-read==0.4.1", # x-release-please-version
-    "deepctl-cmd-listen==0.4.1", # x-release-please-version
-    "deepctl-cmd-requests==0.4.1", # x-release-please-version
-    "deepctl-cmd-billing==0.4.1", # x-release-please-version
-    "deepctl-cmd-members==0.4.1", # x-release-please-version
-    "deepctl-cmd-completion==0.4.1", # x-release-please-version
-    "deepctl-shared-utils==0.4.1", # x-release-please-version
-    "deepctl-telemetry==0.4.1", # x-release-please-version
+    "deepctl-core==0.5.0", # x-release-please-version
+    "deepctl-cmd-login==0.5.0", # x-release-please-version
+    "deepctl-cmd-projects==0.5.0", # x-release-please-version
+    "deepctl-cmd-transcribe==0.5.0", # x-release-please-version
+    "deepctl-cmd-usage==0.5.0", # x-release-please-version
+    "deepctl-cmd-mcp==0.5.0", # x-release-please-version
+    "deepctl-cmd-api==0.5.0", # x-release-please-version
+    "deepctl-cmd-debug==0.5.0", # x-release-please-version
+    "deepctl-cmd-debug-browser==0.5.0", # x-release-please-version
+    "deepctl-cmd-debug-network==0.5.0", # x-release-please-version
+    "deepctl-cmd-debug-audio==0.5.0", # x-release-please-version
+    "deepctl-cmd-debug-probe==0.5.0", # x-release-please-version
+    "deepctl-cmd-debug-toolkit==0.5.0", # x-release-please-version
+    "deepctl-cmd-ffprobe==0.5.0", # x-release-please-version
+    "deepctl-cmd-update==0.5.0", # x-release-please-version
+    "deepctl-cmd-plugin==0.5.0", # x-release-please-version
+    "deepctl-cmd-skills==0.5.0", # x-release-please-version
+    "deepctl-cmd-init==0.5.0", # x-release-please-version
+    "deepctl-cmd-models==0.5.0", # x-release-please-version
+    "deepctl-cmd-speak==0.5.0", # x-release-please-version
+    "deepctl-cmd-keys==0.5.0", # x-release-please-version
+    "deepctl-cmd-read==0.5.0", # x-release-please-version
+    "deepctl-cmd-listen==0.5.0", # x-release-please-version
+    "deepctl-cmd-requests==0.5.0", # x-release-please-version
+    "deepctl-cmd-billing==0.5.0", # x-release-please-version
+    "deepctl-cmd-members==0.5.0", # x-release-please-version
+    "deepctl-cmd-completion==0.5.0", # x-release-please-version
+    "deepctl-shared-utils==0.5.0", # x-release-please-version
+    "deepctl-telemetry==0.5.0", # x-release-please-version
     "pydantic>=2.0.0,<3",
     "rich>=13.0.0,<16",
     "httpx>=0.24.0,<1",

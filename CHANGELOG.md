@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0](https://github.com/deepgram/cli/compare/v0.4.1...v0.5.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* **ci:** drop unwired workflow_call trigger from competitive-bench.yml ([53b720f](https://github.com/deepgram/cli/commit/53b720f921aae5117320e22311b10eb05fac091f))
+
+
+### Documentation
+
+* fix line wrap and restore workflow_call rationale in bench/README.md ([259f07d](https://github.com/deepgram/cli/commit/259f07d5201aa18ecb3604a5f69f420b378518c5))
+
+
+### Miscellaneous Chores
+
+* release 0.5.0 ([31d8a45](https://github.com/deepgram/cli/commit/31d8a45c47da39115e198f661f0df095c69c0c04))
+
 ## [0.4.1](https://github.com/deepgram/cli/compare/v0.4.0...v0.4.1) (2026-11-12)
 
 

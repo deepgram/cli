@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-debug-toolkit"
-version = "0.4.1" # x-release-please-version
+version = "0.5.0" # x-release-please-version
 description = "Toolkit subcommand for dg debug — runs field support scripts from deepgram/support-toolkit"
 readme = "README.md"
 authors = [{ name = "Deepgram", email = "devrel@deepgram.com" }]
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-    "deepctl==0.4.1", # x-release-please-version
-    "deepctl-core==0.4.1", # x-release-please-version
+    "deepctl==0.5.0", # x-release-please-version
+    "deepctl-core==0.5.0", # x-release-please-version
     "httpx>=0.27.0,<1",
     "pydantic>=2.10.1,<3",
     "platformdirs>=4.0.0,<5",
