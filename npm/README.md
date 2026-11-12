@@ -156,9 +156,10 @@ with "no matching distribution" or "no wheels":
 - Python 3.15: not supported yet; the launcher picks Python 3.10 to 3.14.
 
 On those machines, install the CLI another way that builds those packages
-from source. On an Intel Mac, `brew install deepgram/tap/deepgram` brings the
-Rust toolchain that needs. `pipx install deepctl` and `uv tool install deepctl`
-work too, once a Rust toolchain and OpenSSL are installed.
+from source. On an Intel Mac, `brew install deepgram/tap/deepgram` installs
+the Rust toolchain that source build needs. `pipx install deepctl` and
+`uv tool install deepctl` work too, once a Rust toolchain and OpenSSL are
+installed.
 
 ### nohup and ignored signals
 
