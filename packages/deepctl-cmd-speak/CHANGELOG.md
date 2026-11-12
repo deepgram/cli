@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/deepgram/cli/compare/deepctl-cmd-speak-v0.0.5...deepctl-cmd-speak-v0.0.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+
 ## [0.0.5](https://github.com/deepgram/cli/compare/deepctl-cmd-speak-v0.0.4...deepctl-cmd-speak-v0.0.5) (2026-10-09)
 
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.1](https://github.com/deepgram/cli/compare/deepctl-core-v0.3.0...deepctl-core-v0.3.1) (2026-11-12)
+
+
+### Features
+
+* **cli:** detect npm launcher installs in update, plugin and skills ([07e6fd9](https://github.com/deepgram/cli/commit/07e6fd9f8ba337a743e6a50ad96a2b29de53d37d))
+* **npm:** make @deepgram/cli the real Deepgram CLI ([#146](https://github.com/deepgram/cli/issues/146)) ([8ed20ee](https://github.com/deepgram/cli/commit/8ed20ee349c635e7a4b5c3d8ecbae8a4fa558fe1))
+
+
+### Bug Fixes
+
+* **auth:** honor DEEPGRAM_CLI_INSECURE only for 1/true and localhost ([0da2fa0](https://github.com/deepgram/cli/commit/0da2fa0d0051fad82cd56673a90bbb28b1dc2ba5))
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+* **cli:** keep ffprobe path and plugin changes out of AI agent sessions ([2df96f0](https://github.com/deepgram/cli/commit/2df96f0ee9cee8953f7e9f8ca4bf23f8c7ccea19))
+* **config:** limit what a project deepgram.yaml or a non-default --config file can set ([a71a918](https://github.com/deepgram/cli/commit/a71a9189c7f1ff92b22a18e36edf3a405af98eaf))
+* **config:** read and write the config file safely ([36805f2](https://github.com/deepgram/cli/commit/36805f21c99b1554180fe90a4bcd8a5671e2bd38))
+* **config:** report a config file that can't be looked up instead of crashing ([cd11fe8](https://github.com/deepgram/cli/commit/cd11fe82f99fc82690e8541a86ec27fa34d8e6e9))
+* **config:** treat OpenCode as an AI agent and never reuse a refused trust root ([c7d9e35](https://github.com/deepgram/cli/commit/c7d9e35a93f0f7cb8e33689794c0a391c94f5f22))
+* **core:** install deepgram-skills-v1.8.0 by default ([77871b5](https://github.com/deepgram/cli/commit/77871b5c498a89433579f9027bad4ed5a4eef438))
+* **core:** install deepgram-skills-v1.8.0 by default ([#154](https://github.com/deepgram/cli/issues/154)) ([b5beda0](https://github.com/deepgram/cli/commit/b5beda030bb5af3814874753ee7d0929e924ceb7))
+* **ffprobe:** never run an ffprobe found in the current directory or a relative PATH entry ([37d56c6](https://github.com/deepgram/cli/commit/37d56c60c8ea0ce46eb6f1beca15221328ade4c3))
+* **npm:** address devrel-review findings on platform support, tests and docs ([1eb7b64](https://github.com/deepgram/cli/commit/1eb7b64e31aef26735857a47ef25f524ebf8aba5))
+* **plugin:** keep plugins from replacing built-in commands ([dff78a2](https://github.com/deepgram/cli/commit/dff78a233a255b17f831e599bf417f125d0e5b7f))
+* **plugin:** make the plugin folders private ([6b9c257](https://github.com/deepgram/cli/commit/6b9c2576f116d81df1a6ed5015a7ae598aa04aa6))
+* **telemetry:** stop sending error reports ([70033dd](https://github.com/deepgram/cli/commit/70033ddbdb59235a5418ef103de2185bab13f6fe))
+
 ## [0.3.0](https://github.com/deepgram/cli/compare/deepctl-core-v0.2.19...deepctl-core-v0.3.0) (2026-10-14)
 
 

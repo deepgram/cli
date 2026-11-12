@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.8](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.7...deepctl-telemetry-v0.0.8) (2026-11-12)
+
+
+### Bug Fixes
+
+* **config:** limit what a project deepgram.yaml or a non-default --config file can set ([a71a918](https://github.com/deepgram/cli/commit/a71a9189c7f1ff92b22a18e36edf3a405af98eaf))
+* **config:** read and write the config file safely ([36805f2](https://github.com/deepgram/cli/commit/36805f21c99b1554180fe90a4bcd8a5671e2bd38))
+* **telemetry:** stop sending error reports ([70033dd](https://github.com/deepgram/cli/commit/70033ddbdb59235a5418ef103de2185bab13f6fe))
+
 ## [0.0.7](https://github.com/deepgram/cli/compare/deepctl-telemetry-v0.0.6...deepctl-telemetry-v0.0.7) (2026-09-29)
 
 

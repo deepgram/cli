@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.16](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.15...deepctl-cmd-mcp-v0.1.16) (2026-11-12)
+
+
+### Bug Fixes
+
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+* **mcp:** remove the SSE transport; dg mcp runs over stdio only ([ffaa148](https://github.com/deepgram/cli/commit/ffaa1488141e297a09b4813ad6501a728ded9868))
+* **mcp:** serve only Deepgram docs search, and connect only when a tool is called ([9090a80](https://github.com/deepgram/cli/commit/9090a8095903414de74ecc3afb6bcf55d3677875))
+* **telemetry:** stop sending error reports ([70033dd](https://github.com/deepgram/cli/commit/70033ddbdb59235a5418ef103de2185bab13f6fe))
+
 ## [0.1.15](https://github.com/deepgram/cli/compare/deepctl-cmd-mcp-v0.1.14...deepctl-cmd-mcp-v0.1.15) (2026-08-19)
 
 

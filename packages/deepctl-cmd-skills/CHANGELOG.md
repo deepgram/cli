@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.10](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.9...deepctl-cmd-skills-v0.0.10) (2026-11-12)
+
+
+### Features
+
+* **cli:** detect npm launcher installs in update, plugin and skills ([07e6fd9](https://github.com/deepgram/cli/commit/07e6fd9f8ba337a743e6a50ad96a2b29de53d37d))
+* **npm:** make @deepgram/cli the real Deepgram CLI ([#146](https://github.com/deepgram/cli/issues/146)) ([8ed20ee](https://github.com/deepgram/cli/commit/8ed20ee349c635e7a4b5c3d8ecbae8a4fa558fe1))
+
 ## [0.0.9](https://github.com/deepgram/cli/compare/deepctl-cmd-skills-v0.0.8...deepctl-cmd-skills-v0.0.9) (2026-10-09)
 
 

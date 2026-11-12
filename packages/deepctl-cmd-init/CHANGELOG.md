@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/deepgram/cli/compare/deepctl-cmd-init-v0.1.0...deepctl-cmd-init-v0.1.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **init:** stop reading a template URL that starts with - as a git option ([e76bfe1](https://github.com/deepgram/cli/commit/e76bfe1de3e675ab6abf282e334056243eac4d78))
+* **init:** write .env owner-only and add it to .gitignore ([e5a5c70](https://github.com/deepgram/cli/commit/e5a5c70b2bb9d10a32b01546143e101c5277342b))
+
 ## [0.1.0](https://github.com/deepgram/cli/compare/deepctl-cmd-init-v0.0.4...deepctl-cmd-init-v0.1.0) (2026-10-14)
 
 

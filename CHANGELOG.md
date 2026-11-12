@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.4.1](https://github.com/deepgram/cli/compare/v0.4.0...v0.4.1) (2026-11-12)
+
+
+### Features
+
+* **cli:** detect npm launcher installs in update, plugin and skills ([07e6fd9](https://github.com/deepgram/cli/commit/07e6fd9f8ba337a743e6a50ad96a2b29de53d37d))
+* **npm:** add the @deepgram/cli launcher package ([a842404](https://github.com/deepgram/cli/commit/a842404808f52ad31415530a6a72044567e30d11))
+* **npm:** make @deepgram/cli the real Deepgram CLI ([#146](https://github.com/deepgram/cli/issues/146)) ([8ed20ee](https://github.com/deepgram/cli/commit/8ed20ee349c635e7a4b5c3d8ecbae8a4fa558fe1))
+
+
+### Bug Fixes
+
+* **audio:** stop reading a file name that starts with - as ffprobe options ([184c3ec](https://github.com/deepgram/cli/commit/184c3ec68b5797eb038e4d1f61c6b71a60f06597))
+* **auth:** honor DEEPGRAM_CLI_INSECURE only for 1/true and localhost ([0da2fa0](https://github.com/deepgram/cli/commit/0da2fa0d0051fad82cd56673a90bbb28b1dc2ba5))
+* **auth:** send keys and data only to the host you chose ([945338b](https://github.com/deepgram/cli/commit/945338bea40ecfc6721c8071dfc9039a06918409))
+* **cli:** escape characters the output encoding can't write ([17cac1e](https://github.com/deepgram/cli/commit/17cac1e3b1142c58ef30dfc9676aae87c7c1aa13))
+* **cli:** keep ffprobe path and plugin changes out of AI agent sessions ([2df96f0](https://github.com/deepgram/cli/commit/2df96f0ee9cee8953f7e9f8ca4bf23f8c7ccea19))
+* **cli:** stop printing local variables in crash tracebacks ([7098b24](https://github.com/deepgram/cli/commit/7098b246fa92f4f1c49c516b20d9bdb1500c0423))
+* **cli:** stop splitting hyphenated file names like debug-call.wav into a command ([430706e](https://github.com/deepgram/cli/commit/430706e9d672c12fc7ceead14155d8432e74a572))
+* **config:** limit what a project deepgram.yaml or a non-default --config file can set ([a71a918](https://github.com/deepgram/cli/commit/a71a9189c7f1ff92b22a18e36edf3a405af98eaf))
+* **config:** read and write the config file safely ([36805f2](https://github.com/deepgram/cli/commit/36805f21c99b1554180fe90a4bcd8a5671e2bd38))
+* **config:** report a config file that can't be looked up instead of crashing ([cd11fe8](https://github.com/deepgram/cli/commit/cd11fe82f99fc82690e8541a86ec27fa34d8e6e9))
+* **config:** treat OpenCode as an AI agent and never reuse a refused trust root ([c7d9e35](https://github.com/deepgram/cli/commit/c7d9e35a93f0f7cb8e33689794c0a391c94f5f22))
+* **consent:** load Ketch first and hold Heap and GA4 until consent ([6311875](https://github.com/deepgram/cli/commit/6311875fc572dbbcac23dcd3ec83a2c5585c3f10))
+* **consent:** load Ketch first and hold Heap and GA4 until consent ([#143](https://github.com/deepgram/cli/issues/143)) ([79aa2f4](https://github.com/deepgram/cli/commit/79aa2f49347f3018bee8f7a8e2e0ba35899e8319))
+* **core:** install deepgram-skills-v1.8.0 by default ([77871b5](https://github.com/deepgram/cli/commit/77871b5c498a89433579f9027bad4ed5a4eef438))
+* **core:** install deepgram-skills-v1.8.0 by default ([#154](https://github.com/deepgram/cli/issues/154)) ([b5beda0](https://github.com/deepgram/cli/commit/b5beda030bb5af3814874753ee7d0929e924ceb7))
+* **debug:** accept probe connections only from local pages ([3e10c7a](https://github.com/deepgram/cli/commit/3e10c7a44779fbb82151ba6fece180897850ffb7))
+* **ffprobe:** never run an ffprobe found in the current directory or a relative PATH entry ([37d56c6](https://github.com/deepgram/cli/commit/37d56c60c8ea0ce46eb6f1beca15221328ade4c3))
+* **init:** stop reading a template URL that starts with - as a git option ([e76bfe1](https://github.com/deepgram/cli/commit/e76bfe1de3e675ab6abf282e334056243eac4d78))
+* **init:** write .env owner-only and add it to .gitignore ([e5a5c70](https://github.com/deepgram/cli/commit/e5a5c70b2bb9d10a32b01546143e101c5277342b))
+* **install:** verify a pinned uv installer before running it ([ff17cc7](https://github.com/deepgram/cli/commit/ff17cc7d08831bd1d3ac2ca0a31fc5b6070a6476))
+* **mcp:** remove the SSE transport; dg mcp runs over stdio only ([ffaa148](https://github.com/deepgram/cli/commit/ffaa1488141e297a09b4813ad6501a728ded9868))
+* **mcp:** serve only Deepgram docs search, and connect only when a tool is called ([9090a80](https://github.com/deepgram/cli/commit/9090a8095903414de74ecc3afb6bcf55d3677875))
+* **npm:** address devrel-review findings on platform support, tests and docs ([1eb7b64](https://github.com/deepgram/cli/commit/1eb7b64e31aef26735857a47ef25f524ebf8aba5))
+* **npm:** install the CLI only from hash-locked requirements ([d28e851](https://github.com/deepgram/cli/commit/d28e8511d7ed15b9d9b2b824308ad33102ac97f8))
+* **npm:** keep venvs and uv's cache in directories only the user controls ([8ce3461](https://github.com/deepgram/cli/commit/8ce34618e8a4327fa24e330e3a4a90cb2e256972))
+* **npm:** never reuse a uv cache the launcher can't check ([9202b34](https://github.com/deepgram/cli/commit/9202b34908c9395a6457200cca77f69eb0eb06b8))
+* **npm:** never trust a group-writable cache ancestor ([a8ee1e3](https://github.com/deepgram/cli/commit/a8ee1e341efcc4d914fb0acc4b6dac25580cbcdb))
+* **npm:** print launcher errors as ERROR and HINT lines ([a88b434](https://github.com/deepgram/cli/commit/a88b434885a4e950fbc8a606b04eba26bec2415e))
+* **plugin:** keep plugins from replacing built-in commands ([dff78a2](https://github.com/deepgram/cli/commit/dff78a233a255b17f831e599bf417f125d0e5b7f))
+* **plugin:** make the plugin folders private ([6b9c257](https://github.com/deepgram/cli/commit/6b9c2576f116d81df1a6ed5015a7ae598aa04aa6))
+* **telemetry:** stop sending error reports ([70033dd](https://github.com/deepgram/cli/commit/70033ddbdb59235a5418ef103de2185bab13f6fe))
+* **update:** upgrade the deepgram Homebrew formula, not deepctl ([f41226f](https://github.com/deepgram/cli/commit/f41226ff61986f9b4658c06d98f2627e9ed78b30))
+* **web:** self-host Inter so no font request precedes consent ([5cd0725](https://github.com/deepgram/cli/commit/5cd0725e8deaab33cf4acb3173472689a35ab26e))
+
+
+### Documentation
+
+* document the npm install ([85df8bb](https://github.com/deepgram/cli/commit/85df8bb8c4f64c16dbd062df0dc1ac5fb82e3d24))
+* give the real order of settings and of the API key ([e8772ac](https://github.com/deepgram/cli/commit/e8772ac8b2dba75b33517d01f80c93ebd217e68d))
+* **npm:** fix a dangling reference in the Intel Mac brew note ([d28c7a5](https://github.com/deepgram/cli/commit/d28c7a520267e4320c92bff0bb6be9a8951a843e))
+* tell plugin authors not to name an entry point like a built-in command ([371fb7a](https://github.com/deepgram/cli/commit/371fb7aec5f8a87ba3af277f226b75c75dbf8967))
+* **web:** show a plugin Deepgram publishes in the plugin example ([09adc52](https://github.com/deepgram/cli/commit/09adc52d4a400cf8d2d6a05570da7aa39b7f847f))
+
 ## [0.4.0](https://github.com/deepgram/cli/compare/v0.3.3...v0.4.0) (2026-10-14)
 
 

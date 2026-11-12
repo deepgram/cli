@@ -1,6 +1,6 @@
 {
   "name": "@deepgram/cli",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "The official Deepgram CLI: speech-to-text, text-to-speech, voice agents and audio intelligence from your terminal",
   "type": "commonjs",
   "bin": {

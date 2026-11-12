@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.14](https://github.com/deepgram/cli/compare/deepctl-shared-utils-v0.1.13...deepctl-shared-utils-v0.1.14) (2026-11-12)
+
+
+### Bug Fixes
+
+* **audio:** stop reading a file name that starts with - as ffprobe options ([184c3ec](https://github.com/deepgram/cli/commit/184c3ec68b5797eb038e4d1f61c6b71a60f06597))
+* **ffprobe:** never run an ffprobe found in the current directory or a relative PATH entry ([37d56c6](https://github.com/deepgram/cli/commit/37d56c60c8ea0ce46eb6f1beca15221328ade4c3))
+
 ## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-shared-utils-v0.1.12...deepctl-shared-utils-v0.1.13) (2026-09-29)
 
 
