@@ -31,6 +31,7 @@ SIGNALS
   GEMINI_CLI                      set             -     gh, vercel
   COPILOT_CLI                     set             -     gh
   OPENCODE                        set             -     gh
+  OPENCODE_CLIENT                 set             -     gh
   ANTIGRAVITY_AGENT               set             -     gh, vercel
   AUGMENT_AGENT                   set             -     gh, vercel
   CURSOR_AGENT                    set             -     gh, vercel
