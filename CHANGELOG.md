@@ -95,11 +95,14 @@
 Upgrading to 0.5.0 changes these:
 
 * `-o/--output` is deprecated for `dg speak`'s audio file; use `--out-file` instead ([8f59531](https://github.com/deepgram/cli/commit/8f5953198ec2331799e7b3ba2c65eb780eeefbd4)).
-* `dg init`'s setup steps now require `--yes` outside a terminal, so agents and CI no longer run them unattended ([8c50ae1](https://github.com/deepgram/cli/commit/8c50ae15cb82828832245eac51a2c6e4ca93651b)).
-* `dg listen`'s prerecorded `-o json` now prints the server's response body as sent — keys the server omitted no longer appear as `null` — and `-o yaml` prints that body instead of a flattened table ([6aa1795](https://github.com/deepgram/cli/commit/6aa179515d41ca9290b74bd2e81af2ddc69156c1)).
-* Credential resolution for the default profile now follows one explicit order, `--api-key` > keyring > environment > file ([307e2c3](https://github.com/deepgram/cli/commit/307e2c382e9d9f032c4e000cc8d91cdb870ba3a1)).
-* `dg debug network` no longer sends stored credentials (including `~/.netrc`) with its probe requests ([edc5243](https://github.com/deepgram/cli/commit/edc524390db48344e0a9093190d499d5bb2280aa)).
+* `dg init` no longer runs a template's setup commands or starts the app without a person at a terminal: pass `--yes` (or, outside an AI agent session, `--install`) to run setup and `--start` to start the app; otherwise it exits 1 with `confirmation_required` ([8c50ae1](https://github.com/deepgram/cli/commit/8c50ae15cb82828832245eac51a2c6e4ca93651b)).
 * `dg init` clones only Deepgram-owned templates now ([56dc618](https://github.com/deepgram/cli/commit/56dc618c62c3702213656a418ed2507eb68bbb75)).
+* `dg listen`'s prerecorded `-o json` now prints the server's response body as sent — keys the server omitted no longer appear as `null` — and `-o yaml` prints that body instead of the table (set `DEEPCTL_LISTEN_JSON=sdk` to restore the old JSON shape) ([6aa1795](https://github.com/deepgram/cli/commit/6aa179515d41ca9290b74bd2e81af2ddc69156c1)).
+* In an AI-agent session, a prerecorded `dg listen` result over 64 KiB is now saved under `~/.deepctl/results/` instead of printed; stdout gets a summary, and `--full-output` restores the full result ([fb7f9ec](https://github.com/deepgram/cli/commit/fb7f9ecc4746843c0af266d09fc3cda44dd9822d)).
+* Under a hard agent signal, `dg speak` no longer reads stdin unless the text argument is `-` (otherwise it exits with `E-SPEAK-NO-TEXT`), and refuses to write audio to a pipe (`E-SPEAK-NO-OUTPUT`) ([ab6ceb9](https://github.com/deepgram/cli/commit/ab6ceb9cc4a12cd5e6aee872926ba5973ccd3c10)).
+* When no one can answer a prompt, `dg login`'s confirmations now return `confirmation_required` (exit 1) instead of "Login cancelled" ([e4db87a](https://github.com/deepgram/cli/commit/e4db87a541765b5a7374c84b53de52c8c852a1e3)).
+* A `DEEPGRAM_API_KEY`, `DEEPGRAM_PROFILE`, `DEEPGRAM_PROJECT_ID` or `DEEPGRAM_BASE_URL` that still holds an unexpanded `${...}` placeholder is now ignored, with a `W-ENV-PLACEHOLDER` warning; off a terminal, a keyring that doesn't answer within 2 s is skipped for the config file or environment, with a `W-KEYRING-TIMEOUT` warning. Credential precedence itself is unchanged from 0.4.1 ([307e2c3](https://github.com/deepgram/cli/commit/307e2c382e9d9f032c4e000cc8d91cdb870ba3a1)).
+* `dg debug network` no longer attaches `~/.netrc` credentials to its probe requests (it never sent your Deepgram key) ([edc5243](https://github.com/deepgram/cli/commit/edc524390db48344e0a9093190d499d5bb2280aa)).
 
 ## [0.4.1](https://github.com/deepgram/cli/compare/v0.4.0...v0.4.1) (2026-11-12)
 
