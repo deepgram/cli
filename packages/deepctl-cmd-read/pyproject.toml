@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepctl-cmd-read"
-version = "0.4.1" # x-release-please-version
+version = "0.5.0" # x-release-please-version
 description = "Read (text intelligence) command for deepctl"
 readme = "README.md"
 license = "MIT"
@@ -21,8 +21,8 @@ classifiers = [
 keywords = ["deepgram", "cli", "text-intelligence", "nlp", "read"]
 requires-python = ">=3.10"
 dependencies = [
-    "deepctl==0.4.1", # x-release-please-version
-    "deepctl-core==0.4.1", # x-release-please-version
+    "deepctl==0.5.0", # x-release-please-version
+    "deepctl-core==0.5.0", # x-release-please-version
     "click>=8.2.0,<9",
     "rich>=13.0.0,<16",
     "pydantic>=2.0.0,<3",

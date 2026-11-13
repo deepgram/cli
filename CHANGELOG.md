@@ -1,5 +1,109 @@
 # Changelog
 
+## [0.5.0](https://github.com/deepgram/cli/compare/v0.4.1...v0.5.0) (2026-11-12)
+
+
+### Features
+
+* **bench:** add competitive benchmark harness with gates ([1796661](https://github.com/deepgram/cli/commit/17966619119bbb2914ee18c4c06ca9e448660db1))
+* **cli:** load commands from a generated manifest ([67c5881](https://github.com/deepgram/cli/commit/67c5881ae9079b2ca0bbdff646e156ff43357e84))
+* **core:** detect AI agents from one documented table ([758a1a5](https://github.com/deepgram/cli/commit/758a1a5b1f56adf5ba0df99dc669af262ef5581f))
+* **core:** resolve credentials in one place ([307e2c3](https://github.com/deepgram/cli/commit/307e2c382e9d9f032c4e000cc8d91cdb870ba3a1))
+* **help:** explain agent mode with dg help agent-mode ([6cb08e4](https://github.com/deepgram/cli/commit/6cb08e42582f7bd39dbf28d087b544e04eb0a4fe))
+* **init:** resume a rerun in a clone dg init recorded ([76ebda9](https://github.com/deepgram/cli/commit/76ebda942d7c8facd73f422fb7e7ae32b6c8a4b4))
+* **init:** setup steps need --yes outside a terminal ([8c50ae1](https://github.com/deepgram/cli/commit/8c50ae15cb82828832245eac51a2c6e4ca93651b))
+* **listen:** add --timeout for prerecorded transcription ([d695b92](https://github.com/deepgram/cli/commit/d695b92d6251c3ea643c51634072cab4ba0c3d68))
+* **listen:** add -o text for the transcript alone ([943af31](https://github.com/deepgram/cli/commit/943af31f7d29ac339b7723156007e0d617f31b2f))
+* **listen:** print the server's body for prerecorded -o json ([6aa1795](https://github.com/deepgram/cli/commit/6aa179515d41ca9290b74bd2e81af2ddc69156c1))
+* **listen:** save large results to a file in agent sessions ([fb7f9ec](https://github.com/deepgram/cli/commit/fb7f9ecc4746843c0af266d09fc3cda44dd9822d))
+* **login:** let agents finish device login with --complete ([82e37e8](https://github.com/deepgram/cli/commit/82e37e8bc2dc473bd9700328ba3a40444dfebb73))
+* **speak:** add --out-file and deprecate -o/--output for the audio file ([8f59531](https://github.com/deepgram/cli/commit/8f5953198ec2331799e7b3ba2c65eb780eeefbd4))
+* **telemetry:** add DEEPCTL_TELEMETRY=log and =off ([6319d5b](https://github.com/deepgram/cli/commit/6319d5badcec7073fe6f5d27bc756df0bd35c258))
+* **telemetry:** honor DO_NOT_TRACK and CI ([06bd209](https://github.com/deepgram/cli/commit/06bd209c8d926152d87d68f9d5bc06842f0de58e))
+
+
+### Bug Fixes
+
+* Windows runtime failures in speak, listen, update, init and agent-mode help ([6a8e5cd](https://github.com/deepgram/cli/commit/6a8e5cd28bc139eb273140b9dd800c309517c764))
+* **ci:** drop unwired workflow_call trigger from competitive-bench.yml ([53b720f](https://github.com/deepgram/cli/commit/53b720f921aae5117320e22311b10eb05fac091f))
+* **cli:** escape characters the output encoding can't write ([d168f59](https://github.com/deepgram/cli/commit/d168f597f6f5b063be3cbe5e24836adfc1326184))
+* **cli:** keep warnings and notices off stdout ([4364a85](https://github.com/deepgram/cli/commit/4364a85090d1273df6e5af76df70952f443a9000))
+* **cli:** key cached root help on the telemetry sink setting ([58d8b66](https://github.com/deepgram/cli/commit/58d8b661f93d248854f9950a3740ed6974844e44))
+* **cli:** treat Ctrl-C while the CLI is loading as cancelled ([68d79ea](https://github.com/deepgram/cli/commit/68d79ea69c5081be980a682985600f6ceadaeb92))
+* **cli:** use coded messages for cancel and unexpected errors ([89c975b](https://github.com/deepgram/cli/commit/89c975bdc2e4ca7416e9944f22acc0edaba5acb4))
+* **config:** count ~/.config on macOS when XDG_CONFIG_HOME names it ([403f203](https://github.com/deepgram/cli/commit/403f2034abc0a655de4f323e65f12f5af343381b))
+* **config:** on macOS, follow ~/.config only where platformdirs does ([76d1415](https://github.com/deepgram/cli/commit/76d1415e7a92af5c2c5423eabda73034f1c9c081))
+* **config:** wait for a locked config file once per run ([d290452](https://github.com/deepgram/cli/commit/d290452309e189dbc9b67c8f993c73ca19171276))
+* **core:** send API requests through one transport ([edc5ea7](https://github.com/deepgram/cli/commit/edc5ea7b42f05ed847a50dc936e90ad48359f31d))
+* **debug:** send no stored credentials from debug network ([edc5243](https://github.com/deepgram/cli/commit/edc524390db48344e0a9093190d499d5bb2280aa))
+* **debug:** take the probe's and network's host from the transport ([3a6cd9b](https://github.com/deepgram/cli/commit/3a6cd9bb76c6ec620e44ec0458656085ec177b19))
+* give Windows agents a runnable next_step from init, login and speak ([488520a](https://github.com/deepgram/cli/commit/488520a505248da648896b63eaa3e9edd1c2c10d))
+* **init:** clone only Deepgram templates, with plain names ([56dc618](https://github.com/deepgram/cli/commit/56dc618c62c3702213656a418ed2507eb68bbb75))
+* **init:** keep an agent's resume records and logins under the real home ([6ae7be3](https://github.com/deepgram/cli/commit/6ae7be37b0ec73d159840a5de7172901d270f20a))
+* **init:** keep repository settings from running programs ([3bea87c](https://github.com/deepgram/cli/commit/3bea87c1aea0be02f73b4f0072ccaba6389a9714))
+* **listen:** finish live streams cleanly on Ctrl-C and end of input ([1230585](https://github.com/deepgram/cli/commit/1230585f151fee60c194c6221cdcf2426be56ba9))
+* **listen:** give each OS its own stdin and microphone help ([79b5cb9](https://github.com/deepgram/cli/commit/79b5cb9ddf48db9e028e5dba3f9255ad081f5534))
+* **listen:** keep machine output to the final result ([b8fa0d7](https://github.com/deepgram/cli/commit/b8fa0d7230d4e66e7c6eb808edd97b7cfdf2a64e))
+* **listen:** report a failed stdout write as an output error ([589b2c9](https://github.com/deepgram/cli/commit/589b2c902e00f8b6baf6e9410e4ea38a1e4d10ac))
+* **listen:** stop live listen before capture when the caption reader is gone ([24c5deb](https://github.com/deepgram/cli/commit/24c5debb21a856b2397442a0178855a6a43491e3))
+* **listen,speak:** name Flux models, not API versions ([3373da7](https://github.com/deepgram/cli/commit/3373da72c00bcef8c01cc81f90b62109c3df27f8))
+* **login:** accept real API keys and ask for --yes instead of cancelling ([e4db87a](https://github.com/deepgram/cli/commit/e4db87a541765b5a7374c84b53de52c8c852a1e3))
+* **login:** check the base URL before dg login --complete saves a key ([86e74c8](https://github.com/deepgram/cli/commit/86e74c8afad4e317f3a40bfc581e140c3f0bf5d3))
+* **login:** save the pending login and init's records on Windows ([d4625a0](https://github.com/deepgram/cli/commit/d4625a0f1a568e427acf90233026872f1e62ab75))
+* **login:** show a profile's config-file key in profiles --list ([b73e1ce](https://github.com/deepgram/cli/commit/b73e1ce95220a8e99b5d6e7103782b3e22ec3979))
+* **mcp:** keep environment proxies away from the authenticated client ([de4262e](https://github.com/deepgram/cli/commit/de4262e25718f60226702a8ed33aed3ed1c539a8))
+* **mcp:** keep stdout for JSON-RPC from the start of dg mcp ([d6e09c2](https://github.com/deepgram/cli/commit/d6e09c251024366cdeccebfe806c9f5911b3e8e5))
+* **output:** drop status chrome from stderr in agent mode ([cc2de13](https://github.com/deepgram/cli/commit/cc2de135d65fb8f469d35946833d487a51d1a286))
+* **plugin:** refuse a plugin named like a built-in alias before importing it ([dfa89fe](https://github.com/deepgram/cli/commit/dfa89feda0f3829f20f6af9960fdb3aa6914e6f3))
+* preserve agent trust compatibility after rebase ([c62445a](https://github.com/deepgram/cli/commit/c62445a669055919f560e7bff71069e1bc24879f))
+* **speak:** don't read stdin or write audio to a pipe in agent mode ([ab6ceb9](https://github.com/deepgram/cli/commit/ab6ceb9cc4a12cd5e6aee872926ba5973ccd3c10))
+* **speak:** don't take a Windows pipe or console for another file ([7e2dc8b](https://github.com/deepgram/cli/commit/7e2dc8b6b08af89e19fed56e107e7e3c5ff9c84c))
+* **speak:** write --out-file and -o files correctly on Windows ([3a3cf14](https://github.com/deepgram/cli/commit/3a3cf14f2cf10eba2934942f6ff05b52479549cf))
+* **update:** detect pipx, uv and npm installs correctly ([2c97a87](https://github.com/deepgram/cli/commit/2c97a87d6e02d0355459abaa561db9ab3a661f3f))
+* **update:** never wait for the update check ([cb4a70f](https://github.com/deepgram/cli/commit/cb4a70fccae9e075194c170451e6ecb7a9423bfe))
+* **update:** report an unreachable index as an error ([3014068](https://github.com/deepgram/cli/commit/30140682b4629d061f4bfdd208e2a5ec144c718e))
+* **update:** retry an update check that didn't finish after an hour ([906bfcc](https://github.com/deepgram/cli/commit/906bfcc04fa4f03683909289fe99414f20633f59))
+
+
+### Performance Improvements
+
+* **cli:** cache plugin discovery and help output ([48e5f1b](https://github.com/deepgram/cli/commit/48e5f1b849636713e5284752ea3423a24d4d036e))
+* **cli:** render subcommand help from specs ([4667ad3](https://github.com/deepgram/cli/commit/4667ad3a8d362a3537cfa0e1ccee338ac1fea198))
+* **cli:** start dg without importing click for --version and mcp ([f0ef392](https://github.com/deepgram/cli/commit/f0ef392ebb23baa2526528b22f3bfad382298ed6))
+* **core:** drop the pre-flight key check and reuse one HTTP client ([41988be](https://github.com/deepgram/cli/commit/41988bee3aa0c993172274008cfeed04ffbf480c))
+* **core:** import deepctl_core names lazily ([9dc5cb4](https://github.com/deepgram/cli/commit/9dc5cb4fc83ef2f93d8868ee932316f875c0608f))
+* **core:** load config without pydantic on the help path ([0eb4cee](https://github.com/deepgram/cli/commit/0eb4cee805ca51bb0f557399ffd0f918c156b16e))
+* **listen:** bound live-stream memory and frame latency ([3d28b98](https://github.com/deepgram/cli/commit/3d28b989df5eb895fc3106aec879ab34f21768d3))
+* **listen:** check URL sources without fetching them ([bebdbd0](https://github.com/deepgram/cli/commit/bebdbd0ca1db25d2faa4904dc0f8e77bdaf7e5dc))
+* **listen:** stream prerecorded uploads from disk ([728e01b](https://github.com/deepgram/cli/commit/728e01bc32465bca2d0d209ff7ab65664d744a51))
+* **output:** write JSON off a terminal without rich ([d673225](https://github.com/deepgram/cli/commit/d673225d789cda613777e666d97aa7df941ef886))
+* **speak:** stream audio to pipes and players as it arrives ([72c243c](https://github.com/deepgram/cli/commit/72c243c018a9b736d96abf5c907d8765cbeaddbb))
+* **telemetry:** skip the flush when no report was queued ([bcc803c](https://github.com/deepgram/cli/commit/bcc803ca70576c0f0cf08d3a500d5a6207bb2a4b))
+
+
+### Documentation
+
+* compare with 0.4.1 in comments, the release before 0.5.0 ([5481f6a](https://github.com/deepgram/cli/commit/5481f6a61f6918254a39a9dfa65346662da973da))
+* fix line wrap and restore workflow_call rationale in bench/README.md ([259f07d](https://github.com/deepgram/cli/commit/259f07d5201aa18ecb3604a5f69f420b378518c5))
+* **mcp:** describe dg mcp as the documentation search it is ([c097bec](https://github.com/deepgram/cli/commit/c097becfec78aeb2cb4a28acce2374901bcda21f))
+* **telemetry:** publish the report's field schema ([19ea267](https://github.com/deepgram/cli/commit/19ea267f92cef89b22c026cbfbac09916606dc57))
+* **telemetry:** say this version sends no telemetry ([f8690b4](https://github.com/deepgram/cli/commit/f8690b4a150f06fd88f8ff2488db796ca4550298))
+
+
+### Behavior changes
+
+Upgrading to 0.5.0 changes these:
+
+* `-o/--output` is deprecated for `dg speak`'s audio file; use `--out-file` instead ([8f59531](https://github.com/deepgram/cli/commit/8f5953198ec2331799e7b3ba2c65eb780eeefbd4)).
+* `dg init` no longer runs a template's setup commands or starts the app without a person at a terminal: pass `--yes` (or, outside an AI agent session, `--install`) to run setup and `--start` to start the app; otherwise it exits 1 with `confirmation_required` ([8c50ae1](https://github.com/deepgram/cli/commit/8c50ae15cb82828832245eac51a2c6e4ca93651b)).
+* `dg init` clones only Deepgram-owned templates now ([56dc618](https://github.com/deepgram/cli/commit/56dc618c62c3702213656a418ed2507eb68bbb75)).
+* `dg listen`'s prerecorded `-o json` now prints the server's response body as sent — keys the server omitted no longer appear as `null` — and `-o yaml` prints that body instead of the table (set `DEEPCTL_LISTEN_JSON=sdk` to restore the old JSON shape) ([6aa1795](https://github.com/deepgram/cli/commit/6aa179515d41ca9290b74bd2e81af2ddc69156c1)).
+* In an AI-agent session, a prerecorded `dg listen` result over 64 KiB is now saved under `~/.deepctl/results/` (or a private temp directory) instead of printed, when the output format was auto-detected and stdout isn't a regular file or `/dev/null`; stdout gets a summary, and `--full-output` restores the full result ([fb7f9ec](https://github.com/deepgram/cli/commit/fb7f9ecc4746843c0af266d09fc3cda44dd9822d)).
+* Under a hard agent signal, `dg speak` no longer reads stdin unless the text argument is `-` (otherwise it exits with `E-SPEAK-NO-TEXT`), and refuses to write audio to a pipe (`E-SPEAK-NO-OUTPUT`) ([ab6ceb9](https://github.com/deepgram/cli/commit/ab6ceb9cc4a12cd5e6aee872926ba5973ccd3c10)).
+* When no one can answer a prompt, `dg login`'s confirmations now return `confirmation_required` (exit 1) instead of "Login cancelled" ([e4db87a](https://github.com/deepgram/cli/commit/e4db87a541765b5a7374c84b53de52c8c852a1e3)).
+* A `DEEPGRAM_API_KEY`, `DEEPGRAM_PROFILE`, `DEEPGRAM_PROJECT_ID` or `DEEPGRAM_BASE_URL` that still holds an unexpanded `${...}` placeholder is now ignored, with a `W-ENV-PLACEHOLDER` warning; off a terminal, a keyring that doesn't answer within 2 s is skipped for the config file or environment, with a `W-KEYRING-TIMEOUT` warning. Credential precedence itself is unchanged from 0.4.1 ([307e2c3](https://github.com/deepgram/cli/commit/307e2c382e9d9f032c4e000cc8d91cdb870ba3a1)).
+* `dg debug network` no longer attaches `~/.netrc` credentials to its probe requests (it never sent your Deepgram key) ([edc5243](https://github.com/deepgram/cli/commit/edc524390db48344e0a9093190d499d5bb2280aa)).
+
 ## [0.4.1](https://github.com/deepgram/cli/compare/v0.4.0...v0.4.1) (2026-11-12)
 
 
