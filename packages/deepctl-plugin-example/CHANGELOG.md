@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/deepgram/cli/compare/deepctl-plugin-example-v0.1.13...deepctl-plugin-example-v0.5.0) (2026-11-13)
+
+
+### Bug Fixes
+
+* correct release-please's 0.5.0 PR for this repo's merge-commit history ([83dff0c](https://github.com/deepgram/cli/commit/83dff0cd2fdfc3eb5ca3b292d31d346d11ecea51))
+
+
+### Miscellaneous Chores
+
+* release 0.5.0 ([23fe2e4](https://github.com/deepgram/cli/commit/23fe2e47e091f6bbaedb610376bdb4a6875e619d))
+
 ## [0.1.13](https://github.com/deepgram/cli/compare/deepctl-plugin-example-v0.1.12...deepctl-plugin-example-v0.1.13) (2026-11-12)
 
 
